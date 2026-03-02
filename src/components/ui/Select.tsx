@@ -29,6 +29,7 @@ export function Select({
   fullWidth = true
 }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -39,6 +40,19 @@ export function Select({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [disabled, open]);
+
+  const handleToggle = () => {
+    if (disabled) return;
+    setOpen((prev) => {
+      if (!prev && wrapRef.current) {
+        const rect = wrapRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const dropdownHeight = Math.min(options.length * 40 + 12, 240);
+        setDropUp(spaceBelow < dropdownHeight + 8 && rect.top > spaceBelow);
+      }
+      return !prev;
+    });
+  };
 
   const isOpen = open && !disabled;
 
@@ -54,7 +68,7 @@ export function Select({
       <button
         type="button"
         className={styles.trigger}
-        onClick={disabled ? undefined : () => setOpen((prev) => !prev)}
+        onClick={handleToggle}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={ariaLabel}
@@ -68,7 +82,11 @@ export function Select({
         </span>
       </button>
       {isOpen && (
-        <div className={styles.dropdown} role="listbox" aria-label={ariaLabel}>
+        <div
+          className={`${styles.dropdown} ${dropUp ? styles.dropdownUp : ''}`}
+          role="listbox"
+          aria-label={ariaLabel}
+        >
           {options.map((opt) => {
             const active = opt.value === value;
             return (

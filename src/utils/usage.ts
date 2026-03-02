@@ -73,6 +73,7 @@ export type UsageTimeRange = '7h' | '24h' | '7d' | 'all';
 
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 const MODEL_PRICE_STORAGE_KEY = 'cli-proxy-model-prices-v2';
+const MODEL_PRICE_MIGRATED_KEY = 'cli-proxy-model-prices-migrated';
 const USAGE_ENDPOINT_METHOD_REGEX = /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)/i;
 const USAGE_TIME_RANGE_MS: Record<Exclude<UsageTimeRange, 'all'>, number> = {
   '7h': 7 * 60 * 60 * 1000,
@@ -735,7 +736,54 @@ export function calculateTotalCost(usageData: unknown, modelPrices: Record<strin
 /**
  * 从 localStorage 加载模型价格
  */
-export function loadModelPrices(): Record<string, ModelPrice> {
+export async function loadModelPrices(): Promise<Record<string, ModelPrice>> {
+  try {
+    const { modelPricesApi } = await import('@/services/api/modelPrices');
+    const serverPrices = await modelPricesApi.get();
+
+    // Migrate localStorage data to server on first load
+    if (
+      Object.keys(serverPrices).length === 0 &&
+      typeof localStorage !== 'undefined' &&
+      !localStorage.getItem(MODEL_PRICE_MIGRATED_KEY)
+    ) {
+      const localPrices = loadModelPricesFromLocalStorage();
+      if (Object.keys(localPrices).length > 0) {
+        try {
+          await modelPricesApi.put(localPrices);
+        } catch {
+          // Migration failed, will retry next time
+        }
+        localStorage.setItem(MODEL_PRICE_MIGRATED_KEY, 'true');
+        return localPrices;
+      }
+      localStorage.setItem(MODEL_PRICE_MIGRATED_KEY, 'true');
+    }
+
+    return serverPrices;
+  } catch {
+    // Fallback to localStorage when server is unreachable
+    return loadModelPricesFromLocalStorage();
+  }
+}
+
+/**
+ * 保存模型价格到服务端
+ */
+export async function saveModelPrices(prices: Record<string, ModelPrice>): Promise<void> {
+  try {
+    const { modelPricesApi } = await import('@/services/api/modelPrices');
+    await modelPricesApi.put(prices);
+  } catch {
+    // Fallback to localStorage when server is unreachable
+    saveModelPricesToLocalStorage(prices);
+  }
+}
+
+/**
+ * 从 localStorage 加载模型价格（fallback）
+ */
+function loadModelPricesFromLocalStorage(): Record<string, ModelPrice> {
   try {
     if (typeof localStorage === 'undefined') {
       return {};
@@ -782,9 +830,9 @@ export function loadModelPrices(): Record<string, ModelPrice> {
 }
 
 /**
- * 保存模型价格到 localStorage
+ * 保存模型价格到 localStorage（fallback）
  */
-export function saveModelPrices(prices: Record<string, ModelPrice>): void {
+function saveModelPricesToLocalStorage(prices: Record<string, ModelPrice>): void {
   try {
     if (typeof localStorage === 'undefined') {
       return;

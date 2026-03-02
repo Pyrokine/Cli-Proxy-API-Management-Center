@@ -50,7 +50,7 @@ export function useUsageData(): UseUsageDataReturn {
 
   useEffect(() => {
     void loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {});
-    setModelPrices(loadModelPrices());
+    void loadModelPrices().then(setModelPrices).catch(() => {});
   }, [loadUsageStats]);
 
   const handleExport = async () => {
@@ -131,7 +131,7 @@ export function useUsageData(): UseUsageDataReturn {
 
   const handleSetModelPrices = useCallback((prices: Record<string, ModelPrice>) => {
     setModelPrices(prices);
-    saveModelPrices(prices);
+    void saveModelPrices(prices);
   }, []);
 
   const usage = usageSnapshot as UsagePayload | null;

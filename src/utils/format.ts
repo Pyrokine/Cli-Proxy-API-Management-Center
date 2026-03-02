@@ -12,7 +12,7 @@ const resolveDefaultLocale = (): string | undefined => {
 };
 
 /**
- * 隐藏 API Key 中间部分，仅保留前后两位
+ * 隐藏 API Key 中间部分，保留前 10 位和后 4 位便于识别
  */
 export function maskApiKey(key: string): string {
   const trimmed = String(key || '').trim();
@@ -20,14 +20,11 @@ export function maskApiKey(key: string): string {
     return '';
   }
 
-  const MASKED_LENGTH = 10;
-  const visibleChars = trimmed.length < 4 ? 1 : 2;
-  const start = trimmed.slice(0, visibleChars);
-  const end = trimmed.slice(-visibleChars);
-  const maskedLength = Math.max(MASKED_LENGTH - visibleChars * 2, 1);
-  const masked = '*'.repeat(maskedLength);
+  if (trimmed.length <= 14) {
+    return trimmed.slice(0, 2) + '****' + trimmed.slice(-2);
+  }
 
-  return `${start}${masked}${end}`;
+  return trimmed.slice(0, 10) + '****' + trimmed.slice(-4);
 }
 
 /**

@@ -85,6 +85,11 @@
   overscroll-behavior: contain;
 }
 
+.dropdownUp {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 .option {
   padding: 8px 12px;
   border-radius: $radius-md;
