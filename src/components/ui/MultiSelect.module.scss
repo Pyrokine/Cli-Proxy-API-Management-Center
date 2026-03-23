@@ -1,0 +1,122 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use './dropdown' as *;
+
+.wrap {
+  @include dropdown-wrap;
+}
+
+.wrapFullWidth {
+  width: 100%;
+}
+
+.trigger {
+  @include dropdown-trigger(40px, 0 12px);
+}
+
+.triggerText {
+  @include dropdown-trigger-text;
+  flex: 1;
+  min-width: 0;
+}
+
+.placeholder {
+  color: var(--text-tertiary);
+}
+
+.triggerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.clearButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: $radius-sm;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.triggerIcon {
+  @include dropdown-trigger-icon;
+
+  [aria-expanded='true'] > .triggerActions > & {
+    transform: rotate(180deg);
+  }
+}
+
+.dropdown {
+  @include dropdown-panel(280px, 6px, 2px, $radius-lg);
+  min-width: 180px;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: $font-size-sm;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba($primary-color, 0.15);
+  }
+}
+
+.emptyResult {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: $font-size-sm;
+}
+
+.dropdownUp {
+  // Positioned via inline styles
+}
+
+.option {
+  @include dropdown-option(8px 12px, $radius-md);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.optionActive {
+  @include dropdown-option-active;
+}
+
+.optionCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--primary-color);
+}
+
+.optionLabel {
+  @include text-ellipsis;
+  min-width: 0;
+}

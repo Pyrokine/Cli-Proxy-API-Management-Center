@@ -1,7 +1,7 @@
 @use './variables.scss' as *;
 
 :root {
-  --header-height: 64px;
+  --header-height: 48px;
 }
 
 .app-shell {
@@ -25,21 +25,22 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $spacing-md;
-  padding: $spacing-md $spacing-lg;
+  gap: $spacing-sm;
+  padding: 8px 16px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
   z-index: 10;
   width: 100%;
+  font-size: $font-size-base;
 
   @media (max-width: $breakpoint-mobile) {
     position: fixed;
     left: 0;
     right: 0;
-    padding: $spacing-sm $spacing-md;
-    gap: $spacing-sm;
+    padding: $spacing-xs $spacing-sm;
+    gap: $spacing-xs;
   }
 
   .left {
@@ -50,8 +51,8 @@
     flex: 0 1 auto;
 
     .brand-logo {
-      height: 32px;
-      width: 32px;
+      height: 26px;
+      width: 26px;
       object-fit: contain;
       flex-shrink: 0;
       border-radius: $radius-sm;
@@ -61,14 +62,14 @@
   .right {
     display: flex;
     align-items: center;
-    gap: $spacing-md;
+    gap: $spacing-sm;
     min-width: 0;
     flex: 1 1 auto;
     justify-content: flex-end;
 
     @media (max-width: $breakpoint-mobile) {
       flex: 0 1 auto;
-      gap: $spacing-sm;
+      gap: $spacing-xs;
     }
   }
 
@@ -76,17 +77,17 @@
     padding: 0;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: $radius-md;
+    border-radius: $radius-sm;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 16px;
-    font-weight: bold;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
     transition: background $transition-fast, color $transition-fast;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
     line-height: 1;
 
@@ -104,10 +105,10 @@
     display: flex;
     align-items: center;
     gap: $spacing-xs;
-    font-weight: 800;
-    font-size: 18px;
+    font-weight: $font-weight-semibold;
+    font-size: $font-size-xl;
     color: var(--text-primary);
-    margin-right: $spacing-md;
+    margin-right: $spacing-sm;
     cursor: pointer;
     overflow: hidden;
     white-space: nowrap;
@@ -214,9 +215,9 @@
         background: transparent;
         color: var(--text-primary);
         cursor: pointer;
-        padding: 8px 10px;
-        font-size: 14px;
-        font-weight: 500;
+        padding: 5px 8px;
+        font-size: $font-size-base;
+        font-weight: $font-weight-medium;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -234,12 +235,12 @@
 
         &.active {
           color: var(--primary-color);
-          font-weight: 600;
+          font-weight: $font-weight-semibold;
         }
       }
 
       .language-menu-check {
-        font-size: 13px;
+        font-size: $font-size-sm;
         line-height: 1;
       }
 
@@ -263,8 +264,9 @@
   .connection {
     display: flex;
     align-items: center;
-    gap: $spacing-sm;
+    gap: $spacing-xs;
     color: var(--text-secondary);
+    font-size: $font-size-base;
     min-width: 0;
     flex-shrink: 1;
     overflow: hidden;
@@ -276,7 +278,7 @@
     }
 
     .base {
-      font-weight: 600;
+      font-weight: $font-weight-semibold;
       color: var(--text-primary);
       overflow: hidden;
       text-overflow: ellipsis;
@@ -315,49 +317,50 @@
 }
 
 .sidebar {
-  width: 240px;
+  width: 200px;
   background: var(--bg-primary);
   border-right: 1px solid var(--border-color);
   padding: $spacing-md;
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
+  gap: $spacing-sm;
   transition: width $transition-normal, transform $transition-normal;
   overflow-y: auto;
   flex-shrink: 0;
   height: 100%;
 
   &.collapsed {
-    width: 60px;
-    padding: $spacing-md $spacing-sm;
+    width: 52px;
+    padding: $spacing-md $spacing-xs;
 
     .nav-item {
       justify-content: center;
-      padding: 10px;
+      padding: 7px;
     }
   }
 
   .nav-section {
     display: flex;
     flex-direction: column;
-    gap: $spacing-sm;
+    gap: $spacing-xs;
     flex: 1;
   }
 
   .nav-item {
-    padding: 10px 12px;
+    padding: 6px $spacing-sm;
     border-radius: $radius-md;
     color: var(--text-primary);
-    font-weight: 600;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
     display: flex;
     align-items: center;
-    gap: $spacing-sm;
+    gap: $spacing-xs;
     cursor: pointer;
     transition: background $transition-fast, color $transition-fast;
 
     .nav-icon {
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -425,10 +428,10 @@
 
 .main-content {
   flex: 1 0 auto;
-  padding: $spacing-lg;
+  padding: $spacing-md;
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
+  gap: $spacing-md;
   overflow-x: hidden;
 
   &.main-content-logs {
@@ -450,11 +453,5 @@
 
 .grid {
   display: grid;
-  gap: $spacing-lg;
-}
-
-@media (min-width: $breakpoint-tablet) {
-  .grid.cols-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  gap: $spacing-md;
 }

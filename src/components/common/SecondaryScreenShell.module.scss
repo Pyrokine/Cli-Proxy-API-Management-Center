@@ -24,8 +24,8 @@
 .topBarTitle {
   min-width: 0;
   text-align: center;
-  font-size: 16px;
-  font-weight: 650;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -57,7 +57,7 @@
 }
 
 .backText {
-  font-weight: 600;
+  font-weight: $font-weight-semibold;
   line-height: 18px;
 }
 
@@ -84,7 +84,7 @@
 
 .contentWithFloatingAction {
   padding-bottom: calc(
-    var(--secondary-shell-floating-action-height, 56px) + 12px + env(safe-area-inset-bottom)
+          var(--secondary-shell-floating-action-height, 56px) + 12px + env(safe-area-inset-bottom)
   );
 }
 
@@ -110,18 +110,10 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-lg);
 }
 
-:global([data-theme='dark']) {
-  .floatingActionSurface {
-    background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-    border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  }
-}
-
-@media (max-width: 1200px) {
+@media (max-width: $breakpoint-desktop) {
   .floatingActionContainer {
     max-width: calc(100vw - 16px);
   }

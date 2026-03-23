@@ -1,0 +1,70 @@
+@use '../../styles/variables' as *;
+
+.container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dateInput {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: $font-size-sm;
+  font-family: $font-mono;
+  outline: none;
+  min-width: 140px;
+
+  :global([data-theme='dark']) & {
+    color-scheme: dark;
+  }
+
+  &:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 20%, transparent);
+  }
+}
+
+.separator {
+  color: var(--text-tertiary);
+  font-size: $font-size-sm;
+  user-select: none;
+}
+
+.presets {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.preset {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: $font-size-sm;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.presetActive {
+  composes: preset;
+  background: var(--accent-color);
+  color: white;
+  border-color: var(--accent-color);
+
+  &:hover {
+    background: var(--accent-color);
+    color: white;
+  }
+}
