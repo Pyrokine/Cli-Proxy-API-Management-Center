@@ -109,6 +109,7 @@
     "dashboard": "仪表盘",
     "basic_settings": "基础设置",
     "api_keys": "API 密钥",
+    "credentials": "凭证管理",
     "ai_providers": "AI 提供商",
     "auth_files": "认证文件",
     "oauth": "OAuth 登录",
@@ -865,7 +866,8 @@
     "iflow_cookie_result_expired": "过期时间",
     "iflow_cookie_result_path": "保存路径",
     "iflow_cookie_result_type": "类型",
-    "remote_access_disabled": "远程访问不支持此登录方式，请从本地 (localhost) 访问"
+    "remote_access_disabled": "远程访问不支持此登录方式，请从本地 (localhost) 访问",
+    "login_button": "登录"
   },
   "usage_stats": {
     "title": "使用统计",
@@ -891,6 +893,9 @@
     "range_7h": "最近7小时",
     "range_24h": "最近24小时",
     "range_7d": "最近7天",
+    "range_30d": "最近30天",
+    "range_from": "起始",
+    "range_to": "截止",
     "filter_all": "全部",
     "clear_filters": "清空筛选",
     "refresh": "刷新",
@@ -901,21 +906,10 @@
     "export_success": "使用统计已导出",
     "import_success": "导入完成：新增 {{added}}，跳过 {{skipped}}，总请求 {{total}}，失败 {{failed}}",
     "import_invalid": "导入文件格式不正确",
-    "chart_line_label_1": "曲线 1",
-    "chart_line_label_2": "曲线 2",
-    "chart_line_label_3": "曲线 3",
-    "chart_line_label_4": "曲线 4",
-    "chart_line_label_5": "曲线 5",
-    "chart_line_label_6": "曲线 6",
-    "chart_line_label_7": "曲线 7",
-    "chart_line_label_8": "曲线 8",
-    "chart_line_label_9": "曲线 9",
-    "chart_line_hidden": "不显示",
-    "chart_line_actions_label": "曲线数量",
-    "chart_line_add": "增加曲线",
-    "chart_line_all": "全部",
-    "chart_line_delete": "删除曲线",
-    "chart_line_hint": "最多同时显示 9 条模型曲线",
+    "dimension_label": "图表维度",
+    "dimension_total": "总计",
+    "dimension_model": "按模型",
+    "dimension_credential": "按凭证",
     "no_data": "暂无数据",
     "loading_error": "加载失败",
     "api_endpoint": "API端点",
@@ -950,9 +944,11 @@
     "request_events_filter_model": "模型",
     "request_events_filter_source": "来源",
     "request_events_filter_auth_index": "认证索引",
+    "request_events_search_placeholder": "搜索模型、来源、认证索引…",
     "request_events_timestamp": "时间",
     "request_events_source": "来源",
     "request_events_auth_index": "认证索引",
+    "request_events_api_key": "凭据",
     "request_events_result": "结果",
     "request_events_empty_title": "暂无请求事件",
     "request_events_empty_desc": "当前时间范围内暂无可用的请求明细数据。",
@@ -962,7 +958,40 @@
     "request_events_limit_hint": "为保证渲染性能，仅展示 {{shown}} / {{total}} 条事件。",
     "input_tokens": "输入 Tokens",
     "output_tokens": "输出 Tokens",
-    "last_updated": "更新于"
+    "last_updated": "更新于",
+    "tab_overview": "概览",
+    "tab_models": "模型分析",
+    "tab_credentials": "凭证分析",
+    "tab_events": "请求明细",
+    "tab_settings": "设置",
+    "retention_title": "数据保留设置",
+    "retention_days": "按时间裁剪",
+    "retention_days_hint": "超过此天数的明细数据将被归档并从内存中移除",
+    "retention_days_disabled": "按时间裁剪已禁用",
+    "retention_max_size": "最大文件大小 (MB)",
+    "retention_max_size_hint": "活跃统计文件超过此大小时触发强制裁剪",
+    "retention_max_size_disabled": "文件大小限制已禁用",
+    "retention_archive": "归档保留月数",
+    "retention_archive_hint": "归档文件超过此月数后自动删除",
+    "retention_archive_disabled": "归档已禁用",
+    "retention_no_trim_warning": "按时间裁剪已禁用，归档将不会触发（归档依赖于裁剪）。",
+    "retention_no_archive_warning": "归档已禁用，被裁剪的数据将直接删除不归档。",
+    "retention_all_disabled_warning": "所有保留控制均已禁用，数据将无限增长！",
+    "retention_save": "保存",
+    "retention_saved": "数据保留设置已保存",
+    "retention_save_failed": "保存数据保留设置失败",
+    "retention_trim": "立即清理",
+    "retention_unavailable": "数据保留设置不可用",
+    "trim_success": "清理完成，共 {{archives}} 个归档文件",
+    "trim_failed": "清理失败",
+    "trim_confirm_title": "确认清理",
+    "trim_confirm_message": "即将永久删除 {{count}} 个文件（{{size}}），日期范围：{{from}} ~ {{to}}。",
+    "trim_confirm_empty": "当前保留设置下没有需要清理的文件。",
+    "trim_preview_failed": "获取清理预览失败",
+    "import_confirm_title": "确认导入",
+    "import_confirm_message": "确定导入 {{count}} 条使用记录？",
+    "delete_price_confirm_title": "确认删除",
+    "delete_price_confirm_message": "确定删除模型 \"{{model}}\" 的价格配置？"
   },
   "stats": {
     "success": "成功",
@@ -977,7 +1006,9 @@
     "title": "服务健康监测",
     "window": "最近 7 天",
     "oldest": "最早",
-    "newest": "最新"
+    "newest": "最新",
+    "total_requests": "总请求",
+    "tokens": "Tokens"
   },
   "logs": {
     "title": "日志查看",
@@ -1093,6 +1124,10 @@
       "confirm": "确认保存",
       "no_changes": "未检测到变更"
     },
+    "validation": {
+      "errors_title": "配置错误（保存已阻止）",
+      "warnings_title": "配置警告"
+    },
     "tabs": {
       "visual": "可视化编辑",
       "source": "源文件编辑"
@@ -1122,20 +1157,23 @@
           "disable_panel_desc": "禁用内置的 Web 控制面板",
           "secret_key": "管理密钥",
           "secret_key_placeholder": "设置管理密钥",
-          "panel_repo": "面板仓库"
+          "panel_repo": "面板仓库",
+          "cpa_repo": "CPA 仓库"
         },
         "auth": {
           "title": "认证配置",
           "description": "API 密钥与认证文件目录设置",
           "auth_dir": "认证文件目录 (auth-dir)",
-          "auth_dir_hint": "存放认证文件的目录路径（支持 ~）"
+          "auth_dir_hint": "存放认证文件的目录路径（支持 ~）",
+          "usage_data_dir": "使用数据目录 (usage-data-dir)",
+          "usage_data_dir_hint": "使用统计数据的持久化存储目录（支持 ~）"
         },
         "system": {
           "title": "系统配置",
           "description": "调试、日志、统计与性能调试设置",
           "debug": "调试模式",
           "debug_desc": "启用详细的调试日志",
-          "commercial_mode": "商业模式",
+          "commercial_mode": "高性能模式",
           "commercial_mode_desc": "禁用高开销中间件以支持高并发",
           "logging_to_file": "写入日志文件",
           "logging_to_file_desc": "将日志保存到文件",
@@ -1156,7 +1194,9 @@
           "force_model_prefix": "强制模型前缀",
           "force_model_prefix_desc": "未带前缀的模型请求只使用无前缀凭据",
           "ws_auth": "WebSocket 认证",
-          "ws_auth_desc": "启用 WebSocket 连接认证 (/v1/ws)"
+          "ws_auth_desc": "启用 WebSocket 连接认证 (/v1/ws)",
+          "allow_query_auth": "允许 Query 参数认证",
+          "allow_query_auth_desc": "允许通过 URL 查询参数传递 API Key。警告：凭据可能泄露到日志、浏览器历史记录和 Referer 头中"
         },
         "quota": {
           "title": "配额回退",
@@ -1200,7 +1240,15 @@
         "input_placeholder": "粘贴你的 API 密钥",
         "input_hint": "此处仅修改本地配置文件内容，不会自动同步到 API 密钥管理接口",
         "error_empty": "请输入 API 密钥",
-        "error_invalid": "API 密钥包含无效字符"
+        "error_too_short": "API 密钥长度不能少于 8 个字符",
+        "error_invalid": "API 密钥包含无效字符",
+        "alias_label": "Key 别名（可选）",
+        "alias_placeholder": "如 我的密钥-1、test、prod",
+        "alias_hint": "别名独立保存用于展示，任意格式的 Key 都可以配置别名",
+        "alias_error_format": "别名需以字母开头，仅含字母、数字、下划线",
+        "alias_error_length": "别名长度不能超过 20 个字符",
+        "alias_error_duplicate": "该别名已被其他密钥使用",
+        "search_placeholder": "搜索密钥或别名..."
       },
       "payload_rules": {
         "rule": "规则",
@@ -1289,7 +1337,33 @@
     "clear_login_title": "本地登录信息",
     "clear_login_desc": "清理本地保存的登录信息并退出登录，不会影响使用统计中的价格设置。",
     "clear_login_button": "清理登录信息",
-    "clear_login_confirm": "确认清理本地登录信息并退出登录？"
+    "clear_login_confirm": "确认清理本地登录信息并退出登录？",
+    "version_history_button": "版本历史",
+    "panel_update_button": "更新面板",
+    "panel_update_success": "管理面板更新成功",
+    "panel_update_failed": "管理面板更新失败",
+    "timezone_title": "显示时区",
+    "timezone_desc": "界面中所有日期和时间将使用此时区显示。",
+    "timezone_system": "系统（浏览器默认）"
+  },
+  "version_history": {
+    "title": "版本历史",
+    "empty": "暂无版本信息",
+    "patch_count": "{{count}} 个版本",
+    "current": "当前版本",
+    "prerelease": "预发布",
+    "breaking_changes": "不兼容变更",
+    "unofficial_warning": "当前指向非官方仓库 {{repo}}，更新内容未经官方审核。",
+    "upgrade": "升级",
+    "downgrade": "降级",
+    "confirm_upgrade": "将 CPA 后端升级到 {{version}}？",
+    "confirm_downgrade": "将 CPA 后端降级到 {{version}}？这可能导致兼容性问题。",
+    "downgrade_risk": "当前版本与目标版本之间存在以下不兼容变更：",
+    "status_downloading": "正在下载...",
+    "status_verifying": "正在校验...",
+    "status_replacing": "正在替换...",
+    "status_done": "更新完成",
+    "status_error": "更新失败"
   },
   "notification": {
     "debug_updated": "调试设置已更新",
@@ -1356,7 +1430,7 @@
     "gemini_api_key": "Gemini API密钥",
     "codex_api_key": "Codex API密钥",
     "claude_api_key": "Claude API密钥",
-    "commercial_mode_restart_required": "商业模式开关已变更，请重启服务后生效",
+    "commercial_mode_restart_required": "高性能模式开关已变更，请重启服务后生效",
     "copy_failed": "复制失败",
     "link_copied": "已复制"
   },
@@ -1374,6 +1448,52 @@
     "switch_to_dark": "切换到暗色模式",
     "auto": "跟随系统"
   },
+  "not_found": {
+    "title": "页面不存在",
+    "back_home": "返回首页"
+  },
+  "credentials": {
+    "page_title": "凭证管理",
+    "api_keys": "API 密钥",
+    "auth_files": "认证文件",
+    "models": "模型",
+    "websockets": "WebSocket",
+    "no_credentials": "未配置凭证",
+    "no_search_results": "没有匹配 \"{{query}}\" 的凭证",
+    "manual_config": "手动配置",
+    "upload_file": "上传",
+    "import_json": "导入 JSON",
+    "cookie_auth": "Cookie 认证",
+    "api_key_entries": "条目",
+    "oauth_waiting": "等待授权...",
+    "oauth_success": "授权成功！",
+    "oauth_error": "授权失败",
+    "oauth_open_url": "打开链接",
+    "oauth_copy_url": "复制链接",
+    "oauth_callback_hint": "粘贴浏览器中的重定向 URL",
+    "oauth_callback_submit": "提交",
+    "project_id": "项目 ID",
+    "global_settings": "全局设置",
+    "oauth_settings": "OAuth 设置",
+    "oauth_model_alias_manage": "模型别名",
+    "oauth_excluded_manage": "模型禁用",
+    "switch_project_on_quota": "配额用尽时切换项目",
+    "switch_preview_on_quota": "配额用尽时切换预览模型",
+    "quota_poll_interval": "配额轮询间隔",
+    "poll_interval_disabled": "禁用",
+    "poll_interval_1min": "1 分钟",
+    "poll_interval_3min": "3 分钟",
+    "poll_interval_5min": "5 分钟",
+    "poll_interval_10min": "10 分钟",
+    "iflow_cookie_placeholder": "请粘贴 iFlow Cookie",
+    "vertex_location_placeholder": "位置 (如 us-central1)",
+    "vertex_select_file": "选择 JSON 文件",
+    "last_updated": "更新于",
+    "sort_name": "名称",
+    "sort_type": "类型",
+    "sort_status": "状态",
+    "sort_requests": "请求"
+  },
   "sidebar": {
     "toggle_expand": "展开侧边栏",
     "toggle_collapse": "收起侧边栏"
@@ -1383,5 +1503,17 @@
     "build_date": "构建时间",
     "version": "管理中心版本",
     "author": "作者"
+  },
+  "multi_select": {
+    "search_placeholder": "搜索…",
+    "no_match": "无匹配项"
+  },
+  "pagination": {
+    "range": "第 {{start}}–{{end}} 条，共 {{total}} 条",
+    "first": "第一页",
+    "prev": "上一页",
+    "next": "下一页",
+    "last": "最后一页",
+    "per_page": "{{count}} 条/页"
   }
 }

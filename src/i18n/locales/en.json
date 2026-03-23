@@ -109,6 +109,7 @@
     "dashboard": "Dashboard",
     "basic_settings": "Basic Settings",
     "api_keys": "API Keys",
+    "credentials": "Credentials",
     "ai_providers": "AI Providers",
     "auth_files": "Auth Files",
     "oauth": "OAuth Login",
@@ -865,7 +866,8 @@
     "iflow_cookie_result_expired": "Expires At",
     "iflow_cookie_result_path": "Saved Path",
     "iflow_cookie_result_type": "Type",
-    "remote_access_disabled": "This login method is not available for remote access. Please access from localhost."
+    "remote_access_disabled": "This login method is not available for remote access. Please access from localhost.",
+    "login_button": "Login"
   },
   "usage_stats": {
     "title": "Usage Statistics",
@@ -891,6 +893,9 @@
     "range_7h": "Last 7 Hours",
     "range_24h": "Last 24 Hours",
     "range_7d": "Last 7 Days",
+    "range_30d": "Last 30 Days",
+    "range_from": "From",
+    "range_to": "To",
     "filter_all": "All",
     "clear_filters": "Clear Filters",
     "refresh": "Refresh",
@@ -901,21 +906,10 @@
     "export_success": "Usage export downloaded",
     "import_success": "Import complete: added {{added}}, skipped {{skipped}}, total {{total}}, failed {{failed}}",
     "import_invalid": "Invalid usage export file",
-    "chart_line_label_1": "Line 1",
-    "chart_line_label_2": "Line 2",
-    "chart_line_label_3": "Line 3",
-    "chart_line_label_4": "Line 4",
-    "chart_line_label_5": "Line 5",
-    "chart_line_label_6": "Line 6",
-    "chart_line_label_7": "Line 7",
-    "chart_line_label_8": "Line 8",
-    "chart_line_label_9": "Line 9",
-    "chart_line_hidden": "Hide",
-    "chart_line_actions_label": "Lines to display",
-    "chart_line_add": "Add line",
-    "chart_line_all": "All",
-    "chart_line_delete": "Delete line",
-    "chart_line_hint": "Show up to 9 model lines at once",
+    "dimension_label": "Chart Dimension",
+    "dimension_total": "Total",
+    "dimension_model": "By Model",
+    "dimension_credential": "By Credential",
     "no_data": "No Data Available",
     "loading_error": "Loading Failed",
     "api_endpoint": "API Endpoint",
@@ -950,9 +944,11 @@
     "request_events_filter_model": "Model",
     "request_events_filter_source": "Source",
     "request_events_filter_auth_index": "Auth Index",
+    "request_events_search_placeholder": "Search model, source, auth index...",
     "request_events_timestamp": "Timestamp",
     "request_events_source": "Source",
     "request_events_auth_index": "Auth Index",
+    "request_events_api_key": "Credential",
     "request_events_result": "Result",
     "request_events_empty_title": "No request events",
     "request_events_empty_desc": "No request details are available for the selected time range.",
@@ -962,7 +958,40 @@
     "request_events_limit_hint": "Showing {{shown}} of {{total}} events to keep rendering responsive.",
     "input_tokens": "Input Tokens",
     "output_tokens": "Output Tokens",
-    "last_updated": "Updated"
+    "last_updated": "Updated",
+    "tab_overview": "Overview",
+    "tab_models": "Models",
+    "tab_credentials": "Credentials",
+    "tab_events": "Events",
+    "tab_settings": "Settings",
+    "retention_title": "Data Retention",
+    "retention_days": "Trim by Age",
+    "retention_days_hint": "Details older than this are archived and removed from memory",
+    "retention_days_disabled": "Age-based trimming disabled",
+    "retention_max_size": "Max File Size (MB)",
+    "retention_max_size_hint": "Force trim when active statistics file exceeds this size",
+    "retention_max_size_disabled": "File size limit disabled",
+    "retention_archive": "Archive Retention (months)",
+    "retention_archive_hint": "Archive files older than this are deleted",
+    "retention_archive_disabled": "Archiving disabled",
+    "retention_no_trim_warning": "Age-based trimming is disabled. Archiving will not trigger because it depends on trimming.",
+    "retention_no_archive_warning": "Archiving is disabled. Trimmed data will be permanently deleted.",
+    "retention_all_disabled_warning": "All retention controls are disabled. Data will grow indefinitely!",
+    "retention_save": "Save",
+    "retention_saved": "Data retention settings saved",
+    "retention_save_failed": "Failed to save data retention settings",
+    "retention_trim": "Trim Now",
+    "retention_unavailable": "Data retention settings unavailable",
+    "trim_success": "Trim complete, {{archives}} archive files",
+    "trim_failed": "Trim failed",
+    "trim_confirm_title": "Confirm Trim",
+    "trim_confirm_message": "This will permanently delete {{count}} file(s) ({{size}}), date range: {{from}} ~ {{to}}.",
+    "trim_confirm_empty": "No files to trim based on current retention settings.",
+    "trim_preview_failed": "Failed to load trim preview",
+    "import_confirm_title": "Confirm Import",
+    "import_confirm_message": "Import {{count}} usage record(s)?",
+    "delete_price_confirm_title": "Confirm Delete",
+    "delete_price_confirm_message": "Delete price configuration for model \"{{model}}\"?"
   },
   "stats": {
     "success": "Success",
@@ -977,7 +1006,9 @@
     "title": "Service Health",
     "window": "Last 7 days",
     "oldest": "Oldest",
-    "newest": "Latest"
+    "newest": "Latest",
+    "total_requests": "Requests",
+    "tokens": "Tokens"
   },
   "logs": {
     "title": "Logs Viewer",
@@ -1093,6 +1124,10 @@
       "confirm": "Confirm Save",
       "no_changes": "No changes detected"
     },
+    "validation": {
+      "errors_title": "Configuration Errors (save blocked)",
+      "warnings_title": "Configuration Warnings"
+    },
     "tabs": {
       "visual": "Visual Editor",
       "source": "Source File Editor"
@@ -1122,20 +1157,23 @@
           "disable_panel_desc": "Disable the built-in web control panel",
           "secret_key": "Management Key",
           "secret_key_placeholder": "Set management key",
-          "panel_repo": "Panel Repository"
+          "panel_repo": "Panel Repository",
+          "cpa_repo": "CPA Repository"
         },
         "auth": {
           "title": "Authentication Configuration",
           "description": "API keys and authentication directory settings",
           "auth_dir": "Auth Directory (auth-dir)",
-          "auth_dir_hint": "Directory path for authentication files (supports ~)"
+          "auth_dir_hint": "Directory path for authentication files (supports ~)",
+          "usage_data_dir": "Usage Data Directory (usage-data-dir)",
+          "usage_data_dir_hint": "Directory for persisting usage statistics data (supports ~)"
         },
         "system": {
           "title": "System Configuration",
           "description": "Debug, logging, statistics, and performance settings",
           "debug": "Debug Mode",
           "debug_desc": "Enable verbose debug logging",
-          "commercial_mode": "Commercial Mode",
+          "commercial_mode": "High Performance Mode",
           "commercial_mode_desc": "Disable high-overhead middleware to support high concurrency",
           "logging_to_file": "Log to File",
           "logging_to_file_desc": "Save logs to files",
@@ -1156,7 +1194,9 @@
           "force_model_prefix": "Force Model Prefix",
           "force_model_prefix_desc": "Unprefixed model requests only use credentials without prefix",
           "ws_auth": "WebSocket Authentication",
-          "ws_auth_desc": "Enable WebSocket authentication (/v1/ws)"
+          "ws_auth_desc": "Enable WebSocket authentication (/v1/ws)",
+          "allow_query_auth": "Allow Query String Auth",
+          "allow_query_auth_desc": "Allow API key in URL query parameters. WARNING: credentials may leak in logs, browser history, and referrer headers"
         },
         "quota": {
           "title": "Quota Fallback",
@@ -1200,7 +1240,15 @@
         "input_placeholder": "Paste your API key",
         "input_hint": "This only modifies the local config file content, it will not sync to the API Key Management interface",
         "error_empty": "Please enter an API key",
-        "error_invalid": "API key contains invalid characters"
+        "error_too_short": "API key must be at least 8 characters",
+        "error_invalid": "API key contains invalid characters",
+        "alias_label": "Key Alias (optional)",
+        "alias_placeholder": "e.g. my-key-1, test, prod",
+        "alias_hint": "Alias is saved separately for display purposes, any key format can have an alias",
+        "alias_error_format": "Must start with a letter, only letters/digits/underscores",
+        "alias_error_length": "Alias must not exceed 20 characters",
+        "alias_error_duplicate": "Alias already in use by another key",
+        "search_placeholder": "Search keys or aliases..."
       },
       "payload_rules": {
         "rule": "Rule",
@@ -1289,7 +1337,33 @@
     "clear_login_title": "Local Login Data",
     "clear_login_desc": "Clear locally saved login data and sign out. Usage stats pricing settings will remain untouched.",
     "clear_login_button": "Clear login data",
-    "clear_login_confirm": "Clear local login data and sign out now?"
+    "clear_login_confirm": "Clear local login data and sign out now?",
+    "version_history_button": "Version History",
+    "panel_update_button": "Update Panel",
+    "panel_update_success": "Management panel updated successfully",
+    "panel_update_failed": "Failed to update management panel",
+    "timezone_title": "Display Timezone",
+    "timezone_desc": "All dates and times in the interface will use this timezone.",
+    "timezone_system": "System (Browser Default)"
+  },
+  "version_history": {
+    "title": "Version History",
+    "empty": "No releases found",
+    "patch_count": "{{count}} releases",
+    "current": "Current",
+    "prerelease": "Pre-release",
+    "breaking_changes": "Breaking Changes",
+    "unofficial_warning": "Pointing to non-official repository {{repo}}. Updates have not been reviewed by the official team.",
+    "upgrade": "Upgrade",
+    "downgrade": "Downgrade",
+    "confirm_upgrade": "Upgrade CPA backend to {{version}}?",
+    "confirm_downgrade": "Downgrade CPA backend to {{version}}? This may cause compatibility issues.",
+    "downgrade_risk": "The following breaking changes exist between current and target version:",
+    "status_downloading": "Downloading...",
+    "status_verifying": "Verifying checksum...",
+    "status_replacing": "Replacing binary...",
+    "status_done": "Update complete",
+    "status_error": "Update failed"
   },
   "notification": {
     "debug_updated": "Debug settings updated",
@@ -1356,7 +1430,7 @@
     "gemini_api_key": "Gemini API key",
     "codex_api_key": "Codex API key",
     "claude_api_key": "Claude API key",
-    "commercial_mode_restart_required": "Commercial mode setting changed. Please restart the service for it to take effect",
+    "commercial_mode_restart_required": "High performance mode setting changed. Please restart the service for it to take effect",
     "copy_failed": "Copy failed",
     "link_copied": "Link copied to clipboard"
   },
@@ -1374,6 +1448,52 @@
     "switch_to_dark": "Switch to dark mode",
     "auto": "Follow system"
   },
+  "not_found": {
+    "title": "Page not found",
+    "back_home": "Back to home"
+  },
+  "credentials": {
+    "page_title": "Credentials",
+    "api_keys": "API Keys",
+    "auth_files": "Auth Files",
+    "models": "models",
+    "websockets": "WebSocket",
+    "no_credentials": "No credentials configured",
+    "no_search_results": "No credentials match \"{{query}}\"",
+    "manual_config": "Manual Config",
+    "upload_file": "Upload",
+    "import_json": "Import JSON",
+    "cookie_auth": "Cookie Auth",
+    "api_key_entries": "entries",
+    "oauth_waiting": "Waiting for authorization...",
+    "oauth_success": "Authorization successful!",
+    "oauth_error": "Authorization failed",
+    "oauth_open_url": "Open URL",
+    "oauth_copy_url": "Copy URL",
+    "oauth_callback_hint": "Paste the redirect URL from your browser",
+    "oauth_callback_submit": "Submit",
+    "project_id": "Project ID",
+    "global_settings": "Global Settings",
+    "oauth_settings": "OAuth Settings",
+    "oauth_model_alias_manage": "Model Aliases",
+    "oauth_excluded_manage": "Model Exclusions",
+    "switch_project_on_quota": "Switch project on quota exceeded",
+    "switch_preview_on_quota": "Switch to preview model on quota exceeded",
+    "quota_poll_interval": "Quota Poll Interval",
+    "poll_interval_disabled": "Disabled",
+    "poll_interval_1min": "1 min",
+    "poll_interval_3min": "3 min",
+    "poll_interval_5min": "5 min",
+    "poll_interval_10min": "10 min",
+    "iflow_cookie_placeholder": "Paste your iFlow cookie here",
+    "vertex_location_placeholder": "Location (e.g., us-central1)",
+    "vertex_select_file": "Select JSON file",
+    "last_updated": "Updated",
+    "sort_name": "Name",
+    "sort_type": "Type",
+    "sort_status": "Status",
+    "sort_requests": "Requests"
+  },
   "sidebar": {
     "toggle_expand": "Expand sidebar",
     "toggle_collapse": "Collapse sidebar"
@@ -1383,5 +1503,17 @@
     "build_date": "Build Time",
     "version": "Management UI Version",
     "author": "Author"
+  },
+  "multi_select": {
+    "search_placeholder": "Search...",
+    "no_match": "No matches"
+  },
+  "pagination": {
+    "range": "{{start}}–{{end}} of {{total}}",
+    "first": "First page",
+    "prev": "Previous page",
+    "next": "Next page",
+    "last": "Last page",
+    "per_page": "{{count}} / page"
   }
 }

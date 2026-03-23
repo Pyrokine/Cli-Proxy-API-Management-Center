@@ -9,31 +9,15 @@ export type Language = 'zh-CN' | 'en' | 'ru';
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
 
 export interface Notification {
-  id: string;
-  message: string;
-  type: NotificationType;
-  duration?: number;
-}
-
-export interface ApiResponse<T = unknown> {
-  data?: T;
-  error?: string;
-  message?: string;
+    id: string;
+    message: string;
+    type: NotificationType;
+    duration?: number;
 }
 
 export interface PaginationState {
-  currentPage: number;
-  pageSize: number;
-  totalPages: number;
-  totalItems?: number;
-}
-
-export interface LoadingState {
-  isLoading: boolean;
-  error: Error | null;
-}
-
-// 泛型异步状态
-export interface AsyncState<T> extends LoadingState {
-  data: T | null;
+    currentPage: number;
+    pageSize: number;
+    totalPages: number;
+    totalItems?: number;
 }

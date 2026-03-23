@@ -3,25 +3,25 @@
  * 服务端存储模型价格配置，替代 localStorage
  */
 
-import { apiClient } from './client';
-import type { ModelPrice } from '@/utils/usage';
+import type {ModelPrice} from '@/utils/usage'
+import {apiClient} from './client'
 
 interface GetModelPricesResponse {
-  prices: Record<string, ModelPrice>;
+    prices: Record<string, ModelPrice>;
 }
 
 interface PutModelPricesResponse {
-  status: string;
-  count: number;
+    status: string;
+    count: number;
 }
 
 export const modelPricesApi = {
-  async get(): Promise<Record<string, ModelPrice>> {
-    const resp = await apiClient.get<GetModelPricesResponse>('/v0/management/model-prices');
-    return resp.prices ?? {};
-  },
+    async get(): Promise<Record<string, ModelPrice>> {
+        const resp = await apiClient.get<GetModelPricesResponse>('/model-prices')
+        return resp.prices ?? {}
+    },
 
-  async put(prices: Record<string, ModelPrice>): Promise<PutModelPricesResponse> {
-    return apiClient.put<PutModelPricesResponse>('/v0/management/model-prices', { prices });
-  }
-};
+    async put(prices: Record<string, ModelPrice>): Promise<PutModelPricesResponse> {
+        return apiClient.put<PutModelPricesResponse>('/model-prices', { prices })
+    },
+}

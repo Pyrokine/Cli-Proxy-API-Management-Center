@@ -1,144 +1,107 @@
-import { useState, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
-import type { ScriptableContext } from 'chart.js';
-import { Line } from 'react-chartjs-2';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import {
-  buildHourlyCostSeries,
-  buildDailyCostSeries,
-  formatUsd,
-  type ModelPrice
-} from '@/utils/usage';
-import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig';
-import type { UsagePayload } from './hooks/useUsageData';
-import styles from '@/pages/UsagePage.module.scss';
+import {Card} from '@/components/ui/Card'
+import styles from '@/pages/UsagePage.module.scss'
+import type {UsageSummary} from '@/services/api/usage'
+import {buildChartDataFromSummary, formatUsd} from '@/utils/usage'
+import {buildChartOptions} from '@/utils/usage/chartConfig'
+import type {ScriptableContext} from 'chart.js'
+import {useMemo} from 'react'
+import {Line} from 'react-chartjs-2'
+import {useTranslation} from 'react-i18next'
 
-export interface CostTrendChartProps {
-  usage: UsagePayload | null;
-  loading: boolean;
-  isDark: boolean;
-  isMobile: boolean;
-  modelPrices: Record<string, ModelPrice>;
-  hourWindowHours?: number;
+interface CostTrendChartProps {
+    loading: boolean;
+    isMobile: boolean;
+    summary?: UsageSummary | null;
 }
 
-const COST_COLOR = '#f59e0b';
-const COST_BG = 'rgba(245, 158, 11, 0.15)';
+const COST_COLOR = '#f59e0b'
+const COST_BG    = 'rgba(245, 158, 11, 0.15)'
 
 function buildGradient(ctx: ScriptableContext<'line'>) {
-  const chart = ctx.chart;
-  const area = chart.chartArea;
-  if (!area) return COST_BG;
-  const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-  gradient.addColorStop(0, 'rgba(245, 158, 11, 0.28)');
-  gradient.addColorStop(0.6, 'rgba(245, 158, 11, 0.12)');
-  gradient.addColorStop(1, 'rgba(245, 158, 11, 0.02)');
-  return gradient;
+    const chart = ctx.chart
+    const area  = chart.chartArea
+    if (!area) {
+        return COST_BG
+    }
+    const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+    gradient.addColorStop(0, 'rgba(245, 158, 11, 0.28)')
+    gradient.addColorStop(0.6, 'rgba(245, 158, 11, 0.12)')
+    gradient.addColorStop(1, 'rgba(245, 158, 11, 0.02)')
+    return gradient
 }
 
-export function CostTrendChart({
-  usage,
-  loading,
-  isDark,
-  isMobile,
-  modelPrices,
-  hourWindowHours
-}: CostTrendChartProps) {
-  const { t } = useTranslation();
-  const [period, setPeriod] = useState<'hour' | 'day'>('hour');
-  const hasPrices = Object.keys(modelPrices).length > 0;
-
-  const { chartData, chartOptions, hasData } = useMemo(() => {
-    if (!hasPrices || !usage) {
-      return { chartData: { labels: [], datasets: [] }, chartOptions: {}, hasData: false };
-    }
-
-    const series =
-      period === 'hour'
-        ? buildHourlyCostSeries(usage, modelPrices, hourWindowHours)
-        : buildDailyCostSeries(usage, modelPrices);
-
-    const data = {
-      labels: series.labels,
-      datasets: [
-        {
-          label: t('usage_stats.total_cost'),
-          data: series.data,
-          borderColor: COST_COLOR,
-          backgroundColor: buildGradient,
-          pointBackgroundColor: COST_COLOR,
-          pointBorderColor: COST_COLOR,
-          fill: true,
-          tension: 0.35
+export function CostTrendChart({ loading, isMobile, summary }: CostTrendChartProps) {
+    const { t }  = useTranslation()
+    const period = useMemo<'hour' | 'day'>(() => {
+        if (summary?.time_series?.length && summary.time_series.length >= 2) {
+            const t0 = new Date(summary.time_series[0].time).getTime()
+            const t1 = new Date(summary.time_series[1].time).getTime()
+            return t1 - t0 >= 20 * 3600_000 ? 'day' : 'hour'
         }
-      ]
-    };
+        return 'hour'
+    }, [summary])
 
-    const baseOptions = buildChartOptions({ period, labels: series.labels, isDark, isMobile });
-    const options = {
-      ...baseOptions,
-      scales: {
-        ...baseOptions.scales,
-        y: {
-          ...baseOptions.scales?.y,
-          ticks: {
-            ...(baseOptions.scales?.y && 'ticks' in baseOptions.scales.y ? baseOptions.scales.y.ticks : {}),
-            callback: (value: string | number) => formatUsd(Number(value))
-          }
+    const hasCost = useMemo(() => {
+        return !!summary?.time_series?.some(p => p.has_cost)
+    }, [summary])
+
+    const { chartData, chartOptions } = useMemo(() => {
+        if (!hasCost || !summary) {
+            return { chartData: { labels: [], datasets: [] }, chartOptions: {} }
         }
-      }
-    };
 
-    return { chartData: data, chartOptions: options, hasData: series.hasData };
-  }, [usage, period, isDark, isMobile, modelPrices, hasPrices, hourWindowHours, t]);
+        const result = buildChartDataFromSummary(summary, 'cost', 'total')
+        const data   = {
+            labels: result.labels,
+            datasets: [
+                {
+                    label: t('usage_stats.total_cost'),
+                    data: result.datasets[0]?.data ?? [],
+                    borderColor: COST_COLOR,
+                    backgroundColor: buildGradient,
+                    pointBackgroundColor: COST_COLOR,
+                    pointBorderColor: COST_COLOR,
+                    fill: true,
+                    tension: 0.35,
+                },
+            ],
+        }
 
-  return (
-    <Card
-      title={t('usage_stats.cost_trend')}
-      extra={
-        <div className={styles.periodButtons}>
-          <Button
-            variant={period === 'hour' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('hour')}
-          >
-            {t('usage_stats.by_hour')}
-          </Button>
-          <Button
-            variant={period === 'day' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('day')}
-          >
-            {t('usage_stats.by_day')}
-          </Button>
-        </div>
-      }
-    >
-      {loading ? (
-        <div className={styles.hint}>{t('common.loading')}</div>
-      ) : !hasPrices ? (
-        <div className={styles.hint}>{t('usage_stats.cost_need_price')}</div>
-      ) : !hasData ? (
-        <div className={styles.hint}>{t('usage_stats.cost_no_data')}</div>
-      ) : (
-        <div className={styles.chartWrapper}>
-          <div className={styles.chartArea}>
-            <div className={styles.chartScroller}>
-              <div
-                className={styles.chartCanvas}
-                style={
-                  period === 'hour'
-                    ? { minWidth: getHourChartMinWidth(chartData.labels.length, isMobile) }
-                    : undefined
-                }
-              >
-                <Line data={chartData} options={chartOptions} />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
+        const baseOptions = buildChartOptions({ period, labels: result.labels, isMobile })
+        const options     = {
+            ...baseOptions,
+            scales: {
+                ...baseOptions.scales,
+                y: {
+                    ...baseOptions.scales?.y,
+                    ticks: {
+                        ...(baseOptions.scales?.y && 'ticks' in baseOptions.scales.y ? baseOptions.scales.y.ticks : {}),
+                        callback: (value: string | number) => formatUsd(Number(value)),
+                    },
+                },
+            },
+        }
+
+        return { chartData: data, chartOptions: options }
+    }, [summary, hasCost, period, isMobile, t])
+
+    return (
+        <Card title={t('usage_stats.cost_trend')}>
+            {loading ? (
+                <div className={styles.hint}>{t('common.loading')}</div>
+            ) : !hasCost ? (
+                <div className={styles.hint}>{t('usage_stats.cost_no_data')}</div>
+            ) : (
+                    <div className={styles.chartWrapper}>
+                        <div className={styles.chartArea}>
+                            <div className={styles.chartScroller}>
+                                <div className={styles.chartCanvas}>
+                                    <Line data={chartData} options={chartOptions} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+        </Card>
+    )
 }

@@ -1,0 +1,65 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.input {
+  max-width: 200px;
+}
+
+.hint {
+  font-size: $font-size-sm;
+  color: var(--text-tertiary);
+}
+
+.disabledHint {
+  font-size: $font-size-sm;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.warning {
+  font-size: $font-size-sm;
+  color: var(--warning-color);
+  padding: 6px 10px;
+  background: var(--bg-warning-light, rgba(255, 183, 0, 0.08));
+  border-radius: $radius-md;
+}
+
+.warningDanger {
+  font-size: $font-size-sm;
+  color: var(--error-color);
+  padding: 6px 10px;
+  background: var(--bg-error-light);
+  border-radius: $radius-md;
+  font-weight: $font-weight-medium;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}

@@ -1,3 +1,32 @@
+@use '../../styles/variables' as *;
+
+// 文本层级 class —— 统一控制字号，避免内联样式不一致
+.label {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+}
+
+.desc {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+}
+
+.fieldLabel {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+}
+
+.emptyState {
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
 .payloadRuleModelRow {
   display: grid;
   grid-template-columns: 1fr 160px auto;
@@ -23,7 +52,7 @@
   align-items: center;
 }
 
-@media (max-width: 900px) {
+@media (max-width: $breakpoint-tablet) {
   .payloadRuleModelRow,
   .payloadRuleModelRowProtocolFirst,
   .payloadRuleParamRow,
@@ -34,4 +63,17 @@
   .payloadRowActionButton {
     width: 100%;
   }
+}
+
+.disabledBadge {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: $radius-full;
+  border: 1px solid var(--border-color);
 }

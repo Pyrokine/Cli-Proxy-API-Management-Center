@@ -1,16 +1,13 @@
 @use '../../styles/variables' as *;
 @use '../../styles/mixins' as *;
 
-$diff-mono: 'Consolas', 'Monaco', 'Menlo', 'SF Mono', monospace;
-$diff-font-size: 12px;
+$diff-mono: $font-mono;
+$diff-font-size: $font-size-sm;
 $diff-line-height: 20px;
 $diff-gutter-width: 50px;
 $diff-prefix-width: 20px;
 
-// GitHub-inspired diff colors (theme-adaptive via color-mix)
-$diff-add-color: #3fb950;
-$diff-del-color: #f85149;
-$diff-hunk-color: #388bfd;
+// Diff 颜色通过 CSS 自定义属性跟随主题切换（定义在 themes.scss）
 
 .diffModal {
   :global(.modal-body) {
@@ -33,13 +30,48 @@ $diff-hunk-color: #388bfd;
   border-radius: $radius-md;
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: $font-size-base;
   display: grid;
   place-items: center;
   margin: $spacing-md;
 }
 
-// ── File container ──────────────────────────────────────
+// ── File container ────────────────────────────────
+
+.validationErrors,
+.validationWarnings {
+  margin: $spacing-md $spacing-md 0;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+
+  strong {
+    display: block;
+    margin-bottom: $spacing-xs;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 1.5em;
+  }
+
+  li + li {
+    margin-top: 2px;
+  }
+}
+
+.validationErrors {
+  background: color-mix(in srgb, var(--danger-color, #e53e3e) 10%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--danger-color, #e53e3e) 30%, var(--border-color));
+  color: var(--danger-color, #e53e3e);
+}
+
+.validationWarnings {
+  background: color-mix(in srgb, var(--warning-color, #d69e2e) 10%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--warning-color, #d69e2e) 30%, var(--border-color));
+  color: var(--warning-color, #d69e2e);
+}
 
 .diffContainer {
   flex: 1;
@@ -49,7 +81,7 @@ $diff-hunk-color: #388bfd;
   overflow: hidden;
 }
 
-// ── File header ─────────────────────────────────────────
+// ── File header ───────────────────────────────────
 
 .fileHeader {
   display: flex;
@@ -67,8 +99,8 @@ $diff-hunk-color: #388bfd;
 }
 
 .fileName {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
   font-family: $diff-mono;
   color: var(--text-primary);
 }
@@ -78,17 +110,17 @@ $diff-hunk-color: #388bfd;
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
   font-family: $diff-mono;
 }
 
 .statAdditions {
-  color: $diff-add-color;
+  color: var(--diff-add-color);
 }
 
 .statDeletions {
-  color: $diff-del-color;
+  color: var(--diff-del-color);
 }
 
 .statBar {
@@ -104,14 +136,14 @@ $diff-hunk-color: #388bfd;
 }
 
 .statBlockAdd {
-  background: $diff-add-color;
+  background: var(--diff-add-color);
 }
 
 .statBlockDel {
-  background: $diff-del-color;
+  background: var(--diff-del-color);
 }
 
-// ── Diff body (scrollable) ──────────────────────────────
+// ── Diff body (scrollable) ────────────────────────
 
 .diffBody {
   flex: 1;
@@ -122,7 +154,7 @@ $diff-hunk-color: #388bfd;
   line-height: $diff-line-height;
 }
 
-// ── Hunk ────────────────────────────────────────────────
+// ── Hunk ──────────────────────────────────────────
 
 .hunk + .hunk {
   border-top: 1px solid var(--border-color);
@@ -131,9 +163,9 @@ $diff-hunk-color: #388bfd;
 .hunkHeader {
   display: flex;
   align-items: center;
-  background: color-mix(in srgb, $diff-hunk-color 8%, var(--bg-primary));
-  border-bottom: 1px solid color-mix(in srgb, $diff-hunk-color 12%, var(--border-color));
-  color: color-mix(in srgb, $diff-hunk-color 75%, var(--text-secondary));
+  background: color-mix(in srgb, var(--diff-hunk-color) 8%, var(--bg-primary));
+  border-bottom: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
+  color: color-mix(in srgb, var(--diff-hunk-color) 75%, var(--text-secondary));
   min-height: $diff-line-height;
 }
 
@@ -144,11 +176,11 @@ $diff-hunk-color: #388bfd;
   align-items: center;
   justify-content: center;
   align-self: stretch;
-  border-right: 1px solid color-mix(in srgb, $diff-hunk-color 12%, var(--border-color));
+  border-right: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
 }
 
 .hunkExpandIcon {
-  color: color-mix(in srgb, $diff-hunk-color 70%, var(--text-tertiary));
+  color: color-mix(in srgb, var(--diff-hunk-color) 70%, var(--text-tertiary));
   opacity: 0.7;
 }
 
@@ -158,14 +190,14 @@ $diff-hunk-color: #388bfd;
   white-space: nowrap;
 }
 
-// ── Diff line ───────────────────────────────────────────
+// ── Diff line ─────────────────────────────────────
 
 .diffLine {
   display: flex;
   min-height: $diff-line-height;
 }
 
-// ── Line number gutters ─────────────────────────────────
+// ── Line number gutters ───────────────────────────
 
 .lineNum {
   width: $diff-gutter-width;
@@ -190,10 +222,10 @@ $diff-hunk-color: #388bfd;
   flex-shrink: 0;
   text-align: center;
   user-select: none;
-  font-weight: 700;
+  font-weight: $font-weight-semibold;
 }
 
-// ── Code text ───────────────────────────────────────────
+// ── Code text ─────────────────────────────────────
 
 .lineText {
   flex: 1;
@@ -203,7 +235,7 @@ $diff-hunk-color: #388bfd;
   word-break: break-word;
 }
 
-// ── Context lines ───────────────────────────────────────
+// ── Context lines ─────────────────────────────────
 
 .context {
   background: var(--bg-primary);
@@ -217,19 +249,19 @@ $diff-hunk-color: #388bfd;
   }
 }
 
-// ── Deletion lines ──────────────────────────────────────
+// ── Deletion lines ────────────────────────────────
 
 .deletion {
-  background: color-mix(in srgb, $diff-del-color 8%, var(--bg-primary));
+  background: color-mix(in srgb, var(--diff-del-color) 8%, var(--bg-primary));
 
   .lineNum {
-    background: color-mix(in srgb, $diff-del-color 12%, var(--bg-primary));
-    border-right-color: color-mix(in srgb, $diff-del-color 18%, var(--border-color));
-    color: color-mix(in srgb, $diff-del-color 60%, var(--text-tertiary));
+    background: color-mix(in srgb, var(--diff-del-color) 12%, var(--bg-primary));
+    border-right-color: color-mix(in srgb, var(--diff-del-color) 18%, var(--border-color));
+    color: color-mix(in srgb, var(--diff-del-color) 60%, var(--text-tertiary));
   }
 
   .linePrefix {
-    color: $diff-del-color;
+    color: var(--diff-del-color);
   }
 
   .lineText {
@@ -237,19 +269,19 @@ $diff-hunk-color: #388bfd;
   }
 }
 
-// ── Addition lines ──────────────────────────────────────
+// ── Addition lines ────────────────────────────────
 
 .addition {
-  background: color-mix(in srgb, $diff-add-color 8%, var(--bg-primary));
+  background: color-mix(in srgb, var(--diff-add-color) 8%, var(--bg-primary));
 
   .lineNum {
-    background: color-mix(in srgb, $diff-add-color 12%, var(--bg-primary));
-    border-right-color: color-mix(in srgb, $diff-add-color 18%, var(--border-color));
-    color: color-mix(in srgb, $diff-add-color 60%, var(--text-tertiary));
+    background: color-mix(in srgb, var(--diff-add-color) 12%, var(--bg-primary));
+    border-right-color: color-mix(in srgb, var(--diff-add-color) 18%, var(--border-color));
+    color: color-mix(in srgb, var(--diff-add-color) 60%, var(--text-tertiary));
   }
 
   .linePrefix {
-    color: $diff-add-color;
+    color: var(--diff-add-color);
   }
 
   .lineText {
@@ -257,7 +289,7 @@ $diff-hunk-color: #388bfd;
   }
 }
 
-// ── Mobile responsive ───────────────────────────────────
+// ── Mobile responsive ─────────────────────────────
 
 @include mobile {
   .content {
@@ -268,12 +300,12 @@ $diff-hunk-color: #388bfd;
   .lineNum {
     width: 36px;
     padding: 0 4px;
-    font-size: 10px;
+    font-size: $font-size-sm;
   }
 
   .linePrefix {
     width: 16px;
-    font-size: 11px;
+    font-size: $font-size-sm;
   }
 
   .hunkGutter {
@@ -285,15 +317,15 @@ $diff-hunk-color: #388bfd;
   }
 
   .diffBody {
-    font-size: 11px;
+    font-size: $font-size-sm;
     line-height: 18px;
   }
 
   .fileName {
-    font-size: 12px;
+    font-size: $font-size-sm;
   }
 
   .fileStats {
-    font-size: 11px;
+    font-size: $font-size-sm;
   }
 }

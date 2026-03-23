@@ -109,6 +109,7 @@
     "dashboard": "Панель",
     "basic_settings": "Основные настройки",
     "api_keys": "API ключи",
+    "credentials": "Учётные данные",
     "ai_providers": "Поставщики AI",
     "auth_files": "Файлы аутентификации",
     "oauth": "OAuth вход",
@@ -868,7 +869,8 @@
     "iflow_cookie_result_expired": "Истекает",
     "iflow_cookie_result_path": "Путь сохранения",
     "iflow_cookie_result_type": "Тип",
-    "remote_access_disabled": "Этот способ входа недоступен при удалённом доступе. Подключитесь с localhost."
+    "remote_access_disabled": "Этот способ входа недоступен при удалённом доступе. Подключитесь с localhost.",
+    "login_button": "Войти"
   },
   "usage_stats": {
     "title": "Статистика использования",
@@ -894,6 +896,9 @@
     "range_7h": "Последние 7 часов",
     "range_24h": "Последние 24 часа",
     "range_7d": "Последние 7 дней",
+    "range_30d": "Последние 30 дней",
+    "range_from": "С",
+    "range_to": "По",
     "filter_all": "Все",
     "clear_filters": "Сбросить фильтры",
     "refresh": "Обновить",
@@ -904,21 +909,10 @@
     "export_success": "Экспорт использования скачан",
     "import_success": "Импорт завершён: добавлено {{added}}, пропущено {{skipped}}, всего {{total}}, ошибок {{failed}}",
     "import_invalid": "Недопустимый файл экспорта использования",
-    "chart_line_label_1": "Линия 1",
-    "chart_line_label_2": "Линия 2",
-    "chart_line_label_3": "Линия 3",
-    "chart_line_label_4": "Линия 4",
-    "chart_line_label_5": "Линия 5",
-    "chart_line_label_6": "Линия 6",
-    "chart_line_label_7": "Линия 7",
-    "chart_line_label_8": "Линия 8",
-    "chart_line_label_9": "Линия 9",
-    "chart_line_hidden": "Скрыть",
-    "chart_line_actions_label": "Линии для отображения",
-    "chart_line_add": "Добавить линию",
-    "chart_line_all": "Все",
-    "chart_line_delete": "Удалить линию",
-    "chart_line_hint": "Отображайте до 9 линий моделей одновременно",
+    "dimension_label": "Измерение графика",
+    "dimension_total": "Итого",
+    "dimension_model": "По модели",
+    "dimension_credential": "По ключу",
     "no_data": "Данные отсутствуют",
     "loading_error": "Не удалось загрузить",
     "api_endpoint": "API-эндпоинт",
@@ -953,9 +947,11 @@
     "request_events_filter_model": "Модель",
     "request_events_filter_source": "Источник",
     "request_events_filter_auth_index": "Auth Index",
+    "request_events_search_placeholder": "Поиск по модели, источнику...",
     "request_events_timestamp": "Время",
     "request_events_source": "Источник",
     "request_events_auth_index": "Auth Index",
+    "request_events_api_key": "Учётные данные",
     "request_events_result": "Результат",
     "request_events_empty_title": "События запросов отсутствуют",
     "request_events_empty_desc": "Нет деталей запросов для выбранного диапазона времени.",
@@ -965,7 +961,40 @@
     "request_events_limit_hint": "Показано {{shown}} из {{total}} событий для стабильной производительности.",
     "input_tokens": "Входные токены",
     "output_tokens": "Выходные токены",
-    "last_updated": "Обновлено"
+    "last_updated": "Обновлено",
+    "tab_overview": "Обзор",
+    "tab_models": "Модели",
+    "tab_credentials": "Учётные данные",
+    "tab_events": "События",
+    "tab_settings": "Настройки",
+    "retention_title": "Хранение данных",
+    "retention_days": "Очистка по возрасту",
+    "retention_days_hint": "Детали старше этого срока архивируются и удаляются из памяти",
+    "retention_days_disabled": "Очистка по возрасту отключена",
+    "retention_max_size": "Макс. размер файла (МБ)",
+    "retention_max_size_hint": "Принудительная очистка при превышении размера активного файла",
+    "retention_max_size_disabled": "Ограничение размера файла отключено",
+    "retention_archive": "Хранение архивов (мес.)",
+    "retention_archive_hint": "Архивы старше этого срока удаляются",
+    "retention_archive_disabled": "Архивирование отключено",
+    "retention_no_trim_warning": "Очистка по возрасту отключена. Архивирование не будет работать, так как зависит от очистки.",
+    "retention_no_archive_warning": "Архивирование отключено. Очищенные данные будут удалены безвозвратно.",
+    "retention_all_disabled_warning": "Все механизмы хранения отключены. Данные будут расти бесконечно!",
+    "retention_save": "Сохранить",
+    "retention_saved": "Настройки хранения сохранены",
+    "retention_save_failed": "Не удалось сохранить настройки хранения",
+    "retention_trim": "Очистить сейчас",
+    "retention_unavailable": "Настройки хранения недоступны",
+    "trim_success": "Очистка завершена, {{archives}} архивных файлов",
+    "trim_failed": "Ошибка очистки",
+    "trim_confirm_title": "Подтвердить очистку",
+    "trim_confirm_message": "Будет безвозвратно удалено {{count}} файл(ов) ({{size}}), диапазон дат: {{from}} ~ {{to}}.",
+    "trim_confirm_empty": "Нет файлов для очистки при текущих настройках хранения.",
+    "trim_preview_failed": "Не удалось загрузить предварительный просмотр очистки",
+    "import_confirm_title": "Подтвердить импорт",
+    "import_confirm_message": "Импортировать {{count}} запись(ей) использования?",
+    "delete_price_confirm_title": "Подтвердить удаление",
+    "delete_price_confirm_message": "Удалить конфигурацию цен для модели \"{{model}}\"?"
   },
   "stats": {
     "success": "Успех",
@@ -980,7 +1009,9 @@
     "title": "Состояние сервиса",
     "window": "Последние 7 дней",
     "oldest": "Старые",
-    "newest": "Новые"
+    "newest": "Новые",
+    "total_requests": "Запросы",
+    "tokens": "Токены"
   },
   "logs": {
     "title": "Просмотр журналов",
@@ -1096,6 +1127,10 @@
       "confirm": "Подтвердить",
       "no_changes": "Изменений не обнаружено"
     },
+    "validation": {
+      "errors_title": "Ошибки конфигурации (сохранение заблокировано)",
+      "warnings_title": "Предупреждения конфигурации"
+    },
     "tabs": {
       "visual": "Визуальный редактор",
       "source": "Редактор файла"
@@ -1125,20 +1160,23 @@
           "disable_panel_desc": "Отключить встроенную веб-панель управления",
           "secret_key": "Ключ управления",
           "secret_key_placeholder": "Задайте ключ управления",
-          "panel_repo": "Репозиторий панели"
+          "panel_repo": "Репозиторий панели",
+          "cpa_repo": "Репозиторий CPA"
         },
         "auth": {
           "title": "Настройки аутентификации",
           "description": "API-ключи и каталог аутентификации",
           "auth_dir": "Каталог auth-dir",
-          "auth_dir_hint": "Путь к каталогу с файлами аутентификации (поддерживает ~)"
+          "auth_dir_hint": "Путь к каталогу с файлами аутентификации (поддерживает ~)",
+          "usage_data_dir": "Каталог данных использования (usage-data-dir)",
+          "usage_data_dir_hint": "Каталог для хранения данных статистики использования (поддерживает ~)"
         },
         "system": {
           "title": "Системные настройки",
           "description": "Отладка, журналирование, статистика и производительность",
           "debug": "Режим отладки",
           "debug_desc": "Включить подробные отладочные журналы",
-          "commercial_mode": "Коммерческий режим",
+          "commercial_mode": "Высокопроизводительный режим",
           "commercial_mode_desc": "Отключить тяжёлое промежуточное ПО для поддержки высокой нагрузки",
           "logging_to_file": "Журналировать в файл",
           "logging_to_file_desc": "Сохранять журналы в файлы",
@@ -1161,7 +1199,9 @@
           "force_model_prefix": "Принудительный префикс модели",
           "force_model_prefix_desc": "Запросы к моделям без префикса используют только учётные данные без префикса",
           "ws_auth": "Аутентификация WebSocket",
-          "ws_auth_desc": "Включить аутентификацию WebSocket (/v1/ws)"
+          "ws_auth_desc": "Включить аутентификацию WebSocket (/v1/ws)",
+          "allow_query_auth": "Аутентификация через Query-параметры",
+          "allow_query_auth_desc": "Разрешить передачу API-ключа в параметрах URL. ВНИМАНИЕ: учётные данные могут попасть в логи, историю браузера и заголовки Referer"
         },
         "quota": {
           "title": "Резерв по квоте",
@@ -1205,7 +1245,15 @@
         "input_placeholder": "Вставьте API-ключ",
         "input_hint": "Меняет только содержимое локального файла конфигурации, не синхронизируется с интерфейсом управления API-ключами",
         "error_empty": "Введите API-ключ",
-        "error_invalid": "API-ключ содержит недопустимые символы"
+        "error_too_short": "API-ключ должен содержать не менее 8 символов",
+        "error_invalid": "API-ключ содержит недопустимые символы",
+        "alias_label": "Псевдоним ключа (необязательно)",
+        "alias_placeholder": "напр. мой-ключ-1, test, prod",
+        "alias_hint": "Псевдоним сохраняется отдельно для отображения, любой формат ключа может иметь псевдоним",
+        "alias_error_format": "Должен начинаться с буквы, только буквы/цифры/подчёркивания",
+        "alias_error_length": "Длина не должна превышать 20 символов",
+        "alias_error_duplicate": "Этот псевдоним уже используется другим ключом",
+        "search_placeholder": "Поиск ключей или псевдонимов..."
       },
       "payload_rules": {
         "rule": "Правило",
@@ -1294,7 +1342,33 @@
     "clear_login_title": "Локальные данные входа",
     "clear_login_desc": "Очистите локально сохранённые данные входа и выполните выход. Настройки стоимости статистики использования сохранятся.",
     "clear_login_button": "Очистить данные входа",
-    "clear_login_confirm": "Очистить локальные данные входа и выйти?"
+    "clear_login_confirm": "Очистить локальные данные входа и выйти?",
+    "version_history_button": "История версий",
+    "panel_update_button": "Обновить панель",
+    "panel_update_success": "Панель управления успешно обновлена",
+    "panel_update_failed": "Не удалось обновить панель управления",
+    "timezone_title": "Часовой пояс",
+    "timezone_desc": "Все даты и время в интерфейсе будут отображаться в этом часовом поясе.",
+    "timezone_system": "Системный (по умолчанию браузера)"
+  },
+  "version_history": {
+    "title": "История версий",
+    "empty": "Релизов не найдено",
+    "patch_count": "{{count}} релизов",
+    "current": "Текущая",
+    "prerelease": "Пре-релиз",
+    "breaking_changes": "Несовместимые изменения",
+    "unofficial_warning": "Указан неофициальный репозиторий {{repo}}. Обновления не проверены официальной командой.",
+    "upgrade": "Обновить",
+    "downgrade": "Откатить",
+    "confirm_upgrade": "Обновить бэкенд CPA до {{version}}?",
+    "confirm_downgrade": "Откатить бэкенд CPA до {{version}}? Это может вызвать проблемы совместимости.",
+    "downgrade_risk": "Между текущей и целевой версией есть несовместимые изменения:",
+    "status_downloading": "Загрузка...",
+    "status_verifying": "Проверка контрольной суммы...",
+    "status_replacing": "Замена файла...",
+    "status_done": "Обновление завершено",
+    "status_error": "Ошибка обновления"
   },
   "notification": {
     "debug_updated": "Настройки отладки обновлены",
@@ -1361,7 +1435,7 @@
     "gemini_api_key": "API-ключ Gemini",
     "codex_api_key": "API-ключ Codex",
     "claude_api_key": "API-ключ Claude",
-    "commercial_mode_restart_required": "Режим коммерческого использования изменён. Перезапустите сервис, чтобы применить изменения",
+    "commercial_mode_restart_required": "Режим высокой производительности изменён. Перезапустите сервис, чтобы применить изменения",
     "copy_failed": "Не удалось скопировать",
     "link_copied": "Ссылка скопирована в буфер обмена"
   },
@@ -1379,6 +1453,10 @@
     "switch_to_dark": "Переключиться на тёмную тему",
     "auto": "Следовать системе"
   },
+  "not_found": {
+    "title": "Страница не найдена",
+    "back_home": "На главную"
+  },
   "sidebar": {
     "toggle_expand": "Развернуть боковую панель",
     "toggle_collapse": "Свернуть боковую панель"
@@ -1388,5 +1466,24 @@
     "build_date": "Время сборки",
     "version": "Версия интерфейса управления",
     "author": "Автор"
+  },
+  "multi_select": {
+    "search_placeholder": "Поиск...",
+    "no_match": "Нет совпадений"
+  },
+  "pagination": {
+    "range": "{{start}}–{{end}} из {{total}}",
+    "first": "Первая страница",
+    "prev": "Предыдущая страница",
+    "next": "Следующая страница",
+    "last": "Последняя страница",
+    "per_page": "{{count}} / стр."
+  },
+  "credentials": {
+    "poll_interval_disabled": "Отключено",
+    "poll_interval_1min": "1 мин",
+    "poll_interval_3min": "3 мин",
+    "poll_interval_5min": "5 мин",
+    "poll_interval_10min": "10 мин"
   }
 }
