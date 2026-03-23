@@ -1,24 +1,28 @@
-import { useEffect } from 'react';
+import {useEffect} from 'react'
 
-export type HeaderRefreshHandler = () => void | Promise<void>;
+type HeaderRefreshHandler = () => void | Promise<void>;
 
-let activeHeaderRefreshHandler: HeaderRefreshHandler | null = null;
+let activeHeaderRefreshHandler: HeaderRefreshHandler | null = null
 
 export const triggerHeaderRefresh = async () => {
-  if (!activeHeaderRefreshHandler) return;
-  await activeHeaderRefreshHandler();
-};
+    if (!activeHeaderRefreshHandler) {
+        return
+    }
+    await activeHeaderRefreshHandler()
+}
 
 export const useHeaderRefresh = (handler?: HeaderRefreshHandler | null) => {
-  useEffect(() => {
-    if (!handler) return;
+    useEffect(() => {
+        if (!handler) {
+            return
+        }
 
-    activeHeaderRefreshHandler = handler;
+        activeHeaderRefreshHandler = handler
 
-    return () => {
-      if (activeHeaderRefreshHandler === handler) {
-        activeHeaderRefreshHandler = null;
-      }
-    };
-  }, [handler]);
-};
+        return () => {
+            if (activeHeaderRefreshHandler === handler) {
+                activeHeaderRefreshHandler = null
+            }
+        }
+    }, [handler])
+}

@@ -1,96 +1,125 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { BlockerFunction } from 'react-router';
-import { useBlocker, useLocation } from 'react-router';
-import { useNotificationStore } from '@/stores';
+import {useNotificationStore} from '@/stores'
+import {useCallback, useEffect, useMemo, useRef} from 'react'
+import type {BlockerFunction} from 'react-router'
+import {useBlocker, useLocation} from 'react-router'
 
 type ConfirmationVariant = 'danger' | 'primary' | 'secondary';
 
-export type UnsavedChangesDialog = {
-  title: string;
-  message: string;
-  confirmText: string;
-  cancelText: string;
-  variant?: ConfirmationVariant;
+type UnsavedChangesDialog = {
+    title: string;
+    message: string;
+    confirmText: string;
+    cancelText: string;
+    variant?: ConfirmationVariant;
 };
 
-export type UseUnsavedChangesGuardOptions = {
-  enabled?: boolean;
-  shouldBlock: boolean | BlockerFunction;
-  dialog: UnsavedChangesDialog;
+type UseUnsavedChangesGuardOptions = {
+    enabled?: boolean;
+    shouldBlock: boolean | BlockerFunction;
+    dialog: UnsavedChangesDialog;
 };
 
 export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
-  const { enabled = true, shouldBlock, dialog } = options;
-  const { showConfirmation } = useNotificationStore();
-  const lastBlockedRef = useRef<string>('');
-  const allowNextNavigationUntilRef = useRef(0);
-  const allowNextNavigationKeyRef = useRef('');
-  const location = useLocation();
+    const { enabled = true, shouldBlock, dialog } = options
+    const { showConfirmation }                    = useNotificationStore()
+    const lastBlockedRef                          = useRef<string>('')
+    const allowNextNavigationUntilRef             = useRef(0)
+    const allowNextNavigationKeyRef               = useRef('')
+    const location                                = useLocation()
 
-  const allowNextNavigation = useCallback(() => {
-    // Allow one programmatic navigation after successful save.
-    // A short window is used to avoid stale flags lingering when no navigation happens.
-    allowNextNavigationUntilRef.current = Date.now() + 2_000;
-    allowNextNavigationKeyRef.current = '';
-  }, []);
+    const allowNextNavigation = useCallback(() => {
+        // Allow one programmatic navigation after successful save.
+        // A short window is used to avoid stale flags lingering when no navigation happens.
+        allowNextNavigationUntilRef.current = Date.now() + 2_000
+        allowNextNavigationKeyRef.current   = ''
+    }, [])
 
-  const shouldBlockFunction = useCallback<BlockerFunction>(
-    (args) => {
-      if (!enabled) return false;
-      const now = Date.now();
+    const shouldBlockFunction = useCallback<BlockerFunction>(
+        (args) => {
+            if (!enabled) {
+                return false
+            }
+            const now = Date.now()
 
-      if (allowNextNavigationUntilRef.current > now) {
-        const nextKey = `${args.nextLocation.pathname}${args.nextLocation.search}${args.nextLocation.hash}`;
-        if (!allowNextNavigationKeyRef.current) {
-          allowNextNavigationKeyRef.current = nextKey;
+            if (allowNextNavigationUntilRef.current > now) {
+                const nextKey = `${args.nextLocation.pathname}${args.nextLocation.search}${args.nextLocation.hash}`
+                if (!allowNextNavigationKeyRef.current) {
+                    allowNextNavigationKeyRef.current = nextKey
+                }
+                if (allowNextNavigationKeyRef.current === nextKey) {
+                    return false
+                }
+            } else if (allowNextNavigationUntilRef.current !== 0) {
+                allowNextNavigationUntilRef.current = 0
+                allowNextNavigationKeyRef.current   = ''
+            }
+
+            return typeof shouldBlock === 'function' ? shouldBlock(args) : shouldBlock
+        },
+        [enabled, shouldBlock],
+    )
+
+    // Warn on browser tab close / refresh when there are unsaved changes.
+    useEffect(() => {
+        if (!enabled) {
+            return
         }
-        if (allowNextNavigationKeyRef.current === nextKey) {
-          return false;
+        const isBlocking = typeof shouldBlock === 'function' ? shouldBlock({
+            currentLocation: location,
+            nextLocation: location,
+            historyAction: 'POP' as never,
+        }) : shouldBlock
+        if (!isBlocking) {
+            return
         }
-      } else if (allowNextNavigationUntilRef.current !== 0) {
-        allowNextNavigationUntilRef.current = 0;
-        allowNextNavigationKeyRef.current = '';
-      }
 
-      return typeof shouldBlock === 'function' ? shouldBlock(args) : shouldBlock;
-    },
-    [enabled, shouldBlock]
-  );
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault()
+            e.returnValue = ''
+        }
 
-  const blocker = useBlocker(shouldBlockFunction);
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [enabled, shouldBlock, location])
 
-  useEffect(() => {
-    if (allowNextNavigationUntilRef.current === 0) return;
-    allowNextNavigationUntilRef.current = 0;
-    allowNextNavigationKeyRef.current = '';
-  }, [location.key]);
+    const blocker = useBlocker(shouldBlockFunction)
 
-  const blockedKey = useMemo(() => {
-    if (blocker.state !== 'blocked' || !blocker.location) return '';
-    return `${blocker.location.pathname}${blocker.location.search}${blocker.location.hash}`;
-  }, [blocker.location, blocker.state]);
+    useEffect(() => {
+        if (allowNextNavigationUntilRef.current === 0) {
+            return
+        }
+        allowNextNavigationUntilRef.current = 0
+        allowNextNavigationKeyRef.current   = ''
+    }, [location.key])
 
-  useEffect(() => {
-    if (blocker.state !== 'blocked') {
-      lastBlockedRef.current = '';
-      return;
-    }
+    const blockedKey = useMemo(() => {
+        if (blocker.state !== 'blocked' || !blocker.location) {
+            return ''
+        }
+        return `${blocker.location.pathname}${blocker.location.search}${blocker.location.hash}`
+    }, [blocker.location, blocker.state])
 
-    if (!blockedKey || lastBlockedRef.current === blockedKey) {
-      return;
-    }
-    lastBlockedRef.current = blockedKey;
+    useEffect(() => {
+        if (blocker.state !== 'blocked') {
+            lastBlockedRef.current = ''
+            return
+        }
 
-    showConfirmation({
-      title: dialog.title,
-      message: dialog.message,
-      confirmText: dialog.confirmText,
-      cancelText: dialog.cancelText,
-      variant: dialog.variant ?? 'danger',
-      onConfirm: () => blocker.proceed(),
-      onCancel: () => blocker.reset(),
-    });
-  }, [blockedKey, blocker, dialog, showConfirmation]);
+        if (!blockedKey || lastBlockedRef.current === blockedKey) {
+            return
+        }
+        lastBlockedRef.current = blockedKey
 
-  return { allowNextNavigation };
+        showConfirmation({
+                             title: dialog.title,
+                             message: dialog.message,
+                             confirmText: dialog.confirmText,
+                             cancelText: dialog.cancelText,
+                             variant: dialog.variant ?? 'danger',
+                             onConfirm: () => blocker.proceed(),
+                             onCancel: () => blocker.reset(),
+                         })
+    }, [blockedKey, blocker, dialog, showConfirmation])
+
+    return { allowNextNavigation }
 }

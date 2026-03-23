@@ -4,9 +4,7 @@
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
-  max-width: 1000px;
-  margin: 0 auto;
+  gap: $spacing-md;
 }
 
 .header {
@@ -14,15 +12,15 @@
 }
 
 .title {
-  font-size: 26px;
-  font-weight: 800;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
   color: var(--text-primary);
   margin: 0;
-  line-height: 1.4;
+  line-height: $line-height-heading;
 }
 
 .subtitle {
-  font-size: 15px;
+  font-size: $font-size-sm;
   color: var(--text-secondary);
   margin: $spacing-xs 0 0 0;
 }
@@ -31,11 +29,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $spacing-md;
+  gap: $spacing-sm;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: $radius-lg;
-  padding: $spacing-md $spacing-lg;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
   flex-wrap: wrap;
 }
 
@@ -46,10 +44,10 @@
 }
 
 .statusDot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: $gray-400;
+  background: var(--text-quaternary);
 
   &.connected {
     background: $success-color;
@@ -76,7 +74,8 @@
 }
 
 .statusText {
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--text-primary);
 }
 
@@ -89,7 +88,7 @@
 
 .serverUrl {
   font-family: $font-mono;
-  font-size: 13px;
+  font-size: $font-size-base;
   color: var(--text-secondary);
   background: var(--bg-primary);
   padding: 4px 10px;
@@ -98,8 +97,8 @@
 }
 
 .serverVersion {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--primary-color);
   background: rgba($primary-color, 0.1);
   padding: 4px 10px;
@@ -107,7 +106,7 @@
 }
 
 .buildDate {
-  font-size: 12px;
+  font-size: $font-size-base;
   color: var(--text-secondary);
 }
 
@@ -116,11 +115,11 @@
   grid-template-columns: repeat(4, 1fr);
   gap: $spacing-md;
 
-  @media (max-width: 900px) {
+  @media (max-width: $breakpoint-tablet) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  @media (max-width: 500px) {
+  @media (max-width: $breakpoint-xs) {
     grid-template-columns: 1fr;
   }
 }
@@ -128,11 +127,11 @@
 .statCard {
   display: flex;
   align-items: center;
-  gap: $spacing-md;
-  padding: $spacing-lg;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: $radius-lg;
+  border-radius: $radius-md;
   text-decoration: none;
   transition: all $transition-fast;
 
@@ -147,8 +146,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   border-radius: $radius-md;
   background: var(--bg-secondary);
   color: var(--primary-color);
@@ -161,18 +160,20 @@
 }
 
 .statValue {
-  font-size: 24px;
-  font-weight: 800;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  line-height: $line-height-tight;
   color: var(--text-primary);
 }
 
 .statLabel {
-  font-size: 13px;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--text-secondary);
 }
 
 .statSublabel {
-  font-size: 11px;
+  font-size: $font-size-sm;
   color: var(--text-secondary);
   opacity: 0.8;
   margin-top: 2px;
@@ -185,8 +186,9 @@
 }
 
 .sectionTitle {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  line-height: $line-height-heading;
   color: var(--text-primary);
   margin: 0;
 }
@@ -236,13 +238,14 @@
 }
 
 .configLabel {
-  font-size: 13px;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--text-secondary);
 }
 
 .configValue {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--text-primary);
 
   &.enabled {
@@ -255,7 +258,7 @@
 }
 
 .configValueMono {
-  font-size: 12px;
+  font-size: $font-size-base;
   font-family: $font-mono;
   color: var(--text-secondary);
   word-break: break-all;
@@ -265,12 +268,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
+  padding: 2px 7px;
   border-radius: $radius-full;
   border: 1px solid var(--border-color);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  line-height: $line-height-tight;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -310,7 +313,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: $spacing-md;
+  padding: $spacing-sm;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
@@ -318,20 +321,20 @@
 }
 
 .usageValue {
-  font-size: 22px;
-  font-weight: 800;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
   color: var(--primary-color);
 }
 
 .usageLabel {
-  font-size: 12px;
+  font-size: $font-size-sm;
   color: var(--text-secondary);
   margin-top: 4px;
 }
 
 .usageLoading,
 .usageEmpty {
-  padding: $spacing-lg;
+  padding: $spacing-md;
   text-align: center;
   color: var(--text-secondary);
   background: var(--bg-secondary);
@@ -342,7 +345,7 @@
 .viewMoreLink {
   display: inline-flex;
   align-items: center;
-  font-size: 13px;
+  font-size: $font-size-base;
   color: var(--primary-color);
   text-decoration: none;
   margin-top: $spacing-xs;

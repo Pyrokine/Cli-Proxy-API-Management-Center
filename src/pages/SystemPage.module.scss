@@ -1,18 +1,21 @@
+@use '../styles/variables' as *;
+
 .container {
   width: 100%;
 }
 
 .pageTitle {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  line-height: $line-height-heading;
   color: var(--text-primary);
-  margin: 0 0 $spacing-xl 0;
+  margin: 0 0 $spacing-md 0;
 }
 
 .content {
   display: flex;
   flex-direction: column;
-  gap: $spacing-xl;
+  gap: $spacing-md;
 }
 
 .aboutCard {
@@ -25,25 +28,25 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  gap: $spacing-md;
-  padding: $spacing-lg 0 $spacing-xl;
+  gap: $spacing-sm;
+  padding: $spacing-md 0 $spacing-lg;
 }
 
 .aboutLogo {
-  width: 108px;
-  height: 108px;
-  border-radius: 26px;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
   object-fit: cover;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
 }
 
 .aboutTitle {
   width: min(100%, 920px);
-  font-size: clamp(28px, 4.2vw, 44px);
-  font-weight: 800;
-  line-height: 1.12;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  line-height: $line-height-tight;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: $letter-spacing-tight;
   text-align: center;
   text-wrap: balance;
   white-space: normal;
@@ -55,7 +58,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $spacing-md;
 
-  @media (max-width: 900px) {
+  @media (max-width: $breakpoint-tablet) {
     grid-template-columns: 1fr;
   }
 }
@@ -63,10 +66,10 @@
 .infoTile {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-height: 120px;
-  padding: $spacing-md $spacing-lg;
-  border-radius: $radius-lg;
+  gap: 4px;
+  min-height: 80px;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $radius-md;
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
   text-align: left;
@@ -76,7 +79,7 @@
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
   color: inherit;
-  padding: $spacing-md $spacing-lg;
+  padding: $spacing-sm $spacing-md;
   cursor: pointer;
   transition: transform 0.18s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 
@@ -92,29 +95,29 @@
 }
 
 .tileLabel {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
   color: var(--text-secondary);
 }
 
 .tileValue {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
   color: var(--text-primary);
-  line-height: 1.25;
+  line-height: $line-height-heading;
   word-break: break-word;
 }
 
 .tileSub {
-  font-size: 12px;
+  font-size: $font-size-sm;
   color: var(--text-tertiary);
-  line-height: 1.4;
+  line-height: $line-height-heading;
 }
 
 .aboutActions {
   display: flex;
   justify-content: flex-end;
-  margin-top: $spacing-lg;
+  margin-top: $spacing-md;
 }
 
 .section {
@@ -124,16 +127,17 @@
 }
 
 .sectionTitle {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  line-height: $line-height-heading;
   color: var(--text-primary);
-  margin: 0 0 $spacing-md 0;
+  margin: 0 0 $spacing-sm 0;
 }
 
 .sectionDescription {
-  font-size: 14px;
+  font-size: $font-size-sm;
   color: var(--text-secondary);
-  margin: 0 0 $spacing-md 0;
+  margin: 0 0 $spacing-sm 0;
 }
 
 .clearLoginActions {
@@ -154,13 +158,13 @@
     border-radius: $radius-md;
 
     .label {
-      font-weight: 500;
+      font-weight: $font-weight-medium;
       color: var(--text-secondary);
     }
 
     .value {
       color: var(--text-primary);
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-family: $font-mono;
     }
   }
 }
@@ -177,8 +181,8 @@
   padding: $spacing-sm $spacing-md;
   background-color: var(--bg-secondary);
   border-radius: $radius-md;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
+  font-family: $font-mono;
+  font-size: $font-size-base;
 
   &:hover {
     background-color: var(--bg-hover);
@@ -212,17 +216,18 @@
   border-radius: $radius-full;
   border: 1px solid var(--border-color);
   background-color: var(--bg-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: $font-mono;
+  font-size: $font-size-sm;
 }
 
 .modelName {
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: $font-weight-medium;
 }
 
 .modelAlias {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: $font-size-sm;
 }
 
 .versionCheck {
@@ -242,16 +247,16 @@
     border-radius: $radius-md;
 
     .label {
-      font-size: 12px;
+      font-size: $font-size-sm;
       color: var(--text-secondary);
       margin-bottom: $spacing-xs;
     }
 
     .version {
-      font-size: 16px;
-      font-weight: 600;
+      font-size: $font-size-base;
+      font-weight: $font-weight-semibold;
       color: var(--text-primary);
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-family: $font-mono;
     }
   }
 }
@@ -265,11 +270,11 @@
 .linkCard {
   display: flex;
   align-items: center;
-  gap: $spacing-md;
-  padding: $spacing-md $spacing-lg;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: $radius-lg;
+  border-radius: $radius-md;
   text-decoration: none;
   color: inherit;
   transition: all 0.2s ease;
@@ -290,9 +295,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: $radius-md;
+  width: 32px;
+  height: 32px;
+  border-radius: $radius-sm;
   background-color: var(--primary-color);
   color: white;
   flex-shrink: 0;
@@ -315,8 +320,8 @@
   display: flex;
   align-items: center;
   gap: $spacing-xs;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
   color: var(--text-primary);
   margin-bottom: 2px;
 
@@ -327,34 +332,34 @@
 }
 
 .linkDesc {
-  font-size: 13px;
+  font-size: $font-size-sm;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-@media (max-width: 768px) {
+@media (max-width: $breakpoint-mobile) {
   .aboutLogo {
-    width: 92px;
-    height: 92px;
-    border-radius: 22px;
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
   }
 
   .aboutTitle {
     width: min(100%, 24ch);
-    font-size: clamp(22px, 6.6vw, 34px);
-    font-weight: 700;
+    font-size: clamp($font-size-sm, 5vw, $font-size-xl);
+    font-weight: $font-weight-semibold;
     line-height: 1.18;
     letter-spacing: -0.012em;
   }
 }
 
-@media (max-width: 520px) {
+@media (max-width: $breakpoint-xs) {
   .aboutTitle {
     width: min(100%, 19ch);
-    font-size: clamp(20px, 7.2vw, 28px);
-    font-weight: 600;
+    font-size: clamp($font-size-sm, 5.5vw, $font-size-lg);
+    font-weight: $font-weight-semibold;
     line-height: 1.22;
     letter-spacing: -0.006em;
   }
