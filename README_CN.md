@@ -68,18 +68,20 @@ npm run build
 
 ### 远程管理
 
-当你从非 localhost 的浏览器访问时，服务端通常需要开启远程管理（例如 `allow-remote-management: true`）。  
+当你从非 localhost 的浏览器访问时，服务端通常需要开启远程管理（例如 `allow-remote-management: true`）。
 
 ## 功能一览（按页面对应）
 
 - **仪表盘**：连接状态、服务版本/构建时间、关键数量概览、可用模型概览。
-- **基础设置**：调试开关、代理 URL、请求重试、配额回退（达到上限时切换项目或预览模型）、使用统计、请求日志、文件日志、WebSocket 鉴权。
+- **基础设置**：调试开关、代理 URL、请求重试、配额回退（达到上限时切换项目或预览模型）、使用统计、请求日志、文件日志、WebSocket
+  鉴权。
 - **API Keys**：管理代理 `api-keys`（增/改/删）。
 - **AI 提供商**：
-  - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
-  - OpenAI 兼容提供商（多 Key、Header、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
-  - Ampcode 集成（上游地址/密钥、强制映射、模型映射表）。
-- **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；管理 OAuth 排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。
+    - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
+    - OpenAI 兼容提供商（多 Key、Header、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
+    - Ampcode 集成（上游地址/密钥、强制映射、模型映射表）。
+- **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；管理 OAuth
+  排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。
 - **OAuth**：对支持的提供商发起 OAuth/设备码流程，轮询状态；可选提交回调 `redirect_url`；包含 iFlow Cookie 导入。
 - **配额管理**：管理 Claude、Antigravity、Codex、Gemini CLI 等提供商的配额上限与使用情况。
 - **使用统计**：按小时/天图表、按 API 与按模型统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、可选本地保存的模型价格用于费用估算。
