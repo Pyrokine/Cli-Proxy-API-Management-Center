@@ -5,7 +5,7 @@ API** (config, credentials, logs, and usage).
 
 [中文文档](README_CN.md)
 
-**Main Project**: https://github.com/router-for-me/CLIProxyAPI  
+**Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
 **Minimum Required Version**: ≥ 6.8.0 (recommended ≥ 6.8.15)
 
@@ -73,8 +73,13 @@ endpoints).
 
 ### Remote management
 
-If you connect from a non-localhost browser, the server must allow remote management (e.g.
-`allow-remote-management: true`).  
+If you connect from a non-localhost browser, the server must allow remote management:
+
+```yaml
+remote-management:
+  allow-remote: true
+```
+
 See `api.md` for the full authentication rules, server-side limits, and edge cases.
 
 ## What you can manage (mapped to the UI pages)
