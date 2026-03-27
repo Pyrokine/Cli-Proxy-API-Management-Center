@@ -45,6 +45,41 @@
   overflow: hidden;
 }
 
+// 毛玻璃滚动容器
+@mixin glass-rail {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  border-radius: 26px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 76%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 24px 56px -34px rgba(0, 0, 0, 0.42);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// 警告徽章
+@mixin warning-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+}
+
 // 按钮重置
 @mixin button-reset {
   border: none;

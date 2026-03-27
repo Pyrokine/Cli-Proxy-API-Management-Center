@@ -1,8 +1,11 @@
 /**
  * 主题样式
+ *
+ * :root 定义所有 CSS 变量（浅色主题 + 公共变量）。
+ * 各主题选择器只覆盖差异值，公共变量自动继承。
  */
 
-// 浅色主题（默认）
+// 浅色主题（默认）+ 公共变量
 :root {
   // 极简暖灰：浅色模式
   --bg-secondary: #faf9f5; // 页面背景（纸感）
@@ -81,7 +84,24 @@
   --diff-hunk-color: #0550ae;
 }
 
-// 深色主题（#191919）
+// 纯白主题 — 仅覆盖与 :root 不同的变量
+[data-theme='white'] {
+  --bg-secondary: #ffffff;
+  --bg-primary: #ffffff;
+  --bg-tertiary: #f6f6f6;
+  --bg-quinary: #ffffff;
+  --bg-error-light: rgba(198, 87, 70, 0.08);
+
+  --border-color: #e5e5e5;
+  --border-primary: #d9d9d9;
+  --border-hover: #cccccc;
+
+  --warning-color: #c65746;
+  --warning-bg: rgba(198, 87, 70, 0.12);
+  --warning-border: rgba(198, 87, 70, 0.35);
+}
+
+// 深色主题 — 仅覆盖与 :root 不同的变量
 [data-theme='dark'] {
   // 极简暖灰：深色模式（提升对比度与层级）
   --bg-secondary: #151412; // 页面背景
@@ -95,24 +115,15 @@
   --text-secondary: #c9c3bb;
   --text-tertiary: #9c958d;
   --text-quaternary: #6f6962;
-  --text-muted: var(--text-tertiary);
 
   --border-color: #3a3530;
-  --border-secondary: var(--border-color);
   --border-primary: #4a453f;
   --border-hover: #5a544d;
 
-  --primary-color: #8b8680;
   --primary-hover: #9a948e;
   --primary-active: #a6a099;
-  --primary-contrast: #ffffff;
 
-  --success-color: #10b981;
   --warning-color: #e8915a;
-  --error-color: #c65746;
-  --danger-color: var(--error-color);
-  --info-color: var(--primary-color);
-
   --warning-bg: rgba(232, 145, 90, 0.22);
   --warning-border: rgba(232, 145, 90, 0.45);
   --warning-text: #f0a060;
@@ -126,20 +137,9 @@
   --failure-badge-border: rgba(198, 87, 70, 0.5);
 
   --count-badge-bg: rgba(139, 134, 128, 0.28);
-  --count-badge-text: var(--primary-active);
 
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3);
-
-  --radius-md: 8px;
-  --accent-tertiary: var(--bg-tertiary);
-
-  // Stat card accent 色
-  --stat-requests-accent: #8b8680;
-  --stat-tokens-accent: #8b5cf6;
-  --stat-rpm-accent: #10b981;
-  --stat-tpm-accent: #f97316;
-  --stat-cost-accent: #f59e0b;
 
   // Chart.js 主题色
   --chart-grid-color: rgba(255, 255, 255, 0.06);

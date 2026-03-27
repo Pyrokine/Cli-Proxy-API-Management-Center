@@ -18,19 +18,19 @@
   font-size: $font-size-xl;
   font-weight: $font-weight-semibold;
   color: var(--text-primary);
-  margin: 0 0 $spacing-md 0;
+  margin: 0 0 $spacing-lg 0;
 }
 
 .tabBar {
   display: flex;
   gap: $spacing-xs;
-  margin-bottom: $spacing-md;
+  margin-bottom: $spacing-lg;
   border-bottom: 1px solid var(--border-color);
 }
 
 .tabItem {
   @include button-reset;
-  padding: 8px 14px;
+  padding: 12px 20px;
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
   color: var(--text-secondary);
@@ -60,7 +60,7 @@
 .content {
   display: flex;
   flex-direction: column;
-  gap: $spacing-md;
+  gap: $spacing-lg;
   flex: 1;
   min-height: 0;
 
@@ -121,6 +121,33 @@
   max-width: 420px;
 }
 
+.filterPanelHeader {
+  display: flex;
+  align-items: center;
+  flex: 1 1 100%;
+}
+
+.filterPanelToggle {
+  white-space: nowrap;
+}
+
+.filterPanelButtonContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filterPanelCount {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: $radius-full;
+  background: rgba($primary-color, 0.12);
+  color: var(--primary-color);
+  font-size: $font-size-xs;
+  line-height: 1.2;
+}
+
 .structuredFilters {
   display: flex;
   flex-direction: column;
@@ -140,7 +167,7 @@
 }
 
 .filterChipLabel {
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-secondary);
   font-weight: $font-weight-semibold;
   line-height: 28px;
@@ -165,8 +192,8 @@
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: $font-size-sm;
-  line-height: $line-height-heading;
+  font-size: $font-size-xs;
+  line-height: 1.3;
   cursor: pointer;
   max-width: 280px;
   white-space: nowrap;
@@ -194,11 +221,25 @@
 }
 
 .filterChipHint {
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-tertiary);
 }
 
 @include mobile {
+  .filterPanelHeader {
+    width: 100%;
+  }
+
+  .filterPanelToggle {
+    width: 100%;
+  }
+
+  .filterPanelButtonContent {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   .filterChipGroup {
     flex-direction: column;
     gap: 6px;
@@ -206,7 +247,7 @@
 
   .filterChipLabel {
     min-width: 0;
-    line-height: $line-height-tight;
+    line-height: 1.2;
   }
 }
 
@@ -239,7 +280,7 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -317,7 +358,7 @@
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
 
   @include mobile {
     flex-direction: column;
@@ -364,18 +405,19 @@
   user-select: text;
   white-space: pre;
   color: var(--text-primary);
-  font-family: $font-mono;
-  font-size: $font-size-sm;
-  line-height: $line-height-relaxed;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+  monospace;
+  font-size: $font-size-xs;
+  line-height: 1.45;
 
   @include tablet {
     padding: 8px 10px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
   }
 
   @include mobile {
     padding: 8px 10px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
   }
 }
 
@@ -387,9 +429,10 @@
   border-bottom: 1px solid var(--border-color);
   border-left: 3px solid transparent;
   cursor: copy;
-  font-family: $font-mono;
-  font-size: $font-size-sm;
-  line-height: $line-height-relaxed;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+  monospace;
+  font-size: $font-size-xs;
+  line-height: 1.45;
   color: var(--text-primary);
 
   &:hover {
@@ -400,14 +443,14 @@
     grid-template-columns: 140px 1fr;
     gap: $spacing-sm;
     padding: 8px 10px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
   }
 
   @include mobile {
     grid-template-columns: 1fr;
     gap: $spacing-xs;
     padding: 8px 10px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
   }
 }
 
@@ -443,7 +486,7 @@
   align-items: center;
   padding: 2px 8px;
   border-radius: $radius-full;
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
@@ -462,8 +505,9 @@
 }
 
 .requestIdBadge {
-  font-family: $font-mono;
-  font-size: $font-size-sm;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+  'Courier New', monospace;
+  font-size: $font-size-xs;
   color: #0891b2;
   background: rgba(8, 145, 178, 0.1);
   border-color: rgba(8, 145, 178, 0.25);
@@ -558,9 +602,9 @@
   border: 1px solid rgba($primary-color, 0.3);
   background: rgba($primary-color, 0.1);
   color: var(--primary-color);
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
-  line-height: $line-height-tight;
+  line-height: 1.2;
   cursor: pointer;
   transition: background-color 0.15s ease,
   border-color 0.15s ease;
@@ -583,12 +627,12 @@
   border: 1px solid var(--warning-border);
   background: var(--warning-bg);
   color: var(--warning-text);
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
 }
 
 .traceSectionTitle {
   margin: 4px 0 0;
-  font-size: $font-size-lg;
+  font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   color: var(--text-primary);
 }
@@ -626,13 +670,13 @@
 }
 
 .traceInfoLabel {
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-secondary);
   font-weight: $font-weight-semibold;
 }
 
 .traceInfoValue {
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-primary);
   word-break: break-word;
 }
@@ -644,7 +688,7 @@
   padding: 0 6px;
   border-radius: $radius-full;
   border: 1px solid var(--border-color);
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-secondary);
   background: var(--bg-primary);
 }
@@ -680,14 +724,14 @@
   padding: 2px 8px;
   border-radius: $radius-full;
   border: 1px solid var(--success-badge-border, #6ee7b7);
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   color: var(--success-badge-text, #065f46);
   background: var(--success-badge-bg, #d1fae5);
 }
 
 .traceDelta {
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: var(--text-secondary);
 }
 
@@ -703,16 +747,16 @@
 
 @media (max-height: 820px) {
   .pageTitle {
-    font-size: $font-size-lg;
-    margin-bottom: $spacing-sm;
+    font-size: $font-size-xl;
+    margin-bottom: $spacing-md;
   }
 
   .tabBar {
-    margin-bottom: $spacing-sm;
+    margin-bottom: $spacing-md;
   }
 
   .tabItem {
-    padding: 6px 12px;
+    padding: 10px 16px;
   }
 
   .content {
@@ -730,7 +774,7 @@
 
   .logRow {
     padding: 8px 10px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
   }
 
   .errorPanel {
@@ -740,8 +784,8 @@
 
 @media (max-height: 600px) {
   .pageTitle {
-    font-size: $font-size-base;
-    margin-bottom: $spacing-xs;
+    font-size: $font-size-xl;
+    margin-bottom: $spacing-sm;
   }
 
   .tabBar {
@@ -750,7 +794,7 @@
 
   .tabItem {
     padding: 8px 12px;
-    font-size: $font-size-base;
+    font-size: $font-size-xs;
   }
 
   .content {
@@ -773,7 +817,7 @@
 
   .logRow {
     padding: 6px 8px;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
     grid-template-columns: 130px 1fr;
     gap: $spacing-xs;
   }
