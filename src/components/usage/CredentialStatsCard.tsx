@@ -203,16 +203,17 @@ export function CredentialStatsCard({
                                      `codex:${i}`,
                                  ),
         )
-        vertexConfigs.forEach((c, i) =>
-                                  addConfigRow(
-                                      c.apiKey,
-                                      c.prefix,
-                                      c.prefix?.trim() || `Vertex #${i + 1}`,
-                                      'vertex',
-                                      `vertex:${i}`,
-                                  ),
-        )
-        // OpenAI compatibility providers — one row per provider, merged across all apiKey entries (prefix counted once).
+        vertexConfigs.forEach((c, i) => {
+            addConfigRow(
+                c.apiKey,
+                c.prefix,
+                c.prefix?.trim() || `Vertex #${i + 1}`,
+                'vertex',
+                `vertex:${i}`,
+            )
+        })
+        // OpenAI compatibility providers — one row per provider,
+        // merged across all apiKey entries (prefix counted once).
         openaiProviders.forEach((provider, providerIndex) => {
             const prefix      = provider.prefix
             const displayName = prefix?.trim() || provider.name || `OpenAI #${providerIndex + 1}`

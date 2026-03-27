@@ -202,8 +202,9 @@ export function UsageRetentionCard() {
                                         className={styles.input}
                                     />
                                 ) : (
-                                     <span
-                                         className={styles.disabledHint}>{t(`usage_stats.${field.label}_disabled`)}</span>
+                                     <span className={styles.disabledHint}>
+                                         {t(`usage_stats.${field.label}_disabled`)}
+                                     </span>
                                  )}
                                 <span className={styles.hint}>{t(`usage_stats.${field.label}_hint`)}</span>
                             </div>

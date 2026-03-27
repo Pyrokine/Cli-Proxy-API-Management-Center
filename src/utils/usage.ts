@@ -369,15 +369,17 @@ function maskUsageSensitiveValue(value: unknown, masker: (val: string) => string
 
     let masked = raw
 
-    const queryRegex = /(?<prefix>[?&])(?<keyName>api[-_]?key|key|token|access_token|authorization)=(?<value>[^&#\s]+)/gi
+    const queryRegex =
+              /(?<prefix>[?&])(?<keyName>api[-_]?key|key|token|access_token|authorization)=(?<value>[^&#\s]+)/gi
     masked           = masked.replace(
         queryRegex,
         (_full, prefix, keyName, valuePart) => `${prefix}${keyName}=${masker(valuePart)}`,
     )
 
-    const headerRegex =
-              /(?<keyName>api[-_]?key|key|token|access[-_]?token|authorization)\s*(?<sep>[:=])\s*(?<value>[A-Za-z0-9._-]+)/gi
-    masked            = masked.replace(
+    const headerKeyPattern = 'api[-_]?key|key|token|access[-_]?token|authorization'
+    const headerRegex      =
+              new RegExp(`(?<keyName>${headerKeyPattern})\\s*(?<sep>[:=])\\s*(?<value>[A-Za-z0-9._-]+)`, 'gi')
+    masked                 = masked.replace(
         headerRegex,
         (_full, keyName, separator, valuePart) => `${keyName}${separator}${masker(valuePart)}`,
     )
@@ -1343,9 +1345,9 @@ export function buildChartDataFromSummary(
         return { labels: [], datasets: [] }
     }
 
-    const labels = points.map((pt) => formatLabel(pt.time))
+    const labels                  = points.map((pt) => formatLabel(pt.time))
     const data: (number | null)[] = points.map(extractValue)
-    const style  = CHART_COLORS[0]
+    const style                   = CHART_COLORS[0]
 
     return {
         labels,

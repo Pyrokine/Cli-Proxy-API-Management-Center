@@ -229,8 +229,9 @@ export function StatCards({ usage, loading, nowMs, sparklines, summary }: StatCa
             {t('usage_stats.total_tokens')}: {loading ? '-' : formatCompactNumber(usage?.total_tokens ?? 0)}
           </span>
                     {!hasCostData && (
-                        <span
-                            className={`${styles.statMetaItem} ${styles.statSubtle}`}>{t('usage_stats.cost_need_price')}</span>
+                        <span className={`${styles.statMetaItem} ${styles.statSubtle}`}>
+                            {t('usage_stats.cost_need_price')}
+                        </span>
                     )}
                 </>
             ),

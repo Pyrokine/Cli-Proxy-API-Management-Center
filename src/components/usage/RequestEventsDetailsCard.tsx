@@ -175,12 +175,14 @@ export function RequestEventsDetailsCard({
     const fetchIdRef                  = useRef(0)
 
     // 从图表钻取时，同步搜索关键词
-    useEffect(() => {
+    const [prevDrillDown, setPrevDrillDown] = useState(drillDownSearch)
+    if (prevDrillDown !== drillDownSearch) {
+        setPrevDrillDown(drillDownSearch)
         if (drillDownSearch) {
             setSearchInput(drillDownSearch)
             setPage(1)
         }
-    }, [drillDownSearch])
+    }
 
     const sourceInfoMap = useMemo(
         () =>
@@ -195,7 +197,7 @@ export function RequestEventsDetailsCard({
     )
 
     // Reset page when filters change
-    const filterSignature = [
+    const filterSignature                   = [
         modelFilter,
         sourceFilter,
         searchQuery,
@@ -204,23 +206,19 @@ export function RequestEventsDetailsCard({
         dateRange.from,
         dateRange.to,
     ].join('|')
-    const filterSignatureRef = useRef(filterSignature)
-    useEffect(() => {
-        if (filterSignature !== filterSignatureRef.current) {
-            filterSignatureRef.current = filterSignature
-            setPage(1)
-        }
-    }, [filterSignature])
+    const [prevFilterSig, setPrevFilterSig] = useState(filterSignature)
+    if (prevFilterSig !== filterSignature) {
+        setPrevFilterSig(filterSignature)
+        setPage(1)
+    }
 
     // Track fetch params to set loading state
-    const fetchSignature    = `${page}|${pageSize}|${filterSignature}`
-    const fetchSignatureRef = useRef(fetchSignature)
-    useEffect(() => {
-        if (fetchSignature !== fetchSignatureRef.current) {
-            fetchSignatureRef.current = fetchSignature
-            setFetching(true)
-        }
-    }, [fetchSignature])
+    const fetchSignature                  = `${page}|${pageSize}|${filterSignature}`
+    const [prevFetchSig, setPrevFetchSig] = useState(fetchSignature)
+    if (prevFetchSig !== fetchSignature) {
+        setPrevFetchSig(fetchSignature)
+        setFetching(true)
+    }
 
     // Fetch events from backend
     useEffect(() => {
@@ -328,7 +326,6 @@ export function RequestEventsDetailsCard({
         const allEvents: UsageEvent[] = []
         let currentPage               = 1
 
-        // eslint-disable-next-line no-constant-condition
         while (true) {
             const data = await usageApi.getEvents(buildExportParams(currentPage) as never)
             if (!data?.events?.length) {
@@ -365,21 +362,21 @@ export function RequestEventsDetailsCard({
                 'total_tokens',
             ]
             const csvRows   = events.map((e) =>
-                                                  [
-                                                      e.timestamp,
-                                                      e.model,
-                                                      e.source,
-                                                      e.source ? maskApiKey(e.source) : '',
-                                                      e.auth_index,
-                                                      e.failed ? 'failed' : 'success',
-                                                      e.tokens?.input_tokens ?? 0,
-                                                      e.tokens?.output_tokens ?? 0,
-                                                      e.tokens?.reasoning_tokens ?? 0,
-                                                      e.tokens?.cached_tokens ?? 0,
-                                                      e.tokens?.total_tokens ?? 0,
-                                                  ]
-                                                      .map((v) => encodeCsv(v))
-                                                      .join(','),
+                                             [
+                                                 e.timestamp,
+                                                 e.model,
+                                                 e.source,
+                                                 e.source ? maskApiKey(e.source) : '',
+                                                 e.auth_index,
+                                                 e.failed ? 'failed' : 'success',
+                                                 e.tokens?.input_tokens ?? 0,
+                                                 e.tokens?.output_tokens ?? 0,
+                                                 e.tokens?.reasoning_tokens ?? 0,
+                                                 e.tokens?.cached_tokens ?? 0,
+                                                 e.tokens?.total_tokens ?? 0,
+                                             ]
+                                                 .map((v) => encodeCsv(v))
+                                                 .join(','),
             )
             const content   = [csvHeader.join(','), ...csvRows].join('\n')
             const fileTime  = new Date().toISOString().replace(/[:.]/g, '-')
@@ -480,8 +477,9 @@ export function RequestEventsDetailsCard({
                     />
                 </div>
                 <div className={styles.requestEventsFilterItem}>
-                    <span
-                        className={styles.requestEventsFilterLabel}>{t('usage_stats.request_events_filter_model')}</span>
+                    <span className={styles.requestEventsFilterLabel}>
+                        {t('usage_stats.request_events_filter_model')}
+                    </span>
                     <Select
                         value={modelFilter}
                         options={modelOptions}
@@ -492,8 +490,9 @@ export function RequestEventsDetailsCard({
                     />
                 </div>
                 <div className={styles.requestEventsFilterItem}>
-                    <span
-                        className={styles.requestEventsFilterLabel}>{t('usage_stats.request_events_filter_source')}</span>
+                    <span className={styles.requestEventsFilterLabel}>
+                        {t('usage_stats.request_events_filter_source')}
+                    </span>
                     <Select
                         value={sourceFilter}
                         options={sourceOptions}
@@ -550,8 +549,9 @@ export function RequestEventsDetailsCard({
                                             </div>
                                             <div className={styles.eventCardBody}>
                                                 <span className={styles.eventCardModel}>{row.model}</span>
-                                                <span
-                                                    className={styles.eventCardTokens}>{row.totalTokens.toLocaleString()} tokens</span>
+                                                <span className={styles.eventCardTokens}>
+                                                    {row.totalTokens.toLocaleString()} tokens
+                                                </span>
                                             </div>
                                             {expanded && (
                                                 <div className={styles.eventCardDetails}>

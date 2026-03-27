@@ -1,6 +1,6 @@
 import {buildDailyTokenBreakdown, buildHourlyTokenBreakdown, type TokenCategory} from '@/utils/usage'
 import {buildChartOptions} from '@/utils/usage/chartConfig'
-import {useMemo, useEffect, useState} from 'react'
+import {useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import type {UsagePayload} from './hooks/useUsageData'
 import {UsageChart} from './UsageChart'
@@ -28,9 +28,11 @@ export function TokenBreakdownChart({ usage, loading, isMobile, hourWindowHours 
     )
 
     // Sync period when hourWindowHours changes
-    useEffect(() => {
+    const [prevHourWindow, setPrevHourWindow] = useState(hourWindowHours)
+    if (prevHourWindow !== hourWindowHours) {
+        setPrevHourWindow(hourWindowHours)
         setPeriod(hourWindowHours !== undefined && hourWindowHours <= 48 ? 'hour' : 'day')
-    }, [hourWindowHours])
+    }
 
     const { chartData, chartOptions } = useMemo(() => {
         const series                                        =

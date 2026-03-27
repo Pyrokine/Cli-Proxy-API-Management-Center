@@ -77,14 +77,16 @@ export function DashboardPage() {
         const fetchStats = async () => {
             setLoading(true)
             try {
-                const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] = await Promise.allSettled([
-                                                                                                                    apiKeysApi.list(),
-                                                                                                                    authFilesApi.list(),
-                                                                                                                    providersApi.getGeminiKeys(),
-                                                                                                                    providersApi.getCodexConfigs(),
-                                                                                                                    providersApi.getClaudeConfigs(),
-                                                                                                                    providersApi.getOpenAIProviders(),
-                                                                                                                ])
+                const results = await Promise.allSettled([
+                                                             apiKeysApi.list(),
+                                                             authFilesApi.list(),
+                                                             providersApi.getGeminiKeys(),
+                                                             providersApi.getCodexConfigs(),
+                                                             providersApi.getClaudeConfigs(),
+                                                             providersApi.getOpenAIProviders(),
+                                                         ])
+
+                const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] = results
 
                 setStats({
                              apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
@@ -275,14 +277,17 @@ export function DashboardPage() {
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.ws_auth_enable')}</span>
                             <span
-                                className={`${styles.configValue} ${config.wsAuth ? styles.enabled : styles.disabled}`}>
+                                className={`${styles.configValue} ${
+                                    config.wsAuth ? styles.enabled : styles.disabled
+                                }`}>
                 {config.wsAuth ? t('common.yes') : t('common.no')}
               </span>
                         </div>
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('dashboard.routing_strategy')}</span>
-                            <span
-                                className={`${styles.configBadge} ${routingStrategyBadgeClass}`}>{routingStrategyDisplay}</span>
+                            <span className={`${styles.configBadge} ${routingStrategyBadgeClass}`}>
+                                {routingStrategyDisplay}
+                            </span>
                         </div>
                         {config.proxyUrl && (
                             <div className={`${styles.configItem} ${styles.configItemFull}`}>

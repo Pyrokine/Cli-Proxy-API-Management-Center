@@ -145,8 +145,9 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
                                 </span>
                               </span>
                             </span>
-                                                        <span
-                                                            className={styles.modelStat}>{formatCompactNumber(stats.tokens)}</span>
+                                                        <span className={styles.modelStat}>
+                                                            {formatCompactNumber(stats.tokens)}
+                                                        </span>
                                                     </div>
                                                 ))}
                                             </div>

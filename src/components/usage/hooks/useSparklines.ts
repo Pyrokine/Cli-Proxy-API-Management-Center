@@ -159,7 +159,7 @@ export function useSparklines({ usage, loading, nowMs, summary }: UseSparklinesO
             const m = d.getMinutes().toString().padStart(2, '0')
             return `${h}:${m}`
         })
-        const data = ts.map((pt) => pt.has_cost ? (pt.cost ?? 0) : null)
+        const data   = ts.map((pt) => pt.has_cost ? (pt.cost ?? 0) : null)
         return buildSparkline({ labels, data }, '#f59e0b', 'rgba(245, 158, 11, 0.18)')
     }, [buildSparkline, loading, summary])
 

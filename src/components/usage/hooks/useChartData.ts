@@ -2,7 +2,7 @@ import type {UsageSummary} from '@/services/api/usage'
 import {buildChartData, buildChartDataFromSummary, type ChartData, type ChartDimension} from '@/utils/usage'
 import {buildChartOptions} from '@/utils/usage/chartConfig'
 import type {ChartOptions} from 'chart.js'
-import {useEffect, useMemo, useState} from 'react'
+import {useMemo, useState} from 'react'
 import type {UsagePayload} from './useUsageData'
 
 interface UseChartDataOptions {
@@ -49,11 +49,13 @@ export function useChartData({
     )
 
     // Sync periods when hourWindowHours changes
-    useEffect(() => {
+    const [prevHourWindow, setPrevHourWindow] = useState(hourWindowHours)
+    if (prevHourWindow !== hourWindowHours) {
+        setPrevHourWindow(hourWindowHours)
         const p = hourWindowHours !== undefined && hourWindowHours <= 48 ? 'hour' : 'day'
         setRequestsPeriod(p)
         setTokensPeriod(p)
-    }, [hourWindowHours])
+    }
 
     const requestsChartData = useMemo(() => {
         if (canUseSummary(summary, dimension)) {
