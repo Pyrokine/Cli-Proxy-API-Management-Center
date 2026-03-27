@@ -9,8 +9,9 @@ import type {AuthState, ConnectionStatus, LoginCredentials} from '@/types'
 import {detectApiBaseFromLocation, normalizeApiBase} from '@/utils/connection'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
 import {create} from 'zustand'
-import {createJSONStorage, persist} from 'zustand/middleware'
+import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
 import {useConfigStore} from './useConfigStore'
+import {useUsageStatsStore} from './useUsageStatsStore'
 
 interface AuthStoreState extends AuthState {
     connectionStatus: ConnectionStatus;
@@ -47,13 +48,11 @@ export const useAuthStore = create<AuthStoreState>()(
                 }
 
                 restoreSessionPromise = (async () => {
-                    secureStorage.migratePlaintextKeys(['apiBase', 'apiUrl', 'managementKey'])
-
                     const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
                     const legacyBase  =
-                              secureStorage.getItem<string>('apiBase') ||
-                              secureStorage.getItem<string>('apiUrl', { encrypt: true })
-                    const legacyKey   = secureStorage.getItem<string>('managementKey')
+                              await secureStorage.getItem<string>('apiBase') ||
+                              await secureStorage.getItem<string>('apiUrl', { encrypt: true })
+                    const legacyKey   = await secureStorage.getItem<string>('managementKey')
 
                     const { apiBase, managementKey, rememberPassword } = get()
                     const resolvedBase                                 = normalizeApiBase(apiBase ||
@@ -140,6 +139,7 @@ export const useAuthStore = create<AuthStoreState>()(
             logout: () => {
                 restoreSessionPromise = null
                 useConfigStore.getState().clearCache()
+                useUsageStatsStore.getState().clearUsageStats()
                 set({
                         isAuthenticated: false,
                         apiBase: '',
@@ -197,25 +197,28 @@ export const useAuthStore = create<AuthStoreState>()(
         }),
         {
             name: STORAGE_KEY_AUTH,
-            storage: createJSONStorage(() => ({
-                getItem: (name) => {
-                    const data = secureStorage.getItem<AuthStoreState>(name)
-                    return data ? JSON.stringify(data) : null
-                },
-                setItem: (name, value) => {
-                    secureStorage.setItem(name, JSON.parse(value))
-                },
-                removeItem: (name) => {
-                    secureStorage.removeItem(name)
-                },
-            })),
+            storage: createJSONStorage<AuthStoreState>(() => {
+                const asyncStorage: StateStorage = {
+                    getItem: async (name) => {
+                        const raw = await secureStorage.getItem<string>(name, { encrypt: true })
+                        return raw ?? null
+                    },
+                    setItem: async (name, value) => {
+                        await secureStorage.setItem(name, value, { encrypt: true })
+                    },
+                    removeItem: (name) => {
+                        secureStorage.removeItem(name)
+                    },
+                }
+                return asyncStorage
+            }),
             partialize: (state) => ({
                 apiBase: state.apiBase,
                 ...(state.rememberPassword ? { managementKey: state.managementKey } : {}),
                 rememberPassword: state.rememberPassword,
                 serverVersion: state.serverVersion,
                 serverBuildDate: state.serverBuildDate,
-            }),
+            } as unknown as AuthStoreState),
         },
     ),
 )

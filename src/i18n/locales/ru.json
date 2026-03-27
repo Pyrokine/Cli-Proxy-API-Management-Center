@@ -76,7 +76,7 @@
     "custom_connection_placeholder": "Напр.: https://example.com:8317",
     "custom_connection_hint": "По умолчанию используется текущий URL. При необходимости замените его.",
     "use_current_address": "Использовать текущий URL",
-    "remember_password_label": "Запомнить пароль",
+    "remember_password_label": "Запомнить на сессию",
     "management_key_label": "Ключ управления:",
     "management_key_placeholder": "Введите ключ управления",
     "connect_button": "Подключиться",
@@ -343,18 +343,17 @@
     "vertex_add_modal_title": "Добавление конфигурации Vertex API",
     "vertex_add_modal_key_label": "API-ключ:",
     "vertex_add_modal_key_placeholder": "Введите API-ключ Vertex",
-    "vertex_add_modal_url_label": "Базовый URL (обязательно):",
+    "vertex_add_modal_url_label": "Базовый URL:",
     "vertex_add_modal_url_placeholder": "например: https://example.com/api",
     "vertex_add_modal_proxy_label": "URL прокси (необязательно):",
     "vertex_add_modal_proxy_placeholder": "например: socks5://proxy.example.com:1080",
     "vertex_edit_modal_title": "Редактирование конфигурации Vertex API",
     "vertex_edit_modal_key_label": "API-ключ:",
-    "vertex_edit_modal_url_label": "Базовый URL (обязательно):",
+    "vertex_edit_modal_url_label": "Базовый URL:",
     "vertex_edit_modal_proxy_label": "URL прокси (необязательно):",
     "vertex_delete_confirm": "Удалить эту конфигурацию Vertex?",
-    "vertex_models_label": "Псевдонимы моделей (требуется псевдоним):",
+    "vertex_models_label": "Псевдонимы моделей:",
     "vertex_models_add_btn": "Добавить сопоставление",
-    "vertex_models_hint": "Каждому псевдониму требуются исходная модель и псевдоним.",
     "vertex_models_count": "Количество псевдонимов",
     "ampcode_title": "Интеграция Amp CLI (ampcode)",
     "ampcode_modal_title": "Настройка Ampcode",
@@ -433,7 +432,16 @@
     "openai_test_all_hint": "Проверить состояние подключения для всех ключей",
     "openai_test_all_success": "Все {{count}} ключей прошли тест",
     "openai_test_all_failed": "Все {{count}} ключей не прошли тест",
-    "openai_test_all_partial": "Тест завершен: {{success}} прошло, {{failed}} не прошло"
+    "openai_test_all_partial": "Тест завершен: {{success}} прошло, {{failed}} не прошло",
+    "ampcode_upstream_api_keys_label": "Маршрутизация нескольких upstream API-ключей",
+    "ampcode_upstream_api_keys_hint": "Привяжите разные upstream API-ключи Amp к указанным клиентским API-ключам. Клиентские ключи можно разделять запятыми или переводами строки.",
+    "ampcode_upstream_api_keys_add_btn": "Добавить upstream-сопоставление",
+    "ampcode_upstream_api_keys_upstream_placeholder": "Upstream API-ключ (sk-amp-...)",
+    "ampcode_upstream_api_keys_clients_placeholder": "Клиентские API-ключи, через запятую или с новой строки",
+    "ampcode_upstream_api_keys_item_title": "Upstream-сопоставление #{{index}}",
+    "ampcode_upstream_api_keys_count": "Количество upstream-сопоставлений",
+    "ampcode_lists_overwrite_title": "Перезаписать списки",
+    "ampcode_lists_overwrite_confirm": "Существующие списки multi-upstream/сопоставлений моделей не удалось загрузить. Продолжение может перезаписать или очистить их. Продолжить?"
   },
   "auth_files": {
     "title": "Управление файлами авторизации",
@@ -551,7 +559,37 @@
     "quota_refresh_single": "Обновить квоту",
     "quota_refresh_hint": "Обновить квоту только для этих учётных данных",
     "quota_refresh_success": "Квота для \"{{name}}\" обновлена",
-    "quota_refresh_failed": "Не удалось обновить квоту для \"{{name}}\": {{message}}"
+    "quota_refresh_failed": "Не удалось обновить квоту для \"{{name}}\": {{message}}",
+    "delete_problem_button": "Удалить проблемные",
+    "delete_problem_button_with_type": "Удалить проблемные файлы {{type}}",
+    "delete_problem_confirm": "Удалить все проблемные файлы авторизации? Это действие нельзя отменить!",
+    "delete_problem_filtered_confirm": "Удалить все проблемные файлы авторизации {{type}}? Это действие нельзя отменить!",
+    "delete_problem_success": "Удалено проблемных файлов авторизации: {{count}}",
+    "delete_problem_filtered_success": "Удалено проблемных файлов авторизации {{type}}: {{count}}",
+    "delete_problem_partial": "Удаление проблемных файлов авторизации завершено: успешных {{success}}, ошибок {{failed}}",
+    "delete_problem_filtered_partial": "Удаление проблемных файлов авторизации {{type}} завершено: успешных {{success}}, ошибок {{failed}}",
+    "delete_problem_none": "Нет проблемных файлов авторизации для удаления при текущем фильтре",
+    "delete_problem_filtered_none": "Нет проблемных файлов авторизации {{type}} для удаления при текущем фильтре",
+    "problem_filter_label": "Фильтр проблем",
+    "problem_filter_only": "Показывать только проблемные учётные данные",
+    "display_options_label": "Параметры отображения",
+    "compact_mode_label": "Компактный режим",
+    "sort_label": "Сортировка",
+    "sort_default": "По умолчанию",
+    "sort_az": "A-Z Имя",
+    "sort_priority": "Приоритет",
+    "priority_display": "Приоритет",
+    "batch_select_page": "Выбрать страницу",
+    "batch_select_filtered": "Выбрать по фильтру",
+    "batch_invert_page": "Инвертировать страницу",
+    "batch_download": "Скачать выбранные",
+    "batch_download_success": "Запущена загрузка {{count}} файлов",
+    "batch_download_partial": "Загрузка завершена: успешно {{success}}, ошибок {{failed}}",
+    "prefix_proxy_info_label": "Информация о файле авторизации (info)",
+    "note_label": "Заметка (note)",
+    "note_placeholder": "Введите заметку, например: аккаунт Ивана",
+    "note_hint": "Необязательно. Используется для описания назначения или владельца учётных данных; оставьте пустым, чтобы не записывать.",
+    "note_display": "Заметка"
   },
   "antigravity_quota": {
     "title": "Квота Antigravity",
@@ -583,7 +621,14 @@
     "seven_day_sonnet": "7 дней Sonnet",
     "seven_day_cowork": "7 дней Cowork",
     "iguana_necktie": "Iguana Necktie",
-    "extra_usage_label": "Дополнительное использование"
+    "extra_usage_label": "Дополнительное использование",
+    "plan_label": "План",
+    "plan_unknown": "Неизвестно",
+    "plan_free": "Free",
+    "plan_pro": "Pro",
+    "plan_max": "Max",
+    "plan_max5": "Max 5x",
+    "plan_max20": "Max 20x"
   },
   "codex_quota": {
     "title": "Квота Codex",
@@ -607,7 +652,8 @@
     "plan_label": "Тариф",
     "plan_plus": "Plus",
     "plan_team": "Team",
-    "plan_free": "Free"
+    "plan_free": "Free",
+    "plan_pro": "Pro"
   },
   "gemini_cli_quota": {
     "title": "Квота Gemini CLI",
@@ -621,7 +667,15 @@
     "empty_buckets": "Данные по квоте отсутствуют",
     "refresh_button": "Обновить квоту",
     "fetch_all": "Получить все",
-    "remaining_amount": "Осталось {{count}}"
+    "remaining_amount": "Осталось {{count}}",
+    "tier_label": "Уровень",
+    "tier_free": "Бесплатный",
+    "tier_legacy": "Устаревший",
+    "tier_standard": "Стандартный",
+    "tier_pro": "Pro",
+    "tier_ultra": "Ultra",
+    "credit_label": "Google One AI кредиты",
+    "credit_amount": "{{count}} кредитов"
   },
   "kimi_quota": {
     "title": "Квота Kimi",
@@ -994,7 +1048,22 @@
     "import_confirm_title": "Подтвердить импорт",
     "import_confirm_message": "Импортировать {{count}} запись(ей) использования?",
     "delete_price_confirm_title": "Подтвердить удаление",
-    "delete_price_confirm_message": "Удалить конфигурацию цен для модели \"{{model}}\"?"
+    "delete_price_confirm_message": "Удалить конфигурацию цен для модели \"{{model}}\"?",
+    "chart_line_label_1": "Линия 1",
+    "chart_line_label_2": "Линия 2",
+    "chart_line_label_3": "Линия 3",
+    "chart_line_label_4": "Линия 4",
+    "chart_line_label_5": "Линия 5",
+    "chart_line_label_6": "Линия 6",
+    "chart_line_label_7": "Линия 7",
+    "chart_line_label_8": "Линия 8",
+    "chart_line_label_9": "Линия 9",
+    "chart_line_hidden": "Скрыть",
+    "chart_line_actions_label": "Линии для отображения",
+    "chart_line_add": "Добавить линию",
+    "chart_line_all": "Все",
+    "chart_line_delete": "Удалить линию",
+    "chart_line_hint": "Отображайте до 9 линий моделей одновременно"
   },
   "stats": {
     "success": "Успех",
@@ -1095,7 +1164,11 @@
     "lines": "строк",
     "removed": "Отфильтровано",
     "upgrade_required_title": "Обновите CLI Proxy API",
-    "upgrade_required_desc": "Текущая версия сервера не поддерживает просмотр журналов. Обновите CLI Proxy API до последней версии, чтобы использовать эту функцию."
+    "upgrade_required_desc": "Текущая версия сервера не поддерживает просмотр журналов. Обновите CLI Proxy API до последней версии, чтобы использовать эту функцию.",
+    "filter_panel_title": "Структурные фильтры",
+    "filter_panel_expand": "Развернуть структурные фильтры",
+    "filter_panel_collapse": "Свернуть структурные фильтры",
+    "filter_panel_active_count": "Активно: {{count}}"
   },
   "config_management": {
     "title": "Панель конфигурации",
@@ -1183,6 +1256,8 @@
           "usage_statistics": "Статистика использования",
           "usage_statistics_desc": "Собирать статистику использования",
           "logs_max_size": "Максимальный размер файла журнала (МБ)",
+          "usage_data_dir": "Каталог данных использования",
+          "usage_data_dir_hint": "Каталог для файлов статистики. Требуется перезапуск после изменения.",
           "usage_retention_days": "Хранить статистику (дней)",
           "usage_retention_hint": "0 означает без ограничений (без очистки)"
         },
@@ -1201,7 +1276,9 @@
           "ws_auth": "Аутентификация WebSocket",
           "ws_auth_desc": "Включить аутентификацию WebSocket (/v1/ws)",
           "allow_query_auth": "Аутентификация через Query-параметры",
-          "allow_query_auth_desc": "Разрешить передачу API-ключа в параметрах URL. ВНИМАНИЕ: учётные данные могут попасть в логи, историю браузера и заголовки Referer"
+          "allow_query_auth_desc": "Разрешить передачу API-ключа в параметрах URL. ВНИМАНИЕ: учётные данные могут попасть в логи, историю браузера и заголовки Referer",
+          "max_retry_credentials": "Максимум учётных данных для повторов",
+          "max_retry_credentials_hint": "Оставьте пустым, чтобы не задавать поле. Значение 0 сохраняет legacy-поведение и позволяет перебрать все доступные учётные данные."
         },
         "quota": {
           "title": "Резерв по квоте",
@@ -1230,7 +1307,11 @@
           "override_rules": "Правила переопределения",
           "override_rules_desc": "Принудительно задавать значения параметров в запросе",
           "filter_rules": "Правила фильтрации",
-          "filter_rules_desc": "Предварительно фильтровать тело исходящего запроса через JSON Path, автоматически удалять несоответствующие или лишние параметры (санитизация запроса)"
+          "filter_rules_desc": "Предварительно фильтровать тело исходящего запроса через JSON Path, автоматически удалять несоответствующие или лишние параметры (санитизация запроса)",
+          "default_raw_rules": "Raw-правила по умолчанию",
+          "default_raw_rules_desc": "Если параметр отсутствует, записывать эти значения как raw JSON-фрагменты, например true, 123, \"high\" или {\"type\":\"object\"}",
+          "override_raw_rules": "Raw-правила переопределения",
+          "override_raw_rules_desc": "Всегда перезаписывать значения как raw JSON-фрагменты; полезно для response_format, схем и других сложных полей"
         }
       },
       "api_keys": {
@@ -1284,7 +1365,11 @@
         "value_number": "Числовое значение (например, 0.7)",
         "value_boolean": "true или false",
         "value_json": "Значение JSON",
-        "value_default": "Значение"
+        "value_default": "Значение",
+        "param_value": "Значение параметра",
+        "value_raw_json": "Raw JSON-фрагмент, например true, 123, \"high\" или {\"type\":\"object\"}",
+        "boolean_true": "true",
+        "boolean_false": "false"
       },
       "common": {
         "edit": "Изменить",
@@ -1292,8 +1377,23 @@
         "cancel": "Отменить",
         "update": "Обновить",
         "add": "Добавить"
+      },
+      "notice": "Визуальный режим охватывает основные поля. Остальные параметры config.yaml по-прежнему нужно проверять или редактировать в режиме исходника.",
+      "quick_jump": "Быстрый переход",
+      "validation": {
+        "validation_blocked": "Исправьте ошибки валидации перед сохранением",
+        "port_range": "Введите корректный порт от 1 до 65535",
+        "non_negative_integer": "Введите неотрицательное целое число",
+        "payload_invalid_number": "Введите корректное число",
+        "payload_invalid_boolean": "Выберите true или false",
+        "payload_invalid_json": "Введите корректный JSON"
       }
-    }
+    },
+    "reload_confirm_message": "Перезагрузка отбросит ваши несохранённые изменения. Продолжить?",
+    "visual_mode_unavailable": "Визуальный редактор недоступен, пока не исправлен синтаксис YAML",
+    "visual_mode_unavailable_detail": "Визуальный редактор недоступен, потому что в конфигурации есть некорректный YAML: {{message}}",
+    "visual_mode_save_blocked": "Нельзя сохранять из визуального режима, пока не исправлен синтаксис YAML",
+    "visual_mode_latest_yaml_invalid": "Последняя конфигурация на сервере содержит некорректный YAML. Проверьте её в режиме исходника перед сохранением визуальных изменений: {{message}}"
   },
   "quota_management": {
     "title": "Управление квотами",
@@ -1324,6 +1424,7 @@
     "version_current_label": "Текущая версия",
     "version_latest_label": "Последняя версия",
     "version_check_button": "Проверить обновления",
+    "version_history_button": "История версий",
     "version_check_idle": "Нажмите, чтобы проверить обновления",
     "version_checking": "Поиск последней версии...",
     "version_update_available": "Доступно обновление: {{version}}",
@@ -1343,7 +1444,6 @@
     "clear_login_desc": "Очистите локально сохранённые данные входа и выполните выход. Настройки стоимости статистики использования сохранятся.",
     "clear_login_button": "Очистить данные входа",
     "clear_login_confirm": "Очистить локальные данные входа и выйти?",
-    "version_history_button": "История версий",
     "panel_update_button": "Обновить панель",
     "panel_update_success": "Панель управления успешно обновлена",
     "panel_update_failed": "Не удалось обновить панель управления",
@@ -1447,11 +1547,12 @@
   },
   "theme": {
     "switch": "Тема",
-    "light": "Светлая",
+    "light": "Шерстяная бумага",
     "dark": "Тёмная",
-    "switch_to_light": "Переключиться на светлую тему",
+    "switch_to_light": "Переключиться на тему «Шерстяная бумага»",
     "switch_to_dark": "Переключиться на тёмную тему",
-    "auto": "Следовать системе"
+    "auto": "Следовать системе",
+    "white": "Чисто-белая"
   },
   "not_found": {
     "title": "Страница не найдена",
@@ -1480,10 +1581,47 @@
     "per_page": "{{count}} / стр."
   },
   "credentials": {
+    "page_title": "Credentials",
+    "api_keys": "API Keys",
+    "api_key_entries": "entries",
+    "auth_files": "Auth Files",
+    "models": "models",
+    "websockets": "WebSocket",
+    "no_credentials": "No credentials configured",
+    "no_search_results": "No credentials match \"{{query}}\"",
+    "manual_config": "Manual Config",
+    "upload_file": "Upload",
+    "import_json": "Import JSON",
+    "cookie_auth": "Cookie Auth",
+    "oauth_waiting": "Waiting for authorization...",
+    "oauth_success": "Authorization successful!",
+    "oauth_error": "Authorization failed",
+    "oauth_open_url": "Open URL",
+    "oauth_copy_url": "Copy URL",
+    "oauth_callback_hint": "Paste the redirect URL from your browser",
+    "oauth_callback_submit": "Submit",
+    "project_id": "Project ID",
+    "global_settings": "Global Settings",
+    "oauth_settings": "OAuth Settings",
+    "oauth_model_alias_manage": "Model Aliases",
+    "oauth_excluded_manage": "Model Exclusions",
+    "switch_project_on_quota": "Switch project on quota exceeded",
+    "switch_preview_on_quota": "Switch to preview model on quota exceeded",
+    "quota_poll_interval": "Quota Poll Interval",
+    "timezone": "Часовой пояс",
+    "timezone_system": "Системный (браузер)",
     "poll_interval_disabled": "Отключено",
     "poll_interval_1min": "1 мин",
     "poll_interval_3min": "3 мин",
     "poll_interval_5min": "5 мин",
-    "poll_interval_10min": "10 мин"
+    "poll_interval_10min": "10 мин",
+    "iflow_cookie_placeholder": "Paste your iFlow cookie here",
+    "vertex_location_placeholder": "Location (e.g., us-central1)",
+    "vertex_select_file": "Select JSON file",
+    "last_updated": "Updated",
+    "sort_name": "Name",
+    "sort_type": "Type",
+    "sort_status": "Status",
+    "sort_requests": "Requests"
   }
 }

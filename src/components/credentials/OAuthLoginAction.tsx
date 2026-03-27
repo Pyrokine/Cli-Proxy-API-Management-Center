@@ -49,7 +49,18 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             setUrl(response.url)
             setStatus('waiting')
 
-            window.open(response.url, '_blank')
+            // Validate URL scheme to prevent javascript: URI injection (XSS-VULN-01)
+            try {
+                const parsed = new URL(response.url)
+                if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+                    throw new Error('Invalid URL scheme')
+                }
+                window.open(response.url, '_blank', 'noopener,noreferrer')
+            } catch {
+                setError('Invalid OAuth URL received from server')
+                setStatus('error')
+                return
+            }
 
             if (response.state) {
                 const stateValue = response.state
@@ -152,7 +163,14 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                                 <Button
                                     variant='secondary'
                                     size='sm'
-                                    onClick={() => window.open(url, '_blank')}
+                                    onClick={() => {
+                                        try {
+                                            const parsed = new URL(url)
+                                            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                                                window.open(url, '_blank', 'noopener,noreferrer')
+                                            }
+                                        } catch { /* invalid URL, ignore */ }
+                                    }}
                                     title={t('credentials.oauth_open_url')}
                                 >
                                     <IconExternalLink size={14} />
