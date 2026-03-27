@@ -4,6 +4,7 @@ import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {configApi} from '@/services/api/config'
 import {useQuotaScheduler} from '@/services/quota/useQuotaScheduler'
 import {useConfigStore, useNotificationStore} from '@/stores'
+import {TIMEZONE_OPTIONS, useTimezoneStore} from '@/stores/useTimezoneStore'
 import type {Config} from '@/types'
 import {useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -21,6 +22,8 @@ export function GlobalSettings({ config, disableControls }: GlobalSettingsProps)
     const updateConfigValue = useConfigStore((s) => s.updateConfigValue)
     const showNotification  = useNotificationStore((s) => s.showNotification)
     const scheduler         = useQuotaScheduler()
+    const timezone          = useTimezoneStore((s) => s.timezone)
+    const setTimezone       = useTimezoneStore((s) => s.setTimezone)
 
     const pollIntervalOptions = useMemo(() => [
         { value: '0', label: t('credentials.poll_interval_disabled') },
@@ -29,6 +32,15 @@ export function GlobalSettings({ config, disableControls }: GlobalSettingsProps)
         { value: '300000', label: t('credentials.poll_interval_5min') },
         { value: '600000', label: t('credentials.poll_interval_10min') },
     ], [t])
+
+    const timezoneOptions = useMemo(
+        () =>
+            TIMEZONE_OPTIONS.map((tz) => ({
+                value: tz.value,
+                label: tz.value === '' ? t('credentials.timezone_system') : tz.label,
+            })),
+        [t],
+    )
 
     const switchProject      = config?.quotaExceeded?.switchProject ?? false
     const switchPreviewModel = config?.quotaExceeded?.switchPreviewModel ?? false
@@ -90,6 +102,17 @@ export function GlobalSettings({ config, disableControls }: GlobalSettingsProps)
                     value={String(scheduler.currentBaseInterval)}
                     onChange={handleIntervalChange}
                     options={pollIntervalOptions}
+                />
+            </div>
+
+            <div className={styles.pollInterval}>
+                <label className={styles.pollIntervalLabel}>
+                    {t('credentials.timezone')}
+                </label>
+                <Select
+                    value={timezone}
+                    onChange={setTimezone}
+                    options={timezoneOptions}
                 />
             </div>
 

@@ -6,6 +6,7 @@ import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
+    type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
 import {modelsApi, providersApi} from '@/services/api'
@@ -49,6 +50,52 @@ const buildSignature = (form: GeminiFormState) =>
 export function AiProvidersGeminiEditPage() {
     const { t } = useTranslation()
 
+    const editOptions: ProviderEditFormConfig<GeminiFormState, GeminiKeyConfig> = {
+        configKey: 'gemini-api-key',
+        buildEmptyForm,
+        buildSignature,
+        loadConfigs: async ({ fetchConfig }) => {
+            const value = await fetchConfig('gemini-api-key')
+            return Array.isArray(value) ? (value as GeminiKeyConfig[]) : []
+        },
+        configToForm: (config) => {
+            const { headers, models, ...rest } = config
+            return {
+                ...rest,
+                headers: headersToEntries(headers),
+                modelEntries: modelsToEntries(models)
+                    .map((entry) => ({
+                        ...entry,
+                        name: stripGeminiModelResourceName(entry.name),
+                    })),
+                excludedText: excludedModelsToText(config.excludedModels),
+            }
+        },
+        formToPayload: (form) => {
+            const normalizedModelEntries = form.modelEntries.map((entry) => ({
+                ...entry,
+                name: stripGeminiModelResourceName(entry.name),
+            }))
+            return {
+                apiKey: form.apiKey.trim(),
+                priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+                prefix: form.prefix?.trim() || undefined,
+                baseUrl: form.baseUrl?.trim() || undefined,
+                proxyUrl: form.proxyUrl?.trim() || undefined,
+                headers: buildHeaderObject(form.headers),
+                models: entriesToModels(normalizedModelEntries),
+                excludedModels: parseTextList(form.excludedText),
+            }
+        },
+        saveConfigs: (configs) => providersApi.saveGeminiKeys(configs),
+        i18n: {
+            editTitle: 'ai_providers.gemini_edit_modal_title',
+            addTitle: 'ai_providers.gemini_add_modal_title',
+            saveSuccessEdit: 'notification.gemini_key_updated',
+            saveSuccessAdd: 'notification.gemini_key_added',
+        },
+    }
+
     const {
               form,
               setForm,
@@ -64,65 +111,7 @@ export function AiProvidersGeminiEditPage() {
               handleSave,
               handleBack,
               swipeRef,
-          } = useProviderEditForm<GeminiFormState, GeminiKeyConfig>({
-                                                                        configKey: 'gemini-api-key',
-                                                                        buildEmptyForm,
-                                                                        buildSignature,
-                                                                        loadConfigs: async ({ fetchConfig }) => {
-                                                                            const value = await fetchConfig(
-                                                                                'gemini-api-key')
-                                                                            return Array.isArray(value) ?
-                                                                                   (value as GeminiKeyConfig[]) :
-                                                                                []
-                                                                        },
-                                                                        configToForm: (config) => {
-                                                                            const { headers, models, ...rest } = config
-                                                                            return {
-                                                                                ...rest,
-                                                                                headers: headersToEntries(headers),
-                                                                                modelEntries: modelsToEntries(models)
-                                                                                    .map((entry) => ({
-                                                                                        ...entry,
-                                                                                        name: stripGeminiModelResourceName(
-                                                                                            entry.name),
-                                                                                    })),
-                                                                                excludedText: excludedModelsToText(
-                                                                                    config.excludedModels),
-                                                                            }
-                                                                        },
-                                                                        formToPayload: (form) => {
-                                                                            const normalizedModelEntries = form.modelEntries.map(
-                                                                                (entry) => ({
-                                                                                    ...entry,
-                                                                                    name: stripGeminiModelResourceName(
-                                                                                        entry.name),
-                                                                                }))
-                                                                            return {
-                                                                                apiKey: form.apiKey.trim(),
-                                                                                priority: form.priority !== undefined ?
-                                                                                          Math.trunc(form.priority) :
-                                                                                          undefined,
-                                                                                prefix: form.prefix?.trim() ||
-                                                                                        undefined,
-                                                                                baseUrl: form.baseUrl?.trim() ||
-                                                                                         undefined,
-                                                                                proxyUrl: form.proxyUrl?.trim() ||
-                                                                                          undefined,
-                                                                                headers: buildHeaderObject(form.headers),
-                                                                                models: entriesToModels(
-                                                                                    normalizedModelEntries),
-                                                                                excludedModels: parseTextList(form.excludedText),
-                                                                            }
-                                                                        },
-                                                                        saveConfigs: (configs) => providersApi.saveGeminiKeys(
-                                                                            configs),
-                                                                        i18n: {
-                                                                            editTitle: 'ai_providers.gemini_edit_modal_title',
-                                                                            addTitle: 'ai_providers.gemini_add_modal_title',
-                                                                            saveSuccessEdit: 'notification.gemini_key_updated',
-                                                                            saveSuccessAdd: 'notification.gemini_key_added',
-                                                                        },
-                                                                    })
+          } = useProviderEditForm<GeminiFormState, GeminiKeyConfig>(editOptions)
 
     // ---- Model discovery ----
 

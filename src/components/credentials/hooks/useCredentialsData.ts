@@ -58,14 +58,14 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
         setError(null)
 
         try {
-            const [, authFilesResponse] = await Promise.all([
-                                                                fetchConfig(undefined, true),
-                                                                authFilesApi.list()
-                                                                            .catch(() => ({ files: [] as AuthFileItem[] })),
-                                                                loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS })
-                                                                    .catch(() => {
-                                                                    }),
-                                                            ])
+            const configPromise = fetchConfig(undefined, true)
+            const authPromise   = authFilesApi.list()
+                                              .catch(() => ({ files: [] as AuthFileItem[] }))
+            const usagePromise  = loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS })
+                .catch(() => {
+                })
+
+            const [, authFilesResponse] = await Promise.all([configPromise, authPromise, usagePromise])
             setAuthFiles(authFilesResponse.files || [])
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to load credentials data'

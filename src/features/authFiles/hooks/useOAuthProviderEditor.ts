@@ -142,11 +142,13 @@ export function useOAuthProviderEditor(feature: FeatureType) {
             setInitialLoading(true)
             setFeatureUnsupported(false)
             try {
-                const [filesResult, excludedResult, aliasResult] = await Promise.allSettled([
-                                                                                                authFilesApi.list(),
-                                                                                                authFilesApi.getOauthExcludedModels(),
-                                                                                                authFilesApi.getOauthModelAlias(),
-                                                                                            ])
+                const results = await Promise.allSettled([
+                                                             authFilesApi.list(),
+                                                             authFilesApi.getOauthExcludedModels(),
+                                                             authFilesApi.getOauthModelAlias(),
+                                                         ])
+
+                const [filesResult, excludedResult, aliasResult] = results
 
                 if (cancelled) {
                     return

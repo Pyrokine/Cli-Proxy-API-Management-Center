@@ -3,6 +3,8 @@ import {IconDownload, IconPencil, IconRefreshCw, IconTrash2} from '@/components/
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import type {StatusBarData, StatusBlockDetail} from '@/utils/usage'
 import {rateToColor} from '@/utils/usage'
+import type React from 'react'
+import {useCallback, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './CredentialCard.module.scss'
 
@@ -32,6 +34,12 @@ interface CredentialCardProps {
     category: 'api-key' | 'auth-file';
     /** Primary display text (masked key or file name) */
     title: string;
+    /** Optional highlighted title (JSX with <mark> tags for search matching) */
+    highlightTitle?: React.ReactNode;
+    /** Current alias for this credential (displayed as subtitle) */
+    alias?: string;
+    /** Callback to set/update alias */
+    onAliasChange?: (alias: string) => void;
     /** Colored badge (e.g. "API Key", "gemini-cli") */
     badge?: { label: string; color?: string; bgColor?: string };
     /** Key-value metadata */
@@ -104,6 +112,9 @@ function statusRateClass(rate: number): string {
 
 export function CredentialCard({
                                    title,
+                                   highlightTitle,
+                                   alias,
+                                   onAliasChange,
                                    badge,
                                    fields,
                                    tags,
@@ -120,9 +131,30 @@ export function CredentialCard({
                                    statusBar,
                                    refreshState,
                                }: CredentialCardProps) {
-    const { t } = useTranslation()
+    const { t }                           = useTranslation()
+    const [editingAlias, setEditingAlias] = useState(false)
+    const [aliasInput, setAliasInput]     = useState('')
 
     const totalRequests = stats ? stats.success + stats.failure : 0
+
+    const handleAliasEditStart = useCallback(() => {
+        setAliasInput(alias || '')
+        setEditingAlias(true)
+    }, [alias])
+
+    const handleAliasEditConfirm = useCallback(() => {
+        const trimmed = aliasInput.trim()
+        onAliasChange?.(trimmed)
+        setEditingAlias(false)
+    }, [aliasInput, onAliasChange])
+
+    const handleAliasKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleAliasEditConfirm()
+        } else if (e.key === 'Escape') {
+            setEditingAlias(false)
+        }
+    }, [handleAliasEditConfirm])
 
     return (
         <div className={`${styles.card} ${disabled ? styles.disabled : ''}`}>
@@ -130,12 +162,39 @@ export function CredentialCard({
             <div className={styles.header}>
                 {badge && (
                     <span className={styles.badge} style={{ color: badge.color, backgroundColor: badge.bgColor }}>
-            {badge.label}
-          </span>
+                        {badge.label}
+                    </span>
                 )}
                 <span className={styles.title} title={title}>
-          {title}
-        </span>
+                    {highlightTitle ?? title}
+                </span>
+                {onAliasChange && (
+                    editingAlias ? (
+                        <span className={styles.aliasEdit}>
+                            <input
+                                className={styles.aliasInput}
+                                value={aliasInput}
+                                onChange={(e) => setAliasInput(e.target.value)}
+                                onKeyDown={handleAliasKeyDown}
+                                onBlur={handleAliasEditConfirm}
+                                placeholder={t('credentials.alias_placeholder', { defaultValue: 'alias' })}
+                                maxLength={20}
+                                autoFocus
+                            />
+                        </span>
+                    ) : (
+                        <button
+                            type='button'
+                            className={styles.aliasButton}
+                            onClick={handleAliasEditStart}
+                            disabled={disableControls}
+                            title={t('credentials.edit_alias', { defaultValue: 'Edit alias' })}
+                        >
+                            <IconPencil size={10} />
+                            <span>{alias || t('credentials.set_alias', { defaultValue: 'Set alias' })}</span>
+                        </button>
+                    )
+                )}
             </div>
 
             {/* Metadata fields */}

@@ -65,17 +65,17 @@ export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
             return
         }
         const isBlocking = typeof shouldBlock === 'function' ? shouldBlock({
-            currentLocation: location,
-            nextLocation: location,
-            historyAction: 'POP' as never,
-        }) : shouldBlock
+                                                                               currentLocation: location,
+                                                                               nextLocation: location,
+                                                                               historyAction: 'POP' as never,
+                                                                           }) : shouldBlock
         if (!isBlocking) {
             return
         }
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             e.preventDefault()
-            e.returnValue = ''
+            e.returnValue = '' // Legacy browser compatibility (deprecated but required by older Chrome/Safari)
         }
 
         window.addEventListener('beforeunload', handleBeforeUnload)

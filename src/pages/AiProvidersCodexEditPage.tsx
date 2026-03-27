@@ -7,6 +7,7 @@ import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
+    type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
 import {modelsApi, providersApi} from '@/services/api'
@@ -46,6 +47,47 @@ const buildSignature = (form: ProviderFormState) =>
 export function AiProvidersCodexEditPage() {
     const { t } = useTranslation()
 
+    const editOptions: ProviderEditFormConfig<ProviderFormState, ProviderKeyConfig> = {
+        configKey: 'codex-api-key',
+        buildEmptyForm,
+        buildSignature,
+        loadConfigs: async ({ fetchConfig }) => {
+            const value = await fetchConfig('codex-api-key')
+            return Array.isArray(value) ? (value as ProviderKeyConfig[]) : []
+        },
+        configToForm: (config) => ({
+            ...config,
+            websockets: Boolean(config.websockets),
+            headers: headersToEntries(config.headers),
+            modelEntries: modelsToEntries(config.models),
+            excludedText: excludedModelsToText(config.excludedModels),
+        }),
+        formToPayload: (form) => ({
+            apiKey: form.apiKey.trim(),
+            priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+            prefix: form.prefix?.trim() || undefined,
+            baseUrl: (form.baseUrl ?? '').trim() || undefined,
+            websockets: Boolean(form.websockets),
+            proxyUrl: form.proxyUrl?.trim() || undefined,
+            headers: buildHeaderObject(form.headers),
+            models: entriesToModels(form.modelEntries),
+            excludedModels: parseTextList(form.excludedText),
+        }),
+        saveConfigs: (configs) => providersApi.saveCodexConfigs(configs),
+        validateBeforeSave: (form) => {
+            if (!(form.baseUrl ?? '').trim()) {
+                return 'notification.codex_base_url_required'
+            }
+            return undefined
+        },
+        i18n: {
+            editTitle: 'ai_providers.codex_edit_modal_title',
+            addTitle: 'ai_providers.codex_add_modal_title',
+            saveSuccessEdit: 'notification.codex_config_updated',
+            saveSuccessAdd: 'notification.codex_config_added',
+        },
+    }
+
     const {
               form,
               setForm,
@@ -61,56 +103,7 @@ export function AiProvidersCodexEditPage() {
               handleSave,
               handleBack,
               swipeRef,
-          } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>({
-                                                                            configKey: 'codex-api-key',
-                                                                            buildEmptyForm,
-                                                                            buildSignature,
-                                                                            loadConfigs: async ({ fetchConfig }) => {
-                                                                                const value = await fetchConfig(
-                                                                                    'codex-api-key')
-                                                                                return Array.isArray(value) ?
-                                                                                       (value as ProviderKeyConfig[]) :
-                                                                                    []
-                                                                            },
-                                                                            configToForm: (config) => ({
-                                                                                ...config,
-                                                                                websockets: Boolean(config.websockets),
-                                                                                headers: headersToEntries(config.headers),
-                                                                                modelEntries: modelsToEntries(config.models),
-                                                                                excludedText: excludedModelsToText(
-                                                                                    config.excludedModels),
-                                                                            }),
-                                                                            formToPayload: (form) => ({
-                                                                                apiKey: form.apiKey.trim(),
-                                                                                priority: form.priority !== undefined ?
-                                                                                          Math.trunc(form.priority) :
-                                                                                          undefined,
-                                                                                prefix: form.prefix?.trim() ||
-                                                                                        undefined,
-                                                                                baseUrl: (form.baseUrl ?? '').trim() ||
-                                                                                         undefined,
-                                                                                websockets: Boolean(form.websockets),
-                                                                                proxyUrl: form.proxyUrl?.trim() ||
-                                                                                          undefined,
-                                                                                headers: buildHeaderObject(form.headers),
-                                                                                models: entriesToModels(form.modelEntries),
-                                                                                excludedModels: parseTextList(form.excludedText),
-                                                                            }),
-                                                                            saveConfigs: (configs) => providersApi.saveCodexConfigs(
-                                                                                configs),
-                                                                            validateBeforeSave: (form) => {
-                                                                                if (!(form.baseUrl ?? '').trim()) {
-                                                                                    return 'notification.codex_base_url_required'
-                                                                                }
-                                                                                return undefined
-                                                                            },
-                                                                            i18n: {
-                                                                                editTitle: 'ai_providers.codex_edit_modal_title',
-                                                                                addTitle: 'ai_providers.codex_add_modal_title',
-                                                                                saveSuccessEdit: 'notification.codex_config_updated',
-                                                                                saveSuccessAdd: 'notification.codex_config_added',
-                                                                            },
-                                                                        })
+          } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>(editOptions)
 
     // ---- Model discovery ----
 

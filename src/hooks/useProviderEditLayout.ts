@@ -19,6 +19,7 @@ import type {ModelInfo} from '@/utils/models'
 import type {Dispatch, SetStateAction} from 'react'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import type {BlockerFunction} from 'react-router'
 import {useLocation, useNavigate, useParams} from 'react-router-dom'
 import type {StoreApi, UseBoundStore} from 'zustand'
 
@@ -332,23 +333,24 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
     }, [hasIndexParam, params.index, routePrefix])
     const canGuard       = !resolvedLoading && !saving && !invalidIndexParam && !invalidIndex
 
-    const { allowNextNavigation } = useUnsavedChangesGuard({
-                                                               enabled: canGuard,
-                                                               shouldBlock: ({ nextLocation }) => {
-                                                                   const nextPath     = nextLocation.pathname
-                                                                   const isWithinRoot = nextPath ===
-                                                                                        editorRootPath ||
-                                                                                        nextPath.startsWith(`${editorRootPath}/`)
-                                                                   return isDirty && !isWithinRoot
-                                                               },
-                                                               dialog: {
-                                                                   title: t('common.unsaved_changes_title'),
-                                                                   message: t('common.unsaved_changes_message'),
-                                                                   confirmText: t('common.leave'),
-                                                                   cancelText: t('common.stay'),
-                                                                   variant: 'danger',
-                                                               },
-                                                           })
+    const guardOptions = {
+        enabled: canGuard,
+        shouldBlock: (({ nextLocation }) => {
+            const nextPath     = nextLocation.pathname
+            const isWithinRoot = nextPath === editorRootPath ||
+                                 nextPath.startsWith(`${editorRootPath}/`)
+            return isDirty && !isWithinRoot
+        }) as BlockerFunction,
+        dialog: {
+            title: t('common.unsaved_changes_title'),
+            message: t('common.unsaved_changes_message'),
+            confirmText: t('common.leave'),
+            cancelText: t('common.stay'),
+            variant: 'danger' as const,
+        },
+    }
+
+    const { allowNextNavigation } = useUnsavedChangesGuard(guardOptions)
 
     /* ---- Model auto-selection ---- */
     useEffect(() => {

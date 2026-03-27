@@ -5,6 +5,7 @@ import {modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
+    type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
 import {providersApi} from '@/services/api'
@@ -37,6 +38,64 @@ const buildSignature = (form: VertexFormState) =>
 export function AiProvidersVertexEditPage() {
     const { t } = useTranslation()
 
+    const editOptions: ProviderEditFormConfig<VertexFormState, ProviderKeyConfig> = {
+        configKey: 'vertex-api-key',
+        buildEmptyForm,
+        buildSignature,
+        loadConfigs: async ({ fetchConfig, updateConfigValue, clearCache }) => {
+            const [configResult, vertexResult] = await Promise.all([
+                                                                       fetchConfig('vertex-api-key'),
+                                                                       providersApi.getVertexConfigs(),
+                                                                   ])
+            const list                         = Array.isArray(vertexResult)
+                                                 ? (vertexResult as ProviderKeyConfig[])
+                                                 : Array.isArray(configResult)
+                                                   ? (configResult as ProviderKeyConfig[])
+                                                   : []
+            updateConfigValue('vertex-api-key', list)
+            clearCache('vertex-api-key')
+            return list
+        },
+        configToForm: (config) => ({
+            ...config,
+            headers: headersToEntries(config.headers),
+            modelEntries: modelsToEntries(config.models),
+        }),
+        formToPayload: (form) => ({
+            apiKey: form.apiKey.trim(),
+            priority: form.priority !== undefined && Number.isFinite(form.priority)
+                      ? Math.trunc(form.priority)
+                      : undefined,
+            prefix: form.prefix?.trim() || undefined,
+            baseUrl: (form.baseUrl ?? '').trim() || undefined,
+            proxyUrl: form.proxyUrl?.trim() || undefined,
+            headers: buildHeaderObject(form.headers),
+            models: form.modelEntries
+                        .map((entry) => {
+                            const name  = entry.name.trim()
+                            const alias = entry.alias.trim()
+                            if (!name || !alias) {
+                                return null
+                            }
+                            return { name, alias }
+                        })
+                        .filter(Boolean) as ProviderKeyConfig['models'],
+        }),
+        saveConfigs: (configs) => providersApi.saveVertexConfigs(configs),
+        validateBeforeSave: (form) => {
+            if (!(form.baseUrl ?? '').trim()) {
+                return 'notification.vertex_base_url_required'
+            }
+            return undefined
+        },
+        i18n: {
+            editTitle: 'ai_providers.vertex_edit_modal_title',
+            addTitle: 'ai_providers.vertex_add_modal_title',
+            saveSuccessEdit: 'notification.vertex_config_updated',
+            saveSuccessAdd: 'notification.vertex_config_added',
+        },
+    }
+
     const {
               form,
               setForm,
@@ -51,79 +110,7 @@ export function AiProvidersVertexEditPage() {
               handleSave,
               handleBack,
               swipeRef,
-          } = useProviderEditForm<VertexFormState, ProviderKeyConfig>({
-                                                                          configKey: 'vertex-api-key',
-                                                                          buildEmptyForm,
-                                                                          buildSignature,
-                                                                          loadConfigs: async ({
-                                                                                                  fetchConfig,
-                                                                                                  updateConfigValue,
-                                                                                                  clearCache,
-                                                                                              }) => {
-                                                                              const [configResult, vertexResult] = await Promise.all(
-                                                                                  [
-                                                                                      fetchConfig('vertex-api-key'),
-                                                                                      providersApi.getVertexConfigs(),
-                                                                                  ])
-                                                                              const list                         = Array.isArray(
-                                                                                  vertexResult)
-                                                                                                                   ?
-                                                                                                                   (vertexResult as ProviderKeyConfig[])
-                                                                                                                   :
-                                                                                                                   Array.isArray(
-                                                                                                                       configResult)
-                                                                                                                   ?
-                                                                                                                   (configResult as ProviderKeyConfig[])
-                                                                                                                   :
-                                                                                                                       []
-                                                                              updateConfigValue('vertex-api-key', list)
-                                                                              clearCache('vertex-api-key')
-                                                                              return list
-                                                                          },
-                                                                          configToForm: (config) => ({
-                                                                              ...config,
-                                                                              headers: headersToEntries(config.headers),
-                                                                              modelEntries: modelsToEntries(config.models),
-                                                                          }),
-                                                                          formToPayload: (form) => ({
-                                                                              apiKey: form.apiKey.trim(),
-                                                                              priority: form.priority !==
-                                                                                        undefined &&
-                                                                                        Number.isFinite(form.priority) ?
-                                                                                        Math.trunc(form.priority) :
-                                                                                        undefined,
-                                                                              prefix: form.prefix?.trim() || undefined,
-                                                                              baseUrl: (form.baseUrl ?? '').trim() ||
-                                                                                       undefined,
-                                                                              proxyUrl: form.proxyUrl?.trim() ||
-                                                                                        undefined,
-                                                                              headers: buildHeaderObject(form.headers),
-                                                                              models: form.modelEntries
-                                                                                          .map((entry) => {
-                                                                                              const name  = entry.name.trim()
-                                                                                              const alias = entry.alias.trim()
-                                                                                              if (!name || !alias) {
-                                                                                                  return null
-                                                                                              }
-                                                                                              return { name, alias }
-                                                                                          })
-                                                                                          .filter(Boolean) as ProviderKeyConfig['models'],
-                                                                          }),
-                                                                          saveConfigs: (configs) => providersApi.saveVertexConfigs(
-                                                                              configs),
-                                                                          validateBeforeSave: (form) => {
-                                                                              if (!(form.baseUrl ?? '').trim()) {
-                                                                                  return 'notification.vertex_base_url_required'
-                                                                              }
-                                                                              return undefined
-                                                                          },
-                                                                          i18n: {
-                                                                              editTitle: 'ai_providers.vertex_edit_modal_title',
-                                                                              addTitle: 'ai_providers.vertex_add_modal_title',
-                                                                              saveSuccessEdit: 'notification.vertex_config_updated',
-                                                                              saveSuccessAdd: 'notification.vertex_config_added',
-                                                                          },
-                                                                      })
+          } = useProviderEditForm<VertexFormState, ProviderKeyConfig>(editOptions)
 
     return (
         <ProviderEditShell

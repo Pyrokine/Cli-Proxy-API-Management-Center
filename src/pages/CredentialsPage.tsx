@@ -16,6 +16,7 @@ import {createVendorRegistry, GlobalSettings, useCredentialsData, VendorSection}
 import {IconSearch} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {useAutoRefresh} from '@/hooks/useAutoRefresh'
+import {apiKeyAliasApi} from '@/services/api/apiKeys'
 import {useConfigStore, useThemeStore} from '@/stores'
 import {getEffectiveTimezone} from '@/stores/useTimezoneStore'
 import {useCallback, useEffect, useMemo, useState} from 'react'
@@ -86,6 +87,13 @@ export default function CredentialsPage() {
 
     const { vendorData, loading, error, refresh }          = useCredentialsData(vendors)
     const { lastRefreshedAt, isRefreshing, markRefreshed } = useAutoRefresh(refresh, autoRefreshMs)
+    const [aliases, setAliases]                            = useState<Record<string, string>>({})
+
+    // Load API key aliases
+    useEffect(() => {
+        apiKeyAliasApi.list().then(setAliases).catch(() => {
+        })
+    }, [vendorData])
 
     // Mark initial load as refreshed
     useEffect(() => {
@@ -98,6 +106,20 @@ export default function CredentialsPage() {
         await refresh()
         markRefreshed()
     }, [refresh, markRefreshed])
+
+    const handleAliasChange = useCallback(async (apiKey: string, alias: string) => {
+        try {
+            if (alias) {
+                await apiKeyAliasApi.set(apiKey, alias)
+            } else {
+                await apiKeyAliasApi.remove(apiKey)
+            }
+            const updated = await apiKeyAliasApi.list()
+            setAliases(updated)
+        } catch {
+            // silently fail — alias is non-critical
+        }
+    }, [])
 
     return (
         <div className={styles.page}>
@@ -131,6 +153,8 @@ export default function CredentialsPage() {
                         key={vendor.id}
                         vendor={vendor}
                         data={vendorData.get(vendor.id) ?? { apiKeys: [], authFiles: [], stats: { requests: 0 } }}
+                        aliases={aliases}
+                        onAliasChange={handleAliasChange}
                         disableControls={loading}
                         onRefresh={handleRefresh}
                         searchQuery={searchQuery}

@@ -8,9 +8,9 @@ import type {QuotaScheduler} from '@/services/quota/QuotaScheduler'
 import {useUsageStatsStore} from '@/stores/useUsageStatsStore'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
-import {calculateStatusBarData, normalizeAuthIndex} from '@/utils/usage'
 import {maskApiKey} from '@/utils/format'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {calculateStatusBarData, normalizeAuthIndex} from '@/utils/usage'
+import React, {useCallback, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {CookieAuthFlow} from './CookieAuthFlow'
@@ -26,6 +26,8 @@ import {VertexImportFlow} from './VertexImportFlow'
 interface VendorSectionProps {
     vendor: VendorDefinition;
     data: VendorData;
+    aliases?: Record<string, string>;
+    onAliasChange?: (apiKey: string, alias: string) => void;
     disableControls: boolean;
     onRefresh: () => Promise<void>;
     searchQuery?: string;
@@ -53,7 +55,15 @@ const formatCompact = (n: number): string => {
     return `${(n / 1_000_000).toFixed(1)}M`
 }
 
-export function VendorSection({ vendor, data, disableControls, onRefresh, searchQuery = '' }: VendorSectionProps) {
+export function VendorSection({
+                                  vendor,
+                                  data,
+                                  aliases = {},
+                                  onAliasChange,
+                                  disableControls,
+                                  onRefresh,
+                                  searchQuery = '',
+                              }: VendorSectionProps) {
     const { t }                         = useTranslation()
     const navigate                      = useNavigate()
     const [expanded, setExpanded]       = useState(false)
@@ -137,25 +147,38 @@ export function VendorSection({ vendor, data, disableControls, onRefresh, search
     const PAGE_SIZE_OPTIONS                       = [12, 24, 48]
     const [authFilePage, setAuthFilePage]         = useState(1)
     const [authFilePageSize, setAuthFilePageSize] = useState(PAGE_SIZE_OPTIONS[0])
+    const [apiKeyPage, setApiKeyPage]             = useState(1)
+    const [apiKeyPageSize, setApiKeyPageSize]     = useState(PAGE_SIZE_OPTIONS[0])
 
     // Reset page when search query changes
-    useEffect(() => {
+    const [prevQuery, setPrevQuery] = useState(query)
+    if (prevQuery !== query) {
+        setPrevQuery(query)
         setAuthFilePage(1)
-    }, [query])
+        setApiKeyPage(1)
+    }
 
     const paginatedAuthFiles = useMemo(() => {
         const start = (authFilePage - 1) * authFilePageSize
         return sortedAuthFiles.slice(start, start + authFilePageSize)
     }, [sortedAuthFiles, authFilePage, authFilePageSize])
 
+    const paginatedApiKeys = useMemo(() => {
+        const start = (apiKeyPage - 1) * apiKeyPageSize
+        return filteredApiKeys.slice(start, start + apiKeyPageSize)
+    }, [filteredApiKeys, apiKeyPage, apiKeyPageSize])
+
     const showAuthFilePagination = sortedAuthFiles.length > PAGE_SIZE_OPTIONS[0]
+    const showApiKeyPagination   = filteredApiKeys.length > PAGE_SIZE_OPTIONS[0]
 
     // Auto-expand vendors with credentials, collapse empty ones (until user manually toggles)
-    useEffect(() => {
+    const [prevTotalCount, setPrevTotalCount] = useState(totalCount)
+    if (prevTotalCount !== totalCount) {
+        setPrevTotalCount(totalCount)
         if (!userToggled) {
             setExpanded(totalCount > 0)
         }
-    }, [totalCount, userToggled])
+    }
 
     const hasAnyAction =
               Boolean(vendor.editRoute) ||
@@ -187,6 +210,35 @@ export function VendorSection({ vendor, data, disableControls, onRefresh, search
     }, [onRefresh])
 
     const handleFlowCancel = useCallback(() => setActiveFlow(null), [])
+
+    // --- Highlight matching text ---
+
+    const highlightMatch = useCallback((text: string): React.ReactNode => {
+        if (!query || !text) {
+            return text
+        }
+        const idx = text.toLowerCase().indexOf(query)
+        if (idx === -1) {
+            return text
+        }
+        return (
+            <>
+                {text.slice(0, idx)}
+                <mark>{text.slice(idx, idx + query.length)}</mark>
+                {text.slice(idx + query.length)}
+            </>
+        )
+    }, [query])
+
+    // --- Resolve display name for API key (alias > masked key) ---
+
+    const resolveApiKeyTitle = useCallback((apiKey: string | undefined): string => {
+        if (!apiKey) {
+            return ''
+        }
+        const alias = aliases[apiKey]
+        return alias || maskApiKey(apiKey)
+    }, [aliases])
 
     // --- Render API key card ---
 
@@ -257,7 +309,10 @@ export function VendorSection({ vendor, data, disableControls, onRefresh, search
             <CredentialCard
                 key={`api-${index}`}
                 category='api-key'
-                title={maskApiKey(pk.apiKey || '')}
+                title={resolveApiKeyTitle(pk.apiKey)}
+                highlightTitle={highlightMatch(resolveApiKeyTitle(pk.apiKey))}
+                alias={aliases[pk.apiKey || '']}
+                onAliasChange={onAliasChange ? (newAlias) => onAliasChange(pk.apiKey || '', newAlias) : undefined}
                 badge={{ label: 'API', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
                 fields={[
                     ...(pk.priority !== undefined ? [{ label: t('common.priority'), value: String(pk.priority) }] : []),
@@ -415,10 +470,23 @@ export function VendorSection({ vendor, data, disableControls, onRefresh, search
                                 {t('credentials.api_keys')}
                                 <span className={styles.groupCount}>{filteredApiKeys.length}</span>
                             </div>
-                            <div className={styles.grid}>{filteredApiKeys.map((key, index) => renderApiKeyCard(
+                            <div className={styles.grid}>{paginatedApiKeys.map((key, index) => renderApiKeyCard(
                                 key,
-                                index,
+                                (apiKeyPage - 1) * apiKeyPageSize + index,
                             ))}</div>
+                            {showApiKeyPagination && (
+                                <Pagination
+                                    total={filteredApiKeys.length}
+                                    page={apiKeyPage}
+                                    pageSize={apiKeyPageSize}
+                                    pageSizeOptions={PAGE_SIZE_OPTIONS}
+                                    onPageChange={setApiKeyPage}
+                                    onPageSizeChange={(size) => {
+                                        setApiKeyPageSize(size)
+                                        setApiKeyPage(1)
+                                    }}
+                                />
+                            )}
                         </div>
                     )}
 

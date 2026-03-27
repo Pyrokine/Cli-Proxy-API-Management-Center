@@ -22,7 +22,7 @@ interface BaseFormState {
 
 // ---- Configuration for provider-specific behavior ----
 
-interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
+export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
     /** Config key used in config store (e.g. 'codex-api-key') */
     configKey: RawConfigSection;
 
