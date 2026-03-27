@@ -3,7 +3,7 @@ import type {SVGProps} from 'react'
 // Inline SVG icons (Lucide, ISC). We embed paths to keep the WebUI single-file/offline friendly.
 // Source: https://github.com/lucide-icons/lucide (via lucide-static).
 
-interface IconProps extends SVGProps<SVGSVGElement> {
+export interface IconProps extends SVGProps<SVGSVGElement> {
     size?: number;
 }
 
@@ -17,6 +17,30 @@ const baseSvgProps: SVGProps<SVGSVGElement> = {
     strokeLinejoin: 'round',
     'aria-hidden': 'true',
     focusable: 'false',
+}
+
+const sidebarSvgProps: SVGProps<SVGSVGElement> = {
+    ...baseSvgProps,
+    strokeWidth: 1.72,
+    strokeLinecap: 'square',
+    strokeLinejoin: 'miter',
+    strokeMiterlimit: 10,
+}
+
+export function IconSlidersHorizontal({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...baseSvgProps} width={size} height={size} {...props}>
+            <line x1='21' x2='14' y1='4' y2='4' />
+            <line x1='10' x2='3' y1='4' y2='4' />
+            <line x1='21' x2='12' y1='12' y2='12' />
+            <line x1='8' x2='3' y1='12' y2='12' />
+            <line x1='21' x2='16' y1='20' y2='20' />
+            <line x1='12' x2='3' y1='20' y2='20' />
+            <line x1='14' x2='14' y1='2' y2='6' />
+            <line x1='8' x2='8' y1='10' y2='14' />
+            <line x1='16' x2='16' y1='18' y2='22' />
+        </svg>
+    )
 }
 
 export function IconKey({ size = 20, ...props }: IconProps) {
@@ -54,11 +78,11 @@ export function IconFileText({ size = 20, ...props }: IconProps) {
     )
 }
 
-export function IconChartLine({ size = 20, ...props }: IconProps) {
+export function IconShield({ size = 20, ...props }: IconProps) {
     return (
         <svg {...baseSvgProps} width={size} height={size} {...props}>
-            <path d='M3 3v16a2 2 0 0 0 2 2h16' />
-            <path d='m19 9-5 5-4-4-3 3' />
+            <path
+                d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z' />
         </svg>
     )
 }
@@ -146,14 +170,6 @@ export function IconChevronLeft({ size = 20, ...props }: IconProps) {
     return (
         <svg {...baseSvgProps} width={size} height={size} {...props}>
             <path d='m15 18-6-6 6-6' />
-        </svg>
-    )
-}
-
-export function IconChevronRight({ size = 20, ...props }: IconProps) {
-    return (
-        <svg {...baseSvgProps} width={size} height={size} {...props}>
-            <path d='m9 18 6-6-6-6' />
         </svg>
     )
 }
@@ -305,6 +321,142 @@ export function IconCode({ size = 20, ...props }: IconProps) {
     )
 }
 
+export function IconLayoutDashboard({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...baseSvgProps} width={size} height={size} {...props}>
+            <rect width='7' height='9' x='3' y='3' rx='1' />
+            <rect width='7' height='5' x='14' y='3' rx='1' />
+            <rect width='7' height='9' x='14' y='12' rx='1' />
+            <rect width='7' height='5' x='3' y='16' rx='1' />
+        </svg>
+    )
+}
+
+export function IconSidebarDashboard({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <rect x='3' y='3' width='7.5' height='8' rx='1.5' />
+            <rect x='13.5' y='3' width='7.5' height='5' rx='1.5' fill='currentColor' fillOpacity='0.12' />
+            <rect x='3' y='14' width='7.5' height='7' rx='1.5' fill='currentColor' fillOpacity='0.12' />
+            <rect x='13.5' y='11' width='7.5' height='10' rx='1.5' />
+        </svg>
+    )
+}
+
+export function IconSidebarConfig({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <path d='M4 8h16' />
+            <path d='M4 16h16' />
+            <circle cx='9.5' cy='8' r='2.8' fill='currentColor' fillOpacity='0.12' />
+            <circle cx='15' cy='16' r='2.8' fill='currentColor' fillOpacity='0.12' />
+        </svg>
+    )
+}
+
+export function IconSidebarProviders({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <circle cx='12' cy='5.5' r='2.8' fill='currentColor' fillOpacity='0.12' />
+            <circle cx='5.5' cy='18.5' r='2.8' />
+            <circle cx='18.5' cy='18.5' r='2.8' />
+            <path d='M10.2 7.8 7 16.2' />
+            <path d='M13.8 7.8 17 16.2' />
+            <path d='M8.3 18.5h7.4' />
+        </svg>
+    )
+}
+
+export function IconSidebarAuthFiles({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <path d='M7 3h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z' />
+            <path d='M14 3v4h4' fill='currentColor' fillOpacity='0.12' />
+            <path d='M9 13l2 2 4-4' />
+        </svg>
+    )
+}
+
+export function IconSidebarOauth({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <path
+                d='M12 3l8 4v5c0 5.25-3.4 8.25-8 10-4.6-1.75-8-4.75-8-10V7Z'
+                fill='currentColor'
+                fillOpacity='0.08'
+            />
+            <circle cx='12' cy='11' r='1.5' fill='currentColor' stroke='none' />
+            <path d='M12 12.5v2.5' />
+        </svg>
+    )
+}
+
+export function IconSidebarQuota({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <circle cx='12' cy='12' r='8' />
+            <path d='M12 12V4a8 8 0 0 1 8 8Z' fill='currentColor' fillOpacity='0.12' />
+        </svg>
+    )
+}
+
+export function IconSidebarUsage({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <path d='M3.5 20h17' />
+            <rect x='5' y='13' width='3.5' height='7' rx='0.5' />
+            <rect
+                x='10.25'
+                y='7'
+                width='3.5'
+                height='13'
+                rx='0.5'
+                fill='currentColor'
+                fillOpacity='0.12'
+            />
+            <rect x='15.5' y='10' width='3.5' height='10' rx='0.5' />
+        </svg>
+    )
+}
+
+export function IconSidebarLogs({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <rect x='3' y='4' width='18' height='16' rx='2' />
+            <path d='M3 8.5h18' />
+            <circle cx='5.5' cy='6.2' r='0.8' fill='currentColor' stroke='none' />
+            <circle cx='7.8' cy='6.2' r='0.8' fill='currentColor' fillOpacity='0.4' stroke='none' />
+            <path d='M7 12l3 2.5-3 2.5' />
+            <path d='M13 17h4' />
+        </svg>
+    )
+}
+
+export function IconSidebarSystem({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+            <rect x='6' y='6' width='12' height='12' rx='2' />
+            <rect x='9' y='9' width='6' height='6' rx='1' fill='currentColor' fillOpacity='0.12' />
+            <path d='M6 10H3' />
+            <path d='M6 14H3' />
+            <path d='M21 10h-3' />
+            <path d='M21 14h-3' />
+            <path d='M10 6V3' />
+            <path d='M14 6V3' />
+            <path d='M10 21v-3' />
+            <path d='M14 21v-3' />
+        </svg>
+    )
+}
+
+export function IconChevronRight({ size = 20, ...props }: IconProps) {
+    return (
+        <svg {...baseSvgProps} width={size} height={size} {...props}>
+            <path d='m9 18 6-6-6-6' />
+        </svg>
+    )
+}
+
 export function IconPlus({ size = 20, ...props }: IconProps) {
     return (
         <svg {...baseSvgProps} width={size} height={size} {...props}>
@@ -349,17 +501,6 @@ export function IconLogIn({ size = 20, ...props }: IconProps) {
             <path d='M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4' />
             <polyline points='10 17 15 12 10 7' />
             <line x1='15' x2='3' y1='12' y2='12' />
-        </svg>
-    )
-}
-
-export function IconLayoutDashboard({ size = 20, ...props }: IconProps) {
-    return (
-        <svg {...baseSvgProps} width={size} height={size} {...props}>
-            <rect width='7' height='9' x='3' y='3' rx='1' />
-            <rect width='7' height='5' x='14' y='3' rx='1' />
-            <rect width='7' height='9' x='14' y='12' rx='1' />
-            <rect width='7' height='5' x='3' y='16' rx='1' />
         </svg>
     )
 }

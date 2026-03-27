@@ -35,7 +35,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
         textarea.focus()
         textarea.select()
         textarea.setSelectionRange(0, textarea.value.length)
-        // noinspection JSDeprecatedSymbols — execCommand is deprecated but needed as Clipboard API fallback
+        // execCommand is deprecated but needed as Clipboard API fallback
         const copied = document.execCommand('copy')
         document.body.removeChild(textarea)
 

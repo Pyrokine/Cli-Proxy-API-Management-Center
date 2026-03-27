@@ -15,13 +15,11 @@ import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {IconBookOpen, IconCode, IconExternalLink, IconGithub} from '@/components/ui/icons'
 import {Modal} from '@/components/ui/Modal'
-import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
-import {configApi} from '@/services/api'
+import {configApi, versionApi} from '@/services/api'
+import {apiKeysApi} from '@/services/api/apiKeys'
 import {updateApi} from '@/services/api/update'
 import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useThemeStore} from '@/stores'
-import {TIMEZONE_OPTIONS, useTimezoneStore} from '@/stores/useTimezoneStore'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
 import {formatDateTime} from '@/utils/format'
 import {classifyModels} from '@/utils/models'
@@ -41,6 +39,42 @@ const MODEL_CATEGORY_ICONS: Record<string, string | { light: string; dark: strin
     minimax: iconMinimax,
 }
 
+const parseVersionSegments = (version?: string | null) => {
+    if (!version) {
+        return null
+    }
+    const cleaned = version.trim().replace(/^v/i, '')
+    if (!cleaned) {
+        return null
+    }
+    const parts = cleaned
+        .split(/[^0-9]+/)
+        .filter(Boolean)
+        .map((segment) => Number.parseInt(segment, 10))
+        .filter(Number.isFinite)
+    return parts.length ? parts : null
+}
+
+const compareVersions = (latest?: string | null, current?: string | null) => {
+    const latestParts  = parseVersionSegments(latest)
+    const currentParts = parseVersionSegments(current)
+    if (!latestParts || !currentParts) {
+        return null
+    }
+    const length = Math.max(latestParts.length, currentParts.length)
+    for (let i = 0; i < length; i++) {
+        const l = latestParts[i] || 0
+        const c = currentParts[i] || 0
+        if (l > c) {
+            return 1
+        }
+        if (l < c) {
+            return -1
+        }
+    }
+    return 0
+}
+
 export function SystemPage() {
     const { t, i18n }                            = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
@@ -50,9 +84,6 @@ export function SystemPage() {
     const fetchConfig                            = useConfigStore((state) => state.fetchConfig)
     const clearCache                             = useConfigStore((state) => state.clearCache)
     const updateConfigValue                      = useConfigStore((state) => state.updateConfigValue)
-
-    const timezone    = useTimezoneStore((state) => state.timezone)
-    const setTimezone = useTimezoneStore((state) => state.setTimezone)
 
     const models               = useModelsStore((state) => state.models)
     const modelsLoading        = useModelsStore((state) => state.loading)
@@ -64,15 +95,16 @@ export function SystemPage() {
         message: string;
     }>()
     const [requestLogModalOpen, setRequestLogModalOpen] = useState(false)
-    const [versionHistoryOpen, setVersionHistoryOpen]   = useState(false)
     const [requestLogDraft, setRequestLogDraft]         = useState(false)
     const [requestLogTouched, setRequestLogTouched]     = useState(false)
     const [requestLogSaving, setRequestLogSaving]       = useState(false)
+    const [checkingVersion, setCheckingVersion]         = useState(false)
+    const [versionHistoryOpen, setVersionHistoryOpen]   = useState(false)
     const [panelUpdating, setPanelUpdating]             = useState(false)
 
-    const { resolve: resolveApiKeys, clearCache: clearApiKeysCache } = useApiKeysResolver()
-    const versionTapCount                                            = useRef(0)
-    const versionTapTimer                                            = useRef<number | null>(null)
+    const apiKeysCache    = useRef<string[]>([])
+    const versionTapCount = useRef(0)
+    const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const otherLabel        = useMemo(
         () => (i18n.language?.toLowerCase().startsWith('zh') ? '其他' : 'Other'),
@@ -83,20 +115,16 @@ export function SystemPage() {
     const requestLogDirty   = requestLogDraft !== requestLogEnabled
     const canEditRequestLog = auth.connectionStatus === 'connected' && Boolean(config)
 
-    const cpaRepository = useMemo(() => {
-        const rm = config?.raw?.['remote-management']
-        if (rm && typeof rm === 'object' && !Array.isArray(rm)) {
-            const repo = (rm as Record<string, unknown>)['cpa-github-repository']
-            return typeof repo === 'string' ? repo : undefined
-        }
-        return undefined
-    }, [config?.raw])
-
     const appVersion = __APP_VERSION__ || t('system_info.version_unknown')
     const apiVersion = auth.serverVersion || t('system_info.version_unknown')
     const buildTime  = auth.serverBuildDate
                        ? formatDateTime(auth.serverBuildDate, i18n.language)
                        : t('system_info.version_unknown')
+
+    const remoteManagement = config?.raw?.['remote-management'] as Record<string, unknown> | undefined
+    const cpaRepository    = typeof remoteManagement?.['cpa-github-repository'] === 'string'
+                             ? (remoteManagement['cpa-github-repository'] as string)
+                             : undefined
 
     const getIconForCategory = (categoryId: string): string | null => {
         const iconEntry = MODEL_CATEGORY_ICONS[categoryId]
@@ -108,6 +136,59 @@ export function SystemPage() {
         }
         return resolvedTheme === 'dark' ? iconEntry.dark : iconEntry.light
     }
+
+    const normalizeApiKeyList = (input: unknown): string[] => {
+        if (!Array.isArray(input)) {
+            return []
+        }
+        const seen           = new Set<string>()
+        const keys: string[] = []
+
+        input.forEach((item) => {
+            const record  =
+                      item !== null && typeof item === 'object' && !Array.isArray(item)
+                      ? (item as Record<string, unknown>)
+                      : null
+            const value   =
+                      typeof item === 'string'
+                      ? item
+                      : record
+                        ? (record['api-key'] ?? record['apiKey'] ?? record.key ?? record.Key)
+                        : ''
+            const trimmed = String(value ?? '').trim()
+            if (!trimmed || seen.has(trimmed)) {
+                return
+            }
+            seen.add(trimmed)
+            keys.push(trimmed)
+        })
+
+        return keys
+    }
+
+    const resolveApiKeysForModels = useCallback(async () => {
+        if (apiKeysCache.current.length) {
+            return apiKeysCache.current
+        }
+
+        const configKeys = normalizeApiKeyList(config?.apiKeys)
+        if (configKeys.length) {
+            apiKeysCache.current = configKeys
+            return configKeys
+        }
+
+        try {
+            const list       = await apiKeysApi.list()
+            const normalized = normalizeApiKeyList(list)
+            if (normalized.length) {
+                apiKeysCache.current = normalized
+            }
+            return normalized
+        } catch (err) {
+            console.warn('Auto loading API keys for models failed:', err)
+            return []
+        }
+    }, [config?.apiKeys])
 
     const fetchModels = async ({ forceRefresh = false }: { forceRefresh?: boolean } = {}) => {
         if (auth.connectionStatus !== 'connected') {
@@ -124,20 +205,20 @@ export function SystemPage() {
         }
 
         if (forceRefresh) {
-            clearApiKeysCache()
+            apiKeysCache.current = []
         }
 
         setModelStatus({ type: 'muted', message: t('system_info.models_loading') })
         try {
-            const apiKeys    = await resolveApiKeys()
+            const apiKeys    = await resolveApiKeysForModels()
             const primaryKey = apiKeys[0]
             const list       = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh)
             const hasModels  = list.length > 0
             setModelStatus({
                                type: hasModels ? 'success' : 'warning',
-                               message: hasModels ?
-                                        t('system_info.models_count', { count: list.length }) :
-                                        t('system_info.models_empty'),
+                               message: hasModels
+                                        ? t('system_info.models_count', { count: list.length })
+                                        : t('system_info.models_empty'),
                            })
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
@@ -171,19 +252,6 @@ export function SystemPage() {
                          })
     }
 
-    const handlePanelUpdate = async () => {
-        setPanelUpdating(true)
-        try {
-            await updateApi.panelUpdate()
-            showNotification(t('system_info.panel_update_success'), 'success')
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
-            showNotification(`${t('system_info.panel_update_failed')}${message ? `: ${message}` : ''}`, 'error')
-        } finally {
-            setPanelUpdating(false)
-        }
-    }
-
     const openRequestLogModal = useCallback(() => {
         setRequestLogTouched(false)
         setRequestLogDraft(requestLogEnabled)
@@ -203,7 +271,7 @@ export function SystemPage() {
             return
         }
 
-        versionTapTimer.current = window.setTimeout(() => {
+        versionTapTimer.current = setTimeout(() => {
             versionTapCount.current = 0
             versionTapTimer.current = null
         }, 1500)
@@ -233,13 +301,63 @@ export function SystemPage() {
             showNotification(t('notification.request_log_updated'), 'success')
             setRequestLogModalOpen(false)
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+            const message =
+                      error instanceof Error ? error.message : typeof error === 'string' ? error : ''
             updateConfigValue('request-log', previous)
-            showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
+            showNotification(
+                `${t('notification.update_failed')}${message ? `: ${message}` : ''}`,
+                'error',
+            )
         } finally {
             setRequestLogSaving(false)
         }
     }
+
+    const handleVersionCheck = useCallback(async () => {
+        setCheckingVersion(true)
+        try {
+            const data       = await versionApi.checkLatest()
+            const latestRaw  = data?.['latest-version'] ?? data?.latest_version ?? data?.latest ?? ''
+            const latest     = typeof latestRaw === 'string' ? latestRaw : String(latestRaw ?? '')
+            const comparison = compareVersions(latest, auth.serverVersion)
+
+            if (!latest) {
+                showNotification(t('system_info.version_check_error'), 'error')
+                return
+            }
+
+            if (comparison === null) {
+                showNotification(t('system_info.version_current_missing'), 'warning')
+                return
+            }
+
+            if (comparison > 0) {
+                showNotification(t('system_info.version_update_available', { version: latest }), 'warning')
+            } else {
+                showNotification(t('system_info.version_is_latest'), 'success')
+            }
+        } catch (error: unknown) {
+            const message =
+                      error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+            const suffix  = message ? `: ${message}` : ''
+            showNotification(`${t('system_info.version_check_error')}${suffix}`, 'error')
+        } finally {
+            setCheckingVersion(false)
+        }
+    }, [auth.serverVersion, showNotification, t])
+
+    const handlePanelUpdate = useCallback(async () => {
+        setPanelUpdating(true)
+        try {
+            await updateApi.panelUpdate()
+            showNotification(t('system_info.panel_update_success'), 'success')
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+            showNotification(`${t('system_info.panel_update_failed')}${message ? `: ${message}` : ''}`, 'error')
+        } finally {
+            setPanelUpdating(false)
+        }
+    }, [showNotification, t])
 
     useEffect(() => {
         fetchConfig().catch(() => {
@@ -277,14 +395,54 @@ export function SystemPage() {
                     </div>
 
                     <div className={styles.aboutInfoGrid}>
-                        <button type='button' className={`${styles.infoTile} ${styles.tapTile}`}
-                                onClick={handleInfoVersionTap}>
-                            <div className={styles.tileLabel}>{t('footer.version')}</div>
+                        <button
+                            type='button'
+                            className={`${styles.infoTile} ${styles.tapTile}`}
+                            onClick={handleInfoVersionTap}
+                        >
+                            <div className={styles.tileHeader}>
+                                <div className={styles.tileLabel}>{t('footer.version')}</div>
+                            </div>
                             <div className={styles.tileValue}>{appVersion}</div>
                         </button>
 
                         <div className={styles.infoTile}>
-                            <div className={styles.tileLabel}>{t('footer.api_version')}</div>
+                            <div className={styles.tileHeader}>
+                                <div className={styles.tileLabel}>{t('footer.api_version')}</div>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='sm'
+                                    className={styles.tileAction}
+                                    onClick={() => void handleVersionCheck()}
+                                    loading={checkingVersion}
+                                    title={t('system_info.version_check_button')}
+                                    aria-label={t('system_info.version_check_button')}
+                                >
+                                    {t('system_info.version_check_button')}
+                                </Button>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='sm'
+                                    className={styles.tileAction}
+                                    onClick={() => setVersionHistoryOpen(true)}
+                                    title={t('system_info.version_history_button', { defaultValue: 'Version History' })}
+                                >
+                                    {t('system_info.version_history_button', { defaultValue: 'Version History' })}
+                                </Button>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='sm'
+                                    className={styles.tileAction}
+                                    onClick={() => void handlePanelUpdate()}
+                                    loading={panelUpdating}
+                                    title={t('system_info.panel_update_button')}
+                                >
+                                    {t('system_info.panel_update_button')}
+                                </Button>
+                            </div>
                             <div className={styles.tileValue}>{apiVersion}</div>
                         </div>
 
@@ -299,60 +457,64 @@ export function SystemPage() {
                             <div className={styles.tileSub}>{auth.apiBase || '-'}</div>
                         </div>
                     </div>
-
-                    <div className={styles.aboutActions}>
-                        <Button variant='secondary' size='sm' onClick={() => setVersionHistoryOpen(true)}>
-                            {t('system_info.version_history_button')}
-                        </Button>
-                        <Button variant='secondary' size='sm' onClick={handlePanelUpdate} loading={panelUpdating}>
-                            {t('system_info.panel_update_button')}
-                        </Button>
-                        <Button variant='secondary' size='sm' onClick={() => fetchConfig(undefined, true)}>
-                            {t('common.refresh')}
-                        </Button>
-                    </div>
                 </Card>
 
                 <Card title={t('system_info.quick_links_title')}>
                     <p className={styles.sectionDescription}>{t('system_info.quick_links_desc')}</p>
                     <div className={styles.quickLinks}>
-                        {(
-                            [
-                                {
-                                    href: 'https://github.com/Pyrokine/CLIProxyAPI',
-                                    icon: <IconGithub size={22} />,
-                                    iconClass: styles.github,
-                                    title: t('system_info.link_main_repo'),
-                                    desc: t('system_info.link_main_repo_desc'),
-                                },
-                                {
-                                    href: 'https://github.com/Pyrokine/Cli-Proxy-API-Management-Center',
-                                    icon: <IconCode size={22} />,
-                                    iconClass: styles.github,
-                                    title: t('system_info.link_webui_repo'),
-                                    desc: t('system_info.link_webui_repo_desc'),
-                                },
-                                {
-                                    href: 'https://help.router-for.me/',
-                                    icon: <IconBookOpen size={22} />,
-                                    iconClass: styles.docs,
-                                    title: t('system_info.link_docs'),
-                                    desc: t('system_info.link_docs_desc'),
-                                },
-                            ] as const
-                        ).map((link) => (
-                            <a key={link.href} href={link.href} target='_blank' rel='noopener noreferrer'
-                               className={styles.linkCard}>
-                                <div className={`${styles.linkIcon} ${link.iconClass}`}>{link.icon}</div>
-                                <div className={styles.linkContent}>
-                                    <div className={styles.linkTitle}>
-                                        {link.title}
-                                        <IconExternalLink size={14} />
-                                    </div>
-                                    <div className={styles.linkDesc}>{link.desc}</div>
+                        <a
+                            href='https://github.com/Pyrokine/CLIProxyAPI'
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className={styles.linkCard}
+                        >
+                            <div className={`${styles.linkIcon} ${styles.github}`}>
+                                <IconGithub size={22} />
+                            </div>
+                            <div className={styles.linkContent}>
+                                <div className={styles.linkTitle}>
+                                    {t('system_info.link_main_repo')}
+                                    <IconExternalLink size={14} />
                                 </div>
-                            </a>
-                        ))}
+                                <div className={styles.linkDesc}>{t('system_info.link_main_repo_desc')}</div>
+                            </div>
+                        </a>
+
+                        <a
+                            href='https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className={styles.linkCard}
+                        >
+                            <div className={`${styles.linkIcon} ${styles.github}`}>
+                                <IconCode size={22} />
+                            </div>
+                            <div className={styles.linkContent}>
+                                <div className={styles.linkTitle}>
+                                    {t('system_info.link_webui_repo')}
+                                    <IconExternalLink size={14} />
+                                </div>
+                                <div className={styles.linkDesc}>{t('system_info.link_webui_repo_desc')}</div>
+                            </div>
+                        </a>
+
+                        <a
+                            href='https://help.router-for.me/'
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className={styles.linkCard}
+                        >
+                            <div className={`${styles.linkIcon} ${styles.docs}`}>
+                                <IconBookOpen size={22} />
+                            </div>
+                            <div className={styles.linkContent}>
+                                <div className={styles.linkTitle}>
+                                    {t('system_info.link_docs')}
+                                    <IconExternalLink size={14} />
+                                </div>
+                                <div className={styles.linkDesc}>{t('system_info.link_docs_desc')}</div>
+                            </div>
+                        </a>
                     </div>
                 </Card>
 
@@ -370,7 +532,9 @@ export function SystemPage() {
                     }
                 >
                     <p className={styles.sectionDescription}>{t('system_info.models_desc')}</p>
-                    {modelStatus && <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>}
+                    {modelStatus && (
+                        <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>
+                    )}
                     {modelsError && <div className='error-box'>{modelsError}</div>}
                     {modelsLoading ? (
                         <div className='hint'>{t('common.loading')}</div>
@@ -410,18 +574,6 @@ export function SystemPage() {
                                 })}
                             </div>
                         )}
-                </Card>
-
-                <Card title={t('system_info.timezone_title')}>
-                    <p className={styles.sectionDescription}>{t('system_info.timezone_desc')}</p>
-                    <Select
-                        value={timezone}
-                        options={TIMEZONE_OPTIONS.map((opt) => ({
-                            value: opt.value,
-                            label: opt.value === '' ? t('system_info.timezone_system') : opt.label,
-                        }))}
-                        onChange={setTimezone}
-                    />
                 </Card>
 
                 <Card title={t('system_info.clear_login_title')}>
@@ -471,7 +623,7 @@ export function SystemPage() {
             <VersionHistoryModal
                 open={versionHistoryOpen}
                 onClose={() => setVersionHistoryOpen(false)}
-                currentVersion={apiVersion}
+                currentVersion={auth.serverVersion || ''}
                 cpaRepository={cpaRepository}
             />
         </div>

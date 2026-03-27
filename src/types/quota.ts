@@ -20,6 +20,26 @@ export interface GeminiCliQuotaPayload {
     buckets?: GeminiCliQuotaBucket[];
 }
 
+export interface GeminiCliCredits {
+    creditType?: string;
+    credit_type?: string;
+    creditAmount?: number | string;
+    credit_amount?: number | string;
+}
+
+export interface GeminiCliUserTier {
+    id?: string;
+    availableCredits?: GeminiCliCredits[];
+    available_credits?: GeminiCliCredits[];
+}
+
+export interface GeminiCliCodeAssistPayload {
+    currentTier?: GeminiCliUserTier | null;
+    current_tier?: GeminiCliUserTier | null;
+    paidTier?: GeminiCliUserTier | null;
+    paid_tier?: GeminiCliUserTier | null;
+}
+
 export interface AntigravityQuotaInfo {
     displayName?: string;
     quotaInfo?: {
@@ -127,6 +147,28 @@ export interface ClaudeUsagePayload {
     extra_usage?: ClaudeExtraUsage | null;
 }
 
+export interface ClaudeProfileResponse {
+    account?: {
+        uuid?: string;
+        full_name?: string;
+        display_name?: string;
+        email?: string;
+        has_claude_max?: boolean;
+        has_claude_pro?: boolean;
+        created_at?: string;
+    };
+    organization?: {
+        uuid?: string;
+        name?: string;
+        organization_type?: string;
+        billing_type?: string;
+        rate_limit_tier?: string;
+        has_extra_usage_enabled?: boolean;
+        subscription_status?: string;
+        subscription_created_at?: string;
+    };
+}
+
 export interface ClaudeQuotaWindow {
     id: string;
     label: string;
@@ -139,6 +181,7 @@ export interface ClaudeQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error';
     windows: ClaudeQuotaWindow[];
     extraUsage?: ClaudeExtraUsage | null;
+    planType?: string | null;
     error?: string;
     errorStatus?: number;
 }
@@ -172,6 +215,9 @@ export interface GeminiCliQuotaBucketState {
 export interface GeminiCliQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error';
     buckets: GeminiCliQuotaBucketState[];
+    tierLabel?: string | null;
+    tierId?: string | null;
+    creditBalance?: number | null;
     error?: string;
     errorStatus?: number;
 }

@@ -213,9 +213,10 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         if (ginIndex >= 0) {
             const match = segments[ginIndex].match(GIN_TIMESTAMP_SEGMENT_REGEX)
             if (match?.groups) {
-                const ginTimestamp     = `${match.groups.year}-${match.groups.month}-${match.groups.day} ${match.groups.time}`
-                const normalizedGin    = normalizeTimestampToSeconds(ginTimestamp)
-                const normalizedParsed = timestamp ? normalizeTimestampToSeconds(timestamp) : undefined
+                const { year, month, day, time } = match.groups
+                const ginTimestamp               = `${year}-${month}-${day} ${time}`
+                const normalizedGin              = normalizeTimestampToSeconds(ginTimestamp)
+                const normalizedParsed           = timestamp ? normalizeTimestampToSeconds(timestamp) : undefined
 
                 if (!timestamp) {
                     timestamp = ginTimestamp

@@ -40,11 +40,14 @@ export function MultiSelect({
     const { t }               = useTranslation()
 
     // Clear search when dropdown closes
-    useEffect(() => {
-        if (!isOpen) {
-            setSearch('')
-        }
-    }, [isOpen])
+    const [prevOpen, setPrevOpen] = useState(isOpen)
+    if (prevOpen && !isOpen) {
+        setPrevOpen(false)
+        setSearch('')
+    }
+    if (!prevOpen && isOpen) {
+        setPrevOpen(true)
+    }
 
     useEffect(() => {
         if (isOpen && searchRef.current) {

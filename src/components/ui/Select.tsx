@@ -15,7 +15,10 @@ interface SelectProps {
     placeholder?: string;
     className?: string;
     disabled?: boolean;
+    id?: string;
     ariaLabel?: string;
+    ariaLabelledBy?: string;
+    ariaDescribedBy?: string;
     fullWidth?: boolean;
 }
 
@@ -26,7 +29,10 @@ export function Select({
                            placeholder,
                            className,
                            disabled = false,
+                           id,
                            ariaLabel,
+                           ariaLabelledBy,
+                           ariaDescribedBy,
                            fullWidth = true,
                        }: SelectProps) {
     const { isOpen, pos, wrapRef, dropdownRef, toggle, close } = useDropdown(options.length, 240, disabled)
@@ -41,9 +47,12 @@ export function Select({
                 type='button'
                 className={styles.trigger}
                 onClick={toggle}
+                id={id}
                 aria-haspopup='listbox'
                 aria-expanded={isOpen}
                 aria-label={ariaLabel}
+                aria-labelledby={ariaLabelledBy}
+                aria-describedby={ariaDescribedBy}
                 disabled={disabled}
             >
                 <span

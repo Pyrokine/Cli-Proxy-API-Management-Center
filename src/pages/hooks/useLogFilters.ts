@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react'
+import {useMemo, useState} from 'react'
 import type {HttpMethod, ParsedLogLine, StatusGroup} from './logTypes'
 import {resolveStatusGroup} from './logTypes'
 
@@ -75,7 +75,9 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
     }, [parsedLines])
 
     // Clean up invalid path filters when available paths change
-    useEffect(() => {
+    const [prevPathOptions, setPrevPathOptions] = useState(pathOptions)
+    if (prevPathOptions !== pathOptions) {
+        setPrevPathOptions(pathOptions)
         const validPathSet = new Set(pathOptions.map((item) => item.path))
         setPathFilters((prev) => {
             if (prev.length === 0) {
@@ -84,7 +86,7 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
             const next = prev.filter((path) => validPathSet.has(path))
             return next.length === prev.length ? prev : next
         })
-    }, [pathOptions])
+    }
 
     const toggleMethodFilter = (method: HttpMethod) => {
         setMethodFilters((prev) => (prev.includes(method) ?

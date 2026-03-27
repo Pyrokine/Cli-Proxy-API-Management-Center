@@ -2,18 +2,20 @@ import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
 import {PageTransition} from '@/components/common/PageTransition'
 import {Button} from '@/components/ui/Button'
 import {
-    IconChartLine,
-    IconInfo,
-    IconKey,
-    IconLayoutDashboard,
-    IconScrollText,
-    IconSettings,
-    IconTimer,
+    IconSidebarAuthFiles,
+    IconSidebarConfig,
+    IconSidebarDashboard,
+    IconSidebarLogs,
+    IconSidebarOauth,
+    IconSidebarProviders,
+    IconSidebarQuota,
+    IconSidebarSystem,
+    IconSidebarUsage,
 } from '@/components/ui/icons'
 import {triggerHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {MainRoutes} from '@/router/MainRoutes'
-import {versionApi} from '@/services/api'
 import {useAuthStore, useConfigStore, useLanguageStore, useNotificationStore, useThemeStore} from '@/stores'
+import type {Theme} from '@/types'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
 import {isSupportedLanguage} from '@/utils/language'
 import {ReactNode, SVGProps, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react'
@@ -21,19 +23,21 @@ import {useTranslation} from 'react-i18next'
 import {NavLink, useLocation} from 'react-router-dom'
 
 const sidebarIcons: Record<string, ReactNode> = {
-    dashboard: <IconLayoutDashboard size={15} />,
-    credentials: <IconKey size={15} />,
-    quota: <IconTimer size={15} />,
-    usage: <IconChartLine size={15} />,
-    config: <IconSettings size={15} />,
-    logs: <IconScrollText size={15} />,
-    system: <IconInfo size={15} />,
+    dashboard: <IconSidebarDashboard size={18} />,
+    aiProviders: <IconSidebarProviders size={18} />,
+    authFiles: <IconSidebarAuthFiles size={18} />,
+    oauth: <IconSidebarOauth size={18} />,
+    quota: <IconSidebarQuota size={18} />,
+    usage: <IconSidebarUsage size={18} />,
+    config: <IconSidebarConfig size={18} />,
+    logs: <IconSidebarLogs size={18} />,
+    system: <IconSidebarSystem size={18} />,
 }
 
 // Header action icons - smaller size for header buttons
 const headerIconProps: SVGProps<SVGSVGElement> = {
-    width: 14,
-    height: 14,
+    width: 16,
+    height: 16,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
@@ -49,12 +53,6 @@ const headerIcons = {
         <svg {...headerIconProps}>
             <path d='M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8' />
             <path d='M21 3v5h-5' />
-        </svg>
-    ),
-    update: (
-        <svg {...headerIconProps}>
-            <path d='M12 19V5' />
-            <path d='m5 12 7-7 7 7' />
         </svg>
     ),
     menu: (
@@ -99,6 +97,12 @@ const headerIcons = {
             <path d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z' />
         </svg>
     ),
+    whiteTheme: (
+        <svg {...headerIconProps}>
+            <circle cx='12' cy='12' r='7' />
+            <circle cx='12' cy='12' r='3' fill='currentColor' stroke='none' />
+        </svg>
+    ),
     autoTheme: (
         <svg {...headerIconProps}>
             <defs>
@@ -107,7 +111,13 @@ const headerIcons = {
                 </clipPath>
             </defs>
             <circle cx='12' cy='12' r='4' />
-            <circle cx='12' cy='12' r='4' clipPath='url(#mainLayoutAutoThemeSunLeftHalf)' fill='currentColor' />
+            <circle
+                cx='12'
+                cy='12'
+                r='4'
+                clipPath='url(#mainLayoutAutoThemeSunLeftHalf)'
+                fill='currentColor'
+            />
             <path d='M12 2v2' />
             <path d='M12 20v2' />
             <path d='M4.93 4.93l1.41 1.41' />
@@ -127,41 +137,56 @@ const headerIcons = {
     ),
 }
 
-const parseVersionSegments = (version?: string | null) => {
-    if (!version) {
-        return null
-    }
-    const cleaned = version.trim().replace(/^v/i, '')
-    if (!cleaned) {
-        return null
-    }
-    const parts = cleaned
-        .split(/[^0-9]+/)
-        .filter(Boolean)
-        .map((segment) => Number.parseInt(segment, 10))
-        .filter(Number.isFinite)
-    return parts.length ? parts : null
-}
-
-const compareVersions = (latest?: string | null, current?: string | null) => {
-    const latestParts  = parseVersionSegments(latest)
-    const currentParts = parseVersionSegments(current)
-    if (!latestParts || !currentParts) {
-        return null
-    }
-    const length = Math.max(latestParts.length, currentParts.length)
-    for (let i = 0; i < length; i++) {
-        const l = latestParts[i] || 0
-        const c = currentParts[i] || 0
-        if (l > c) {
-            return 1
-        }
-        if (l < c) {
-            return -1
-        }
-    }
-    return 0
-}
+const THEME_CARDS: Array<{
+    key: Theme;
+    labelKey: string;
+    colors: { bg: string; card: string; border: string; text: string; textMuted: string };
+}> = [
+    {
+        key: 'auto',
+        labelKey: 'theme.auto',
+        colors: {
+            bg: 'linear-gradient(135deg, #ffffff 0 50%, #111111 50% 100%)',
+            card: 'linear-gradient(135deg, #ffffff 0 50%, #1a1a1a 50% 100%)',
+            border: '#bdbdbd',
+            text: '#2d2a26',
+            textMuted: 'linear-gradient(135deg, #c9c9c9 0 50%, #5a5a5a 50% 100%)',
+        },
+    },
+    {
+        key: 'white',
+        labelKey: 'theme.white',
+        colors: {
+            bg: '#ffffff',
+            card: '#ffffff',
+            border: '#e5e5e5',
+            text: '#2d2a26',
+            textMuted: '#a29c95',
+        },
+    },
+    {
+        key: 'light',
+        labelKey: 'theme.light',
+        colors: {
+            bg: '#faf9f5',
+            card: '#f0eee8',
+            border: '#e3e1db',
+            text: '#2d2a26',
+            textMuted: '#a29c95',
+        },
+    },
+    {
+        key: 'dark',
+        labelKey: 'theme.dark',
+        colors: {
+            bg: '#151412',
+            card: '#1d1b18',
+            border: '#3a3530',
+            text: '#f6f4f1',
+            textMuted: '#9c958d',
+        },
+    },
+]
 
 export function MainLayout() {
     const { t }                = useTranslation()
@@ -169,7 +194,6 @@ export function MainLayout() {
     const location             = useLocation()
 
     const apiBase          = useAuthStore((state) => state.apiBase)
-    const serverVersion    = useAuthStore((state) => state.serverVersion)
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
     const logout           = useAuthStore((state) => state.logout)
 
@@ -178,18 +202,19 @@ export function MainLayout() {
     const clearCache  = useConfigStore((state) => state.clearCache)
 
     const theme       = useThemeStore((state) => state.theme)
-    const cycleTheme  = useThemeStore((state) => state.cycleTheme)
+    const setTheme    = useThemeStore((state) => state.setTheme)
     const language    = useLanguageStore((state) => state.language)
     const setLanguage = useLanguageStore((state) => state.setLanguage)
 
     const [sidebarOpen, setSidebarOpen]           = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-    const [checkingVersion, setCheckingVersion]   = useState(false)
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
+    const [themeMenuOpen, setThemeMenuOpen]       = useState(false)
     const [brandExpanded, setBrandExpanded]       = useState(true)
     const contentRef                              = useRef<HTMLDivElement | null>(null)
     const languageMenuRef                         = useRef<HTMLDivElement | null>(null)
-    const brandCollapseTimer                      = useRef<number | null>(null)
+    const themeMenuRef                            = useRef<HTMLDivElement | null>(null)
+    const brandCollapseTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
     const headerRef                               = useRef<HTMLElement | null>(null)
 
     const fullBrandName = 'CLI Proxy API Management Center'
@@ -208,9 +233,9 @@ export function MainLayout() {
         updateHeaderHeight()
 
         const resizeObserver =
-                  typeof ResizeObserver !== 'undefined' && headerRef.current ?
-                  new ResizeObserver(updateHeaderHeight) :
-                  null
+                  typeof ResizeObserver !== 'undefined' && headerRef.current
+                  ? new ResizeObserver(updateHeaderHeight)
+                  : null
         if (resizeObserver && headerRef.current) {
             resizeObserver.observe(headerRef.current)
         }
@@ -225,8 +250,7 @@ export function MainLayout() {
         }
     }, [])
 
-    // 将主内容区的中心点写入 CSS 变量，
-    // 供底部浮层（配置面板操作栏、提供商导航）对齐到内容区
+    // 将主内容区的中心点写入 CSS 变量，供底部浮层（配置面板操作栏、提供商导航）对齐到内容区
     useLayoutEffect(() => {
         const updateContentCenter = () => {
             const el = contentRef.current
@@ -241,9 +265,9 @@ export function MainLayout() {
         updateContentCenter()
 
         const resizeObserver =
-                  typeof ResizeObserver !== 'undefined' && contentRef.current ?
-                  new ResizeObserver(updateContentCenter) :
-                  null
+                  typeof ResizeObserver !== 'undefined' && contentRef.current
+                  ? new ResizeObserver(updateContentCenter)
+                  : null
 
         if (resizeObserver && contentRef.current) {
             resizeObserver.observe(contentRef.current)
@@ -262,7 +286,7 @@ export function MainLayout() {
 
     // 5秒后自动收起品牌名称
     useEffect(() => {
-        brandCollapseTimer.current = window.setTimeout(() => {
+        brandCollapseTimer.current = setTimeout(() => {
             setBrandExpanded(false)
         }, 5000)
 
@@ -299,6 +323,32 @@ export function MainLayout() {
         }
     }, [languageMenuOpen])
 
+    useEffect(() => {
+        if (!themeMenuOpen) {
+            return
+        }
+
+        const handlePointerDown = (event: MouseEvent) => {
+            if (!themeMenuRef.current?.contains(event.target as Node)) {
+                setThemeMenuOpen(false)
+            }
+        }
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setThemeMenuOpen(false)
+            }
+        }
+
+        document.addEventListener('mousedown', handlePointerDown)
+        document.addEventListener('keydown', handleEscape)
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown)
+            document.removeEventListener('keydown', handleEscape)
+        }
+    }, [themeMenuOpen])
+
     const handleBrandClick = useCallback(() => {
         if (!brandExpanded) {
             setBrandExpanded(true)
@@ -306,7 +356,7 @@ export function MainLayout() {
             if (brandCollapseTimer.current) {
                 clearTimeout(brandCollapseTimer.current)
             }
-            brandCollapseTimer.current = window.setTimeout(() => {
+            brandCollapseTimer.current = setTimeout(() => {
                 setBrandExpanded(false)
             }, 5000)
         }
@@ -314,7 +364,21 @@ export function MainLayout() {
 
     const toggleLanguageMenu = useCallback(() => {
         setLanguageMenuOpen((prev) => !prev)
+        setThemeMenuOpen(false)
     }, [])
+
+    const toggleThemeMenu = useCallback(() => {
+        setThemeMenuOpen((prev) => !prev)
+        setLanguageMenuOpen(false)
+    }, [])
+
+    const handleThemeSelect = useCallback(
+        (nextTheme: Theme) => {
+            setTheme(nextTheme)
+            setThemeMenuOpen(false)
+        },
+        [setTheme],
+    )
 
     const handleLanguageSelect = useCallback(
         (nextLanguage: string) => {
@@ -345,18 +409,17 @@ export function MainLayout() {
     const navItems      = [
         { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
         { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
-        {
-            path: '/credentials',
-            label: t('nav.credentials', { defaultValue: 'Credentials' }),
-            icon: sidebarIcons.credentials,
-        },
+        { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
         { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
-        ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
+        ...(config?.loggingToFile
+            ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
+            : []),
         { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
     ]
     const navOrder      = navItems.map((item) => item.path)
     const getRouteOrder = (pathname: string) => {
-        const trimmedPath    = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+        const trimmedPath    =
+                  pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
         const normalizedPath = trimmedPath === '/dashboard' ? '/' : trimmedPath
 
         const credentialsIndex = navOrder.indexOf('/credentials')
@@ -383,6 +446,9 @@ export function MainLayout() {
                 if (normalizedPath.startsWith('/credentials/openai')) {
                     return credentialsIndex + 0.6
                 }
+                if (normalizedPath.startsWith('/credentials/oauth')) {
+                    return credentialsIndex + 0.7
+                }
                 return credentialsIndex + 0.05
             }
         }
@@ -391,19 +457,23 @@ export function MainLayout() {
         if (exactIndex !== -1) {
             return exactIndex
         }
-        const nestedIndex = navOrder.findIndex((path) => path !== '/' && normalizedPath.startsWith(`${path}/`))
+        const nestedIndex = navOrder.findIndex(
+            (path) => path !== '/' && normalizedPath.startsWith(`${path}/`),
+        )
         return nestedIndex === -1 ? null : nestedIndex
     }
 
     const getTransitionVariant = useCallback((fromPathname: string, toPathname: string) => {
         const normalize = (pathname: string) => {
-            const trimmed = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+            const trimmed =
+                      pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
             return trimmed === '/dashboard' ? '/' : trimmed
         }
 
         const from          = normalize(fromPathname)
         const to            = normalize(toPathname)
-        const isCredentials = (pathname: string) => pathname === '/credentials' || pathname.startsWith('/credentials/')
+        const isCredentials = (pathname: string) =>
+            pathname === '/credentials' || pathname.startsWith('/credentials/')
         if (isCredentials(from) && isCredentials(to)) {
             return 'ios'
         }
@@ -412,47 +482,22 @@ export function MainLayout() {
 
     const handleRefreshAll = async () => {
         clearCache()
-        const results  = await Promise.allSettled([fetchConfig(undefined, true), triggerHeaderRefresh()])
+        const results  = await Promise.allSettled([
+                                                      fetchConfig(undefined, true),
+                                                      triggerHeaderRefresh(),
+                                                  ])
         const rejected = results.find((result) => result.status === 'rejected')
         if (rejected && rejected.status === 'rejected') {
             const reason  = rejected.reason
-            const message = typeof reason === 'string' ? reason : reason instanceof Error ? reason.message : ''
-            showNotification(`${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`, 'error')
+            const message =
+                      typeof reason === 'string' ? reason : reason instanceof Error ? reason.message : ''
+            showNotification(
+                `${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`,
+                'error',
+            )
             return
         }
         showNotification(t('notification.data_refreshed'), 'success')
-    }
-
-    const handleVersionCheck = async () => {
-        setCheckingVersion(true)
-        try {
-            const data       = await versionApi.checkLatest()
-            const latestRaw  = data?.['latest-version'] ?? data?.latest_version ?? data?.latest ?? ''
-            const latest     = typeof latestRaw === 'string' ? latestRaw : String(latestRaw ?? '')
-            const comparison = compareVersions(latest, serverVersion)
-
-            if (!latest) {
-                showNotification(t('system_info.version_check_error'), 'error')
-                return
-            }
-
-            if (comparison === null) {
-                showNotification(t('system_info.version_current_missing'), 'warning')
-                return
-            }
-
-            if (comparison > 0) {
-                showNotification(t('system_info.version_update_available', { version: latest }), 'warning')
-            } else {
-                showNotification(t('system_info.version_is_latest'), 'success')
-            }
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
-            const suffix  = message ? `: ${message}` : ''
-            showNotification(`${t('system_info.version_check_error')}${suffix}`, 'error')
-        } finally {
-            setCheckingVersion(false)
-        }
     }
 
     return (
@@ -504,19 +549,18 @@ export function MainLayout() {
                         >
                             {headerIcons.menu}
                         </Button>
-                        <Button variant='ghost' size='sm' onClick={handleRefreshAll} title={t('header.refresh_all')}>
-                            {headerIcons.refresh}
-                        </Button>
                         <Button
                             variant='ghost'
                             size='sm'
-                            onClick={handleVersionCheck}
-                            loading={checkingVersion}
-                            title={t('system_info.version_check_button')}
+                            onClick={handleRefreshAll}
+                            title={t('header.refresh_all')}
                         >
-                            {headerIcons.update}
+                            {headerIcons.refresh}
                         </Button>
-                        <div className={`language-menu ${languageMenuOpen ? 'open' : ''}`} ref={languageMenuRef}>
+                        <div
+                            className={`language-menu ${languageMenuOpen ? 'open' : ''}`}
+                            ref={languageMenuRef}
+                        >
                             <Button
                                 variant='ghost'
                                 size='sm'
@@ -550,11 +594,80 @@ export function MainLayout() {
                                 </div>
                             )}
                         </div>
-                        <Button variant='ghost' size='sm' onClick={cycleTheme} title={t('theme.switch')}>
-                            {theme === 'auto' ?
-                             headerIcons.autoTheme :
-                             theme === 'dark' ? headerIcons.moon : headerIcons.sun}
-                        </Button>
+                        <div className={`theme-menu ${themeMenuOpen ? 'open' : ''}`} ref={themeMenuRef}>
+                            <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={toggleThemeMenu}
+                                title={t('theme.switch')}
+                                aria-label={t('theme.switch')}
+                                aria-haspopup='menu'
+                                aria-expanded={themeMenuOpen}
+                            >
+                                {theme === 'auto'
+                                 ? headerIcons.autoTheme
+                                 : theme === 'dark'
+                                   ? headerIcons.moon
+                                   : theme === 'white'
+                                     ? headerIcons.whiteTheme
+                                     : headerIcons.sun}
+                            </Button>
+                            {themeMenuOpen && (
+                                <div
+                                    className='notification entering theme-menu-popover'
+                                    role='menu'
+                                    aria-label={t('theme.switch')}
+                                >
+                                    {THEME_CARDS.map((tc) => (
+                                        <button
+                                            key={tc.key}
+                                            type='button'
+                                            className={`theme-card ${theme === tc.key ? 'active' : ''}`}
+                                            onClick={() => handleThemeSelect(tc.key)}
+                                            role='menuitemradio'
+                                            aria-checked={theme === tc.key}
+                                        >
+                                            <div
+                                                className='theme-card-preview'
+                                                style={{
+                                                    background: tc.colors.bg,
+                                                    border: `1px solid ${tc.colors.border}`,
+                                                }}
+                                            >
+                                                <div
+                                                    className='theme-card-header'
+                                                    style={{
+                                                        background: tc.colors.card,
+                                                        borderBottom: `1px solid ${tc.colors.border}`,
+                                                    }}
+                                                />
+                                                <div className='theme-card-body'>
+                                                    <div
+                                                        className='theme-card-sidebar'
+                                                        style={{
+                                                            background: tc.colors.card,
+                                                            borderRight: `1px solid ${tc.colors.border}`,
+                                                        }}
+                                                    />
+                                                    <div className='theme-card-content'
+                                                         style={{ background: tc.colors.bg }}>
+                                                        <div
+                                                            className='theme-card-line'
+                                                            style={{ background: tc.colors.textMuted }}
+                                                        />
+                                                        <div
+                                                            className='theme-card-line short'
+                                                            style={{ background: tc.colors.textMuted }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span className='theme-card-label'>{t(tc.labelKey)}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                         <Button variant='ghost' size='sm' onClick={logout} title={t('header.logout')}>
                             {headerIcons.logout}
                         </Button>
@@ -563,7 +676,18 @@ export function MainLayout() {
             </header>
 
             <div className='main-body'>
-                <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>
+                <button
+                    type='button'
+                    className={`sidebar-backdrop ${sidebarOpen ? 'visible' : ''}`}
+                    onClick={() => setSidebarOpen(false)}
+                    aria-label={t('common.close')}
+                    aria-hidden={!sidebarOpen}
+                    tabIndex={sidebarOpen ? 0 : -1}
+                />
+
+                <aside
+                    className={`sidebar ${sidebarOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}
+                >
                     <div className='nav-section'>
                         {navItems.map((item) => (
                             <NavLink

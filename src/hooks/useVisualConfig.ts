@@ -1,4 +1,13 @@
-import type {PayloadFilterRule, PayloadParamValueType, PayloadRule, VisualConfigValues} from '@/types/visualConfig'
+import type {
+    PayloadFilterRule,
+    PayloadParamEntry,
+    PayloadParamValidationErrorCode,
+    PayloadParamValueType,
+    PayloadRule,
+    VisualConfigValidationErrorCode,
+    VisualConfigValidationErrors,
+    VisualConfigValues,
+} from '@/types/visualConfig'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 import {useCallback, useMemo, useState} from 'react'
 import {isMap, parse as parseYaml, parseDocument} from 'yaml'
@@ -61,7 +70,8 @@ function ensureMapInDoc(doc: YamlDocument, path: YamlPath): void {
     if (isMap(existing)) {
         return
     }
-    doc.setIn(path, {})
+    // Use a YAML node here; plain objects are not treated as collections by subsequent `setIn`.
+    doc.setIn(path, doc.createNode({}))
 }
 
 function deleteIfMapEmpty(doc: YamlDocument, path: YamlPath): void {
@@ -147,14 +157,11 @@ function parsePayloadParamValue(raw: unknown): { valueType: PayloadParamValueTyp
     return { valueType: 'string', value: String(raw ?? '') }
 }
 
-const PAYLOAD_PROTOCOL_VALUES = ['openai', 'openai-response', 'gemini', 'claude', 'codex', 'antigravity'] as const
-type PayloadProtocol = (typeof PAYLOAD_PROTOCOL_VALUES)[number];
-
-function parsePayloadProtocol(raw: unknown): PayloadProtocol | undefined {
+function parsePayloadProtocol(raw: unknown): string | undefined {
     if (typeof raw !== 'string') {
         return undefined
     }
-    return PAYLOAD_PROTOCOL_VALUES.includes(raw as PayloadProtocol) ? (raw as PayloadProtocol) : undefined
+    return raw.trim() ? raw : undefined
 }
 
 function parsePayloadRules(rules: unknown): PayloadRule[] {
@@ -225,6 +232,150 @@ function parsePayloadFilterRules(rules: unknown): PayloadFilterRule[] {
     })
 }
 
+function resolveApiKeysText(parsed: Record<string, unknown>): string {
+    if (Object.prototype.hasOwnProperty.call(parsed, 'api-keys')) {
+        return parseApiKeysText(parsed['api-keys'])
+    }
+
+    const auth                 = asRecord(parsed.auth)
+    const providers            = asRecord(auth?.providers)
+    const configApiKeyProvider = asRecord(providers?.['config-api-key'])
+    if (!configApiKeyProvider) {
+        return ''
+    }
+
+    if (Object.prototype.hasOwnProperty.call(configApiKeyProvider, 'api-key-entries')) {
+        return parseApiKeysText(configApiKeyProvider['api-key-entries'])
+    }
+
+    return parseApiKeysText(configApiKeyProvider['api-keys'])
+}
+
+function parseRawPayloadParamValue(raw: unknown): string {
+    if (typeof raw === 'string') {
+        return raw
+    }
+    try {
+        const json = JSON.stringify(raw, null, 2)
+        return json ?? ''
+    } catch {
+        return String(raw ?? '')
+    }
+}
+
+function parseRawPayloadRules(rules: unknown): PayloadRule[] {
+    if (!Array.isArray(rules)) {
+        return []
+    }
+
+    return rules.map((rule, index) => {
+        const record = asRecord(rule) ?? {}
+
+        const modelsRaw = record.models
+        const models    = Array.isArray(modelsRaw)
+                          ? modelsRaw.map((model, modelIndex) => {
+                const modelRecord = asRecord(model)
+                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                return {
+                    id: `raw-model-${index}-${modelIndex}`,
+                    name,
+                    protocol: parsePayloadProtocol(modelRecord?.protocol),
+                }
+            })
+                          : []
+
+        const paramsRecord = asRecord(record.params)
+        const params       = paramsRecord
+                             ? Object.entries(paramsRecord).map(([path, value], pIndex) => ({
+                id: `raw-param-${index}-${pIndex}`,
+                path,
+                valueType: 'json' as const,
+                value: parseRawPayloadParamValue(value),
+            }))
+                             : []
+
+        return { id: `payload-raw-rule-${index}`, models, params }
+    })
+}
+
+function getPortError(value: string): VisualConfigValidationErrorCode | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    const parsed = Number(trimmed)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+        return 'port_range'
+    }
+    return undefined
+}
+
+function getNonNegativeIntegerError(value: string): VisualConfigValidationErrorCode | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    const parsed = Number(trimmed)
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        return 'non_negative_integer'
+    }
+    return undefined
+}
+
+function getVisualConfigValidationErrors(
+    values: VisualConfigValues,
+): VisualConfigValidationErrors {
+    return {
+        port: getPortError(values.port),
+        logsMaxTotalSizeMb: getNonNegativeIntegerError(values.logsMaxTotalSizeMb),
+        requestRetry: getNonNegativeIntegerError(values.requestRetry),
+        maxRetryCredentials: getNonNegativeIntegerError(values.maxRetryCredentials),
+        maxRetryInterval: getNonNegativeIntegerError(values.maxRetryInterval),
+        'streaming.keepaliveSeconds': getNonNegativeIntegerError(values.streaming.keepaliveSeconds),
+        'streaming.bootstrapRetries': getNonNegativeIntegerError(values.streaming.bootstrapRetries),
+        'streaming.nonstreamKeepaliveInterval': getNonNegativeIntegerError(values.streaming.nonstreamKeepaliveInterval),
+    }
+}
+
+export function getPayloadParamValidationError(
+    param: PayloadParamEntry,
+): PayloadParamValidationErrorCode | undefined {
+    const trimmedValue = param.value.trim()
+    if (!trimmedValue) {
+        return undefined
+    }
+
+    if (param.valueType === 'number') {
+        const parsed = Number(trimmedValue)
+        if (!Number.isFinite(parsed)) {
+            return 'payload_invalid_number'
+        }
+    }
+
+    if (param.valueType === 'boolean') {
+        if (trimmedValue !== 'true' && trimmedValue !== 'false') {
+            return 'payload_invalid_boolean'
+        }
+    }
+
+    if (param.valueType === 'json') {
+        try {
+            JSON.parse(trimmedValue)
+        } catch {
+            return 'payload_invalid_json'
+        }
+    }
+
+    return undefined
+}
+
+function hasPayloadParamValidationErrors(rules: PayloadRule[]): boolean {
+    return rules.some((rule) =>
+                          rule.params.some((param) => getPayloadParamValidationError(param) !== undefined),
+    )
+}
+
 function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string, unknown>> {
     return rules
         .map((rule) => {
@@ -285,14 +436,65 @@ function serializePayloadFilterRulesForYaml(rules: PayloadFilterRule[]): Array<R
         .filter((rule) => rule.models.length > 0)
 }
 
+function serializeRawPayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string, unknown>> {
+    return rules
+        .map((rule) => {
+            const models = (rule.models || [])
+                .filter((m) => m.name?.trim())
+                .map((m) => {
+                    const obj: Record<string, unknown> = { name: m.name.trim() }
+                    if (m.protocol) {
+                        obj.protocol = m.protocol
+                    }
+                    return obj
+                })
+
+            const params: Record<string, unknown> = {}
+            for (const param of rule.params || []) {
+                if (!param.path?.trim()) {
+                    continue
+                }
+                params[param.path.trim()] = param.value
+            }
+
+            return { models, params }
+        })
+        .filter((rule) => rule.models.length > 0)
+}
+
 export function useVisualConfig() {
     const [visualValues, setVisualValuesState] = useState<VisualConfigValues>({
                                                                                   ...DEFAULT_VISUAL_VALUES,
                                                                               })
 
-    const [baselineValues, setBaselineValues] = useState<VisualConfigValues>({
-                                                                                 ...DEFAULT_VISUAL_VALUES,
-                                                                             })
+    const [baselineValues, setBaselineValues]     = useState<VisualConfigValues>({
+                                                                                     ...DEFAULT_VISUAL_VALUES,
+                                                                                 })
+    const [visualParseError, setVisualParseError] = useState<string | null>(null)
+
+    const validationErrors = useMemo(
+        () => getVisualConfigValidationErrors(visualValues),
+        [visualValues],
+    )
+
+    const visualHasValidationErrors = useMemo(
+        () => Object.values(validationErrors).some(Boolean),
+        [validationErrors],
+    )
+
+    const visualHasPayloadValidationErrors = useMemo(
+        () =>
+            hasPayloadParamValidationErrors(visualValues.payloadDefaultRules) ||
+            hasPayloadParamValidationErrors(visualValues.payloadDefaultRawRules) ||
+            hasPayloadParamValidationErrors(visualValues.payloadOverrideRules) ||
+            hasPayloadParamValidationErrors(visualValues.payloadOverrideRawRules),
+        [
+            visualValues.payloadDefaultRules,
+            visualValues.payloadDefaultRawRules,
+            visualValues.payloadOverrideRules,
+            visualValues.payloadOverrideRawRules,
+        ],
+    )
 
     const visualDirty = useMemo(() => {
         return JSON.stringify(visualValues) !== JSON.stringify(baselineValues)
@@ -300,6 +502,13 @@ export function useVisualConfig() {
 
     const loadVisualValuesFromYaml = useCallback((yamlContent: string) => {
         try {
+            const document = parseDocument(yamlContent)
+            if (document.errors.length > 0) {
+                const message = document.errors[0]?.message ?? 'Invalid YAML'
+                setVisualParseError(message)
+                return { ok: false as const, error: message }
+            }
+
             const parsedRaw: unknown = parseYaml(yamlContent) || {}
             const parsed             = asRecord(parsedRaw) ?? {}
             const tls                = asRecord(parsed.tls)
@@ -333,7 +542,7 @@ export function useVisualConfig() {
 
                 authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
                 usageDataDir: typeof parsed['usage-data-dir'] === 'string' ? parsed['usage-data-dir'] : '',
-                apiKeysText: parseApiKeysText(parsed['api-keys']),
+                apiKeysText: resolveApiKeysText(parsed),
 
                 debug: Boolean(parsed.debug),
                 commercialMode: Boolean(parsed['commercial-mode']),
@@ -344,6 +553,7 @@ export function useVisualConfig() {
                 proxyUrl: typeof parsed['proxy-url'] === 'string' ? parsed['proxy-url'] : '',
                 forceModelPrefix: Boolean(parsed['force-model-prefix']),
                 requestRetry: String(parsed['request-retry'] ?? ''),
+                maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
                 maxRetryInterval: String(parsed['max-retry-interval'] ?? ''),
                 wsAuth: parsed['ws-auth'] === undefined ? true : Boolean(parsed['ws-auth']),
                 allowQueryAuth: parsed['allow-query-auth'] === true,
@@ -357,7 +567,9 @@ export function useVisualConfig() {
                 routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
 
                 payloadDefaultRules: parsePayloadRules(payload?.default),
+                payloadDefaultRawRules: parseRawPayloadRules(payload?.['default-raw']),
                 payloadOverrideRules: parsePayloadRules(payload?.override),
+                payloadOverrideRawRules: parseRawPayloadRules(payload?.['override-raw']),
                 payloadFilterRules: parsePayloadFilterRules(payload?.filter),
 
                 streaming: {
@@ -369,9 +581,12 @@ export function useVisualConfig() {
 
             setVisualValuesState(newValues)
             setBaselineValues(deepClone(newValues))
-        } catch {
-            setVisualValuesState({ ...DEFAULT_VISUAL_VALUES })
-            setBaselineValues(deepClone(DEFAULT_VISUAL_VALUES))
+            setVisualParseError(null)
+            return { ok: true as const }
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Invalid YAML'
+            setVisualParseError(message)
+            return { ok: false as const, error: message }
         }
     }, [])
 
@@ -442,6 +657,7 @@ export function useVisualConfig() {
                 setStringInDoc(doc, ['proxy-url'], values.proxyUrl)
                 setBooleanInDoc(doc, ['force-model-prefix'], values.forceModelPrefix)
                 setIntFromStringInDoc(doc, ['request-retry'], values.requestRetry)
+                setIntFromStringInDoc(doc, ['max-retry-credentials'], values.maxRetryCredentials)
                 setIntFromStringInDoc(doc, ['max-retry-interval'], values.maxRetryInterval)
                 setBooleanInDoc(doc, ['ws-auth'], values.wsAuth)
                 setBooleanInDoc(doc, ['allow-query-auth'], values.allowQueryAuth)
@@ -497,7 +713,9 @@ export function useVisualConfig() {
                 if (
                     docHas(doc, ['payload']) ||
                     values.payloadDefaultRules.length > 0 ||
+                    values.payloadDefaultRawRules.length > 0 ||
                     values.payloadOverrideRules.length > 0 ||
+                    values.payloadOverrideRawRules.length > 0 ||
                     values.payloadFilterRules.length > 0
                 ) {
                     ensureMapInDoc(doc, ['payload'])
@@ -506,10 +724,26 @@ export function useVisualConfig() {
                     } else if (docHas(doc, ['payload', 'default'])) {
                         doc.deleteIn(['payload', 'default'])
                     }
+                    if (values.payloadDefaultRawRules.length > 0) {
+                        doc.setIn(
+                            ['payload', 'default-raw'],
+                            serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules),
+                        )
+                    } else if (docHas(doc, ['payload', 'default-raw'])) {
+                        doc.deleteIn(['payload', 'default-raw'])
+                    }
                     if (values.payloadOverrideRules.length > 0) {
                         doc.setIn(['payload', 'override'], serializePayloadRulesForYaml(values.payloadOverrideRules))
                     } else if (docHas(doc, ['payload', 'override'])) {
                         doc.deleteIn(['payload', 'override'])
+                    }
+                    if (values.payloadOverrideRawRules.length > 0) {
+                        doc.setIn(
+                            ['payload', 'override-raw'],
+                            serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules),
+                        )
+                    } else if (docHas(doc, ['payload', 'override-raw'])) {
+                        doc.deleteIn(['payload', 'override-raw'])
                     }
                     if (values.payloadFilterRules.length > 0) {
                         doc.setIn(['payload', 'filter'], serializePayloadFilterRulesForYaml(values.payloadFilterRules))
@@ -540,6 +774,10 @@ export function useVisualConfig() {
     return {
         visualValues,
         visualDirty,
+        visualParseError,
+        validationErrors,
+        visualHasValidationErrors,
+        visualHasPayloadValidationErrors,
         loadVisualValuesFromYaml,
         applyVisualChangesToYaml,
         setVisualValues,

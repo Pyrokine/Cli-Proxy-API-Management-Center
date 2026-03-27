@@ -85,9 +85,10 @@ interface UseTraceResolverReturn {
 export function useTraceResolver(options: UseTraceResolverOptions): UseTraceResolverReturn {
     const { traceScopeKey, connectionStatus, config, requestLogDownloading } = options
     const { t }                                                              = useTranslation()
-    const usageSnapshot                                                      = useUsageStatsStore((state) => state.usage)
-    const usageScopeKey                                                      = useUsageStatsStore((state) => state.scopeKey)
-    const loadUsageStats                                                     = useUsageStatsStore((state) => state.loadUsageStats)
+
+    const usageSnapshot  = useUsageStatsStore((state) => state.usage)
+    const usageScopeKey  = useUsageStatsStore((state) => state.scopeKey)
+    const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats)
 
     const [traceLogLine, setTraceLogLine]         = useState<ParsedLogLine | null>(null)
     const [traceAuthFileMap, setTraceAuthFileMap] = useState<Map<string, CredentialInfo>>(new Map())
@@ -128,15 +129,15 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             setTraceLoading(true)
             setTraceError('')
             try {
-                const [, authFilesResponse] = await Promise.all([
-                                                                    loadUsageStats({
-                                                                                       force: forceUsage,
-                                                                                       staleTimeMs: USAGE_STATS_STALE_TIME_MS,
-                                                                                   }),
-                                                                    authFresh ?
-                                                                    Promise.resolve(null) :
-                                                                    authFilesApi.list().catch(() => null),
-                                                                ])
+                const usagePromise          = loadUsageStats({
+                                                                 force: forceUsage,
+                                                                 staleTimeMs: USAGE_STATS_STALE_TIME_MS,
+                                                             })
+                // noinspection ES6MissingAwait — awaited via Promise.all below
+                const authPromise           = authFresh
+                                              ? Promise.resolve(null)
+                                              : authFilesApi.list().catch(() => null)
+                const [, authFilesResponse] = await Promise.all([usagePromise, authPromise])
 
                 if (authFilesResponse !== null) {
                     const files = Array.isArray(authFilesResponse)

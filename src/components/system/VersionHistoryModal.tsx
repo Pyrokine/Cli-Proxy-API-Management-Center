@@ -429,8 +429,9 @@ export function VersionHistoryModal({ open, onClose, currentVersion, cpaReposito
                                              <span
                                                  className={styles.currentBadge}>{t('version_history.current')}</span>}
                                             {isPrerelease && (
-                                                <span
-                                                    className={styles.prereleaseBadge}>{t('version_history.prerelease')}</span>
+                                                <span className={styles.prereleaseBadge}>
+                                                    {t('version_history.prerelease')}
+                                                </span>
                                             )}
                                             <span className={styles.releaseDate}>{formatDate(
                                                 release.published_at,

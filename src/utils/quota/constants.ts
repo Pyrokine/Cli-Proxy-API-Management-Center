@@ -62,7 +62,8 @@ export const ANTIGRAVITY_QUOTA_GROUPS: AntigravityQuotaGroupDefinition[] = [
 ]
 
 // Gemini CLI API configuration
-export const GEMINI_CLI_QUOTA_URL = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota'
+export const GEMINI_CLI_QUOTA_URL       = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota'
+export const GEMINI_CLI_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:getCodeAssistSubscription'
 
 export const GEMINI_CLI_REQUEST_HEADERS = {
     Authorization: 'Bearer $TOKEN$',
@@ -101,7 +102,8 @@ export const GEMINI_CLI_GROUP_LOOKUP = new Map(
 export const GEMINI_CLI_IGNORED_MODEL_PREFIXES = ['gemini-2.0-flash']
 
 // Claude API configuration
-export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+export const CLAUDE_USAGE_URL   = 'https://api.anthropic.com/api/oauth/usage'
+export const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/bootstrap'
 
 export const CLAUDE_REQUEST_HEADERS = {
     Authorization: 'Bearer $TOKEN$',

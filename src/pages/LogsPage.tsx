@@ -2,11 +2,14 @@ import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {EmptyState} from '@/components/ui/EmptyState'
 import {
+    IconChevronDown,
+    IconChevronUp,
     IconCode,
     IconDownload,
     IconEyeOff,
     IconRefreshCw,
     IconSearch,
+    IconSlidersHorizontal,
     IconTimer,
     IconTrash2,
     IconX,
@@ -15,13 +18,13 @@ import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {useLocalStorage} from '@/hooks/useLocalStorage'
 import {logsApi} from '@/services/api/logs'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {copyToClipboard} from '@/utils/clipboard'
 import {MANAGEMENT_API_PREFIX} from '@/utils/constants'
 import {downloadBlob} from '@/utils/download'
-import {formatDateTime, formatUnixTimestamp} from '@/utils/format'
-import {getErrorMessage} from '@/utils/helpers'
+import {formatUnixTimestamp} from '@/utils/format'
 import type {PointerEvent as ReactPointerEvent} from 'react'
 import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -44,10 +47,28 @@ const MAX_BUFFER_LINES          = 10000
 const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
 
+const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) {
+        return err.message
+    }
+    if (typeof err === 'string') {
+        return err
+    }
+    if (typeof err !== 'object' || err === null) {
+        return ''
+    }
+    if (!('message' in err)) {
+        return ''
+    }
+
+    const message = (err as { message?: unknown }).message
+    return typeof message === 'string' ? message : ''
+}
+
 type TabType = 'logs' | 'errors';
 
 export function LogsPage() {
-    const { t, i18n }                            = useTranslation()
+    const { t }                                  = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
     const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
     const apiBase                                = useAuthStore((state) => state.apiBase)
@@ -56,20 +77,27 @@ export function LogsPage() {
     const config                                 = useConfigStore((state) => state.config)
     const requestLogEnabled                      = config?.requestLog ?? false
 
-    const [activeTab, setActiveTab]                         = useState<TabType>('logs')
-    const [logState, setLogState]                           = useState<LogState>({ buffer: [], visibleFrom: 0 })
-    const [loading, setLoading]                             = useState(true)
-    const [error, setError]                                 = useState('')
-    const [autoRefresh, setAutoRefresh]                     = useState(false)
-    const [searchQuery, setSearchQuery]                     = useState('')
-    const deferredSearchQuery                               = useDeferredValue(searchQuery)
-    const [hideManagementLogs, setHideManagementLogs]       = useState(true)
-    const [showRawLogs, setShowRawLogs]                     = useState(false)
-    const [errorLogs, setErrorLogs]                         = useState<ErrorLogItem[]>([])
-    const [loadingErrors, setLoadingErrors]                 = useState(false)
-    const [errorLogsError, setErrorLogsError]               = useState('')
-    const [requestLogId, setRequestLogId]                   = useState<string | null>(null)
-    const [requestLogDownloading, setRequestLogDownloading] = useState(false)
+    const [activeTab, setActiveTab]                                 = useState<TabType>('logs')
+    const [logState, setLogState]                                   = useState<LogState>({
+                                                                                             buffer: [],
+                                                                                             visibleFrom: 0,
+                                                                                         })
+    const [loading, setLoading]                                     = useState(true)
+    const [error, setError]                                         = useState('')
+    const [autoRefresh, setAutoRefresh]                             = useState(false)
+    const [searchQuery, setSearchQuery]                             = useState('')
+    const deferredSearchQuery                                       = useDeferredValue(searchQuery)
+    const [hideManagementLogs, setHideManagementLogs]               = useState(true)
+    const [showRawLogs, setShowRawLogs]                             = useState(false)
+    const [structuredFiltersExpanded, setStructuredFiltersExpanded] = useLocalStorage(
+        'logsPage.structuredFiltersExpanded',
+        true,
+    )
+    const [errorLogs, setErrorLogs]                                 = useState<ErrorLogItem[]>([])
+    const [loadingErrors, setLoadingErrors]                         = useState(false)
+    const [errorLogsError, setErrorLogsError]                       = useState('')
+    const [requestLogId, setRequestLogId]                           = useState<string | null>(null)
+    const [requestLogDownloading, setRequestLogDownloading]         = useState(false)
 
     const trace = useTraceResolver({
                                        traceScopeKey,
@@ -115,12 +143,14 @@ export function LogsPage() {
 
         try {
             const scrollerInstance = logScrollerRef.current
-            const stickToBottom    = !incremental || isNearBottom(scrollerInstance?.logViewerRef.current ?? null)
+            const stickToBottom    =
+                      !incremental || isNearBottom(scrollerInstance?.logViewerRef.current ?? null)
             if (stickToBottom) {
                 scrollerInstance?.requestScrollToBottom()
             }
 
-            const params = incremental && latestTimestampRef.current > 0 ? { after: latestTimestampRef.current } : {}
+            const params =
+                      incremental && latestTimestampRef.current > 0 ? { after: latestTimestampRef.current } : {}
             const data   = await logsApi.fetchLogs(params)
 
             // 更新时间戳
@@ -217,9 +247,9 @@ export function LogsPage() {
             console.error('Failed to load error logs:', err)
             setErrorLogs([])
             const message = getErrorMessage(err)
-            setErrorLogsError(message ?
-                              `${t('logs.error_logs_load_error')}: ${message}` :
-                              t('logs.error_logs_load_error'))
+            setErrorLogsError(
+                message ? `${t('logs.error_logs_load_error')}: ${message}` : t('logs.error_logs_load_error'),
+            )
         } finally {
             setLoadingErrors(false)
         }
@@ -232,7 +262,10 @@ export function LogsPage() {
             showNotification(t('logs.error_log_download_success'), 'success')
         } catch (err: unknown) {
             const message = getErrorMessage(err)
-            showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            showNotification(
+                `${t('notification.download_failed')}${message ? `: ${message}` : ''}`,
+                'error',
+            )
         }
     }
 
@@ -290,16 +323,25 @@ export function LogsPage() {
         return working.map((line) => parseLogLine(line))
     }, [baseLines, hideManagementLogs, trimmedSearchQuery])
 
-    const filters = useLogFilters({ parsedLines: parsedSearchLines })
+    const filters                  = useLogFilters({ parsedLines: parsedSearchLines })
+    const structuredFiltersPanelId = 'logs-structured-filters'
+    const structuredFilterCount    =
+              filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length
 
     const { filteredParsedLines, filteredLines, removedCount } = useMemo(() => {
         const filteredParsed = parsedSearchLines.filter((line) => {
-            if (filters.methodFilterSet.size > 0 && (!line.method || !filters.methodFilterSet.has(line.method))) {
+            if (
+                filters.methodFilterSet.size > 0 &&
+                (!line.method || !filters.methodFilterSet.has(line.method))
+            ) {
                 return false
             }
 
             const statusGroup = resolveStatusGroup(line.statusCode)
-            if (filters.statusFilterSet.size > 0 && (!statusGroup || !filters.statusFilterSet.has(statusGroup))) {
+            if (
+                filters.statusFilterSet.size > 0 &&
+                (!statusGroup || !filters.statusFilterSet.has(statusGroup))
+            ) {
                 return false
             }
 
@@ -311,7 +353,13 @@ export function LogsPage() {
             filteredLines: filteredParsed.map((line) => line.raw),
             removedCount: Math.max(baseLines.length - filteredParsed.length, 0),
         }
-    }, [baseLines, filters.methodFilterSet, filters.pathFilterSet, filters.statusFilterSet, parsedSearchLines])
+    }, [
+                                                                             baseLines,
+                                                                             filters.methodFilterSet,
+                                                                             filters.pathFilterSet,
+                                                                             filters.statusFilterSet,
+                                                                             parsedSearchLines,
+                                                                         ])
 
     const parsedVisibleLines = useMemo(
         () => (showRawLogs ? [] : filteredParsedLines),
@@ -409,7 +457,10 @@ export function LogsPage() {
             setRequestLogId(null)
         } catch (err: unknown) {
             const message = getErrorMessage(err)
-            showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            showNotification(
+                `${t('notification.download_failed')}${message ? `: ${message}` : ''}`,
+                'error',
+            )
         } finally {
             setRequestLogDownloading(false)
         }
@@ -475,91 +526,127 @@ export function LogsPage() {
                                 />
                             </div>
 
-                            <div className={styles.structuredFilters}>
-                                <div className={styles.filterChipGroup}>
-                                    <span className={styles.filterChipLabel}>{t('logs.filter_method')}</span>
-                                    <div className={styles.filterChipList}>
-                                        {HTTP_METHODS.map((method) => {
-                                            const active = filters.methodFilters.includes(method)
-                                            const count  = filters.methodCounts[method] ?? 0
-                                            return (
-                                                <button
-                                                    key={method}
-                                                    type='button'
-                                                    className={`${styles.filterChip} ${active ?
-                                                                                       styles.filterChipActive :
-                                                                                       ''}`}
-                                                    onClick={() => filters.toggleMethodFilter(method)}
-                                                    disabled={count === 0 && !active}
-                                                    aria-pressed={active}
-                                                >
-                                                    {method} ({count})
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className={styles.filterChipGroup}>
-                                    <span className={styles.filterChipLabel}>{t('logs.filter_status')}</span>
-                                    <div className={styles.filterChipList}>
-                                        {STATUS_GROUPS.map((statusGroup) => {
-                                            const active = filters.statusFilters.includes(statusGroup)
-                                            const count  = filters.statusCounts[statusGroup] ?? 0
-                                            return (
-                                                <button
-                                                    key={statusGroup}
-                                                    type='button'
-                                                    className={`${styles.filterChip} ${active ?
-                                                                                       styles.filterChipActive :
-                                                                                       ''}`}
-                                                    onClick={() => filters.toggleStatusFilter(statusGroup)}
-                                                    disabled={count === 0 && !active}
-                                                    aria-pressed={active}
-                                                >
-                                                    {t(`logs.filter_status_${statusGroup}`)} ({count})
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className={styles.filterChipGroup}>
-                                    <span className={styles.filterChipLabel}>{t('logs.filter_path')}</span>
-                                    <div className={styles.filterChipList}>
-                                        {filters.pathOptions.length === 0 ? (
-                                            <span className={styles.filterChipHint}>{t('logs.filter_path_empty')}</span>
-                                        ) : (
-                                             filters.pathOptions.map(({ path, count }) => {
-                                                 const active = filters.pathFilters.includes(path)
-                                                 return (
-                                                     <button
-                                                         key={path}
-                                                         type='button'
-                                                         className={`${styles.filterChip} ${active ?
-                                                                                            styles.filterChipActive :
-                                                                                            ''}`}
-                                                         onClick={() => filters.togglePathFilter(path)}
-                                                         aria-pressed={active}
-                                                         title={path}
-                                                     >
-                                                         {path} ({count})
-                                                     </button>
-                                                 )
-                                             })
-                                         )}
-                                    </div>
-                                </div>
-
+                            <div className={styles.filterPanelHeader}>
                                 <Button
-                                    variant='ghost'
+                                    type='button'
+                                    variant='secondary'
                                     size='sm'
-                                    onClick={filters.clearStructuredFilters}
-                                    disabled={!filters.hasStructuredFilters}
+                                    className={styles.filterPanelToggle}
+                                    onClick={() => setStructuredFiltersExpanded((prev: boolean) => !prev)}
+                                    aria-expanded={structuredFiltersExpanded}
+                                    aria-controls={structuredFiltersPanelId}
+                                    title={
+                                        structuredFiltersExpanded
+                                        ? t('logs.filter_panel_collapse')
+                                        : t('logs.filter_panel_expand')
+                                    }
                                 >
-                                    {t('logs.clear_filters')}
+                  <span className={styles.filterPanelButtonContent}>
+                    <IconSlidersHorizontal size={16} />
+                    <span>{t('logs.filter_panel_title')}</span>
+                      {structuredFilterCount > 0 && (
+                          <span className={styles.filterPanelCount}>
+                        {t('logs.filter_panel_active_count', { count: structuredFilterCount })}
+                      </span>
+                      )}
+                      {structuredFiltersExpanded ? (
+                          <IconChevronUp size={16} />
+                      ) : (
+                           <IconChevronDown size={16} />
+                       )}
+                  </span>
                                 </Button>
                             </div>
+
+                            {structuredFiltersExpanded && (
+                                <div id={structuredFiltersPanelId} className={styles.structuredFilters}>
+                                    <div className={styles.filterChipGroup}>
+                                        <span className={styles.filterChipLabel}>{t('logs.filter_method')}</span>
+                                        <div className={styles.filterChipList}>
+                                            {HTTP_METHODS.map((method) => {
+                                                const active = filters.methodFilters.includes(method)
+                                                const count  = filters.methodCounts[method] ?? 0
+                                                return (
+                                                    <button
+                                                        key={method}
+                                                        type='button'
+                                                        className={`${styles.filterChip} ${active ?
+                                                                                           styles.filterChipActive :
+                                                                                           ''}`}
+                                                        onClick={() => filters.toggleMethodFilter(method)}
+                                                        disabled={count === 0 && !active}
+                                                        aria-pressed={active}
+                                                    >
+                                                        {method} ({count})
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className={styles.filterChipGroup}>
+                                        <span className={styles.filterChipLabel}>{t('logs.filter_status')}</span>
+                                        <div className={styles.filterChipList}>
+                                            {STATUS_GROUPS.map((statusGroup) => {
+                                                const active = filters.statusFilters.includes(statusGroup)
+                                                const count  = filters.statusCounts[statusGroup] ?? 0
+                                                return (
+                                                    <button
+                                                        key={statusGroup}
+                                                        type='button'
+                                                        className={`${styles.filterChip} ${active ?
+                                                                                           styles.filterChipActive :
+                                                                                           ''}`}
+                                                        onClick={() => filters.toggleStatusFilter(statusGroup)}
+                                                        disabled={count === 0 && !active}
+                                                        aria-pressed={active}
+                                                    >
+                                                        {t(`logs.filter_status_${statusGroup}`)} ({count})
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className={styles.filterChipGroup}>
+                                        <span className={styles.filterChipLabel}>{t('logs.filter_path')}</span>
+                                        <div className={styles.filterChipList}>
+                                            {filters.pathOptions.length === 0 ? (
+                                                <span className={styles.filterChipHint}>
+                                                    {t('logs.filter_path_empty')}
+                                                </span>
+                                            ) : (
+                                                 filters.pathOptions.map(({ path, count }) => {
+                                                     const active = filters.pathFilters.includes(path)
+                                                     return (
+                                                         <button
+                                                             key={path}
+                                                             type='button'
+                                                             className={`${styles.filterChip} ${
+                                                                 active ? styles.filterChipActive : ''
+                                                             }`}
+                                                             onClick={() => filters.togglePathFilter(path)}
+                                                             aria-pressed={active}
+                                                             title={path}
+                                                         >
+                                                             {path} ({count})
+                                                         </button>
+                                                     )
+                                                 })
+                                             )}
+                                        </div>
+                                    </div>
+
+                                    <Button
+                                        variant='ghost'
+                                        size='sm'
+                                        onClick={filters.clearStructuredFilters}
+                                        disabled={!filters.hasStructuredFilters}
+                                    >
+                                        {t('logs.clear_filters')}
+                                    </Button>
+                                </div>
+                            )}
 
                             <ToggleSwitch
                                 checked={hideManagementLogs}
@@ -642,13 +729,18 @@ export function LogsPage() {
                         {loading ? (
                             <div className='hint'>{t('logs.loading')}</div>
                         ) : logState.buffer.length > 0 && filteredLines.length > 0 ? (
-                            <div ref={scroller.logViewerRef} className={styles.logPanel}
-                                 onScroll={scroller.handleLogScroll}>
+                            <div
+                                ref={scroller.logViewerRef}
+                                className={styles.logPanel}
+                                onScroll={scroller.handleLogScroll}
+                            >
                                 {scroller.canLoadMore && (
                                     <div className={styles.loadMoreBanner}>
                                         <span>{t('logs.load_more_hint')}</span>
                                         <div className={styles.loadMoreStats}>
-                                            <span>{t('logs.loaded_lines', { count: filteredLines.length })}</span>
+                      <span>
+                        {t('logs.loaded_lines', { count: filteredLines.length })}
+                      </span>
                                             {removedCount > 0 && (
                                                 <span className={styles.loadMoreCount}>
                           {t('logs.filtered_lines', { count: removedCount })}
@@ -691,11 +783,7 @@ export function LogsPage() {
                                                          defaultValue: 'Double-click to copy',
                                                      })}
                                                  >
-                                                     <div className={styles.timestamp}>
-                                                         {line.timestamp ?
-                                                          formatDateTime(line.timestamp, i18n.language) :
-                                                          ''}
-                                                     </div>
+                                                     <div className={styles.timestamp}>{line.timestamp || ''}</div>
                                                      <div className={styles.rowMain}>
                                                          {line.level && (
                                                              <span
@@ -703,9 +791,9 @@ export function LogsPage() {
                                                                      styles.badge,
                                                                      line.level === 'info' ? styles.levelInfo : '',
                                                                      line.level === 'warn' ? styles.levelWarn : '',
-                                                                     line.level === 'error' || line.level === 'fatal' ?
-                                                                     styles.levelError :
-                                                                     '',
+                                                                     line.level === 'error' || line.level === 'fatal'
+                                                                     ? styles.levelError
+                                                                     : '',
                                                                      line.level === 'debug' ? styles.levelDebug : '',
                                                                      line.level === 'trace' ? styles.levelTrace : '',
                                                                  ]
@@ -725,7 +813,9 @@ export function LogsPage() {
                                                          {line.requestId && (
                                                              <span
                                                                  className={[styles.badge, styles.requestIdBadge].join(
-                                                                     ' ')} title={line.requestId}>
+                                                                     ' ')}
+                                                                 title={line.requestId}
+                                                             >
                                 {line.requestId}
                               </span>
                                                          )}
@@ -756,7 +846,9 @@ export function LogsPage() {
                                                              <span className={[
                                                                  styles.badge,
                                                                  styles.methodBadge,
-                                                             ].join(' ')}>{line.method}</span>
+                                                             ].join(' ')}>
+                                {line.method}
+                              </span>
                                                          )}
 
                                                          {line.path && (
@@ -790,8 +882,10 @@ export function LogsPage() {
                                  )}
                             </div>
                         ) : logState.buffer.length > 0 ? (
-                            <EmptyState title={t('logs.search_empty_title')}
-                                        description={t('logs.search_empty_desc')} />
+                            <EmptyState
+                                title={t('logs.search_empty_title')}
+                                description={t('logs.search_empty_desc')}
+                            />
                         ) : (
                                 <EmptyState title={t('logs.empty_title')} description={t('logs.empty_desc')} />
                             )}
@@ -817,8 +911,9 @@ export function LogsPage() {
 
                             {requestLogEnabled && (
                                 <div>
-                                    <div
-                                        className='status-badge warning'>{t('logs.error_logs_request_log_enabled')}</div>
+                                    <div className='status-badge warning'>
+                                        {t('logs.error_logs_request_log_enabled')}
+                                    </div>
                                 </div>
                             )}
 
@@ -881,7 +976,11 @@ export function LogsPage() {
                                 {t('logs.trace_download_request_log')}
                             </Button>
                         )}
-                        <Button variant='secondary' onClick={trace.closeTraceModal} disabled={requestLogDownloading}>
+                        <Button
+                            variant='secondary'
+                            onClick={trace.closeTraceModal}
+                            disabled={requestLogDownloading}
+                        >
                             {t('common.close')}
                         </Button>
                     </>
@@ -908,7 +1007,9 @@ export function LogsPage() {
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_status_code')}</span>
                                 <span className={styles.traceInfoValue}>
-                  {typeof trace.traceLogLine.statusCode === 'number' ? trace.traceLogLine.statusCode : '-'}
+                  {typeof trace.traceLogLine.statusCode === 'number'
+                   ? trace.traceLogLine.statusCode
+                   : '-'}
                 </span>
                             </div>
                             <div className={styles.traceInfoItem}>
@@ -953,22 +1054,25 @@ export function LogsPage() {
                         ) : (
                                 <div className={styles.traceCandidates}>
                                     {trace.traceCandidates.map((candidate) => {
-                                        const sourceInfo   = trace.resolveTraceSourceInfo(
+                                        const sourceInfo = trace.resolveTraceSourceInfo(
                                             String(candidate.detail.source ?? ''),
                                             candidate.detail.auth_index,
                                         )
-                                        const candidateKey = [
-                                            candidate.detail.__endpoint,
-                                            candidate.detail.__modelName,
-                                            candidate.detail.timestamp,
-                                            candidate.detail.source,
-                                        ].join('-')
                                         return (
-                                            <div key={candidateKey} className={styles.traceCandidate}>
+                                            <div
+                                                key={[
+                                                    candidate.detail.__endpoint,
+                                                    candidate.detail.__modelName,
+                                                    candidate.detail.timestamp,
+                                                    candidate.detail.source,
+                                                ].join('-')}
+                                                className={styles.traceCandidate}
+                                            >
                                                 <div className={styles.traceCandidateHeader}>
                                                     {candidate.modelMatched && (
-                                                        <span className={styles.traceModelBadge}>{t(
-                                                            'logs.trace_model_matched')}</span>
+                                                        <span className={styles.traceModelBadge}>
+                            {t('logs.trace_model_matched')}
+                          </span>
                                                     )}
                                                     {candidate.timeDeltaMs !== null && (
                                                         <span className={styles.traceDelta}>
@@ -980,46 +1084,55 @@ export function LogsPage() {
                                                 </div>
                                                 <div className={styles.traceCandidateGrid}>
                                                     <div className={styles.traceInfoItem}>
-                                                        <span
-                                                            className={styles.traceInfoLabel}>{t('logs.trace_endpoint')}</span>
-                                                        <span
-                                                            className={styles.traceInfoValue}>{candidate.detail.__endpoint}</span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_endpoint')}
+                                                        </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                            {candidate.detail.__endpoint}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                        <span
-                                                            className={styles.traceInfoLabel}>{t('logs.trace_model')}</span>
-                                                        <span
-                                                            className={styles.traceInfoValue}>{candidate.detail.__modelName ||
-                                                                                               '-'}</span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_model')}
+                                                        </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                            {candidate.detail.__modelName || '-'}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_source')}
+                                                        </span>
                                                         <span
-                                                            className={styles.traceInfoLabel}>{t('logs.trace_source')}</span>
-                                                        <span className={styles.traceInfoValue}
-                                                              title={String(candidate.detail.source || '-')}>
+                                                            className={styles.traceInfoValue}
+                                                            title={String(candidate.detail.source || '-')}
+                                                        >
                             <span>{sourceInfo.displayName}</span>
-                                                            {sourceInfo.type &&
-                                                             <span
-                                                                 className={styles.traceSourceType}>{sourceInfo.type}</span>}
+                                                            {sourceInfo.type && (
+                                                                <span className={styles.traceSourceType}>
+                                                                    {sourceInfo.type}
+                                                                </span>
+                                                            )}
                           </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
                                                         <span className={styles.traceInfoLabel}>{t(
                                                             'logs.trace_auth_index')}</span>
-                                                        <span
-                                                            className={styles.traceInfoValue}>{candidate.detail.auth_index ??
-                                                                                               '-'}</span>
+                                                        <span className={styles.traceInfoValue}>
+                            {candidate.detail.auth_index ?? '-'}
+                          </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
                                                         <span className={styles.traceInfoLabel}>{t(
                                                             'logs.trace_timestamp')}</span>
-                                                        <span
-                                                            className={styles.traceInfoValue}>{candidate.detail.timestamp ||
-                                                                                               '-'}</span>
+                                                        <span className={styles.traceInfoValue}>
+                            {candidate.detail.timestamp || '-'}
+                          </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                        <span
-                                                            className={styles.traceInfoLabel}>{t('logs.trace_result')}</span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_result')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
                             {candidate.detail.failed ? t('stats.failure') : t('stats.success')}
                           </span>
