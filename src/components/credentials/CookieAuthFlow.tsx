@@ -1,21 +1,21 @@
-import {Button} from '@/components/ui/Button'
-import {Input} from '@/components/ui/Input'
-import {oauthApi} from '@/services/api/oauth'
-import {useNotificationStore} from '@/stores'
-import {type ChangeEvent, useCallback, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { oauthApi } from '@/services/api/oauth'
+import { useNotificationStore } from '@/stores'
+import { type ChangeEvent, useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styles from './VendorSection.module.scss'
 
 interface CookieAuthFlowProps {
-    disableControls: boolean;
-    onSuccess: () => Promise<void>;
-    onCancel: () => void;
+    disableControls: boolean
+    onSuccess: () => Promise<void>
+    onCancel: () => void
 }
 
 export function CookieAuthFlow({ disableControls, onSuccess, onCancel }: CookieAuthFlowProps) {
-    const { t }                 = useTranslation()
-    const showNotification      = useNotificationStore((s) => s.showNotification)
-    const [cookie, setCookie]   = useState('')
+    const { t } = useTranslation()
+    const showNotification = useNotificationStore((s) => s.showNotification)
+    const [cookie, setCookie] = useState('')
     const [loading, setLoading] = useState(false)
 
     const handleSubmit = useCallback(async () => {
@@ -47,10 +47,10 @@ export function CookieAuthFlow({ disableControls, onSuccess, onCancel }: CookieA
                 disabled={disableControls || loading}
             />
             <div className={styles.flowButtons}>
-                <Button variant='primary' size='xs' onClick={handleSubmit} loading={loading} disabled={!cookie.trim()}>
+                <Button variant="primary" size="xs" onClick={handleSubmit} loading={loading} disabled={!cookie.trim()}>
                     {t('credentials.oauth_callback_submit')}
                 </Button>
-                <Button variant='secondary' size='xs' onClick={onCancel}>
+                <Button variant="secondary" size="xs" onClick={onCancel}>
                     {t('common.cancel')}
                 </Button>
             </div>

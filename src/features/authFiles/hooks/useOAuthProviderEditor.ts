@@ -1,19 +1,19 @@
-import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
-import {authFilesApi} from '@/services/api'
-import {useAuthStore, useNotificationStore} from '@/stores'
-import type {AuthFileItem, OAuthModelAliasEntry} from '@/types'
-import {useCallback, useEffect, useMemo, useState} from 'react'
-import {useTranslation} from 'react-i18next'
-import {useLocation, useNavigate, useSearchParams} from 'react-router-dom'
+import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack'
+import { authFilesApi } from '@/services/api'
+import { useAuthStore, useNotificationStore } from '@/stores'
+import type { AuthFileItem, OAuthModelAliasEntry } from '@/types'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 export type AuthFileModelItem = {
-    id: string;
-    display_name?: string;
-    type?: string;
-    owned_by?: string;
-};
+    id: string
+    display_name?: string
+    type?: string
+    owned_by?: string
+}
 
-type LocationState = { fromAuthFiles?: boolean } | null;
+type LocationState = { fromAuthFiles?: boolean } | null
 
 const OAUTH_PROVIDER_PRESETS = [
     'gemini-cli',
@@ -41,34 +41,28 @@ const extractHttpStatus = (err: unknown): unknown => {
     return undefined
 }
 
-type FeatureType = 'excluded' | 'modelAlias';
+type FeatureType = 'excluded' | 'modelAlias'
 
 export function useOAuthProviderEditor(feature: FeatureType) {
-    const { t }                = useTranslation()
-    const navigate             = useNavigate()
-    const location             = useLocation()
+    const { t } = useTranslation()
+    const navigate = useNavigate()
+    const location = useLocation()
     const { showNotification } = useNotificationStore()
-    const connectionStatus     = useAuthStore((state) => state.connectionStatus)
-    const disableControls      = connectionStatus !== 'connected'
+    const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const disableControls = connectionStatus !== 'connected'
 
     const [searchParams, setSearchParams] = useSearchParams()
-    const providerFromParams              = searchParams.get('provider') ?? ''
-
-    const [provider, setProvider]                     = useState(providerFromParams)
-    const [files, setFiles]                           = useState<AuthFileItem[]>([])
-    const [excluded, setExcluded]                     = useState<Record<string, string[]>>({})
-    const [modelAlias, setModelAlias]                 = useState<Record<string, OAuthModelAliasEntry[]>>({})
-    const [initialLoading, setInitialLoading]         = useState(true)
+    const provider = searchParams.get('provider') ?? ''
+    const [files, setFiles] = useState<AuthFileItem[]>([])
+    const [excluded, setExcluded] = useState<Record<string, string[]>>({})
+    const [modelAlias, setModelAlias] = useState<Record<string, OAuthModelAliasEntry[]>>({})
+    const [initialLoading, setInitialLoading] = useState(true)
     const [featureUnsupported, setFeatureUnsupported] = useState(false)
 
-    const [modelsList, setModelsList]       = useState<AuthFileModelItem[]>([])
+    const [modelsList, setModelsList] = useState<AuthFileModelItem[]>([])
     const [modelsLoading, setModelsLoading] = useState(false)
-    const [modelsError, setModelsError]     = useState<'unsupported' | null>(null)
-    const [saving, setSaving]               = useState(false)
-
-    useEffect(() => {
-        setProvider(providerFromParams)
-    }, [providerFromParams])
+    const [modelsError, setModelsError] = useState<'unsupported' | null>(null)
+    const [saving, setSaving] = useState(false)
 
     const providerOptions = useMemo(() => {
         const extraProviders = new Set<string>()
@@ -84,10 +78,10 @@ export function useOAuthProviderEditor(feature: FeatureType) {
         })
 
         const normalizedExtras = Array.from(extraProviders)
-                                      .map((value) => value.trim())
-                                      .filter((value) => value && !OAUTH_PROVIDER_EXCLUDES.has(value.toLowerCase()))
+            .map((value) => value.trim())
+            .filter((value) => value && !OAUTH_PROVIDER_EXCLUDES.has(value.toLowerCase()))
 
-        const baseSet   = new Set(OAUTH_PROVIDER_PRESETS.map((value) => value.toLowerCase()))
+        const baseSet = new Set(OAUTH_PROVIDER_PRESETS.map((value) => value.toLowerCase()))
         const extraList = normalizedExtras
             .filter((value) => !baseSet.has(value.toLowerCase()))
             .sort((a, b) => a.localeCompare(b))
@@ -97,7 +91,7 @@ export function useOAuthProviderEditor(feature: FeatureType) {
 
     const getTypeLabel = useCallback(
         (type: string): string => {
-            const key        = `auth_files.filter_${type}`
+            const key = `auth_files.filter_${type}`
             const translated = t(key)
             if (translated !== key) {
                 return translated
@@ -107,7 +101,7 @@ export function useOAuthProviderEditor(feature: FeatureType) {
             }
             return type.charAt(0).toUpperCase() + type.slice(1)
         },
-        [t],
+        [t]
     )
 
     const resolvedProviderKey = useMemo(() => normalizeProviderKey(provider), [provider])
@@ -143,10 +137,10 @@ export function useOAuthProviderEditor(feature: FeatureType) {
             setFeatureUnsupported(false)
             try {
                 const results = await Promise.allSettled([
-                                                             authFilesApi.list(),
-                                                             authFilesApi.getOauthExcludedModels(),
-                                                             authFilesApi.getOauthModelAlias(),
-                                                         ])
+                    authFilesApi.list(),
+                    authFilesApi.getOauthExcludedModels(),
+                    authFilesApi.getOauthModelAlias(),
+                ])
 
                 const [filesResult, excludedResult, aliasResult] = results
 
@@ -197,44 +191,46 @@ export function useOAuthProviderEditor(feature: FeatureType) {
     // Model 定义加载
     useEffect(() => {
         if (!resolvedProviderKey || featureUnsupported) {
-            setModelsList([])
-            setModelsError(null)
-            setModelsLoading(false)
             return
         }
 
         let cancelled = false
-        setModelsLoading(true)
-        setModelsError(null)
+        queueMicrotask(() => {
+            if (cancelled) {
+                return
+            }
+            setModelsLoading(true)
+            setModelsError(null)
 
-        authFilesApi
-            .getModelDefinitions(resolvedProviderKey)
-            .then((models) => {
-                if (cancelled) {
-                    return
-                }
-                setModelsList(models)
-            })
-            .catch((err: unknown) => {
-                if (cancelled) {
-                    return
-                }
+            authFilesApi
+                .getModelDefinitions(resolvedProviderKey)
+                .then((models) => {
+                    if (cancelled) {
+                        return
+                    }
+                    setModelsList(models)
+                })
+                .catch((err: unknown) => {
+                    if (cancelled) {
+                        return
+                    }
 
-                if (extractHttpStatus(err) === 404) {
-                    setModelsList([])
-                    setModelsError('unsupported')
-                    return
-                }
+                    if (extractHttpStatus(err) === 404) {
+                        setModelsList([])
+                        setModelsError('unsupported')
+                        return
+                    }
 
-                const errorMessage = err instanceof Error ? err.message : ''
-                showNotification(`${t('notification.load_failed')}: ${errorMessage}`, 'error')
-            })
-            .finally(() => {
-                if (cancelled) {
-                    return
-                }
-                setModelsLoading(false)
-            })
+                    const errorMessage = err instanceof Error ? err.message : ''
+                    showNotification(`${t('notification.load_failed')}: ${errorMessage}`, 'error')
+                })
+                .finally(() => {
+                    if (cancelled) {
+                        return
+                    }
+                    setModelsLoading(false)
+                })
+        })
 
         return () => {
             cancelled = true
@@ -243,8 +239,7 @@ export function useOAuthProviderEditor(feature: FeatureType) {
 
     const updateProvider = useCallback(
         (value: string) => {
-            setProvider(value)
-            const next    = new URLSearchParams(searchParams)
+            const next = new URLSearchParams(searchParams)
             const trimmed = value.trim()
             if (trimmed) {
                 next.set('provider', trimmed)
@@ -253,7 +248,7 @@ export function useOAuthProviderEditor(feature: FeatureType) {
             }
             setSearchParams(next, { replace: true })
         },
-        [searchParams, setSearchParams],
+        [searchParams, setSearchParams]
     )
 
     const canSave = !disableControls && !saving && !featureUnsupported

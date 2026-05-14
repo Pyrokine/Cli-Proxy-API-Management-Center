@@ -1,34 +1,39 @@
-import {Button} from '@/components/ui/Button'
-import {IconCheck, IconCopy, IconExternalLink, IconX} from '@/components/ui/icons'
-import {Input} from '@/components/ui/Input'
-import {oauthApi, type OAuthProvider} from '@/services/api/oauth'
-import {copyToClipboard} from '@/utils/clipboard'
-import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import { Button } from '@/components/ui/Button'
+import { IconCheck, IconCopy, IconExternalLink, IconX } from '@/components/ui/icons'
+import { Input } from '@/components/ui/Input'
+import { oauthApi, type OAuthProvider } from '@/services/api/oauth'
+import { copyToClipboard } from '@/utils/clipboard'
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styles from './OAuthLoginAction.module.scss'
 
-const POLL_INTERVAL                       = 3000
+const POLL_INTERVAL = 3000
 const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli']
 
+function generateNonce(): string {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 interface OAuthLoginActionProps {
-    provider: OAuthProvider;
-    disableControls: boolean;
-    onSuccess: () => void;
-    onCancel: () => void;
+    provider: OAuthProvider
+    disableControls: boolean
+    onSuccess: () => void
+    onCancel: () => void
 }
 
 export function OAuthLoginAction({ provider, disableControls, onSuccess, onCancel }: OAuthLoginActionProps) {
-    const { t }                                       = useTranslation()
-    const [url, setUrl]                               = useState('')
-    const [status, setStatus]                         = useState<'idle' | 'starting' | 'waiting' | 'success' | 'error'>(
-        'idle')
-    const [error, setError]                           = useState('')
-    const [projectId, setProjectId]                   = useState('')
-    const [callbackUrl, setCallbackUrl]               = useState('')
+    const { t } = useTranslation()
+    const [url, setUrl] = useState('')
+    const [status, setStatus] = useState<'idle' | 'starting' | 'waiting' | 'success' | 'error'>('idle')
+    const [error, setError] = useState('')
+    const [projectId, setProjectId] = useState('')
+    const [callbackUrl, setCallbackUrl] = useState('')
     const [callbackSubmitting, setCallbackSubmitting] = useState(false)
-    const pollRef                                     = useRef<number | null>(null)
+    const pollRef = useRef<number | null>(null)
 
-    const needsProjectId   = provider === 'gemini-cli'
+    const needsProjectId = provider === 'gemini-cli'
     const supportsCallback = CALLBACK_SUPPORTED.includes(provider)
 
     const stopPolling = useCallback(() => {
@@ -44,7 +49,13 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
         setStatus('starting')
         setError('')
         try {
-            const options  = needsProjectId && projectId ? { projectId } : undefined
+            // Generate a per-flow nonce bound to the polling loop so a third party who only
+            // learns the state (e.g. via referrer leak) cannot read the result.
+            const nonce = generateNonce()
+            const options = {
+                ...(needsProjectId && projectId ? { projectId } : {}),
+                nonce,
+            }
             const response = await oauthApi.startAuth(provider, options)
             setUrl(response.url)
             setStatus('waiting')
@@ -64,9 +75,9 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
 
             if (response.state) {
                 const stateValue = response.state
-                pollRef.current  = window.setInterval(async () => {
+                pollRef.current = window.setInterval(async () => {
                     try {
-                        const result = await oauthApi.getAuthStatus(stateValue)
+                        const result = await oauthApi.getAuthStatus(stateValue, nonce)
                         if (result.status === 'ok') {
                             stopPolling()
                             setStatus('success')
@@ -113,8 +124,28 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
         return (
             <div className={styles.flow}>
                 <div className={styles.successArea}>
-                    <IconCheck size={16} />
-                    <span>{t('credentials.oauth_success')}</span>
+                    <div className={styles.successMessage}>
+                        <IconCheck size={16} />
+                        <span>{t('credentials.oauth_success')}</span>
+                    </div>
+                    <div className={styles.flowButtons}>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                                stopPolling()
+                                setStatus('idle')
+                                setUrl('')
+                                setError('')
+                                setCallbackUrl('')
+                            }}
+                        >
+                            {t('auth_login.login_another_account', { defaultValue: '登录另一个账号' })}
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={onCancel}>
+                            {t('auth_login.view_auth_files', { defaultValue: '查看认证文件' })}
+                        </Button>
+                    </div>
                 </div>
             </div>
         )
@@ -127,10 +158,10 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                     <IconX size={16} />
                     <span>{error || t('credentials.oauth_error')}</span>
                     <div className={styles.flowButtons}>
-                        <Button variant='secondary' size='sm' onClick={() => setStatus('idle')}>
+                        <Button variant="secondary" size="sm" onClick={() => setStatus('idle')}>
                             {t('common.refresh')}
                         </Button>
-                        <Button variant='secondary' size='sm' onClick={handleCancel}>
+                        <Button variant="secondary" size="sm" onClick={handleCancel}>
                             {t('common.cancel')}
                         </Button>
                     </div>
@@ -144,7 +175,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             <div className={styles.flow}>
                 <div className={styles.waitingArea}>
                     <div className={styles.statusLine}>
-                        <span className='loading-spinner' aria-hidden='true' />
+                        <span className="loading-spinner" aria-hidden="true" />
                         <span>{t('credentials.oauth_waiting')}</span>
                     </div>
 
@@ -153,23 +184,25 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                             <code className={styles.url}>{url}</code>
                             <div className={styles.urlActions}>
                                 <Button
-                                    variant='secondary'
-                                    size='sm'
+                                    variant="secondary"
+                                    size="sm"
                                     onClick={() => copyToClipboard(url)}
                                     title={t('credentials.oauth_copy_url')}
                                 >
                                     <IconCopy size={14} />
                                 </Button>
                                 <Button
-                                    variant='secondary'
-                                    size='sm'
+                                    variant="secondary"
+                                    size="sm"
                                     onClick={() => {
                                         try {
                                             const parsed = new URL(url)
                                             if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
                                                 window.open(url, '_blank', 'noopener,noreferrer')
                                             }
-                                        } catch { /* invalid URL, ignore */ }
+                                        } catch {
+                                            /* invalid URL, ignore */
+                                        }
                                     }}
                                     title={t('credentials.oauth_open_url')}
                                 >
@@ -183,14 +216,14 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                         <div className={styles.callbackArea}>
                             <Input
                                 label={t('credentials.oauth_callback_hint')}
-                                placeholder='https://...'
+                                placeholder="https://..."
                                 value={callbackUrl}
                                 onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
                                 disabled={callbackSubmitting}
                             />
                             <Button
-                                variant='primary'
-                                size='sm'
+                                variant="primary"
+                                size="sm"
                                 onClick={submitCallback}
                                 loading={callbackSubmitting}
                                 disabled={!callbackUrl.trim()}
@@ -200,7 +233,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                         </div>
                     )}
 
-                    <Button variant='secondary' size='sm' onClick={handleCancel}>
+                    <Button variant="secondary" size="sm" onClick={handleCancel}>
                         {t('common.cancel')}
                     </Button>
                 </div>
@@ -215,7 +248,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 {needsProjectId && (
                     <Input
                         label={t('credentials.project_id')}
-                        placeholder='my-gcp-project'
+                        placeholder="my-gcp-project"
                         value={projectId}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => setProjectId(e.target.value)}
                         disabled={disableControls || status === 'starting'}
@@ -223,15 +256,15 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 )}
                 <div className={styles.flowButtons}>
                     <Button
-                        variant='primary'
-                        size='sm'
+                        variant="primary"
+                        size="sm"
                         onClick={startAuth}
                         loading={status === 'starting'}
                         disabled={disableControls}
                     >
                         {t('auth_login.login_button')}
                     </Button>
-                    <Button variant='secondary' size='sm' onClick={onCancel}>
+                    <Button variant="secondary" size="sm" onClick={onCancel}>
                         {t('common.cancel')}
                     </Button>
                 </div>

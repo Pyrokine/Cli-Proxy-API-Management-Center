@@ -1,23 +1,23 @@
-import {Button} from '@/components/ui/Button'
-import {Input} from '@/components/ui/Input'
-import {vertexApi} from '@/services/api/vertex'
-import {useNotificationStore} from '@/stores'
-import {type ChangeEvent, useCallback, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { vertexApi } from '@/services/api/vertex'
+import { useNotificationStore } from '@/stores'
+import { type ChangeEvent, useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styles from './VendorSection.module.scss'
 
 interface VertexImportFlowProps {
-    disableControls: boolean;
-    onSuccess: () => Promise<void>;
-    onCancel: () => void;
+    disableControls: boolean
+    onSuccess: () => Promise<void>
+    onCancel: () => void
 }
 
 export function VertexImportFlow({ disableControls, onSuccess, onCancel }: VertexImportFlowProps) {
-    const { t }                   = useTranslation()
-    const showNotification        = useNotificationStore((s) => s.showNotification)
-    const [file, setFile]         = useState<File | null>(null)
+    const { t } = useTranslation()
+    const showNotification = useNotificationStore((s) => s.showNotification)
+    const [file, setFile] = useState<File | null>(null)
     const [location, setLocation] = useState('')
-    const [loading, setLoading]   = useState(false)
+    const [loading, setLoading] = useState(false)
 
     const handleImport = useCallback(async () => {
         if (!file) {
@@ -36,9 +36,9 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
     }, [file, location, onSuccess, showNotification, t])
 
     const selectFile = useCallback(() => {
-        const input    = document.createElement('input')
-        input.type     = 'file'
-        input.accept   = '.json'
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = '.json'
         input.onchange = () => {
             const selected = input.files?.[0]
             if (selected) {
@@ -51,7 +51,7 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
     return (
         <div className={styles.flowArea}>
             <div className={styles.fileSelect}>
-                <Button variant='secondary' size='xs' onClick={selectFile} disabled={disableControls || loading}>
+                <Button variant="secondary" size="xs" onClick={selectFile} disabled={disableControls || loading}>
                     {t('credentials.vertex_select_file')}
                 </Button>
                 {file && <span className={styles.fileName}>{file.name}</span>}
@@ -63,10 +63,10 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
                 disabled={disableControls || loading}
             />
             <div className={styles.flowButtons}>
-                <Button variant='primary' size='xs' onClick={handleImport} loading={loading} disabled={!file}>
+                <Button variant="primary" size="xs" onClick={handleImport} loading={loading} disabled={!file}>
                     {t('credentials.import_json')}
                 </Button>
-                <Button variant='secondary' size='xs' onClick={onCancel}>
+                <Button variant="secondary" size="xs" onClick={onCancel}>
                     {t('common.cancel')}
                 </Button>
             </div>

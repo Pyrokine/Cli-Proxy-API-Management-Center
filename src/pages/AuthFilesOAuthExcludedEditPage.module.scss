@@ -3,94 +3,94 @@
 @use '../styles/oauthPageLayout' as oauth;
 
 .pageContent {
-  @include oauth.pageContent;
+    @include oauth.pageContent;
 }
 
 .settingsCard {
-  @include oauth.settingsCard;
+    @include oauth.settingsCard;
 }
 
 .settingsHeader {
-  @include oauth.settingsHeader;
+    @include oauth.settingsHeader;
 }
 
 .settingsHeaderTitle {
-  @include oauth.settingsHeaderTitle;
+    @include oauth.settingsHeaderTitle;
 }
 
 .modelsHint {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-size: $font-size-base;
-  color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-base;
+    color: var(--text-secondary);
 }
 
 .loadingModels {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: $spacing-sm;
-  padding: $spacing-xl 0;
-  color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: $spacing-sm;
+    padding: $spacing-xl 0;
+    color: var(--text-secondary);
 }
 
 .modelList {
-  max-height: 520px;
-  overflow: auto;
-  padding: $spacing-sm $spacing-lg $spacing-lg;
+    max-height: 520px;
+    overflow: auto;
+    padding: $spacing-sm $spacing-lg $spacing-lg;
 
-  @include mobile {
-    padding-left: $spacing-md;
-    padding-right: $spacing-md;
-  }
+    @include mobile {
+        padding-left: $spacing-md;
+        padding-right: $spacing-md;
+    }
 }
 
 .modelItem {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
 
-  &:last-child {
-    border-bottom: none;
-  }
+    &:last-child {
+        border-bottom: none;
+    }
 
-  input {
-    width: 16px;
-    height: 16px;
-  }
+    input {
+        width: 16px;
+        height: 16px;
+    }
 }
 
 .modelText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
 }
 
 .modelId {
-  font-size: $font-size-base;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  word-break: break-all;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    word-break: break-all;
 }
 
 .modelDisplayName {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  word-break: break-all;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    word-break: break-all;
 }
 
 .emptyModels {
-  padding: $spacing-xl $spacing-lg;
-  color: var(--text-secondary);
-  font-size: $font-size-base;
-  text-align: center;
+    padding: $spacing-xl $spacing-lg;
+    color: var(--text-secondary);
+    font-size: $font-size-base;
+    text-align: center;
 
-  @include mobile {
-    padding-left: $spacing-md;
-    padding-right: $spacing-md;
-  }
+    @include mobile {
+        padding-left: $spacing-md;
+        padding-right: $spacing-md;
+    }
 }

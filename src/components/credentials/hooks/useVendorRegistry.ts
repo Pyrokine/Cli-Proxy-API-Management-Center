@@ -1,34 +1,34 @@
-import type {OAuthProvider} from '@/services/api/oauth'
-import type {Config, GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
-import type {ComponentType} from 'react'
+import type { OAuthProvider } from '@/services/api/oauth'
+import type { Config, GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
+import type { ComponentType } from 'react'
 
-export type AnyKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig;
+export type AnyKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig
 
 export interface QuotaConfig {
-    provider: string;
-    label: string;
+    provider: string
+    label: string
 }
 
 export interface VendorDefinition {
-    id: string;
-    label: string;
-    icon: ComponentType<{ size?: number }>;
+    id: string
+    label: string
+    icon: ComponentType<{ size?: number }>
     /** Extract API key configs from server config */
-    configExtractor?: (config: Config) => AnyKeyConfig[];
+    configExtractor?: (config: Config) => AnyKeyConfig[]
     /** Auth file types that belong to this vendor */
-    authFileTypes: string[];
+    authFileTypes: string[]
     /** Supported OAuth providers */
-    oauthProviders: OAuthProvider[];
+    oauthProviders: OAuthProvider[]
     /** Route prefix for manual key editing */
-    editRoute?: string;
+    editRoute?: string
     /** Supports auth file upload */
-    supportsFileUpload: boolean;
+    supportsFileUpload: boolean
     /** Supports Vertex JSON import */
-    supportsJsonImport: boolean;
+    supportsJsonImport: boolean
     /** Supports iFlow cookie auth */
-    supportsCookieAuth: boolean;
+    supportsCookieAuth: boolean
     /** Quota settings */
-    quotaConfig?: QuotaConfig;
+    quotaConfig?: QuotaConfig
 }
 
 /**
@@ -38,15 +38,15 @@ export interface VendorDefinition {
  * be created lazily in a component that already imports icons.
  */
 export function createVendorRegistry(icons: {
-    Gemini: ComponentType<{ size?: number }>;
-    Claude: ComponentType<{ size?: number }>;
-    Codex: ComponentType<{ size?: number }>;
-    Vertex: ComponentType<{ size?: number }>;
-    OpenAI: ComponentType<{ size?: number }>;
-    Ampcode: ComponentType<{ size?: number }>;
-    Kimi: ComponentType<{ size?: number }>;
-    Qwen: ComponentType<{ size?: number }>;
-    IFlow: ComponentType<{ size?: number }>;
+    Gemini: ComponentType<{ size?: number }>
+    Claude: ComponentType<{ size?: number }>
+    Codex: ComponentType<{ size?: number }>
+    Vertex: ComponentType<{ size?: number }>
+    OpenAI: ComponentType<{ size?: number }>
+    Ampcode: ComponentType<{ size?: number }>
+    Kimi: ComponentType<{ size?: number }>
+    Qwen: ComponentType<{ size?: number }>
+    IFlow: ComponentType<{ size?: number }>
 }): VendorDefinition[] {
     return [
         {

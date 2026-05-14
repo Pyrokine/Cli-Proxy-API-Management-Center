@@ -15,26 +15,35 @@ export type AuthFileType =
     | 'iflow'
     | 'vertex'
     | 'empty'
-    | 'unknown';
+    | 'unknown'
+
+export interface RecentRequestBucket {
+    time: string
+    success: number
+    failed: number
+}
 
 export interface AuthFileItem {
-    name: string;
-    type?: AuthFileType | string;
-    provider?: string;
-    size?: number;
-    authIndex?: string | number | null;
-    runtimeOnly?: boolean | string;
-    disabled?: boolean;
-    unavailable?: boolean;
-    status?: string;
-    statusMessage?: string;
-    lastRefresh?: string | number;
-    modified?: number;
+    name: string
+    type?: AuthFileType | string
+    provider?: string
+    size?: number
+    authIndex?: string | number | null
+    runtimeOnly?: boolean | string
+    disabled?: boolean
+    unavailable?: boolean
+    status?: string
+    statusMessage?: string
+    lastRefresh?: string | number
+    modified?: number
+    success?: number
+    failed?: number
+    recentRequests?: RecentRequestBucket[]
 
-    [key: string]: unknown;
+    [key: string]: unknown
 }
 
 export interface AuthFilesResponse {
-    files: AuthFileItem[];
-    total?: number;
+    files: AuthFileItem[]
+    total?: number
 }

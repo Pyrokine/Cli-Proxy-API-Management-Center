@@ -9,22 +9,22 @@ import type {
     GeminiCliQuotaState,
     KimiQuotaState,
 } from '@/types'
-import {create} from 'zustand'
+import { create } from 'zustand'
 
-type QuotaUpdater<T> = T | ((prev: T) => T);
+type QuotaUpdater<T> = T | ((prev: T) => T)
 
 interface QuotaStoreState {
-    antigravityQuota: Record<string, AntigravityQuotaState>;
-    claudeQuota: Record<string, ClaudeQuotaState>;
-    codexQuota: Record<string, CodexQuotaState>;
-    geminiCliQuota: Record<string, GeminiCliQuotaState>;
-    kimiQuota: Record<string, KimiQuotaState>;
-    setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
-    setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
-    setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
-    setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
-    setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
-    clearQuotaCache: () => void;
+    antigravityQuota: Record<string, AntigravityQuotaState>
+    claudeQuota: Record<string, ClaudeQuotaState>
+    codexQuota: Record<string, CodexQuotaState>
+    geminiCliQuota: Record<string, GeminiCliQuotaState>
+    kimiQuota: Record<string, KimiQuotaState>
+    setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void
+    setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void
+    setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void
+    setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void
+    setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void
+    clearQuotaCache: () => void
 }
 
 const resolveUpdater = <T>(updater: QuotaUpdater<T>, prev: T): T => {
@@ -62,10 +62,10 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         })),
     clearQuotaCache: () =>
         set({
-                antigravityQuota: {},
-                claudeQuota: {},
-                codexQuota: {},
-                geminiCliQuota: {},
-                kimiQuota: {},
-            }),
+            antigravityQuota: {},
+            claudeQuota: {},
+            codexQuota: {},
+            geminiCliQuota: {},
+            kimiQuota: {},
+        }),
 }))
