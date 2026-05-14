@@ -78,7 +78,7 @@ interface ReleaseSections {
     other: string[]
 }
 
-const FEATURE_SECTION_PATTERN = /^(?:#+\s*)?(features?|enhancements?|新增|特性|功能|added|new)\b/i
+const FEATURE_SECTION_PATTERN = /^(?:#+\s*)?(features?|enhancements?|新增|特性|功能|added|new|what's changed|whats changed|更新内容|变更)\b/i
 const FIX_SECTION_PATTERN = /^(?:#+\s*)?(fix(?:es)?|bug\s*fix(?:es)?|修复|bugs?)\b/i
 
 function classifyReleaseBody(body: string): ReleaseSections {
@@ -504,7 +504,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                         (() => {
                                             const sections = classifyReleaseBody(release.body)
                                             const hasStructured =
-                                                sections.features.length > 0 || sections.fixes.length > 0
+                                                sections.features.length > 0 || sections.fixes.length > 0 || sections.other.length > 0
                                             if (hasStructured) {
                                                 return (
                                                     <div className={styles.releaseSections}>
@@ -536,16 +536,24 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                                                 </ul>
                                                             </div>
                                                         )}
+                                                        {sections.other.length > 0 && (
+                                                            <div className={styles.releaseColumn}>
+                                                                <div className={styles.columnTitle}>
+                                                                    {t('version_history.section_other', {
+                                                                        defaultValue: 'Details',
+                                                                    })}
+                                                                </div>
+                                                                <ul className={styles.columnList}>
+                                                                    {sections.other.map((item, idx) => (
+                                                                        <li key={`other-${idx}`}>{item}</li>
+                                                                    ))}
+                                                                </ul>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )
                                             }
-                                            return (
-                                                <div className={styles.releaseBody}>
-                                                    {release.body.length > 500
-                                                        ? release.body.slice(0, 500) + '...'
-                                                        : release.body}
-                                                </div>
-                                            )
+                                            return <div className={styles.releaseBody}>{release.body}</div>
                                         })()}
 
                                     {breaking.length > 0 && (
