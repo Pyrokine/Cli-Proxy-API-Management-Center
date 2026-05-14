@@ -1,49 +1,49 @@
 @use './dropdown' as *;
 
 .wrap {
-  @include dropdown-wrap;
+    @include dropdown-wrap;
 }
 
 .wrapFullWidth {
-  width: 100%;
+    width: 100%;
 }
 
 .trigger {
-  @include dropdown-trigger(32px, 0 10px);
+    @include dropdown-trigger(32px, 0 10px);
 }
 
 .triggerText {
-  @include dropdown-trigger-text;
+    @include dropdown-trigger-text;
 }
 
 .placeholder {
-  color: var(--text-tertiary);
+    color: var(--text-tertiary);
 }
 
 .triggerIcon {
-  @include dropdown-trigger-icon;
+    @include dropdown-trigger-icon;
 
-  [aria-expanded='true'] > & {
-    transform: rotate(180deg);
-  }
+    [aria-expanded='true'] > & {
+        transform: rotate(180deg);
+    }
 }
 
 .dropdown {
-  @include dropdown-panel(240px, 4px, 4px);
+    @include dropdown-panel(240px, 4px, 4px);
 }
 
 .dropdownUp {
-  // Positioned via inline styles
+    // Positioned via inline styles
 }
 
 .option {
-  @include dropdown-option;
+    @include dropdown-option;
 
-  &:hover {
-    background: var(--bg-secondary);
-  }
+    &:hover {
+        background: var(--bg-secondary);
+    }
 }
 
 .optionActive {
-  @include dropdown-option-active;
+    @include dropdown-option-active;
 }

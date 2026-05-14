@@ -1,24 +1,24 @@
-import {IconX} from '@/components/ui/icons'
-import {useNotificationStore} from '@/stores'
-import type {Notification} from '@/types'
-import {useEffect, useRef, useState} from 'react'
+import { IconX } from '@/components/ui/icons'
+import { useNotificationStore } from '@/stores'
+import type { Notification } from '@/types'
+import { useEffect, useRef, useState } from 'react'
 
 interface AnimatedNotification extends Notification {
-    isExiting?: boolean;
+    isExiting?: boolean
 }
 
 const ANIMATION_DURATION = 300 // ms
 
 export function NotificationContainer() {
-    const { notifications, removeNotification }             = useNotificationStore()
+    const { notifications, removeNotification } = useNotificationStore()
     const [animatedNotifications, setAnimatedNotifications] = useState<AnimatedNotification[]>([])
-    const prevNotificationsRef                              = useRef<Notification[]>([])
+    const prevNotificationsRef = useRef<Notification[]>([])
 
     // Track notifications and manage animation states
     useEffect(() => {
         const prevNotifications = prevNotificationsRef.current
-        const prevIds           = new Set(prevNotifications.map((n) => n.id))
-        const currentIds        = new Set(notifications.map((n) => n.id))
+        const prevIds = new Set(prevNotifications.map((n) => n.id))
+        const currentIds = new Set(notifications.map((n) => n.id))
 
         // Find new notifications (for enter animation)
         const newNotifications = notifications.filter((n) => !prevIds.has(n.id))
@@ -69,14 +69,14 @@ export function NotificationContainer() {
     }
 
     return (
-        <div className='notification-container'>
+        <div className="notification-container">
             {animatedNotifications.map((notification) => (
                 <div
                     key={notification.id}
                     className={`notification ${notification.type} ${notification.isExiting ? 'exiting' : 'entering'}`}
                 >
-                    <div className='message'>{notification.message}</div>
-                    <button className='close-btn' onClick={() => handleClose(notification.id)} aria-label='Close'>
+                    <div className="message">{notification.message}</div>
+                    <button className="close-btn" onClick={() => handleClose(notification.id)} aria-label="Close">
                         <IconX size={16} />
                     </button>
                 </div>

@@ -1,29 +1,29 @@
-import type {HeaderEntry} from '@/utils/headers'
-import {Fragment} from 'react'
-import {Button} from './Button'
-import {IconX} from './icons'
+import type { HeaderEntry } from '@/utils/headers'
+import { Fragment } from 'react'
+import { Button } from './Button'
+import { IconX } from './icons'
 
 interface HeaderInputListProps {
-    entries: HeaderEntry[];
-    onChange: (entries: HeaderEntry[]) => void;
-    addLabel: string;
-    disabled?: boolean;
-    keyPlaceholder?: string;
-    valuePlaceholder?: string;
-    removeButtonTitle?: string;
-    removeButtonAriaLabel?: string;
+    entries: HeaderEntry[]
+    onChange: (entries: HeaderEntry[]) => void
+    addLabel: string
+    disabled?: boolean
+    keyPlaceholder?: string
+    valuePlaceholder?: string
+    removeButtonTitle?: string
+    removeButtonAriaLabel?: string
 }
 
 export function HeaderInputList({
-                                    entries,
-                                    onChange,
-                                    addLabel,
-                                    disabled = false,
-                                    keyPlaceholder = 'X-Custom-Header',
-                                    valuePlaceholder = 'value',
-                                    removeButtonTitle = 'Remove',
-                                    removeButtonAriaLabel = 'Remove',
-                                }: HeaderInputListProps) {
+    entries,
+    onChange,
+    addLabel,
+    disabled = false,
+    keyPlaceholder = 'X-Custom-Header',
+    valuePlaceholder = 'value',
+    removeButtonTitle = 'Remove',
+    removeButtonAriaLabel = 'Remove',
+}: HeaderInputListProps) {
     const currentEntries = entries.length ? entries : [{ key: '', value: '' }]
 
     const updateEntry = (index: number, field: 'key' | 'value', value: string) => {
@@ -41,28 +41,28 @@ export function HeaderInputList({
     }
 
     return (
-        <div className='header-input-list'>
+        <div className="header-input-list">
             {currentEntries.map((entry, index) => (
                 <Fragment key={index}>
-                    <div className='header-input-row'>
+                    <div className="header-input-row">
                         <input
-                            className='input'
+                            className="input"
                             placeholder={keyPlaceholder}
                             value={entry.key}
                             onChange={(e) => updateEntry(index, 'key', e.target.value)}
                             disabled={disabled}
                         />
-                        <span className='header-separator'>:</span>
+                        <span className="header-separator">:</span>
                         <input
-                            className='input'
+                            className="input"
                             placeholder={valuePlaceholder}
                             value={entry.value}
                             onChange={(e) => updateEntry(index, 'value', e.target.value)}
                             disabled={disabled}
                         />
                         <Button
-                            variant='ghost'
-                            size='sm'
+                            variant="ghost"
+                            size="sm"
                             onClick={() => removeEntry(index)}
                             disabled={disabled || currentEntries.length <= 1}
                             title={removeButtonTitle}
@@ -73,7 +73,7 @@ export function HeaderInputList({
                     </div>
                 </Fragment>
             ))}
-            <Button variant='secondary' size='sm' onClick={addEntry} disabled={disabled} className='align-start'>
+            <Button variant="secondary" size="sm" onClick={addEntry} disabled={disabled} className="align-start">
                 {addLabel}
             </Button>
         </div>

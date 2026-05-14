@@ -1,8 +1,8 @@
-import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
-import {useCallback, useEffect} from 'react'
-import {useLocation, useNavigate} from 'react-router-dom'
+import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack'
+import { useCallback, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
-type LocationState = { fromAiProviders?: boolean } | null;
+type LocationState = { fromAiProviders?: boolean } | null
 
 /**
  * Encapsulates the common navigation pattern for provider edit pages:

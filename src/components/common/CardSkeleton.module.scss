@@ -1,0 +1,73 @@
+@use '@/styles/mixins' as *;
+
+@keyframes cardSkeletonPulse {
+    0%,
+    100% {
+        opacity: 0.55;
+    }
+    50% {
+        opacity: 0.95;
+    }
+}
+
+.skeletonRoot {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px;
+    width: 100%;
+    min-height: 120px;
+}
+
+.skeletonRoot:has(.skeletonChart) {
+    min-height: 180px;
+}
+
+.skeletonHeader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.skeletonBar {
+    background: linear-gradient(
+        90deg,
+        var(--bg-secondary, #f0f0f0) 0%,
+        var(--bg-tertiary, #e0e0e0) 50%,
+        var(--bg-secondary, #f0f0f0) 100%
+    );
+    border-radius: 4px;
+    animation: cardSkeletonPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonTitle {
+    height: 14px;
+    width: 30%;
+    min-width: 80px;
+}
+
+.skeletonRow {
+    height: 12px;
+    width: 100%;
+}
+
+.skeletonRowShort {
+    width: 65%;
+}
+
+.skeletonChart {
+    height: 180px;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.skeletonGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 8px;
+}
+
+.skeletonGridCell {
+    height: 56px;
+}

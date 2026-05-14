@@ -1,61 +1,71 @@
 @use '../../styles/variables' as *;
 
 .root {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
 }
 
 .labelLeft {
-  .label {
-    order: -1;
-  }
+    .label {
+        order: -1;
+    }
 }
 
 .disabled {
-  cursor: not-allowed;
+    cursor: not-allowed;
 }
 
 .root input {
-  width: 0;
-  height: 0;
-  opacity: 0;
-  position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    position: absolute;
 }
 
 .track {
-  width: 32px;
-  height: 18px;
-  background: var(--border-color);
-  border-radius: $radius-full;
-  position: relative;
-  transition: background $transition-fast;
+    width: 32px;
+    height: 18px;
+    background: var(--border-color);
+    border-radius: $radius-full;
+    position: relative;
+    transition: background $transition-fast;
 }
 
 .thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 12px;
-  height: 12px;
-  background: #fff;
-  border-radius: $radius-full;
-  box-shadow: $shadow-sm;
-  transition: transform $transition-fast;
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: $radius-full;
+    box-shadow: $shadow-sm;
+    transition: transform $transition-fast;
 }
 
 .root input:checked + .track {
-  background: var(--success-color);
+    background: var(--success-color);
 }
 
 .root input:checked + .track .thumb {
-  transform: translateX(14px);
+    transform: translateX(14px);
+}
+
+.root:not(.disabled):hover .track {
+    outline: 2px solid var(--accent-color, #f59e0b);
+    outline-offset: 2px;
+    background: color-mix(in srgb, var(--success-color) 70%, var(--text-primary));
+}
+
+.root:not(.disabled):hover input:not(:checked) + .track {
+    background: var(--text-secondary);
 }
 
 .label {
-  color: var(--text-primary);
-  font-weight: $font-weight-medium;
-  font-size: $font-size-sm;
+    color: var(--text-primary);
+    font-weight: $font-weight-medium;
+    font-size: $font-size-sm;
 }

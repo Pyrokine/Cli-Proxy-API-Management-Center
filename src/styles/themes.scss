@@ -1,161 +1,141 @@
 /**
  * 主题样式
  *
- * :root 定义所有 CSS 变量（浅色主题 + 公共变量）。
- * 各主题选择器只覆盖差异值，公共变量自动继承。
+ * :root 定义所有 CSS 变量（浅色主题 + 公共变量）
+ * 各主题选择器只覆盖差异值，公共变量自动继承
  */
 
 // 浅色主题（默认）+ 公共变量
 :root {
-  // 极简暖灰：浅色模式
-  --bg-secondary: #faf9f5; // 页面背景（纸感）
-  --bg-primary: #f0eee8; // 容器/卡片背景
-  --bg-tertiary: #e9e6df; // hover/次级背景
-  --bg-hover: var(--bg-tertiary);
-  --bg-quinary: #f6f4ee;
-  --bg-error-light: rgba(198, 87, 70, 0.1);
+    // 极简暖灰：浅色模式
+    --bg-secondary: #faf9f5; // 页面背景（纸感）
+    --bg-primary: #f0eee8; // 容器/卡片背景
+    --bg-tertiary: #e9e6df; // hover/次级背景
+    --bg-hover: var(--bg-tertiary);
+    --bg-quinary: #f6f4ee;
+    --bg-error-light: rgba(198, 87, 70, 0.1);
+    --text-primary: #2d2a26;
+    --text-secondary: #6d6760;
+    --text-tertiary: #a29c95;
+    --text-quaternary: #c0bab3;
+    --text-muted: var(--text-tertiary);
+    --border-color: #e3e1db; // 边框/分割线
+    --border-secondary: var(--border-color);
+    --border-primary: #d5d2cb;
+    --border-hover: #cecac4;
+    --primary-color: #8b8680; // 行动色（主色）
+    --primary-hover: #7f7a74;
+    --primary-active: #726d67;
+    --primary-contrast: #ffffff;
+    --success-color: #10b981;
+    --warning-color: #e07b2a;
+    --error-color: #c65746;
+    --danger-color: var(--error-color);
+    --info-color: var(--primary-color);
+    --warning-bg: rgba(224, 123, 42, 0.12);
+    --warning-border: rgba(224, 123, 42, 0.35);
+    --warning-text: var(--warning-color);
+    --success-badge-bg: #d1fae5;
+    --success-badge-text: #065f46;
+    --success-badge-border: #6ee7b7;
+    --failure-badge-bg: rgba(198, 87, 70, 0.14);
+    --failure-badge-text: #8a3a30;
+    --failure-badge-border: rgba(198, 87, 70, 0.35);
+    --count-badge-bg: rgba(139, 134, 128, 0.18);
+    --count-badge-text: var(--primary-active);
+    --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.08);
+    --shadow-lg: 0 10px 18px -3px rgb(0 0 0 / 0.1);
+    --radius-md: 8px;
+    --accent-tertiary: var(--bg-tertiary);
 
-  --text-primary: #2d2a26;
-  --text-secondary: #6d6760;
-  --text-tertiary: #a29c95;
-  --text-quaternary: #c0bab3;
-  --text-muted: var(--text-tertiary);
+    // Stat card accent 色
+    --stat-requests-accent: #8b8680;
+    --stat-tokens-accent: #8b5cf6;
+    --stat-rpm-accent: #10b981;
+    --stat-tpm-accent: #f97316;
+    --stat-cost-accent: #f59e0b;
 
-  --border-color: #e3e1db; // 边框/分割线
-  --border-secondary: var(--border-color);
-  --border-primary: #d5d2cb;
-  --border-hover: #cecac4;
+    // Chart.js 主题色
+    --chart-grid-color: rgba(17, 24, 39, 0.06);
+    --chart-axis-color: rgba(17, 24, 39, 0.1);
+    --chart-tick-color: rgba(17, 24, 39, 0.72);
+    --chart-tooltip-bg: rgba(255, 255, 255, 0.98);
+    --chart-tooltip-title: #111827;
+    --chart-tooltip-body: #374151;
+    --chart-tooltip-border: rgba(17, 24, 39, 0.1);
 
-  --primary-color: #8b8680; // 行动色（主色）
-  --primary-hover: #7f7a74;
-  --primary-active: #726d67;
-  --primary-contrast: #ffffff;
+    // CodeMirror 编辑器
+    --editor-gutter-bg: var(--bg-secondary);
+    --editor-selection-match-bg: rgba(255, 193, 7, 0.3);
 
-  --success-color: #10b981;
-  --warning-color: #e07b2a;
-  --error-color: #c65746;
-  --danger-color: var(--error-color);
-  --info-color: var(--primary-color);
-
-  --warning-bg: rgba(224, 123, 42, 0.12);
-  --warning-border: rgba(224, 123, 42, 0.35);
-  --warning-text: var(--warning-color);
-
-  --success-badge-bg: #d1fae5;
-  --success-badge-text: #065f46;
-  --success-badge-border: #6ee7b7;
-
-  --failure-badge-bg: rgba(198, 87, 70, 0.14);
-  --failure-badge-text: #8a3a30;
-  --failure-badge-border: rgba(198, 87, 70, 0.35);
-
-  --count-badge-bg: rgba(139, 134, 128, 0.18);
-  --count-badge-text: var(--primary-active);
-
-  --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.08);
-  --shadow-lg: 0 10px 18px -3px rgb(0 0 0 / 0.1);
-
-  --radius-md: 8px;
-  --accent-tertiary: var(--bg-tertiary);
-
-  // Stat card accent 色
-  --stat-requests-accent: #8b8680;
-  --stat-tokens-accent: #8b5cf6;
-  --stat-rpm-accent: #10b981;
-  --stat-tpm-accent: #f97316;
-  --stat-cost-accent: #f59e0b;
-
-  // Chart.js 主题色
-  --chart-grid-color: rgba(17, 24, 39, 0.06);
-  --chart-axis-color: rgba(17, 24, 39, 0.10);
-  --chart-tick-color: rgba(17, 24, 39, 0.72);
-  --chart-tooltip-bg: rgba(255, 255, 255, 0.98);
-  --chart-tooltip-title: #111827;
-  --chart-tooltip-body: #374151;
-  --chart-tooltip-border: rgba(17, 24, 39, 0.10);
-
-  // CodeMirror 编辑器
-  --editor-gutter-bg: var(--bg-secondary);
-  --editor-selection-match-bg: rgba(255, 193, 7, 0.3);
-
-  // Diff 颜色（GitHub light 风格）
-  --diff-add-color: #1a7f37;
-  --diff-del-color: #cf222e;
-  --diff-hunk-color: #0550ae;
+    // Diff 颜色（GitHub light 风格）
+    --diff-add-color: #1a7f37;
+    --diff-del-color: #cf222e;
+    --diff-hunk-color: #0550ae;
 }
 
 // 纯白主题 — 仅覆盖与 :root 不同的变量
 [data-theme='white'] {
-  --bg-secondary: #ffffff;
-  --bg-primary: #ffffff;
-  --bg-tertiary: #f6f6f6;
-  --bg-quinary: #ffffff;
-  --bg-error-light: rgba(198, 87, 70, 0.08);
-
-  --border-color: #e5e5e5;
-  --border-primary: #d9d9d9;
-  --border-hover: #cccccc;
-
-  --warning-color: #c65746;
-  --warning-bg: rgba(198, 87, 70, 0.12);
-  --warning-border: rgba(198, 87, 70, 0.35);
+    --bg-secondary: #ffffff;
+    --bg-primary: #ffffff;
+    --bg-tertiary: #f6f6f6;
+    --bg-quinary: #ffffff;
+    --bg-error-light: rgba(198, 87, 70, 0.08);
+    --border-color: #e5e5e5;
+    --border-primary: #d9d9d9;
+    --border-hover: #cccccc;
+    --warning-color: #c65746;
+    --warning-bg: rgba(198, 87, 70, 0.12);
+    --warning-border: rgba(198, 87, 70, 0.35);
 }
 
 // 深色主题 — 仅覆盖与 :root 不同的变量
 [data-theme='dark'] {
-  // 极简暖灰：深色模式（提升对比度与层级）
-  --bg-secondary: #151412; // 页面背景
-  --bg-primary: #1d1b18; // 容器/卡片背景
-  --bg-tertiary: #262320; // hover/次级背景
-  --bg-hover: #2e2a26;
-  --bg-quinary: #191714;
-  --bg-error-light: rgba(198, 87, 70, 0.18);
+    // 极简暖灰：深色模式（提升对比度与层级）
+    --bg-secondary: #151412; // 页面背景
+    --bg-primary: #1d1b18; // 容器/卡片背景
+    --bg-tertiary: #262320; // hover/次级背景
+    --bg-hover: #2e2a26;
+    --bg-quinary: #191714;
+    --bg-error-light: rgba(198, 87, 70, 0.18);
+    --text-primary: #f6f4f1;
+    --text-secondary: #c9c3bb;
+    --text-tertiary: #9c958d;
+    --text-quaternary: #6f6962;
+    --border-color: #3a3530;
+    --border-primary: #4a453f;
+    --border-hover: #5a544d;
+    --primary-hover: #9a948e;
+    --primary-active: #a6a099;
+    --warning-color: #e8915a;
+    --warning-bg: rgba(232, 145, 90, 0.22);
+    --warning-border: rgba(232, 145, 90, 0.45);
+    --warning-text: #f0a060;
+    --success-badge-bg: rgba(6, 78, 59, 0.3);
+    --success-badge-text: #6ee7b7;
+    --success-badge-border: #059669;
+    --failure-badge-bg: rgba(198, 87, 70, 0.24);
+    --failure-badge-text: #f1b0a6;
+    --failure-badge-border: rgba(198, 87, 70, 0.5);
+    --count-badge-bg: rgba(139, 134, 128, 0.28);
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3);
 
-  --text-primary: #f6f4f1;
-  --text-secondary: #c9c3bb;
-  --text-tertiary: #9c958d;
-  --text-quaternary: #6f6962;
+    // Chart.js 主题色
+    --chart-grid-color: rgba(255, 255, 255, 0.06);
+    --chart-axis-color: rgba(255, 255, 255, 0.1);
+    --chart-tick-color: rgba(255, 255, 255, 0.72);
+    --chart-tooltip-bg: rgba(17, 24, 39, 0.92);
+    --chart-tooltip-title: #ffffff;
+    --chart-tooltip-body: rgba(255, 255, 255, 0.86);
+    --chart-tooltip-border: rgba(255, 255, 255, 0.1);
 
-  --border-color: #3a3530;
-  --border-primary: #4a453f;
-  --border-hover: #5a544d;
+    // CodeMirror 编辑器
+    --editor-gutter-bg: var(--bg-tertiary);
+    --editor-selection-match-bg: rgba(255, 193, 7, 0.2);
 
-  --primary-hover: #9a948e;
-  --primary-active: #a6a099;
-
-  --warning-color: #e8915a;
-  --warning-bg: rgba(232, 145, 90, 0.22);
-  --warning-border: rgba(232, 145, 90, 0.45);
-  --warning-text: #f0a060;
-
-  --success-badge-bg: rgba(6, 78, 59, 0.3);
-  --success-badge-text: #6ee7b7;
-  --success-badge-border: #059669;
-
-  --failure-badge-bg: rgba(198, 87, 70, 0.24);
-  --failure-badge-text: #f1b0a6;
-  --failure-badge-border: rgba(198, 87, 70, 0.5);
-
-  --count-badge-bg: rgba(139, 134, 128, 0.28);
-
-  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3);
-
-  // Chart.js 主题色
-  --chart-grid-color: rgba(255, 255, 255, 0.06);
-  --chart-axis-color: rgba(255, 255, 255, 0.10);
-  --chart-tick-color: rgba(255, 255, 255, 0.72);
-  --chart-tooltip-bg: rgba(17, 24, 39, 0.92);
-  --chart-tooltip-title: #ffffff;
-  --chart-tooltip-body: rgba(255, 255, 255, 0.86);
-  --chart-tooltip-border: rgba(255, 255, 255, 0.10);
-
-  // CodeMirror 编辑器
-  --editor-gutter-bg: var(--bg-tertiary);
-  --editor-selection-match-bg: rgba(255, 193, 7, 0.2);
-
-  // Diff 颜色（GitHub dark 风格）
-  --diff-add-color: #3fb950;
-  --diff-del-color: #f85149;
-  --diff-hunk-color: #388bfd;
+    // Diff 颜色（GitHub dark 风格）
+    --diff-add-color: #3fb950;
+    --diff-del-color: #f85149;
+    --diff-hunk-color: #388bfd;
 }

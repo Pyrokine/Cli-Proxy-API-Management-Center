@@ -1,16 +1,13 @@
-import {ConfirmationModal} from '@/components/common/ConfirmationModal'
-import {NotificationContainer} from '@/components/common/NotificationContainer'
-import {MainLayout} from '@/components/layout/MainLayout'
-import {LoginPage} from '@/pages/LoginPage'
-import {ProtectedRoute} from '@/router/ProtectedRoute'
-import {useLanguageStore, useThemeStore} from '@/stores'
-import React, {useEffect} from 'react'
-import {createHashRouter, Outlet, RouterProvider} from 'react-router-dom'
+import { ConfirmationModal } from '@/components/common/ConfirmationModal'
+import { NotificationContainer } from '@/components/common/NotificationContainer'
+import { MainLayout } from '@/components/layout/MainLayout'
+import { LoginPage } from '@/pages/LoginPage'
+import { ProtectedRoute } from '@/router/ProtectedRoute'
+import { useLanguageStore, useThemeStore } from '@/stores'
+import React, { useEffect } from 'react'
+import { createHashRouter, Outlet, RouterProvider } from 'react-router-dom'
 
-class ErrorBoundary extends React.Component<
-    { children: React.ReactNode },
-    { hasError: boolean; error?: Error }
-> {
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: Error }> {
     state = { hasError: false, error: undefined as Error | undefined }
 
     static getDerivedStateFromError(error: Error) {
@@ -42,26 +39,26 @@ function RootShell() {
 }
 
 const router = createHashRouter([
-                                    {
-                                        element: <RootShell />,
-                                        children: [
-                                            { path: '/login', element: <LoginPage /> },
-                                            {
-                                                path: '/*',
-                                                element: (
-                                                    <ProtectedRoute>
-                                                        <MainLayout />
-                                                    </ProtectedRoute>
-                                                ),
-                                            },
-                                        ],
-                                    },
-                                ])
+    {
+        element: <RootShell />,
+        children: [
+            { path: '/login', element: <LoginPage /> },
+            {
+                path: '/*',
+                element: (
+                    <ProtectedRoute>
+                        <MainLayout />
+                    </ProtectedRoute>
+                ),
+            },
+        ],
+    },
+])
 
 function App() {
     const initializeTheme = useThemeStore((state) => state.initializeTheme)
-    const language        = useLanguageStore((state) => state.language)
-    const setLanguage     = useLanguageStore((state) => state.setLanguage)
+    const language = useLanguageStore((state) => state.language)
+    const setLanguage = useLanguageStore((state) => state.setLanguage)
 
     useEffect(() => {
         return initializeTheme()

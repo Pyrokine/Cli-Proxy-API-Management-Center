@@ -1,53 +1,53 @@
-import {Button} from '@/components/ui/Button'
-import {Select} from '@/components/ui/Select'
+import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import styles from '@/pages/ProviderEditForm.module.scss'
-import type {Dispatch, SetStateAction} from 'react'
-import {useTranslation} from 'react-i18next'
+import type { Dispatch, SetStateAction } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface ModelTestPanelProps {
-    testModel: string;
-    setTestModel: Dispatch<SetStateAction<string>>;
-    testStatus: 'idle' | 'loading' | 'success' | 'error';
-    setTestStatus: Dispatch<SetStateAction<'idle' | 'loading' | 'success' | 'error'>>;
-    testMessage: string;
-    setTestMessage: Dispatch<SetStateAction<string>>;
-    modelSelectOptions: Array<{ value: string; label: string }>;
-    availableModels: string[];
-    isTesting: boolean;
+    testModel: string
+    setTestModel: Dispatch<SetStateAction<string>>
+    testStatus: 'idle' | 'loading' | 'success' | 'error'
+    setTestStatus: Dispatch<SetStateAction<'idle' | 'loading' | 'success' | 'error'>>
+    testMessage: string
+    setTestMessage: Dispatch<SetStateAction<string>>
+    modelSelectOptions: Array<{ value: string; label: string }>
+    availableModels: string[]
+    isTesting: boolean
     /** Whether controls should be disabled (saving / disconnected) */
-    disabled: boolean;
+    disabled: boolean
     /** i18n key prefix for labels (e.g. 'ai_providers.claude' or 'ai_providers.openai') */
-    i18nPrefix: string;
+    i18nPrefix: string
     /** Callback to run the test */
-    onTest: () => void;
+    onTest: () => void
     /** Additional disabled condition for the test button */
-    testButtonDisabled?: boolean;
+    testButtonDisabled?: boolean
     /** Override the test button label (defaults to `{i18nPrefix}_test_action`) */
-    testButtonLabel?: string;
+    testButtonLabel?: string
     /** HTML title attribute for the test button */
-    testButtonTitle?: string;
+    testButtonTitle?: string
 }
 
 /**
  * Shared model connectivity test panel: model select, test button, and status badge.
  */
 export function ModelTestPanel({
-                                   testModel,
-                                   setTestModel,
-                                   testStatus,
-                                   setTestStatus,
-                                   testMessage,
-                                   setTestMessage,
-                                   modelSelectOptions,
-                                   availableModels,
-                                   isTesting,
-                                   disabled,
-                                   i18nPrefix,
-                                   onTest,
-                                   testButtonDisabled,
-                                   testButtonLabel,
-                                   testButtonTitle,
-                               }: ModelTestPanelProps) {
+    testModel,
+    setTestModel,
+    testStatus,
+    setTestStatus,
+    testMessage,
+    setTestMessage,
+    modelSelectOptions,
+    availableModels,
+    isTesting,
+    disabled,
+    i18nPrefix,
+    onTest,
+    testButtonDisabled,
+    testButtonLabel,
+    testButtonTitle,
+}: ModelTestPanelProps) {
     const { t } = useTranslation()
 
     return (
@@ -67,9 +67,9 @@ export function ModelTestPanel({
                             setTestMessage('')
                         }}
                         placeholder={
-                            availableModels.length ?
-                            t(`${i18nPrefix}_test_select_placeholder`) :
-                            t(`${i18nPrefix}_test_select_empty`)
+                            availableModels.length
+                                ? t(`${i18nPrefix}_test_select_placeholder`)
+                                : t(`${i18nPrefix}_test_select_empty`)
                         }
                         className={styles.openaiTestSelect}
                         ariaLabel={t(`${i18nPrefix}_test_title`)}
@@ -77,17 +77,15 @@ export function ModelTestPanel({
                     />
                     <Button
                         variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                        size='sm'
+                        size="sm"
                         onClick={onTest}
                         loading={testStatus === 'loading'}
                         disabled={
                             disabled ||
                             isTesting ||
-                            testStatus ===
-                            'loading' ||
+                            testStatus === 'loading' ||
                             testButtonDisabled ||
-                            availableModels.length ===
-                            0
+                            availableModels.length === 0
                         }
                         title={testButtonTitle}
                         className={styles.modelTestAllButton}

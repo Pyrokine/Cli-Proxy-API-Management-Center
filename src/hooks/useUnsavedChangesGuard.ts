@@ -1,37 +1,37 @@
-import {useNotificationStore} from '@/stores'
-import {useCallback, useEffect, useMemo, useRef} from 'react'
-import type {BlockerFunction} from 'react-router'
-import {useBlocker, useLocation} from 'react-router'
+import { useNotificationStore } from '@/stores'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import type { BlockerFunction } from 'react-router'
+import { useBlocker, useLocation } from 'react-router'
 
-type ConfirmationVariant = 'danger' | 'primary' | 'secondary';
+type ConfirmationVariant = 'danger' | 'primary' | 'secondary'
 
 type UnsavedChangesDialog = {
-    title: string;
-    message: string;
-    confirmText: string;
-    cancelText: string;
-    variant?: ConfirmationVariant;
-};
+    title: string
+    message: string
+    confirmText: string
+    cancelText: string
+    variant?: ConfirmationVariant
+}
 
 type UseUnsavedChangesGuardOptions = {
-    enabled?: boolean;
-    shouldBlock: boolean | BlockerFunction;
-    dialog: UnsavedChangesDialog;
-};
+    enabled?: boolean
+    shouldBlock: boolean | BlockerFunction
+    dialog: UnsavedChangesDialog
+}
 
 export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
     const { enabled = true, shouldBlock, dialog } = options
-    const { showConfirmation }                    = useNotificationStore()
-    const lastBlockedRef                          = useRef<string>('')
-    const allowNextNavigationUntilRef             = useRef(0)
-    const allowNextNavigationKeyRef               = useRef('')
-    const location                                = useLocation()
+    const { showConfirmation } = useNotificationStore()
+    const lastBlockedRef = useRef<string>('')
+    const allowNextNavigationUntilRef = useRef(0)
+    const allowNextNavigationKeyRef = useRef('')
+    const location = useLocation()
 
     const allowNextNavigation = useCallback(() => {
         // Allow one programmatic navigation after successful save.
         // A short window is used to avoid stale flags lingering when no navigation happens.
         allowNextNavigationUntilRef.current = Date.now() + 2_000
-        allowNextNavigationKeyRef.current   = ''
+        allowNextNavigationKeyRef.current = ''
     }, [])
 
     const shouldBlockFunction = useCallback<BlockerFunction>(
@@ -51,12 +51,12 @@ export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
                 }
             } else if (allowNextNavigationUntilRef.current !== 0) {
                 allowNextNavigationUntilRef.current = 0
-                allowNextNavigationKeyRef.current   = ''
+                allowNextNavigationKeyRef.current = ''
             }
 
             return typeof shouldBlock === 'function' ? shouldBlock(args) : shouldBlock
         },
-        [enabled, shouldBlock],
+        [enabled, shouldBlock]
     )
 
     // Warn on browser tab close / refresh when there are unsaved changes.
@@ -64,11 +64,14 @@ export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
         if (!enabled) {
             return
         }
-        const isBlocking = typeof shouldBlock === 'function' ? shouldBlock({
-                                                                               currentLocation: location,
-                                                                               nextLocation: location,
-                                                                               historyAction: 'POP' as never,
-                                                                           }) : shouldBlock
+        const isBlocking =
+            typeof shouldBlock === 'function'
+                ? shouldBlock({
+                      currentLocation: location,
+                      nextLocation: location,
+                      historyAction: 'POP' as never,
+                  })
+                : shouldBlock
         if (!isBlocking) {
             return
         }
@@ -89,7 +92,7 @@ export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
             return
         }
         allowNextNavigationUntilRef.current = 0
-        allowNextNavigationKeyRef.current   = ''
+        allowNextNavigationKeyRef.current = ''
     }, [location.key])
 
     const blockedKey = useMemo(() => {
@@ -111,14 +114,14 @@ export function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOptions) {
         lastBlockedRef.current = blockedKey
 
         showConfirmation({
-                             title: dialog.title,
-                             message: dialog.message,
-                             confirmText: dialog.confirmText,
-                             cancelText: dialog.cancelText,
-                             variant: dialog.variant ?? 'danger',
-                             onConfirm: () => blocker.proceed(),
-                             onCancel: () => blocker.reset(),
-                         })
+            title: dialog.title,
+            message: dialog.message,
+            confirmText: dialog.confirmText,
+            cancelText: dialog.cancelText,
+            variant: dialog.variant ?? 'danger',
+            onConfirm: () => blocker.proceed(),
+            onCancel: () => blocker.reset(),
+        })
     }, [blockedKey, blocker, dialog, showConfirmation])
 
     return { allowNextNavigation }

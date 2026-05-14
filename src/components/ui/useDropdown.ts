@@ -1,10 +1,10 @@
-import {useCallback, useEffect, useRef, useState} from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export interface DropdownPos {
-    top: number;
-    left: number;
-    width: number;
-    up: boolean;
+    top: number
+    left: number
+    width: number
+    up: boolean
 }
 
 const INITIAL_POS: DropdownPos = { top: 0, left: 0, width: 0, up: false }
@@ -18,24 +18,24 @@ const INITIAL_POS: DropdownPos = { top: 0, left: 0, width: 0, up: false }
  */
 export function useDropdown(optionCount: number, maxHeight: number, disabled: boolean) {
     const [open, setOpen] = useState(false)
-    const [pos, setPos]   = useState<DropdownPos>(INITIAL_POS)
-    const wrapRef         = useRef<HTMLDivElement | null>(null)
-    const dropdownRef     = useRef<HTMLDivElement | null>(null)
+    const [pos, setPos] = useState<DropdownPos>(INITIAL_POS)
+    const wrapRef = useRef<HTMLDivElement | null>(null)
+    const dropdownRef = useRef<HTMLDivElement | null>(null)
 
     const calcPos = useCallback(() => {
         if (!wrapRef.current) {
             return
         }
-        const rect           = wrapRef.current.getBoundingClientRect()
-        const spaceBelow     = window.innerHeight - rect.bottom
+        const rect = wrapRef.current.getBoundingClientRect()
+        const spaceBelow = window.innerHeight - rect.bottom
         const dropdownHeight = Math.min(optionCount * 40 + 12, maxHeight)
-        const up             = spaceBelow < dropdownHeight + 8 && rect.top > spaceBelow
+        const up = spaceBelow < dropdownHeight + 8 && rect.top > spaceBelow
         setPos({
-                   top: up ? rect.top - 6 : rect.bottom + 6,
-                   left: rect.left,
-                   width: Math.max(rect.width, 180),
-                   up,
-               })
+            top: up ? rect.top - 6 : rect.bottom + 6,
+            left: rect.left,
+            width: Math.max(rect.width, 180),
+            up,
+        })
     }, [optionCount, maxHeight])
 
     // Close on click outside

@@ -1,26 +1,26 @@
-import {Button} from '@/components/ui/Button'
-import {IconChevronLeft} from '@/components/ui/icons'
-import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
-import {forwardRef, type ReactNode, useLayoutEffect, useRef} from 'react'
-import {createPortal} from 'react-dom'
-import {usePageTransitionLayer} from './PageTransitionLayer'
+import { Button } from '@/components/ui/Button'
+import { IconChevronLeft } from '@/components/ui/icons'
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { forwardRef, type ReactNode, useLayoutEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { usePageTransitionLayer } from './PageTransitionLayer'
 import styles from './SecondaryScreenShell.module.scss'
 
 type SecondaryScreenShellProps = {
-    title: ReactNode;
-    onBack?: () => void;
-    backLabel?: string;
-    backAriaLabel?: string;
-    rightAction?: ReactNode;
-    hideTopBarBackButton?: boolean;
-    hideTopBarRightAction?: boolean;
-    floatingAction?: ReactNode;
-    isLoading?: boolean;
-    loadingLabel?: ReactNode;
-    className?: string;
-    contentClassName?: string;
-    children?: ReactNode;
-};
+    title: ReactNode
+    onBack?: () => void
+    backLabel?: string
+    backAriaLabel?: string
+    rightAction?: ReactNode
+    hideTopBarBackButton?: boolean
+    hideTopBarRightAction?: boolean
+    floatingAction?: ReactNode
+    isLoading?: boolean
+    loadingLabel?: ReactNode
+    className?: string
+    contentClassName?: string
+    children?: ReactNode
+}
 
 export const SecondaryScreenShell = forwardRef<HTMLDivElement, SecondaryScreenShellProps>(function SecondaryScreenShell(
     {
@@ -38,22 +38,18 @@ export const SecondaryScreenShell = forwardRef<HTMLDivElement, SecondaryScreenSh
         contentClassName = '',
         children,
     },
-    ref,
+    ref
 ) {
-    const containerClassName         = [styles.container, className].filter(Boolean).join(' ')
-    const contentClasses             = [
-        styles.content,
-        floatingAction ? styles.contentWithFloatingAction : '',
-        contentClassName,
-    ]
+    const containerClassName = [styles.container, className].filter(Boolean).join(' ')
+    const contentClasses = [styles.content, floatingAction ? styles.contentWithFloatingAction : '', contentClassName]
         .filter(Boolean)
         .join(' ')
-    const titleTooltip               = typeof title === 'string' ? title : undefined
-    const resolvedBackAriaLabel      = backAriaLabel ?? backLabel
-    const pageTransitionLayer        = usePageTransitionLayer()
-    const isCurrentLayer             = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true
+    const titleTooltip = typeof title === 'string' ? title : undefined
+    const resolvedBackAriaLabel = backAriaLabel ?? backLabel
+    const pageTransitionLayer = usePageTransitionLayer()
+    const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true
     const shouldRenderFloatingAction = Boolean(floatingAction) && isCurrentLayer
-    const floatingActionRef          = useRef<HTMLDivElement | null>(null)
+    const floatingActionRef = useRef<HTMLDivElement | null>(null)
 
     useLayoutEffect(() => {
         if (!shouldRenderFloatingAction) {
@@ -89,20 +85,20 @@ export const SecondaryScreenShell = forwardRef<HTMLDivElement, SecondaryScreenSh
                 <div className={styles.topBar}>
                     {onBack && !hideTopBarBackButton ? (
                         <Button
-                            variant='ghost'
-                            size='sm'
+                            variant="ghost"
+                            size="sm"
                             onClick={onBack}
                             className={styles.backButton}
                             aria-label={resolvedBackAriaLabel}
                         >
-              <span className={styles.backIcon}>
-                <IconChevronLeft size={18} />
-              </span>
+                            <span className={styles.backIcon}>
+                                <IconChevronLeft size={18} />
+                            </span>
                             <span className={styles.backText}>{backLabel}</span>
                         </Button>
                     ) : (
-                         <div />
-                     )}
+                        <div />
+                    )}
                     <div className={styles.topBarTitle} title={titleTooltip}>
                         {title}
                     </div>
@@ -115,19 +111,19 @@ export const SecondaryScreenShell = forwardRef<HTMLDivElement, SecondaryScreenSh
                         <span>{loadingLabel}</span>
                     </div>
                 ) : (
-                     <div className={contentClasses}>{children}</div>
-                 )}
+                    <div className={contentClasses}>{children}</div>
+                )}
             </div>
             {shouldRenderFloatingAction && typeof document !== 'undefined'
-             ? createPortal(
-                    <div className={styles.floatingActionContainer}>
-                        <div className={styles.floatingActionSurface} ref={floatingActionRef}>
-                            {floatingAction}
-                        </div>
-                    </div>,
-                    document.body,
-                )
-             : null}
+                ? createPortal(
+                      <div className={styles.floatingActionContainer}>
+                          <div className={styles.floatingActionSurface} ref={floatingActionRef}>
+                              {floatingAction}
+                          </div>
+                      </div>,
+                      document.body
+                  )
+                : null}
         </>
     )
 })

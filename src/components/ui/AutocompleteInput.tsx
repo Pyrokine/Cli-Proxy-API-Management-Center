@@ -3,51 +3,54 @@ import {
     type CSSProperties,
     type KeyboardEvent,
     type ReactNode,
+    useCallback,
     useEffect,
     useRef,
     useState,
 } from 'react'
-import {IconChevronDown} from './icons'
+import { createPortal } from 'react-dom'
+import styles from './AutocompleteInput.module.scss'
+import { IconChevronDown } from './icons'
 
 interface AutocompleteInputProps {
-    label?: string;
-    value: string;
-    onChange: (value: string) => void;
-    options: string[] | { value: string; label?: string }[];
-    placeholder?: string;
-    disabled?: boolean;
-    hint?: string;
-    error?: string;
-    className?: string;
-    wrapperClassName?: string;
-    wrapperStyle?: CSSProperties;
-    id?: string;
-    rightElement?: ReactNode;
+    label?: string
+    value: string
+    onChange: (value: string) => void
+    options: string[] | { value: string; label?: string }[]
+    placeholder?: string
+    disabled?: boolean
+    hint?: string
+    error?: string
+    className?: string
+    wrapperClassName?: string
+    wrapperStyle?: CSSProperties
+    id?: string
+    rightElement?: ReactNode
 }
 
 export function AutocompleteInput({
-                                      label,
-                                      value,
-                                      onChange,
-                                      options,
-                                      placeholder,
-                                      disabled,
-                                      hint,
-                                      error,
-                                      className = '',
-                                      wrapperClassName = '',
-                                      wrapperStyle,
-                                      id,
-                                      rightElement,
-                                  }: AutocompleteInputProps) {
-    const [isOpen, setIsOpen]                     = useState(false)
+    label,
+    value,
+    onChange,
+    options,
+    placeholder,
+    disabled,
+    hint,
+    error,
+    className = '',
+    wrapperClassName = '',
+    wrapperStyle,
+    id,
+    rightElement,
+}: AutocompleteInputProps) {
+    const [isOpen, setIsOpen] = useState(false)
     const [highlightedIndex, setHighlightedIndex] = useState(-1)
-    const containerRef                            = useRef<HTMLDivElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
+    const dropdownRef = useRef<HTMLDivElement>(null)
+    const inputWrapRef = useRef<HTMLDivElement>(null)
 
     const normalizedOptions = options.map((opt) =>
-                                              typeof opt === 'string' ?
-                                                  { value: opt, label: opt } :
-                                                  { value: opt.value, label: opt.label || opt.value },
+        typeof opt === 'string' ? { value: opt, label: opt } : { value: opt.value, label: opt.label || opt.value }
     )
 
     const filteredOptions = normalizedOptions.filter((opt) => {
@@ -55,15 +58,65 @@ export function AutocompleteInput({
         return opt.value.toLowerCase().includes(v) || (opt.label && opt.label.toLowerCase().includes(v))
     })
 
+    // Click outside: close if target is neither the container nor the portal dropdown
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false)
+            const target = event.target as Node
+            if (containerRef.current?.contains(target) || dropdownRef.current?.contains(target)) {
+                return
             }
+            setIsOpen(false)
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
+
+    // Calculate dropdown position relative to the viewport
+    const calcDropdownStyle = useCallback((): CSSProperties => {
+        if (!inputWrapRef.current) {
+            return {}
+        }
+        const rect = inputWrapRef.current.getBoundingClientRect()
+        const maxHeight = 200
+        const gap = 4
+        const spaceBelow = window.innerHeight - rect.bottom
+        const openUp = spaceBelow < maxHeight + gap && rect.top > spaceBelow
+
+        return {
+            position: 'fixed',
+            left: rect.left,
+            width: rect.width,
+            maxHeight,
+            overflowY: 'auto',
+            zIndex: 9999,
+            backgroundColor: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            ...(openUp ? { bottom: window.innerHeight - rect.top + gap } : { top: rect.bottom + gap }),
+        }
+    }, [])
+
+    const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({})
+
+    // Recalculate position on scroll/resize while open
+    useEffect(() => {
+        if (!isOpen) {
+            return
+        }
+
+        const reposition = () => setDropdownStyle(calcDropdownStyle())
+        // Initial positioning is handled via requestAnimationFrame to avoid
+        // synchronous setState inside the effect body (react-hooks/set-state-in-effect).
+        const raf = requestAnimationFrame(reposition)
+        window.addEventListener('scroll', reposition, true)
+        window.addEventListener('resize', reposition)
+        return () => {
+            cancelAnimationFrame(raf)
+            window.removeEventListener('scroll', reposition, true)
+            window.removeEventListener('resize', reposition)
+        }
+    }, [isOpen, calcDropdownStyle])
 
     const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
         onChange(e.target.value)
@@ -106,10 +159,12 @@ export function AutocompleteInput({
         }
     }
 
+    const showDropdown = isOpen && filteredOptions.length > 0 && !disabled
+
     return (
         <div className={`form-group ${wrapperClassName}`} ref={containerRef} style={wrapperStyle}>
             {label && <label htmlFor={id}>{label}</label>}
-            <div style={{ position: 'relative' }}>
+            <div className={styles.inputWrap} ref={inputWrapRef}>
                 <input
                     id={id}
                     className={`input ${className}`.trim()}
@@ -119,73 +174,41 @@ export function AutocompleteInput({
                     onKeyDown={handleKeyDown}
                     placeholder={placeholder}
                     disabled={disabled}
-                    autoComplete='off'
+                    autoComplete="off"
                     style={{ paddingRight: 32 }}
                 />
                 <div
-                    style={{
-                        position: 'absolute',
-                        right: 8,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        pointerEvents: disabled ? 'none' : 'auto',
-                        cursor: 'pointer',
-                        height: '100%',
-                    }}
+                    className={`${styles.chevron} ${disabled ? styles.disabled : ''}`}
                     onClick={() => !disabled && setIsOpen(!isOpen)}
                 >
                     {rightElement}
                     <IconChevronDown size={16} style={{ opacity: 0.5, marginLeft: 4 }} />
                 </div>
+            </div>
 
-                {isOpen && filteredOptions.length > 0 && !disabled && (
-                    <div
-                        className='autocomplete-dropdown'
-                        style={{
-                            position: 'absolute',
-                            top: 'calc(100% + 4px)',
-                            left: 0,
-                            right: 0,
-                            zIndex: 1000,
-                            backgroundColor: 'var(--bg-secondary)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: 'var(--radius-md)',
-                            maxHeight: 200,
-                            overflowY: 'auto',
-                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                        }}
-                    >
+            {/* Portal-based dropdown to avoid parent overflow:hidden clipping */}
+            {showDropdown &&
+                createPortal(
+                    <div ref={dropdownRef} className="autocomplete-dropdown" style={dropdownStyle}>
                         {filteredOptions.map((opt, index) => (
                             <div
                                 key={`${opt.value}-${index}`}
                                 onClick={() => handleSelect(opt.value)}
-                                style={{
-                                    padding: '8px 12px',
-                                    cursor: 'pointer',
-                                    backgroundColor: index === highlightedIndex ? 'var(--bg-tertiary)' : 'transparent',
-                                    color: 'var(--text-primary)',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    fontSize: '0.9rem',
-                                }}
+                                className={`${styles.option} ${index === highlightedIndex ? styles.highlighted : ''}`}
                                 onMouseEnter={() => setHighlightedIndex(index)}
                             >
-                                <span style={{ fontWeight: 500 }}>{opt.value}</span>
+                                <span className={styles.optionValue}>{opt.value}</span>
                                 {opt.label && opt.label !== opt.value && (
-                                    <span style={{
-                                        fontSize: '0.85em',
-                                        color: 'var(--text-secondary)',
-                                    }}>{opt.label}</span>
+                                    <span className={styles.optionLabel}>{opt.label}</span>
                                 )}
                             </div>
                         ))}
-                    </div>
+                    </div>,
+                    document.body
                 )}
-            </div>
-            {hint && <div className='hint'>{hint}</div>}
-            {error && <div className='error-box'>{error}</div>}
+
+            {hint && <div className="hint">{hint}</div>}
+            {error && <div className="error-box">{error}</div>}
         </div>
     )
 }

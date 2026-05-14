@@ -1,10 +1,10 @@
-import {createContext, useContext} from 'react'
+import { createContext, useContext } from 'react'
 
-export type LayerStatus = 'current' | 'exiting' | 'stacked';
+export type LayerStatus = 'current' | 'exiting' | 'stacked'
 
 type PageTransitionLayerContextValue = {
-    status: LayerStatus;
-};
+    status: LayerStatus
+}
 
 export const PageTransitionLayerContext = createContext<PageTransitionLayerContextValue | null>(null)
 

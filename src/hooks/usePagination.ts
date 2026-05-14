@@ -2,28 +2,28 @@
  * 分页 Hook
  */
 
-import type {PaginationState} from '@/types'
-import {useMemo, useState} from 'react'
+import type { PaginationState } from '@/types'
+import { useMemo, useState } from 'react'
 
 export function usePagination<T>(
     items: T[],
-    initialPageSize: number = 20,
+    initialPageSize: number = 20
 ): PaginationState & {
-    currentItems: T[];
-    goToPage: (page: number) => void;
-    nextPage: () => void;
-    prevPage: () => void;
-    setPageSize: (size: number) => void;
+    currentItems: T[]
+    goToPage: (page: number) => void
+    nextPage: () => void
+    prevPage: () => void
+    setPageSize: (size: number) => void
 } {
     const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize]       = useState(initialPageSize)
+    const [pageSize, setPageSize] = useState(initialPageSize)
 
     const totalItems = items.length
     const totalPages = Math.ceil(totalItems / pageSize) || 1
 
     const currentItems = useMemo(() => {
         const start = (currentPage - 1) * pageSize
-        const end   = start + pageSize
+        const end = start + pageSize
         return items.slice(start, end)
     }, [items, currentPage, pageSize])
 

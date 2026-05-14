@@ -1,43 +1,44 @@
-import {type MouseEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
-import {useTranslation} from 'react-i18next'
-import {DropdownPanel} from './DropdownPanel'
-import {IconCheck, IconChevronDown, IconX} from './icons'
+import type { ReactNode } from 'react'
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { DropdownPanel } from './DropdownPanel'
+import { IconCheck, IconChevronDown, IconX } from './icons'
 import styles from './MultiSelect.module.scss'
-import {useDropdown} from './useDropdown'
+import { useDropdown } from './useDropdown'
 
 interface MultiSelectOption {
-    value: string;
-    label: string;
+    value: string
+    label: string
 }
 
 interface MultiSelectProps {
-    values: string[];
-    options: ReadonlyArray<MultiSelectOption>;
-    onChange: (values: string[]) => void;
-    placeholder?: string;
-    className?: string;
-    disabled?: boolean;
-    ariaLabel?: string;
-    fullWidth?: boolean;
-    allLabel?: string;
+    values: string[]
+    options: ReadonlyArray<MultiSelectOption>
+    onChange: (values: string[]) => void
+    placeholder?: string
+    className?: string
+    disabled?: boolean
+    ariaLabel?: string
+    fullWidth?: boolean
+    allLabel?: string
 }
 
 export function MultiSelect({
-                                values,
-                                options,
-                                onChange,
-                                placeholder,
-                                className,
-                                disabled = false,
-                                ariaLabel,
-                                fullWidth = true,
-                                allLabel,
-                            }: MultiSelectProps) {
+    values,
+    options,
+    onChange,
+    placeholder,
+    className,
+    disabled = false,
+    ariaLabel,
+    fullWidth = true,
+    allLabel,
+}: MultiSelectProps) {
     const { isOpen, pos, wrapRef, dropdownRef, toggle } = useDropdown(options.length, 280, disabled)
 
     const [search, setSearch] = useState('')
-    const searchRef           = useRef<HTMLInputElement | null>(null)
-    const { t }               = useTranslation()
+    const searchRef = useRef<HTMLInputElement | null>(null)
+    const { t } = useTranslation()
 
     // Clear search when dropdown closes
     const [prevOpen, setPrevOpen] = useState(isOpen)
@@ -55,7 +56,7 @@ export function MultiSelect({
         }
     }, [isOpen])
 
-    const selectedSet   = useMemo(() => new Set(values), [values])
+    const selectedSet = useMemo(() => new Set(values), [values])
     const isAllSelected = values.length === 0
 
     const filteredOptions = useMemo(() => {
@@ -68,6 +69,27 @@ export function MultiSelect({
 
     const showSearch = options.length > 8
 
+    const highlightMatch = useCallback(
+        (text: string): ReactNode => {
+            if (!search.trim()) {
+                return text
+            }
+            const query = search.trim()
+            const idx = text.toLowerCase().indexOf(query.toLowerCase())
+            if (idx === -1) {
+                return text
+            }
+            return (
+                <>
+                    {text.slice(0, idx)}
+                    <mark className={styles.highlight}>{text.slice(idx, idx + query.length)}</mark>
+                    {text.slice(idx + query.length)}
+                </>
+            )
+        },
+        [search]
+    )
+
     const handleOptionClick = useCallback(
         (value: string) => {
             if (selectedSet.has(value)) {
@@ -76,7 +98,7 @@ export function MultiSelect({
                 onChange([...values, value])
             }
         },
-        [selectedSet, values, onChange],
+        [selectedSet, values, onChange]
     )
 
     const handleSelectAll = () => {
@@ -102,32 +124,33 @@ export function MultiSelect({
     return (
         <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}>
             <button
-                type='button'
+                type="button"
                 className={styles.trigger}
                 onClick={toggle}
-                aria-haspopup='listbox'
+                aria-haspopup="listbox"
                 aria-expanded={isOpen}
                 aria-label={ariaLabel}
                 disabled={disabled}
             >
-                <span
-                    className={`${styles.triggerText} ${isAllSelected ? styles.placeholder : ''}`}>{displayText}</span>
+                <span className={`${styles.triggerText} ${isAllSelected ? styles.placeholder : ''}`}>
+                    {displayText}
+                </span>
                 <span className={styles.triggerActions}>
-          {!isAllSelected && (
-              <span
-                  className={styles.clearButton}
-                  role='button'
-                  tabIndex={-1}
-                  onClick={handleClear}
-                  aria-label='Clear selection'
-              >
-              <IconX size={12} />
-            </span>
-          )}
-                    <span className={styles.triggerIcon} aria-hidden='true'>
-            <IconChevronDown size={14} />
-          </span>
-        </span>
+                    {!isAllSelected && (
+                        <span
+                            className={styles.clearButton}
+                            role="button"
+                            tabIndex={-1}
+                            onClick={handleClear}
+                            aria-label="Clear selection"
+                        >
+                            <IconX size={12} />
+                        </span>
+                    )}
+                    <span className={styles.triggerIcon} aria-hidden="true">
+                        <IconChevronDown size={14} />
+                    </span>
+                </span>
             </button>
             {isOpen && (
                 <DropdownPanel
@@ -141,19 +164,19 @@ export function MultiSelect({
                     {showSearch && (
                         <input
                             ref={searchRef}
-                            type='text'
+                            type="text"
                             className={styles.searchInput}
                             placeholder={t('multi_select.search_placeholder')}
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             onClick={(e) => e.stopPropagation()}
-                            autoComplete='off'
+                            autoComplete="off"
                         />
                     )}
                     {!search.trim() && (
                         <button
-                            type='button'
-                            role='option'
+                            type="button"
+                            role="option"
                             aria-selected={isAllSelected}
                             className={`${styles.option} ${isAllSelected ? styles.optionActive : ''}`}
                             onClick={handleSelectAll}
@@ -165,23 +188,23 @@ export function MultiSelect({
                     {filteredOptions.length === 0 ? (
                         <div className={styles.emptyResult}>{t('multi_select.no_match')}</div>
                     ) : (
-                         filteredOptions.map((opt) => {
-                             const active = selectedSet.has(opt.value)
-                             return (
-                                 <button
-                                     key={opt.value}
-                                     type='button'
-                                     role='option'
-                                     aria-selected={active}
-                                     className={`${styles.option} ${active ? styles.optionActive : ''}`}
-                                     onClick={() => handleOptionClick(opt.value)}
-                                 >
-                                     <span className={styles.optionCheck}>{active && <IconCheck size={14} />}</span>
-                                     <span className={styles.optionLabel}>{opt.label}</span>
-                                 </button>
-                             )
-                         })
-                     )}
+                        filteredOptions.map((opt) => {
+                            const active = selectedSet.has(opt.value)
+                            return (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={active}
+                                    className={`${styles.option} ${active ? styles.optionActive : ''}`}
+                                    onClick={() => handleOptionClick(opt.value)}
+                                >
+                                    <span className={styles.optionCheck}>{active && <IconCheck size={14} />}</span>
+                                    <span className={styles.optionLabel}>{highlightMatch(opt.label)}</span>
+                                </button>
+                            )
+                        })
+                    )}
                 </DropdownPanel>
             )}
         </div>

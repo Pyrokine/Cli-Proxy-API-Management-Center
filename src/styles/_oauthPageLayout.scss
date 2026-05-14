@@ -2,39 +2,39 @@
 @use './mixins' as *;
 
 @mixin pageContent {
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 0 $spacing-md $spacing-lg;
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 $spacing-md $spacing-lg;
 
-  @include mobile {
-    padding-left: $spacing-md;
-    padding-right: $spacing-md;
-  }
+    @include mobile {
+        padding-left: $spacing-md;
+        padding-right: $spacing-md;
+    }
 }
 
 @mixin settingsCard {
-  padding: 0;
-  overflow: visible;
+    padding: 0;
+    overflow: visible;
 }
 
 @mixin settingsHeader {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-xs;
-  padding: $spacing-sm $spacing-md;
-  border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+    padding: $spacing-sm $spacing-md;
+    border-bottom: 1px solid var(--border-color);
 
-  @include mobile {
-    padding-left: $spacing-md;
-    padding-right: $spacing-md;
-  }
+    @include mobile {
+        padding-left: $spacing-md;
+        padding-right: $spacing-md;
+    }
 }
 
 @mixin settingsHeaderTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
 }

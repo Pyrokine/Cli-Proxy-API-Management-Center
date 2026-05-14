@@ -1,0 +1,45 @@
+@use '../../styles/variables' as *;
+
+.inputWrap {
+    position: relative;
+}
+
+.chevron {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    height: 100%;
+
+    &.disabled {
+        pointer-events: none;
+        cursor: default;
+    }
+}
+
+.option {
+    padding: 8px 12px;
+    cursor: pointer;
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    font-size: $font-size-sm;
+    background-color: transparent;
+    transition: background-color $transition-fast;
+
+    &.highlighted {
+        background-color: var(--bg-tertiary);
+    }
+}
+
+.optionValue {
+    font-weight: $font-weight-medium;
+}
+
+.optionLabel {
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+}

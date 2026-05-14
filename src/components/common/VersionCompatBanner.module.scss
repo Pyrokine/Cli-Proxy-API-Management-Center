@@ -1,0 +1,37 @@
+@use '../../styles/variables' as *;
+
+.banner {
+    position: sticky;
+    top: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    background: rgba(239, 68, 68, 0.14);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.55);
+    color: var(--danger-color, #ef4444);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.message {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.dismiss {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: $font-size-xl;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+
+    &:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 2px;
+    }
+}

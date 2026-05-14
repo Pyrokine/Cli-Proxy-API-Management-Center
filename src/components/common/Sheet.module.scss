@@ -1,0 +1,147 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.sheetRoot {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+}
+
+.sheetToolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sheetMeta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+}
+
+.sheetCount {
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+}
+
+.sheetScroll {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sheetTableWrap {
+    overflow-x: auto;
+}
+
+.sheetTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: $font-size-sm;
+
+    th,
+    td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+        vertical-align: middle;
+    }
+
+    th {
+        font-weight: $font-weight-medium;
+        color: var(--text-tertiary);
+        background-color: var(--bg-secondary);
+        white-space: nowrap;
+    }
+
+    td {
+        color: var(--text-primary);
+    }
+
+    tbody tr:hover {
+        background-color: var(--bg-tertiary);
+    }
+}
+
+.sortableHeader {
+    user-select: none;
+    transition: color 0.15s ease;
+
+    &:hover {
+        color: var(--text-primary);
+    }
+}
+
+.sortHeaderButton {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+        border-radius: $radius-sm;
+    }
+}
+
+.busyShell {
+    position: relative;
+}
+
+.busyOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.busyPill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-lg);
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+}
+
+.busySpinner {
+    border-color: rgba($primary-color, 0.25);
+    border-top-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba($primary-color, 0.25);
+}
+
+.paginationWrap {
+    display: flex;
+    justify-content: flex-end;
+}
+
+@include mobile {
+    .sheetToolbar {
+        align-items: stretch;
+    }
+
+    .paginationWrap {
+        justify-content: stretch;
+    }
+}

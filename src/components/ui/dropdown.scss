@@ -2,100 +2,106 @@
 
 // Shared dropdown wrapper
 @mixin dropdown-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
 }
 
 // Shared trigger button
 @mixin dropdown-trigger($height: 32px, $padding: 0 10px) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  height: $height;
-  padding: $padding;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  background-color: var(--bg-primary);
-  box-shadow: var(--shadow);
-  color: var(--text-primary);
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  cursor: pointer;
-  appearance: none;
-  text-align: left;
-  box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    height: $height;
+    padding: $padding;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background-color: var(--bg-primary);
+    box-shadow: var(--shadow);
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    cursor: pointer;
+    appearance: none;
+    text-align: left;
+    box-sizing: border-box;
 
-  &:hover {
-    border-color: var(--border-hover);
-  }
+    &:hover {
+        border-color: var(--border-hover);
+    }
 
-  &:focus {
-    outline: none;
-    box-shadow: var(--shadow), 0 0 0 3px rgba($primary-color, 0.18);
-  }
+    &:focus {
+        outline: none;
+        box-shadow:
+            var(--shadow),
+            0 0 0 3px rgba($primary-color, 0.18);
+    }
 
-  &[aria-expanded='true'] {
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow), 0 0 0 3px rgba($primary-color, 0.18);
-  }
+    &[aria-expanded='true'] {
+        border-color: var(--primary-color);
+        box-shadow:
+            var(--shadow),
+            0 0 0 3px rgba($primary-color, 0.18);
+    }
 }
 
 // Shared trigger text
 @mixin dropdown-trigger-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 // Shared chevron icon
 @mixin dropdown-trigger-icon {
-  display: inline-flex;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+    display: inline-flex;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
 }
 
 // Shared dropdown panel
 @mixin dropdown-panel($max-height: 240px, $padding: 4px, $gap: 4px, $radius: $radius-md) {
-  position: fixed;
-  z-index: $z-dropdown;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius;
-  padding: $padding;
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  gap: $gap;
-  max-height: $max-height;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  box-sizing: border-box;
+    position: fixed;
+    z-index: $z-dropdown;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius;
+    padding: $padding;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    gap: $gap;
+    max-height: $max-height;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
 }
 
 // Shared option item
 @mixin dropdown-option($padding: 6px 10px, $radius: $radius-sm) {
-  border-radius: $radius;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-  white-space: nowrap;
-  font-size: $font-size-sm;
-  flex-shrink: 0;
+    border-radius: $radius;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: $font-size-sm;
+    flex-shrink: 0;
 
-  &:hover {
-    background: var(--bg-secondary);
-  }
+    &:hover {
+        background: var(--bg-secondary);
+    }
 }
 
 // Shared active option highlight
 @mixin dropdown-option-active {
-  border-color: rgba($primary-color, 0.5);
-  background: rgba($primary-color, 0.1);
-  font-weight: $font-weight-semibold;
+    border-color: rgba($primary-color, 0.5);
+    background: rgba($primary-color, 0.1);
+    font-weight: $font-weight-semibold;
 }

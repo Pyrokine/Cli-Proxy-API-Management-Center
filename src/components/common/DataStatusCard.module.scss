@@ -1,0 +1,58 @@
+.statusRoot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-secondary, #666);
+    min-height: 160px;
+}
+
+.statusText {
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary, #333);
+}
+
+.statusHint {
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    color: var(--text-tertiary, #999);
+    font-weight: $font-weight-normal;
+    max-width: 480px;
+}
+
+.statusError {
+    color: var(--text-error, #c53030);
+}
+
+.statusActions {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.retryButton {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border-default, #d0d4dc);
+    background: var(--surface-elevated, #fff);
+    color: var(--text-primary, #333);
+    font-size: $font-size-sm;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+        background: var(--surface-hover, #f5f6f8);
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+}
