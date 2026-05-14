@@ -1,150 +1,122 @@
-import {Card} from '@/components/ui/Card'
+import { Sheet, type SheetColumn } from '@/components/common/Sheet'
+import { Card } from '@/components/ui/Card'
+import { useDataStatus } from '@/hooks/useDataStatus'
 import styles from '@/pages/UsagePage.module.scss'
-import {formatCompactNumber, formatUsd} from '@/utils/usage'
-import {useMemo, useState} from 'react'
-import {useTranslation} from 'react-i18next'
-
-export interface ModelStat {
-    model: string;
-    requests: number;
-    successCount: number;
-    failureCount: number;
-    tokens: number;
-    cost: number;
-}
+import { formatCompactNumber, formatUsd } from '@/utils/usage'
+import type { ModelStat } from '@/utils/usage/summaryHelpers'
+import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface ModelStatsCardProps {
-    modelStats: ModelStat[];
-    loading: boolean;
-    hasPrices: boolean;
+    modelStats: ModelStat[]
+    loading: boolean
+    hasPrices: boolean
+    nameHeader?: string
+    /** Card title override. OverviewTab reuses ModelStatsCard for API Key
+     *  aggregates; without this prop the "API Key 统计" pane would still say
+     *  "模型统计" at the top — the bug reported as issue 5. */
+    cardTitle?: string
 }
-
-type SortKey = 'model' | 'requests' | 'tokens' | 'cost' | 'successRate';
-type SortDir = 'asc' | 'desc';
 
 interface ModelStatWithRate extends ModelStat {
-    successRate: number;
+    successRate: number
 }
 
-export function ModelStatsCard({ modelStats, loading, hasPrices }: ModelStatsCardProps) {
-    const { t }                 = useTranslation()
-    const [sortKey, setSortKey] = useState<SortKey>('requests')
-    const [sortDir, setSortDir] = useState<SortDir>('desc')
+export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, cardTitle }: ModelStatsCardProps) {
+    const { t } = useTranslation()
 
-    const handleSort = (key: SortKey) => {
-        if (sortKey === key) {
-            setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-        } else {
-            setSortKey(key)
-            setSortDir(key === 'model' ? 'asc' : 'desc')
+    const rows = useMemo(
+        (): ModelStatWithRate[] =>
+            modelStats.map((stat) => ({
+                ...stat,
+                successRate: stat.requests > 0 ? (stat.successCount / stat.requests) * 100 : 100,
+            })),
+        [modelStats]
+    )
+
+    const { status } = useDataStatus({
+        loading,
+        data: rows,
+        isEmpty: (data) => data.length === 0,
+    })
+
+    const columns = useMemo<SheetColumn<ModelStatWithRate>[]>(() => {
+        const items: SheetColumn<ModelStatWithRate>[] = [
+            {
+                key: 'model',
+                header: nameHeader || t('usage_stats.model_name'),
+                sortable: true,
+                sortValue: (row) => row.model,
+                cell: (row) => <span className={styles.modelCell}>{row.model}</span>,
+            },
+            {
+                key: 'requests',
+                header: t('usage_stats.requests_count'),
+                sortable: true,
+                sortValue: (row) => row.requests,
+                cell: (row) => (
+                    <span className={styles.requestCountCell}>
+                        <span>{row.requests.toLocaleString()}</span>
+                        <span className={styles.requestBreakdown}>
+                            (<span className={styles.statSuccess}>{row.successCount.toLocaleString()}</span>{' '}
+                            <span className={styles.statFailure}>{row.failureCount.toLocaleString()}</span>)
+                        </span>
+                    </span>
+                ),
+            },
+            {
+                key: 'tokens',
+                header: t('usage_stats.tokens_count'),
+                sortable: true,
+                sortValue: (row) => row.tokens,
+                cell: (row) => formatCompactNumber(row.tokens),
+            },
+            {
+                key: 'successRate',
+                header: t('usage_stats.success_rate'),
+                sortable: true,
+                sortValue: (row) => row.successRate,
+                cell: (row) => (
+                    <span
+                        className={
+                            row.successRate >= 95
+                                ? styles.statSuccess
+                                : row.successRate >= 80
+                                  ? styles.statNeutral
+                                  : styles.statFailure
+                        }
+                    >
+                        {row.successRate.toFixed(1)}%
+                    </span>
+                ),
+            },
+        ]
+        if (hasPrices) {
+            items.push({
+                key: 'cost',
+                header: t('usage_stats.total_cost'),
+                sortable: true,
+                sortValue: (row) => row.cost,
+                cell: (row) => (row.cost > 0 ? formatUsd(row.cost) : '--'),
+            })
         }
-    }
-
-    const sorted = useMemo((): ModelStatWithRate[] => {
-        const list: ModelStatWithRate[] = modelStats.map((s) => ({
-            ...s,
-            successRate: s.requests > 0 ? (s.successCount / s.requests) * 100 : 100,
-        }))
-        const dir                       = sortDir === 'asc' ? 1 : -1
-        list.sort((a, b) => {
-            if (sortKey === 'model') {
-                return dir * a.model.localeCompare(b.model)
-            }
-            return dir * ((a[sortKey] as number) - (b[sortKey] as number))
-        })
-        return list
-    }, [modelStats, sortKey, sortDir])
-
-    const arrow    = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '')
-    const ariaSort = (key: SortKey): 'none' | 'ascending' | 'descending' =>
-        sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'
+        return items
+    }, [hasPrices, nameHeader, t])
 
     return (
-        <Card title={t('usage_stats.models')} className={styles.detailsFixedCard}>
-            {loading ? (
-                <div className={styles.hint}>{t('common.loading')}</div>
-            ) : sorted.length > 0 ? (
-                <div className={styles.detailsScroll}>
-                    <div className={styles.tableWrapper}>
-                        <table className={styles.table}>
-                            <thead>
-                            <tr>
-                                <th className={styles.sortableHeader} aria-sort={ariaSort('model')}>
-                                    <button type='button' className={styles.sortHeaderButton}
-                                            onClick={() => handleSort('model')}>
-                                        {t('usage_stats.model_name')}
-                                        {arrow('model')}
-                                    </button>
-                                </th>
-                                <th className={styles.sortableHeader} aria-sort={ariaSort('requests')}>
-                                    <button type='button' className={styles.sortHeaderButton}
-                                            onClick={() => handleSort('requests')}>
-                                        {t('usage_stats.requests_count')}
-                                        {arrow('requests')}
-                                    </button>
-                                </th>
-                                <th className={styles.sortableHeader} aria-sort={ariaSort('tokens')}>
-                                    <button type='button' className={styles.sortHeaderButton}
-                                            onClick={() => handleSort('tokens')}>
-                                        {t('usage_stats.tokens_count')}
-                                        {arrow('tokens')}
-                                    </button>
-                                </th>
-                                <th className={styles.sortableHeader} aria-sort={ariaSort('successRate')}>
-                                    <button type='button' className={styles.sortHeaderButton}
-                                            onClick={() => handleSort('successRate')}>
-                                        {t('usage_stats.success_rate')}
-                                        {arrow('successRate')}
-                                    </button>
-                                </th>
-                                {hasPrices && (
-                                    <th className={styles.sortableHeader} aria-sort={ariaSort('cost')}>
-                                        <button type='button' className={styles.sortHeaderButton}
-                                                onClick={() => handleSort('cost')}>
-                                            {t('usage_stats.total_cost')}
-                                            {arrow('cost')}
-                                        </button>
-                                    </th>
-                                )}
-                            </tr>
-                            </thead>
-                            <tbody>
-                            {sorted.map((stat) => (
-                                <tr key={stat.model}>
-                                    <td className={styles.modelCell}>{stat.model}</td>
-                                    <td>
-                      <span className={styles.requestCountCell}>
-                        <span>{stat.requests.toLocaleString()}</span>
-                        <span className={styles.requestBreakdown}>
-                          (<span className={styles.statSuccess}>{stat.successCount.toLocaleString()}</span>{' '}
-                            <span className={styles.statFailure}>{stat.failureCount.toLocaleString()}</span>)
-                        </span>
-                      </span>
-                                    </td>
-                                    <td>{formatCompactNumber(stat.tokens)}</td>
-                                    <td>
-                      <span
-                          className={
-                              stat.successRate >= 95
-                              ? styles.statSuccess
-                              : stat.successRate >= 80
-                                ? styles.statNeutral
-                                : styles.statFailure
-                          }
-                      >
-                        {stat.successRate.toFixed(1)}%
-                      </span>
-                                    </td>
-                                    {hasPrices && <td>{stat.cost > 0 ? formatUsd(stat.cost) : '--'}</td>}
-                                </tr>
-                            ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            ) : (
-                    <div className={styles.hint}>{t('usage_stats.no_data')}</div>
-                )}
+        <Card title={cardTitle ?? t('usage_stats.models')} className={styles.detailsFixedCard}>
+            <Sheet
+                rows={rows}
+                columns={columns}
+                rowKey={(row) => row.model}
+                status={status}
+                emptyText={t('usage_stats.no_data')}
+                loadingText={t('common.loading')}
+                defaultSortKey="requests"
+                defaultSortDir="desc"
+                refreshing={loading && rows.length > 0}
+                refreshingText={t('common.loading')}
+            />
         </Card>
     )
 }

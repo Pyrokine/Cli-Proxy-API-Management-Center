@@ -2,1354 +2,1602 @@
 @use '../styles/mixins' as *;
 
 .container {
-  width: 100%;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  position: relative;
+    width: 100%;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    position: relative;
 }
 
 .header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .headerActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .timeRangeGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .timeRangeLabel {
-  font-size: $font-size-base;
-  color: var(--text-secondary);
-  font-weight: $font-weight-medium;
+    font-size: $font-size-base;
+    color: var(--text-secondary);
+    font-weight: $font-weight-medium;
 }
 
 .timeRangeSelectControl {
-  min-width: 164px;
+    min-width: 164px;
 }
 
 .pageTitle {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  line-height: $line-height-heading;
-  color: var(--text-primary);
-  margin: 0;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    line-height: $line-height-heading;
+    color: var(--text-primary);
+    margin: 0;
 }
 
 .errorBox {
-  padding: 10px;
-  background-color: rgba($error-color, 0.1);
-  border: 1px solid var(--error-color);
-  border-radius: $radius-sm;
-  color: var(--error-color);
-  font-size: $font-size-sm;
+    padding: 10px;
+    background-color: rgba($error-color, 0.1);
+    border: 1px solid var(--error-color);
+    border-radius: $radius-sm;
+    color: var(--error-color);
+    font-size: $font-size-sm;
+}
+
+.settingsDisclosure {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+
+    & > :not(summary) {
+        margin-top: $spacing-md;
+    }
+}
+
+.settingsSummary {
+    cursor: pointer;
+    padding: $spacing-sm $spacing-md;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    list-style: none;
+
+    &::-webkit-details-marker {
+        display: none;
+    }
+
+    &::before {
+        content: '▸ ';
+        color: var(--text-secondary);
+        font-size: $font-size-xs;
+    }
+}
+
+.settingsDisclosure[open] .settingsSummary::before {
+    content: '▾ ';
 }
 
 .hint {
-  color: var(--text-secondary);
-  font-size: $font-size-sm;
-  text-align: center;
-  padding: 16px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    text-align: center;
+    padding: 16px;
 }
 
 .loadingOverlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .loadingOverlayContent {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: $radius-lg;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  box-shadow: var(--shadow-lg);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: $radius-lg;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-lg);
 }
 
 .loadingOverlaySpinner {
-  border-color: rgba($primary-color, 0.25);
-  border-top-color: var(--primary-color);
-  box-shadow: 0 0 10px rgba($primary-color, 0.25);
+    border-color: rgba($primary-color, 0.25);
+    border-top-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba($primary-color, 0.25);
 }
 
 .loadingOverlayText {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+}
+
+.cardLoadingShell {
+    position: relative;
+}
+
+.cardLoadingOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.cardLoadingPill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-lg);
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+}
+
+.cardLoadingSpinner {
+    border-color: rgba($primary-color, 0.25);
+    border-top-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba($primary-color, 0.25);
 }
 
 // Stats Grid
 .statsGrid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
 
-  @include mobile {
-    grid-template-columns: 1fr;
-  }
+    @include mobile {
+        grid-template-columns: 1fr;
+    }
 }
 
 .statCard {
-  --accent: var(--primary-color);
-  --accent-soft: rgba($primary-color, 0.18);
-  --accent-border: rgba($primary-color, 0.35);
+    --accent: var(--primary-color);
+    --accent-soft: rgba($primary-color, 0.18);
+    --accent-border: rgba($primary-color, 0.35);
 
-  grid-column: span 4;
-  position: relative;
-  padding: 12px;
-  background: radial-gradient(120% 140% at 12% 0%, var(--accent-soft) 0%, rgba(0, 0, 0, 0) 62%),
-  linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
-  var(--bg-primary);
-  border-radius: $radius-md;
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 120px;
-  box-shadow: var(--shadow-lg);
-  transition: transform $transition-fast, box-shadow $transition-fast, border-color $transition-fast;
-  overflow: hidden;
+    grid-column: span 4;
+    position: relative;
+    padding: 12px;
+    background:
+        radial-gradient(120% 140% at 12% 0%, var(--accent-soft) 0%, rgba(0, 0, 0, 0) 62%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)), var(--bg-primary);
+    border-radius: $radius-md;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 120px;
+    box-shadow: var(--shadow-lg);
+    transition:
+        transform $transition-fast,
+        box-shadow $transition-fast,
+        border-color $transition-fast;
+    overflow: hidden;
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 3px;
-    width: 100%;
-    background: linear-gradient(90deg, var(--accent), rgba(0, 0, 0, 0));
-    opacity: 0.95;
-  }
+    &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 3px;
+        width: 100%;
+        background: linear-gradient(90deg, var(--accent), rgba(0, 0, 0, 0));
+        opacity: 0.95;
+    }
 
-  &:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent-border);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
-  }
+    &:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent-border);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+    }
 
-  @include tablet {
-    grid-column: span 6;
-  }
+    @include tablet {
+        grid-column: span 6;
+    }
 
-  @include mobile {
-    grid-column: auto;
-    min-height: 110px;
-  }
+    @include mobile {
+        grid-column: auto;
+        min-height: 110px;
+    }
 }
 
 .statCard:nth-child(-n + 2) {
-  grid-column: span 6;
+    grid-column: span 6;
 }
 
 @include mobile {
-  .statCard:nth-child(-n + 2) {
-    grid-column: auto;
-  }
+    .statCard:nth-child(-n + 2) {
+        grid-column: auto;
+    }
 }
 
 .statCardHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
 }
 
 .statLabelGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .statIconBadge {
-  width: 26px;
-  height: 26px;
-  border-radius: $radius-sm;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: $font-size-base;
-  background: var(--accent);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
-  flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: $radius-sm;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: $font-size-base;
+    background: var(--accent);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
+    flex-shrink: 0;
 
-  svg {
-    display: block;
-  }
+    svg {
+        display: block;
+    }
 }
 
 .statHeader {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
 }
 
 .statIcon {
-  font-size: $font-size-xl;
+    font-size: $font-size-xl;
 }
 
 .statLabel {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
-  font-weight: $font-weight-medium;
-  letter-spacing: 0.02em;
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+    font-weight: $font-weight-medium;
+    letter-spacing: 0.02em;
 }
 
 .statValue {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  line-height: $line-height-tight;
-  font-variant-numeric: tabular-nums;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    line-height: $line-height-tight;
+    font-variant-numeric: tabular-nums;
 }
 
 .statValueRow {
-  display: flex;
-  gap: $spacing-lg;
+    display: flex;
+    gap: $spacing-lg;
 }
 
 .statValueSmall {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .statValueLabel {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
 }
 
 .statValueNum {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
 }
 
 .statMeta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: $font-size-sm;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: $font-size-sm;
 }
 
 .statSuccess {
-  color: var(--success-color);
+    color: var(--success-color);
 }
 
 .statFailure {
-  color: var(--danger-color);
+    color: var(--danger-color);
 }
 
 .statNeutral {
-  color: var(--text-secondary);
+    color: var(--text-secondary);
 }
 
 .statMetaRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
 }
 
 .statMetaItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .statMetaDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: var(--text-secondary);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--text-secondary);
 }
 
 .statSubtle {
-  color: var(--text-tertiary);
+    color: var(--text-tertiary);
 }
 
 .statTrend {
-  margin-top: auto;
-  background: var(--bg-tertiary);
-  border-radius: $radius-md;
-  padding: 8px;
-  height: 58px;
-  border: 1px solid var(--border-color);
+    margin-top: auto;
+    background: var(--bg-tertiary);
+    border-radius: $radius-md;
+    padding: 8px;
+    height: 58px;
+    border: 1px solid var(--border-color);
 }
 
 .statTrendPlaceholder {
-  width: 100%;
-  height: 100%;
-  background: var(--bg-secondary);
-  border-radius: $radius-md;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-secondary);
+    border-radius: $radius-md;
 }
 
 .sparkline {
-  width: 100%;
-  height: 100% !important;
+    width: 100%;
+    height: 100% !important;
 }
 
 .statHint {
-  color: var(--text-tertiary);
-  font-style: italic;
+    color: var(--text-tertiary);
+    font-style: italic;
 }
 
 // API List (80%比例)
 .apiSortBar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
 }
 
 .apiSortBtn {
-  padding: 4px 10px;
-  border-radius: $radius-full;
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    padding: 4px 10px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
 
-  &:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-  }
+    &:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
 
-  &:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 1px;
-  }
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 1px;
+    }
 }
 
 .apiSortBtnActive {
-  border-color: rgba($primary-color, 0.5);
-  background: rgba($primary-color, 0.1);
-  color: var(--text-primary);
-  font-weight: $font-weight-semibold;
+    border-color: rgba($primary-color, 0.5);
+    background: rgba($primary-color, 0.1);
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
 }
 
 .apiList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .apiItem {
-  background-color: var(--bg-secondary);
-  border-radius: $radius-sm;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
+    background-color: var(--bg-secondary);
+    border-radius: $radius-sm;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
 }
 
 .apiHeader {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
 
-  &:hover {
-    background-color: var(--bg-tertiary);
-  }
+    &:hover {
+        background-color: var(--bg-tertiary);
+    }
 
-  &:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: -2px;
-  }
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: -2px;
+    }
 }
 
 .apiInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
 }
 
 .apiEndpoint {
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  font-size: $font-size-base;
-  word-break: break-all;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    font-size: $font-size-base;
+    word-break: break-all;
 }
 
 .apiStats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
 }
 
 .apiBadge {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  padding: 2px 8px;
-  border-radius: $radius-full;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    padding: 2px 8px;
+    border-radius: $radius-full;
 }
 
 .expandIcon {
-  color: var(--text-secondary);
-  font-size: $font-size-sm;
-  margin-left: 6px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    margin-left: 6px;
 }
 
 .apiModels {
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  border-top: 1px solid var(--border-color);
-  margin-top: 0;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 0;
 }
 
 .modelRow {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 10px;
-  padding: 8px 10px;
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  font-size: $font-size-sm;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    padding: 8px 10px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    font-size: $font-size-sm;
 
-  @include mobile {
-    grid-template-columns: 1fr;
-    gap: 3px;
-  }
+    @include mobile {
+        grid-template-columns: 1fr;
+        gap: 3px;
+    }
 }
 
 .modelName {
-  color: var(--text-primary);
-  font-weight: $font-weight-medium;
-  word-break: break-all;
+    color: var(--text-primary);
+    font-weight: $font-weight-medium;
+    word-break: break-all;
 }
 
 .modelStat {
-  color: var(--text-secondary);
-  text-align: right;
+    color: var(--text-secondary);
+    text-align: right;
 
-  @include mobile {
-    text-align: left;
-  }
+    @include mobile {
+        text-align: left;
+    }
 }
 
 // Detail cards — content flows naturally within the page scroll.
 .detailsFixedCard {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
 }
 
 .detailsScroll {
-  flex: 1 1 auto;
-  min-height: 0;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 // Table (80%比例)
 .tableWrapper {
-  overflow-x: auto;
+    overflow-x: auto;
 }
 
 .table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: $font-size-sm;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: $font-size-sm;
 
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  th {
-    font-weight: $font-weight-medium;
-    color: var(--text-tertiary);
-    background-color: var(--bg-secondary);
-    white-space: nowrap;
-  }
-
-  th.sortableHeader {
-    user-select: none;
-    transition: color 0.15s ease;
-
-    &:hover {
-      color: var(--text-primary);
+    th,
+    td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
     }
-  }
 
-  td {
-    color: var(--text-primary);
-  }
+    th {
+        font-weight: $font-weight-medium;
+        color: var(--text-tertiary);
+        background-color: var(--bg-secondary);
+        white-space: nowrap;
+    }
 
-  tbody tr:hover {
-    background-color: var(--bg-tertiary);
-  }
+    th.sortableHeader {
+        user-select: none;
+        transition: color 0.15s ease;
+
+        &:hover {
+            color: var(--text-primary);
+        }
+    }
+
+    td {
+        color: var(--text-primary);
+    }
+
+    tbody tr:hover {
+        background-color: var(--bg-tertiary);
+    }
 }
 
 .sortHeaderButton {
-  display: inline-flex;
-  align-items: center;
-  width: 100%;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
 
-  &:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-    border-radius: $radius-sm;
-  }
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+        border-radius: $radius-sm;
+    }
 }
 
 .modelCell {
-  font-weight: $font-weight-medium;
-  max-width: 240px;
-  word-break: break-all;
+    font-weight: $font-weight-medium;
+    max-width: 240px;
+    word-break: break-all;
 }
 
 .credentialType {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: $radius-full;
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  vertical-align: middle;
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: $radius-full;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    vertical-align: middle;
 }
 
 .requestCountCell {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
 }
 
 .requestBreakdown {
-  color: var(--text-secondary);
-  white-space: nowrap;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 // Pricing Section (80%比例)
 .pricingSection {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.pricingActionsBar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+
+    @include mobile {
+        justify-content: stretch;
+
+        :global(.btn) {
+            width: 100%;
+        }
+    }
+}
+
+.priceSaveFeedback {
+    padding: 10px 12px;
+    border-radius: $radius-sm;
+    border: 1px solid var(--border-color);
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}
+
+.priceSaveFeedbackInfo {
+    color: var(--info-color);
+    background: color-mix(in srgb, var(--info-color) 10%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--info-color) 24%, var(--border-color));
+}
+
+.priceSaveFeedbackSuccess {
+    color: var(--success-color);
+    background: color-mix(in srgb, var(--success-color) 10%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--success-color) 24%, var(--border-color));
+}
+
+.priceSaveFeedbackWarning {
+    color: var(--warning-color);
+    background: color-mix(in srgb, var(--warning-color) 10%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--warning-color) 24%, var(--border-color));
+}
+
+.priceSaveFeedbackError {
+    color: var(--error-color);
+    background: color-mix(in srgb, var(--error-color) 10%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--error-color) 24%, var(--border-color));
 }
 
 .priceForm {
-  padding: 10px;
-  background-color: var(--bg-secondary);
-  border-radius: $radius-sm;
-  border: 1px solid var(--border-color);
+    padding: 10px;
+    background-color: var(--bg-secondary);
+    border-radius: $radius-sm;
+    border: 1px solid var(--border-color);
+}
+
+.priceFormFooter {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
 }
 
 .formRow {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
 
-  @include mobile {
-    flex-direction: column;
-    align-items: stretch;
-  }
+    @include mobile {
+        flex-direction: column;
+        align-items: stretch;
+    }
 }
 
 .formField {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex: 1;
-  min-width: 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 120px;
 
-  label {
-    font-size: $font-size-sm;
-    color: var(--text-secondary);
-    font-weight: $font-weight-medium;
-  }
-
-  // 确保 Input 组件的 form-group 包装器不影响布局
-  :global(.form-group) {
-    margin: 0;
-
-    > label {
-      display: none; // 隐藏 Input 自带的 label，使用外层的
+    label {
+        font-size: $font-size-sm;
+        color: var(--text-secondary);
+        font-weight: $font-weight-medium;
     }
-  }
 
-  :global(.input) {
-    height: 40px;
-    box-sizing: border-box;
-  }
+    // 确保 Input 组件的 form-group 包装器不影响布局
+    :global(.form-group) {
+        margin: 0;
+
+        > label {
+            display: none; // 隐藏 Input 自带的 label，使用外层的
+        }
+    }
+
+    :global(.input) {
+        height: 40px;
+        box-sizing: border-box;
+    }
+}
+
+.formHint {
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+    margin-top: 2px;
 }
 
 .pricesList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+}
+
+.pricesToolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .pricesTitle {
-  font-size: $font-size-sm;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  margin: 0;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0;
 }
 
-.pricesGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.priceItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px;
-  background-color: var(--bg-secondary);
-  border-radius: $radius-sm;
-  border: 1px solid var(--border-color);
-  gap: 10px;
-
-  @include mobile {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
-
-.priceInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
-}
-
-.priceModel {
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  font-size: $font-size-sm;
-  word-break: break-all;
-}
-
-.priceMeta {
-  display: flex;
-  gap: 10px;
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-
-  @include mobile {
-    flex-direction: column;
-    gap: 3px;
-  }
+.pricesCount {
+    color: var(--text-tertiary);
+    font-weight: $font-weight-medium;
+    font-size: $font-size-xs;
 }
 
 .priceActions {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .editModalBody {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settingsCardsGrid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr);
+    gap: 16px;
+    align-items: start;
+
+    @include mobile {
+        grid-template-columns: 1fr;
+    }
 }
 
 // Chart Section (80%比例)
 .chartSection {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .chartControls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
 
-  @include mobile {
-    flex-direction: column;
-    align-items: stretch;
-  }
+    @include mobile {
+        flex-direction: column;
+        align-items: stretch;
+    }
 }
 
 .dimensionBar {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
 }
 
 .dimensionLabel {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  font-weight: $font-weight-medium;
-  white-space: nowrap;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    font-weight: $font-weight-medium;
+    white-space: nowrap;
 }
 
 .dimensionButtons {
-  display: flex;
-  gap: 4px;
+    display: flex;
+    gap: 4px;
 }
 
 .chartWrapper {
-  padding: 14px;
-  background-color: var(--bg-secondary);
-  border-radius: $radius-lg;
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+    padding: 14px;
+    background-color: var(--bg-secondary);
+    border-radius: $radius-lg;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .chartLegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  align-items: center;
-  min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    align-items: center;
+    min-width: 0;
 
-  @include mobile {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
-  }
+    @include mobile {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+    }
 }
 
 .legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 240px;
-  padding: 4px 10px;
-  border-radius: $radius-full;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
-  transition: opacity 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 240px;
+    padding: 4px 10px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s ease;
 
-  &:hover {
-    border-color: var(--text-tertiary);
-  }
+    &:hover {
+        border-color: var(--text-tertiary);
+    }
 
-  @include mobile {
-    max-width: 180px;
-  }
+    @include mobile {
+        max-width: 180px;
+    }
 }
 
 .legendItemHidden {
-  opacity: 0.4;
+    opacity: 0.4;
 
-  .legendDot {
-    background: var(--text-tertiary) !important;
-  }
+    .legendDot {
+        background: var(--text-tertiary) !important;
+    }
 
-  .legendLabel {
-    text-decoration: line-through;
-  }
+    .legendLabel {
+        text-decoration: line-through;
+    }
 }
 
 .legendDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
 }
 
 .legendLabel {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .chartArea {
-  height: 280px;
+    height: 280px;
 
-  @include mobile {
-    height: 320px;
-  }
+    @include mobile {
+        height: 320px;
+    }
 }
 
 .chartScroller {
-  width: 100%;
-  height: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
+    width: 100%;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
 
-  // Chart.js 默认会设置 canvas 的 touch-action: none，导致移动端无法横向滚动
-  :global(canvas) {
-    touch-action: pan-x pan-y !important;
-  }
+    // Chart.js 默认会设置 canvas 的 touch-action: none，导致移动端无法横向滚动
+    :global(canvas) {
+        touch-action: pan-x pan-y !important;
+    }
 }
 
 .chartCanvas {
-  position: relative;
-  height: 100%;
-  width: 100%;
+    position: relative;
+    height: 100%;
+    width: 100%;
 }
 
 .periodButtons {
-  display: flex;
-  gap: 6px;
+    display: flex;
+    gap: 6px;
 }
 
 .chartsGrid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr);
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
 
-  > * {
-    min-width: 0;
-  }
+    > * {
+        min-width: 0;
+    }
 
-  @include desktop {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+    @include desktop {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .detailsGrid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr);
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
 
-  > * {
-    min-width: 0;
-  }
+    > * {
+        min-width: 0;
+    }
 
-  @include desktop {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
-  }
+    @include desktop {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+    }
 }
 
 .requestEventsActions {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  flex-wrap: wrap;
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.autoRefreshGroup {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-xs;
 }
 
 .requestEventsToolbar {
-  display: flex;
-  gap: $spacing-sm;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  margin-bottom: $spacing-sm;
+    display: flex;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: $spacing-sm;
 }
 
 .requestEventsFilterItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 180px;
 }
 
 .requestEventsFilterLabel {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  font-weight: $font-weight-medium;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    font-weight: $font-weight-medium;
 }
 
 .requestEventsSelect {
-  min-width: 180px;
+    min-width: 180px;
 }
 
 .requestEventsSearch {
-  width: 100%;
-  min-width: 200px;
-  max-width: 320px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: $font-size-sm;
-  box-shadow: var(--shadow);
-  box-sizing: border-box;
-  outline: none;
+    width: 100%;
+    min-width: 200px;
+    max-width: 320px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    box-shadow: var(--shadow);
+    box-sizing: border-box;
+    outline: none;
 
-  &::placeholder {
-    color: var(--text-tertiary);
-  }
+    &::placeholder {
+        color: var(--text-tertiary);
+    }
 
-  &:focus {
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow), 0 0 0 3px rgba($primary-color, 0.18);
-  }
+    &:focus {
+        border-color: var(--primary-color);
+        box-shadow:
+            var(--shadow),
+            0 0 0 3px rgba($primary-color, 0.18);
+    }
 }
 
 .requestEventsMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: $spacing-xs $spacing-sm;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .requestEventsLimitHint {
-  color: var(--text-tertiary);
+    color: var(--text-tertiary);
+    grid-column: 1;
+}
+
+.requestEventsRefreshingHint {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    justify-self: end;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 56px;
+    justify-content: flex-end;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    white-space: nowrap;
+
+    @include mobile {
+        grid-column: 1;
+        grid-row: auto;
+        justify-self: start;
+        min-width: 0;
+    }
+}
+
+.requestEventsRefreshingHintIdle {
+    visibility: hidden;
 }
 
 .requestEventsTableWrapper {
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    margin-bottom: $spacing-sm;
+    padding-bottom: 8px;
 }
 
 .requestEventsTimestamp {
-  white-space: nowrap;
-  min-width: 160px;
+    white-space: nowrap;
+    min-width: 160px;
 }
 
 .requestEventsSourceCell,
 .requestEventsAuthIndex,
 .requestEventsApiKey {
-  font-family: $font-mono;
-  font-size: $font-size-sm;
-  max-width: 180px;
-  word-break: break-all;
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    max-width: 180px;
+    word-break: break-all;
 }
 
 .requestEventsResultSuccess {
-  color: var(--success-badge-text, #065f46);
-  background: var(--success-badge-bg, #d1fae5);
-  border: 1px solid var(--success-badge-border, #6ee7b7);
+    color: var(--success-badge-text, #065f46);
+    background: var(--success-badge-bg, #d1fae5);
+    border: 1px solid var(--success-badge-border, #6ee7b7);
 }
 
 .requestEventsResultFailed {
-  color: var(--failure-badge-text);
-  background: var(--failure-badge-bg);
-  border: 1px solid var(--failure-badge-border);
+    color: var(--failure-badge-text);
+    background: var(--failure-badge-bg);
+    border: 1px solid var(--failure-badge-border);
 }
 
 .requestEventsResultSuccess,
 .requestEventsResultFailed {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: $radius-full;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    white-space: nowrap;
 }
 
 // Service Health Card
 .healthCard {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  box-shadow: var(--shadow-lg);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: var(--shadow-lg);
 }
 
 .healthHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    // healthGridScroller 用负 margin 把自身上沿延伸进 header 区域(给 tooltip 留 padding),
+    // 不抬高 header 的话刷新按钮会被透明 scroller 顶覆盖,点不动.
+    position: relative;
+    z-index: 1;
 }
 
 .healthTitle {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  margin: 0;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0;
 }
 
 .healthMeta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .healthWindow {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
 }
 
 .healthRate {
-  display: flex;
-  align-items: center;
-  font-size: $font-size-sm;
-  font-weight: $font-weight-semibold;
-  white-space: nowrap;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    white-space: nowrap;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
 }
 
 .healthRateHigh {
-  color: var(--success-badge-text, #065f46);
-  background: var(--success-badge-bg, #d1fae5);
+    color: var(--success-badge-text, #065f46);
+    background: var(--success-badge-bg, #d1fae5);
 }
 
 .healthRateMedium {
-  color: var(--warning-text, #92400e);
-  background: var(--warning-bg, #fef3c7);
+    color: var(--warning-text, #92400e);
+    background: var(--warning-bg, #fef3c7);
 }
 
 .healthRateLow {
-  color: var(--failure-badge-text);
-  background: var(--failure-badge-bg);
+    color: var(--failure-badge-text);
+    background: var(--failure-badge-bg);
 }
 
 .healthGridScroller {
-  overflow-x: auto;
-  overflow-y: hidden;
-  // 为 tooltip 腾出垂直空间：padding 扩大 overflow 的裁剪区域，负 margin 补偿布局
-  padding: 64px 0;
-  margin: -64px 0;
-  -webkit-overflow-scrolling: touch;
+    overflow-x: auto;
+    overflow-y: hidden;
+    // 隔离堆叠上下文 — 防止负 margin + tooltip padding 让滚动条/绝对定位元素漏到下一个卡的顶部
+    isolation: isolate;
+    // padding-top 给上方 tooltip 腾空间,负 margin-top 抵消视觉高度.
+    // padding-bottom: 12px 让 scrollbar 落在容器自己的轨道里 — 没这条 scrollbar 会挂在
+    // 下一张卡的顶部 (issue 6 的成因).
+    padding: 64px 0 12px 0;
+    margin: -64px 0 0 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.healthDateLabels {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: calc(10px + 3px); // match block width + gap
+    width: fit-content;
+    margin: 0 auto 4px;
+
+    span {
+        font-size: 0;
+        line-height: 0;
+    }
+}
+
+.healthDateLabel {
+    font-size: $font-size-xs !important;
+    line-height: 1 !important;
+    color: var(--text-tertiary);
+    white-space: nowrap;
 }
 
 .healthGrid {
-  display: grid;
-  gap: 3px;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(7, 10px);
-  width: fit-content;
-  margin: 0 auto;
+    display: grid;
+    gap: 3px;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(8, 10px);
+    width: fit-content;
+    margin: 0 auto;
 }
 
 .healthBlockWrapper {
-  position: relative;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  width: 10px;
-  height: 10px;
+    position: relative;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    width: 10px;
+    height: 10px;
 }
 
 .healthBlock {
-  width: 100%;
-  height: 100%;
-  border-radius: 2px;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+    width: 100%;
+    height: 100%;
+    border-radius: 2px;
+    transition:
+        transform 0.15s ease,
+        opacity 0.15s ease;
 
-  .healthBlockWrapper:hover &,
-  .healthBlockWrapper.healthBlockActive & {
-    transform: scaleY(1.6);
-    opacity: 0.85;
-  }
+    .healthBlockWrapper:hover &,
+    .healthBlockWrapper.healthBlockActive & {
+        transform: scaleY(1.6);
+        opacity: 0.85;
+    }
 }
 
 .healthBlockIdle {
-  background-color: var(--border-secondary, #e5e7eb);
+    background-color: var(--border-secondary, #e5e7eb);
 }
 
 // noinspection DuplicatedCode
 .healthTooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-primary, #fff);
-  border: 1px solid var(--border-secondary, #e5e7eb);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: $font-size-sm;
-  line-height: $line-height-base;
-  white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  z-index: $z-dropdown;
-  pointer-events: none;
-  color: var(--text-primary);
-
-  &::after {
-    content: '';
     position: absolute;
-    top: 100%;
+    bottom: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
-    border: 5px solid transparent;
-    border-top-color: var(--bg-primary, #fff);
-  }
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-secondary, #e5e7eb);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    z-index: $z-dropdown;
+    pointer-events: none;
+    color: var(--text-primary);
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: var(--border-secondary, #e5e7eb);
-  }
+    &::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: var(--bg-primary, #fff);
+    }
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 6px solid transparent;
+        border-top-color: var(--border-secondary, #e5e7eb);
+    }
 }
 
 // When tooltip should appear below (for top rows)
 .healthTooltipBelow {
-  bottom: auto;
-  top: calc(100% + 8px);
+    bottom: auto;
+    top: calc(100% + 8px);
 
-  &::after {
-    top: auto;
-    bottom: 100%;
-    border-top-color: transparent;
-    border-bottom-color: var(--bg-primary, #fff);
-  }
+    &::after {
+        top: auto;
+        bottom: 100%;
+        border-top-color: transparent;
+        border-bottom-color: var(--bg-primary, #fff);
+    }
 
-  &::before {
-    top: auto;
-    bottom: 100%;
-    border-top-color: transparent;
-    border-bottom-color: var(--border-secondary, #e5e7eb);
-  }
+    &::before {
+        top: auto;
+        bottom: 100%;
+        border-top-color: transparent;
+        border-bottom-color: var(--border-secondary, #e5e7eb);
+    }
 }
 
 .healthTooltipLeft {
-  left: 0;
-  transform: translateX(0);
+    left: 0;
+    transform: translateX(0);
 
-  &::after,
-  &::before {
-    left: 8px;
-    transform: none;
-  }
+    &::after,
+    &::before {
+        left: 8px;
+        transform: none;
+    }
 }
 
 .healthTooltipRight {
-  left: auto;
-  right: 0;
-  transform: translateX(0);
-
-  &::after,
-  &::before {
     left: auto;
-    right: 8px;
-    transform: none;
-  }
+    right: 0;
+    transform: translateX(0);
+
+    &::after,
+    &::before {
+        left: auto;
+        right: 8px;
+        transform: none;
+    }
 }
 
 .healthTooltipTime {
-  color: var(--text-secondary);
-  display: block;
-  margin-bottom: 2px;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 2px;
 }
 
 .healthTooltipSummary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: $font-weight-medium;
-  color: var(--text-primary);
-  margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+    margin-bottom: 4px;
 }
 
 .healthTooltipBar {
-  height: 3px;
-  background: var(--bg-error-light, #fecaca);
-  border-radius: 999px;
-  overflow: hidden;
-  margin-bottom: 4px;
+    height: 3px;
+    background: var(--bg-error-light, #fecaca);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 4px;
 }
 
 .healthTooltipBarFill {
-  height: 100%;
-  background: var(--success-color, #10b981);
-  border-radius: 999px;
+    height: 100%;
+    background: var(--success-color, #10b981);
+    border-radius: 999px;
 }
 
 .healthTooltipStats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .healthTooltipSuccess {
-  color: var(--success-color, #10b981);
+    color: var(--success-color, #10b981);
 }
 
 .healthTooltipFailure {
-  color: var(--danger-color, #ef4444);
+    color: var(--danger-color, #ef4444);
 }
 
 .healthTooltipRate {
-  color: var(--text-secondary);
-  margin-left: 2px;
+    color: var(--text-secondary);
+    margin-left: 2px;
 }
 
 .healthLegend {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.healthLegendItem {
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
 .healthLegendLabel {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
-}
-
-.healthLegendColors {
-  display: flex;
-  gap: 3px;
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
 }
 
 .healthLegendBlock {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
 }
 
 @include mobile {
-  .healthCard {
-    padding: 14px;
-    gap: 10px;
-  }
+    .healthCard {
+        padding: 14px;
+        gap: 10px;
+    }
 
-  .healthGrid {
-    grid-template-rows: repeat(7, 6px);
-    gap: 2px;
-    margin: 0;
-  }
+    .healthGrid {
+        grid-template-rows: repeat(8, 6px);
+        gap: 2px;
+        margin: 0;
+    }
 
-  .healthBlockWrapper {
-    width: 6px;
-    height: 6px;
-  }
+    .healthBlockWrapper {
+        width: 6px;
+        height: 6px;
+    }
 
-  .healthTooltip {
-    font-size: $font-size-sm;
-    padding: 4px 8px;
-  }
+    .healthTooltip {
+        font-size: $font-size-sm;
+        padding: 4px 8px;
+    }
 
-  .healthLegendBlock {
-    width: 8px;
-    height: 8px;
-  }
+    .healthLegendBlock {
+        width: 8px;
+        height: 8px;
+    }
 }
 
 // Events 移动端卡片视图
 .eventCardList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .eventCard {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s;
-  background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    cursor: pointer;
+    transition:
+        border-color 0.15s,
+        background-color 0.15s;
+    background: var(--bg-primary);
 
-  &:hover {
-    border-color: var(--border-hover);
-    background: var(--bg-tertiary);
-  }
+    &:hover {
+        border-color: var(--border-hover);
+        background: var(--bg-tertiary);
+    }
 }
 
 .eventCardExpanded {
-  border-color: var(--border-primary);
+    border-color: var(--border-primary);
 }
 
 .eventCardHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
 }
 
 .eventCardTime {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
 }
 
 .eventCardBody {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 4px;
-  gap: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+    gap: 8px;
 }
 
 .eventCardModel {
-  font-weight: $font-weight-medium;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .eventCardTokens {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  white-space: nowrap;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .eventCardDetails {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .eventCardDetailRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
 }
 
 .eventCardDetailLabel {
-  color: var(--text-tertiary);
+    color: var(--text-tertiary);
+}
+
+.costBarWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 20px;
+    min-width: 120px;
+}
+
+.costBar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: var(--accent-primary-alpha, rgba(59, 130, 246, 0.15));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.costBarLabel {
+    position: relative;
+    z-index: 1;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    padding-left: 6px;
+}
+
+.tabBar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.tabButton {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition:
+        color 0.15s ease,
+        border-color 0.15s ease;
+
+    &:hover {
+        color: var(--text-primary, #111827);
+    }
+}
+
+.tabButtonActive {
+    color: var(--brand-color, #3b82f6);
+    border-bottom-color: var(--brand-color, #3b82f6);
 }

@@ -2,26 +2,26 @@
  * 模型列表状态管理（带缓存）
  */
 
-import {modelsApi} from '@/services/api/models'
-import {CACHE_EXPIRY_MS} from '@/utils/constants'
-import type {ModelInfo} from '@/utils/models'
-import {create} from 'zustand'
+import { modelsApi } from '@/services/api/models'
+import { getCacheExpiryMs } from '@/utils/constants'
+import type { ModelInfo } from '@/utils/models'
+import { create } from 'zustand'
 
 interface ModelsCache {
-    data: ModelInfo[];
-    timestamp: number;
-    apiBase: string;
+    data: ModelInfo[]
+    timestamp: number
+    apiBase: string
 }
 
 interface ModelsState {
-    models: ModelInfo[];
-    loading: boolean;
-    error: string | null;
-    cache: ModelsCache | null;
+    models: ModelInfo[]
+    loading: boolean
+    error: string | null
+    cache: ModelsCache | null
 
-    fetchModels: (apiBase: string, apiKey?: string, forceRefresh?: boolean) => Promise<ModelInfo[]>;
-    clearCache: () => void;
-    isCacheValid: (apiBase: string) => boolean;
+    fetchModels: (apiBase: string, apiKey?: string, forceRefresh?: boolean) => Promise<ModelInfo[]>
+    clearCache: () => void
+    isCacheValid: (apiBase: string) => boolean
 }
 
 export const useModelsStore = create<ModelsState>((set, get) => ({
@@ -43,25 +43,23 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
 
         try {
             const list = await modelsApi.fetchModels(apiBase, apiKey)
-            const now  = Date.now()
+            const now = Date.now()
 
             set({
-                    models: list,
-                    loading: false,
-                    cache: { data: list, timestamp: now, apiBase },
-                })
+                models: list,
+                loading: false,
+                cache: { data: list, timestamp: now, apiBase },
+            })
 
             return list
         } catch (error: unknown) {
             const message =
-                      error instanceof Error ?
-                      error.message :
-                      typeof error === 'string' ? error : 'Failed to fetch models'
+                error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failed to fetch models'
             set({
-                    error: message,
-                    loading: false,
-                    models: [],
-                })
+                error: message,
+                loading: false,
+                models: [],
+            })
             throw error
         }
     },
@@ -78,6 +76,6 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
         if (cache.apiBase !== apiBase) {
             return false
         }
-        return Date.now() - cache.timestamp < CACHE_EXPIRY_MS
+        return Date.now() - cache.timestamp < getCacheExpiryMs()
     },
 }))

@@ -1,73 +1,73 @@
-import {useNotificationStore} from '@/stores'
-import {buildHeaderObject} from '@/utils/headers'
-import type {ModelInfo} from '@/utils/models'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import { useNotificationStore } from '@/stores'
+import { buildHeaderObject } from '@/utils/headers'
+import type { ModelInfo } from '@/utils/models'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 // ---- Types ----
 
 interface HeaderEntry {
-    key: string;
-    value: string;
+    key: string
+    value: string
 }
 
 interface ModelDiscoveryConfig {
     /** Build the endpoint URL from the baseUrl */
-    buildEndpoint: (baseUrl: string) => string;
+    buildEndpoint: (baseUrl: string) => string
 
     /** Fetch models from the endpoint */
-    fetchModels: (baseUrl: string, apiKey: string | undefined, headers: Record<string, string>) => Promise<ModelInfo[]>;
+    fetchModels: (baseUrl: string, apiKey: string | undefined, headers: Record<string, string>) => Promise<ModelInfo[]>
 
     /**
      * Determine if auto-fetch should proceed based on credentials.
      * Receives the apiKey field value and the resolved header object.
      */
-    canAutoFetch: (apiKey: string, headers: Record<string, string>) => boolean;
+    canAutoFetch: (apiKey: string, headers: Record<string, string>) => boolean
 
     /** Build the error message for display */
     buildErrorMessage: (
         err: unknown,
         context: {
-            apiKey: string;
-            headers: Record<string, string>;
-        },
-    ) => string;
+            apiKey: string
+            headers: Record<string, string>
+        }
+    ) => string
 
     /** Normalize a model name (e.g. strip Gemini resource prefix) */
-    normalizeName?: (name: string) => string;
+    normalizeName?: (name: string) => string
 
     /** Translation key prefix (e.g. 'codex', 'gemini') */
-    i18nPrefix: string;
+    i18nPrefix: string
 }
 
 export interface ModelDiscoveryReturn {
     // State
-    open: boolean;
-    setOpen: (open: boolean) => void;
-    endpoint: string;
-    discoveredModels: ModelInfo[];
-    filteredModels: ModelInfo[];
-    fetching: boolean;
-    error: string;
-    search: string;
-    setSearch: (search: string) => void;
-    selected: Set<string>;
+    open: boolean
+    setOpen: (open: boolean) => void
+    endpoint: string
+    discoveredModels: ModelInfo[]
+    filteredModels: ModelInfo[]
+    fetching: boolean
+    error: string
+    search: string
+    setSearch: (search: string) => void
+    selected: Set<string>
 
     // Actions
-    fetchDiscovery: () => Promise<void>;
-    toggleSelection: (name: string) => void;
-    applySelected: () => void;
+    fetchDiscovery: () => Promise<void>
+    toggleSelection: (name: string) => void
+    applySelected: () => void
 
     // Derived
-    canOpen: boolean;
-    canApply: boolean;
+    canOpen: boolean
+    canApply: boolean
 }
 
 interface DiscoveryFormState {
-    apiKey: string;
-    baseUrl?: string;
-    headers: HeaderEntry[];
-    modelEntries: Array<{ name: string; alias: string }>;
+    apiKey: string
+    baseUrl?: string
+    headers: HeaderEntry[]
+    modelEntries: Array<{ name: string; alias: string }>
 }
 
 /**
@@ -78,30 +78,30 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     formState: TForm,
     setForm: (updater: (prev: TForm) => TForm) => void,
     flags: {
-        disableControls: boolean;
-        saving: boolean;
-        loading: boolean;
-        invalidIndexParam: boolean;
-        invalidIndex: boolean;
+        disableControls: boolean
+        saving: boolean
+        loading: boolean
+        invalidIndexParam: boolean
+        invalidIndex: boolean
     },
-    discoveryConfig: ModelDiscoveryConfig,
+    discoveryConfig: ModelDiscoveryConfig
 ): ModelDiscoveryReturn {
-    const { t }                = useTranslation()
+    const { t } = useTranslation()
     const { showNotification } = useNotificationStore()
 
-    const [open, setOpen]                         = useState(false)
-    const [endpoint, setEndpoint]                 = useState('')
+    const [open, setOpen] = useState(false)
+    const [endpoint, setEndpoint] = useState('')
     const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([])
-    const [fetching, setFetching]                 = useState(false)
-    const [error, setError]                       = useState('')
-    const [search, setSearch]                     = useState('')
-    const [selected, setSelected]                 = useState<Set<string>>(new Set())
-    const autoFetchSignatureRef                   = useRef<string>('')
-    const requestIdRef                            = useRef(0)
+    const [fetching, setFetching] = useState(false)
+    const [error, setError] = useState('')
+    const [search, setSearch] = useState('')
+    const [selected, setSelected] = useState<Set<string>>(new Set())
+    const autoFetchSignatureRef = useRef<string>('')
+    const requestIdRef = useRef(0)
 
     const normalizeName = useMemo(
         () => discoveryConfig.normalizeName ?? ((n: string) => String(n ?? '').trim()),
-        [discoveryConfig.normalizeName],
+        [discoveryConfig.normalizeName]
     )
 
     // ---- Filtered models ----
@@ -112,8 +112,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             return discoveredModels
         }
         return discoveredModels.filter((model) => {
-            const name        = (model.name || '').toLowerCase()
-            const alias       = (model.alias || '').toLowerCase()
+            const name = (model.name || '').toLowerCase()
+            const alias = (model.alias || '').toLowerCase()
             const description = (model.description || '').toLowerCase()
             return name.includes(filter) || alias.includes(filter) || description.includes(filter)
         })
@@ -162,11 +162,11 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             if (addedCount > 0) {
                 showNotification(
                     t(`ai_providers.${discoveryConfig.i18nPrefix}_models_fetch_added`, { count: addedCount }),
-                    'success',
+                    'success'
                 )
             }
         },
-        [discoveryConfig.i18nPrefix, normalizeName, setForm, showNotification, t],
+        [discoveryConfig.i18nPrefix, normalizeName, setForm, showNotification, t]
     )
 
     // ---- Fetch models ----
@@ -178,8 +178,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 
         try {
             const headerObject = buildHeaderObject(formState.headers)
-            const apiKey       = formState.apiKey.trim() || undefined
-            const list         = await discoveryConfig.fetchModels(formState.baseUrl ?? '', apiKey, headerObject)
+            const apiKey = formState.apiKey.trim() || undefined
+            const list = await discoveryConfig.fetchModels(formState.baseUrl ?? '', apiKey, headerObject)
             if (requestIdRef.current !== requestId) {
                 return
             }
@@ -194,7 +194,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 discoveryConfig.buildErrorMessage(err, {
                     apiKey: formState.apiKey.trim(),
                     headers: headerObject,
-                }),
+                })
             )
         } finally {
             if (requestIdRef.current === requestId) {
@@ -206,40 +206,42 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     // ---- Auto-fetch when modal opens ----
 
     useEffect(() => {
-        if (!open) {
-            autoFetchSignatureRef.current = ''
-            requestIdRef.current += 1
-            setFetching(false)
-            return
-        }
+        queueMicrotask(() => {
+            if (!open) {
+                autoFetchSignatureRef.current = ''
+                requestIdRef.current += 1
+                setFetching(false)
+                return
+            }
 
-        const nextEndpoint = discoveryConfig.buildEndpoint(formState.baseUrl ?? '')
-        setEndpoint(nextEndpoint)
-        setDiscoveredModels([])
-        setSearch('')
-        setSelected(new Set())
-        setError('')
+            const nextEndpoint = discoveryConfig.buildEndpoint(formState.baseUrl ?? '')
+            setEndpoint(nextEndpoint)
+            setDiscoveredModels([])
+            setSearch('')
+            setSelected(new Set())
+            setError('')
 
-        if (!nextEndpoint) {
-            return
-        }
+            if (!nextEndpoint) {
+                return
+            }
 
-        const headerObject = buildHeaderObject(formState.headers)
-        if (!discoveryConfig.canAutoFetch(formState.apiKey.trim(), headerObject)) {
-            return
-        }
+            const headerObject = buildHeaderObject(formState.headers)
+            if (!discoveryConfig.canAutoFetch(formState.apiKey.trim(), headerObject)) {
+                return
+            }
 
-        const headerSignature = Object.entries(headerObject)
-                                      .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                      .map(([key, value]) => `${key}:${value}`)
-                                      .join('|')
-        const signature       = `${nextEndpoint}||${formState.apiKey.trim()}||${headerSignature}`
-        if (autoFetchSignatureRef.current === signature) {
-            return
-        }
-        autoFetchSignatureRef.current = signature
+            const headerSignature = Object.entries(headerObject)
+                .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+                .map(([key, value]) => `${key}:${value}`)
+                .join('|')
+            const signature = `${nextEndpoint}||${formState.apiKey.trim()}||${headerSignature}`
+            if (autoFetchSignatureRef.current === signature) {
+                return
+            }
+            autoFetchSignatureRef.current = signature
 
-        void fetchDiscovery()
+            void fetchDiscovery()
+        })
     }, [discoveryConfig, fetchDiscovery, formState.apiKey, formState.baseUrl, formState.headers, open])
 
     // ---- Toggle selection ----
@@ -269,11 +271,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     // ---- Derived flags ----
 
     const canOpen =
-              !flags.disableControls &&
-              !flags.saving &&
-              !flags.loading &&
-              !flags.invalidIndexParam &&
-              !flags.invalidIndex
+        !flags.disableControls && !flags.saving && !flags.loading && !flags.invalidIndexParam && !flags.invalidIndex
 
     const canApply = !flags.disableControls && !flags.saving && !fetching
 

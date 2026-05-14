@@ -2,64 +2,91 @@
 @use '../../styles/mixins' as *;
 
 .form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .fieldHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .label {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--text-primary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
 }
 
 .input {
-  max-width: 200px;
+    max-width: 200px;
+}
+
+.dbSizeRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg-tertiary, rgba(0, 0, 0, 0.03));
+    border-radius: $radius-md;
+}
+
+.dbSizeLabel {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+}
+
+.dbSizeValue {
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .hint {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
 }
 
 .disabledHint {
-  font-size: $font-size-sm;
-  color: var(--text-tertiary);
-  font-style: italic;
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+    font-style: italic;
 }
 
 .warning {
-  font-size: $font-size-sm;
-  color: var(--warning-color);
-  padding: 6px 10px;
-  background: var(--bg-warning-light, rgba(255, 183, 0, 0.08));
-  border-radius: $radius-md;
+    font-size: $font-size-sm;
+    color: var(--warning-color);
+    padding: 6px 10px;
+    background: var(--bg-warning-light, rgba(255, 183, 0, 0.08));
+    border-radius: $radius-md;
 }
 
 .warningDanger {
-  font-size: $font-size-sm;
-  color: var(--error-color);
-  padding: 6px 10px;
-  background: var(--bg-error-light);
-  border-radius: $radius-md;
-  font-weight: $font-weight-medium;
+    font-size: $font-size-sm;
+    color: var(--error-color);
+    padding: 6px 10px;
+    background: var(--bg-error-light);
+    border-radius: $radius-md;
+    font-weight: $font-weight-medium;
 }
 
 .actions {
-  display: flex;
-  gap: 8px;
-  padding-top: 4px;
+    display: flex;
+    gap: 8px;
+    padding-top: 4px;
 }

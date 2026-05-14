@@ -1,22 +1,26 @@
-import {getModelNamesFromUsage, type ModelPrice} from '@/utils/usage'
-import {useMemo} from 'react'
-import type {UsagePayload} from './hooks/useUsageData'
-import {PriceSettingsCard} from './PriceSettingsCard'
-import {UsageRetentionCard} from './UsageRetentionCard'
+import styles from '@/pages/UsagePage.module.scss'
+import type { ModelPrice } from '@/utils/usage'
+import type { PriceSaveFeedback } from './hooks/useUsageData'
+import { PriceSettingsCard } from './PriceSettingsCard'
+import { UsageRetentionCard } from './UsageRetentionCard'
 
 interface SettingsTabProps {
-    usage: UsagePayload | null;
-    modelPrices: Record<string, ModelPrice>;
-    onPricesChange: (prices: Record<string, ModelPrice>) => void;
+    modelNames: string[]
+    modelPrices: Record<string, ModelPrice>
+    priceSaveFeedback: PriceSaveFeedback | null
+    onPricesChange: (prices: Record<string, ModelPrice>) => Promise<void>
 }
 
-export function SettingsTab({ usage, modelPrices, onPricesChange }: SettingsTabProps) {
-    const modelNames = useMemo(() => getModelNamesFromUsage(usage), [usage])
-
+export function SettingsTab({ modelNames, modelPrices, priceSaveFeedback, onPricesChange }: SettingsTabProps) {
     return (
-        <>
-            <PriceSettingsCard modelNames={modelNames} modelPrices={modelPrices} onPricesChange={onPricesChange} />
+        <div className={styles.settingsCardsGrid}>
+            <PriceSettingsCard
+                modelNames={modelNames}
+                modelPrices={modelPrices}
+                priceSaveFeedback={priceSaveFeedback}
+                onPricesChange={onPricesChange}
+            />
             <UsageRetentionCard />
-        </>
+        </div>
     )
 }

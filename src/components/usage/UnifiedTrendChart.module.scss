@@ -1,0 +1,233 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+// Soft radial accent fading from the top-right corner to hint the metric.
+.accentBackdrop {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    z-index: 0;
+}
+
+.header {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+
+    @include mobile {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+.metricTitle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 8px;
+    border-radius: $radius-sm;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+
+    &::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        flex-shrink: 0;
+    }
+}
+
+.metricTabs {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-tertiary);
+    border-radius: $radius-md;
+    padding: 2px;
+}
+
+.metricTab {
+    padding: 6px 14px;
+    border: none;
+    border-radius: calc(#{$radius-md} - 2px);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        color 0.15s ease,
+        box-shadow 0.15s ease;
+    white-space: nowrap;
+
+    &:hover:not(.metricTabActive) {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: -1px;
+    }
+}
+
+.metricTabActive {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.headerRight {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.headerFixed {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px 4px;
+}
+
+.dataStartsAt {
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.summaryBar {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 8px 14px 2px;
+
+    @include mobile {
+        flex-direction: column;
+        gap: 4px;
+    }
+}
+
+.summaryTotal {
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: $line-height-tight;
+}
+
+.summaryLabel {
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+    font-weight: $font-weight-medium;
+}
+
+.summaryLive {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.liveDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success-color, #10b981);
+    flex-shrink: 0;
+}
+
+.chartBody {
+    position: relative;
+    z-index: 1;
+    padding: 4px 14px 14px;
+}
+
+@keyframes trendLoadingPulse {
+    0%,
+    100% {
+        opacity: 0.55;
+    }
+    50% {
+        opacity: 0.92;
+    }
+}
+
+.trendLoadingShell {
+    position: relative;
+    z-index: 1;
+    padding: 6px 14px 14px;
+}
+
+.trendLoadingSummary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.trendLoadingPrimary,
+.trendLoadingSecondary {
+    border-radius: $radius-sm;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--bg-secondary) 88%, transparent) 0%,
+        color-mix(in srgb, var(--bg-tertiary) 92%, transparent) 50%,
+        color-mix(in srgb, var(--bg-secondary) 88%, transparent) 100%
+    );
+    animation: trendLoadingPulse 1.4s ease-in-out infinite;
+}
+
+.trendLoadingPrimary {
+    width: 96px;
+    height: 28px;
+}
+
+.trendLoadingSecondary {
+    width: 72px;
+    height: 18px;
+}
+
+.trendLoadingChart {
+    padding: 0;
+    min-height: 180px;
+}
+
+.emptyHint {
+    position: relative;
+    z-index: 1;
+    padding: 8px 14px 14px;
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+}

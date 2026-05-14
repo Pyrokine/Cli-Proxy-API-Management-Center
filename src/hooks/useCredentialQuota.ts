@@ -3,8 +3,8 @@
  * for a given auth file and converts it to QuotaItem[] for display.
  */
 
-import type {QuotaItem} from '@/components/credentials/CredentialCard'
-import {useQuotaStore} from '@/stores/useQuotaStore'
+import type { QuotaItem } from '@/components/credentials/CredentialCard'
+import { useQuotaStore } from '@/stores/useQuotaStore'
 import type {
     AntigravityQuotaState,
     ClaudeQuotaState,
@@ -12,8 +12,8 @@ import type {
     GeminiCliQuotaState,
     KimiQuotaState,
 } from '@/types'
-import {formatQuotaResetTime} from '@/utils/quota/formatters'
-import {useMemo} from 'react'
+import { formatQuotaResetTime } from '@/utils/quota/formatters'
+import { useMemo } from 'react'
 
 function fromAntigravity(state: AntigravityQuotaState): QuotaItem[] {
     if (state.status !== 'success') {
@@ -31,12 +31,12 @@ function fromClaude(state: ClaudeQuotaState): QuotaItem[] {
         return []
     }
     return state.windows
-                .filter((w) => w.usedPercent !== null)
-                .map((w) => ({
-                    model: w.label,
-                    percent: Math.max(0, 100 - (w.usedPercent ?? 0)),
-                    resetLabel: w.resetLabel || undefined,
-                }))
+        .filter((w) => w.usedPercent !== null)
+        .map((w) => ({
+            model: w.label,
+            percent: Math.max(0, 100 - (w.usedPercent ?? 0)),
+            resetLabel: w.resetLabel || undefined,
+        }))
 }
 
 function fromCodex(state: CodexQuotaState): QuotaItem[] {
@@ -44,12 +44,12 @@ function fromCodex(state: CodexQuotaState): QuotaItem[] {
         return []
     }
     return state.windows
-                .filter((w) => w.usedPercent !== null)
-                .map((w) => ({
-                    model: w.label,
-                    percent: Math.max(0, 100 - (w.usedPercent ?? 0)),
-                    resetLabel: w.resetLabel || undefined,
-                }))
+        .filter((w) => w.usedPercent !== null)
+        .map((w) => ({
+            model: w.label,
+            percent: Math.max(0, 100 - (w.usedPercent ?? 0)),
+            resetLabel: w.resetLabel || undefined,
+        }))
 }
 
 function fromGeminiCli(state: GeminiCliQuotaState): QuotaItem[] {
@@ -57,12 +57,12 @@ function fromGeminiCli(state: GeminiCliQuotaState): QuotaItem[] {
         return []
     }
     return state.buckets
-                .filter((b) => b.remainingFraction !== null)
-                .map((b) => ({
-                    model: b.label,
-                    percent: Math.round((b.remainingFraction ?? 0) * 100),
-                    resetLabel: b.resetTime ? formatQuotaResetTime(b.resetTime) : undefined,
-                }))
+        .filter((b) => b.remainingFraction !== null)
+        .map((b) => ({
+            model: b.label,
+            percent: Math.round((b.remainingFraction ?? 0) * 100),
+            resetLabel: b.resetTime ? formatQuotaResetTime(b.resetTime) : undefined,
+        }))
 }
 
 function fromKimi(state: KimiQuotaState): QuotaItem[] {
@@ -70,18 +70,19 @@ function fromKimi(state: KimiQuotaState): QuotaItem[] {
         return []
     }
     return state.rows
-                .filter((r) => r.limit > 0)
-                .map((r) => ({
-                    model: r.label ?? r.id,
-                    percent: Math.round(Math.max(0, ((r.limit - r.used) / r.limit) * 100)),
-                    resetLabel: r.resetHint || undefined,
-                }))
+        .filter((r) => r.limit > 0)
+        .map((r) => ({
+            model: r.label ?? r.id,
+            percent: Math.round(Math.max(0, ((r.limit - r.used) / r.limit) * 100)),
+            resetLabel: r.resetHint || undefined,
+        }))
 }
 
 interface CredentialQuotaResult {
-    items?: QuotaItem[];
-    error?: string;
-    loading?: boolean;
+    items?: QuotaItem[]
+    error?: string
+    loading?: boolean
+    planType?: string | null
 }
 
 /**
@@ -90,10 +91,10 @@ interface CredentialQuotaResult {
  */
 export function useCredentialQuota(fileName: string): CredentialQuotaResult {
     const antigravity = useQuotaStore((s) => s.antigravityQuota[fileName])
-    const claude      = useQuotaStore((s) => s.claudeQuota[fileName])
-    const codex       = useQuotaStore((s) => s.codexQuota[fileName])
-    const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[fileName])
-    const kimi        = useQuotaStore((s) => s.kimiQuota[fileName])
+    const claude = useQuotaStore((s) => s.claudeQuota[fileName])
+    const codex = useQuotaStore((s) => s.codexQuota[fileName])
+    const geminiCli = useQuotaStore((s) => s.geminiCliQuota[fileName])
+    const kimi = useQuotaStore((s) => s.kimiQuota[fileName])
 
     return useMemo(() => {
         const states = [antigravity, claude, codex, geminiCli, kimi]
@@ -115,13 +116,13 @@ export function useCredentialQuota(fileName: string): CredentialQuotaResult {
             return { items: fromAntigravity(antigravity) }
         }
         if (claude?.status === 'success') {
-            return { items: fromClaude(claude) }
+            return { items: fromClaude(claude), planType: claude.planType }
         }
         if (codex?.status === 'success') {
-            return { items: fromCodex(codex) }
+            return { items: fromCodex(codex), planType: codex.planType }
         }
         if (geminiCli?.status === 'success') {
-            return { items: fromGeminiCli(geminiCli) }
+            return { items: fromGeminiCli(geminiCli), planType: geminiCli.tierLabel }
         }
         if (kimi?.status === 'success') {
             return { items: fromKimi(kimi) }

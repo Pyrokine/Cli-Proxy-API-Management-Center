@@ -4,9 +4,9 @@
  */
 
 export interface ModelInfo {
-    name: string;
-    alias?: string;
-    description?: string;
+    name: string
+    alias?: string
+    description?: string
 }
 
 const MODEL_CATEGORIES = [
@@ -20,6 +20,16 @@ const MODEL_CATEGORIES = [
     { id: 'deepseek', label: 'DeepSeek', patterns: [/deepseek/i] },
     { id: 'minimax', label: 'MiniMax', patterns: [/minimax/i, /abab/i] },
 ]
+
+type Translator = (key: string, opts?: Record<string, unknown>) => string
+
+/** Returns the localized label for a category id, falling back to the English brand label. */
+function localizeCategoryLabel(id: string, fallback: string, t?: Translator): string {
+    if (!t) {
+        return fallback
+    }
+    return t(`models.category_${id}`, { defaultValue: fallback })
+}
 
 const matchCategory = (text: string) => {
     for (const category of MODEL_CATEGORIES) {
@@ -46,8 +56,8 @@ export function normalizeModelList(payload: unknown, { dedupe = false } = {}): M
             return null
         }
 
-        const alias            = entry.alias || entry.display_name || entry.displayName
-        const description      = entry.description || entry.note || entry.comment
+        const alias = entry.alias || entry.display_name || entry.displayName
+        const description = entry.description || entry.note || entry.comment
         const model: ModelInfo = { name: String(name) }
         if (alias && alias !== name) {
             model.alias = String(alias)
@@ -86,27 +96,38 @@ export function normalizeModelList(payload: unknown, { dedupe = false } = {}): M
     })
 }
 
-interface ModelGroup {
-    id: string;
-    label: string;
-    items: ModelInfo[];
+/**
+ * Returns the localized label for the "Other" model category.
+ * Uses i18n `t()` with key `models.category_other`, falling back to "Other".
+ */
+export function getLocalizedOtherLabel(t: Translator): string {
+    return t('models.category_other', { defaultValue: 'Other' })
 }
 
-export function classifyModels(models: ModelInfo[] = [], { otherLabel = 'Other' } = {}): ModelGroup[] {
+interface ModelGroup {
+    id: string
+    label: string
+    items: ModelInfo[]
+}
+
+export function classifyModels(
+    models: ModelInfo[] = [],
+    { otherLabel = 'Other', t }: { otherLabel?: string; t?: Translator } = {}
+): ModelGroup[] {
     const groups: ModelGroup[] = MODEL_CATEGORIES.map((category) => ({
         id: category.id,
-        label: category.label,
+        label: localizeCategoryLabel(category.id, category.label, t),
         items: [],
     }))
 
     const otherGroup: ModelGroup = { id: 'other', label: otherLabel, items: [] }
 
     models.forEach((model) => {
-        const name      = (model?.name || '').toString()
-        const alias     = (model?.alias || '').toString()
-        const haystack  = `${name} ${alias}`.toLowerCase()
+        const name = (model?.name || '').toString()
+        const alias = (model?.alias || '').toString()
+        const haystack = `${name} ${alias}`.toLowerCase()
         const matchedId = matchCategory(haystack)
-        const target    = matchedId ? groups.find((group) => group.id === matchedId) : null
+        const target = matchedId ? groups.find((group) => group.id === matchedId) : null
 
         if (target) {
             target.items.push(model)
@@ -118,6 +139,10 @@ export function classifyModels(models: ModelInfo[] = [], { otherLabel = 'Other' 
     const populatedGroups = groups.filter((group) => group.items.length > 0)
     if (otherGroup.items.length) {
         populatedGroups.push(otherGroup)
+    }
+
+    for (const group of populatedGroups) {
+        group.items.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     }
 
     return populatedGroups

@@ -1,0 +1,11 @@
+@use '../../styles/variables.scss' as *;
+
+.metricsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: $spacing-md;
+
+    @media (max-width: 768px) {
+        grid-template-columns: 1fr;
+    }
+}

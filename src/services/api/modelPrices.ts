@@ -3,16 +3,21 @@
  * 服务端存储模型价格配置，替代 localStorage
  */
 
-import type {ModelPrice} from '@/utils/usage'
-import {apiClient} from './client'
+import type { ModelPrice } from '@/utils/usage'
+import { apiClient } from './client'
 
 interface GetModelPricesResponse {
-    prices: Record<string, ModelPrice>;
+    prices: Record<string, ModelPrice>
 }
 
-interface PutModelPricesResponse {
-    status: string;
-    count: number;
+export interface PutModelPricesResponse {
+    status: string
+    count: number
+    recalculation: boolean
+    recalculated_days?: number
+    total_cost?: number
+    recalculation_error?: string
+    already_running?: boolean
 }
 
 export const modelPricesApi = {

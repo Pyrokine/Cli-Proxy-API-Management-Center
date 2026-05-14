@@ -1,25 +1,40 @@
-import type {ModelEntry} from '@/components/providers/types'
-import {useMemo} from 'react'
+import type { ModelEntry } from '@/components/providers/types'
+import { useMemo } from 'react'
 
 /**
  * Derives `{ value, label }[]` options from model entries for use in <Select>.
- * Deduplicates by trimmed name and appends the alias when it differs from the name.
+ * Deduplicates by normalized model name, keeps the first visible name, and sorts the result.
  */
 export function useModelSelectOptions(modelEntries: ModelEntry[]) {
     return useMemo(() => {
-        const seen = new Set<string>()
-        return modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
-            const name = entry.name.trim()
-            if (!name || seen.has(name)) {
-                return acc
+        const entries = new Map<string, { value: string; alias: string }>()
+
+        modelEntries.forEach((entry) => {
+            const value = entry.name.trim()
+            if (!value) {
+                return
             }
-            seen.add(name)
+
+            const key = value.toLowerCase()
             const alias = entry.alias.trim()
-            acc.push({
-                         value: name,
-                         label: alias && alias !== name ? `${name} (${alias})` : name,
-                     })
-            return acc
-        }, [])
+            const normalizedAlias = alias && alias !== value ? alias : ''
+            const existing = entries.get(key)
+
+            if (!existing) {
+                entries.set(key, { value, alias: normalizedAlias })
+                return
+            }
+
+            if (!existing.alias && normalizedAlias && normalizedAlias !== existing.value) {
+                entries.set(key, { ...existing, alias: normalizedAlias })
+            }
+        })
+
+        return Array.from(entries.values())
+            .sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }))
+            .map((entry) => ({
+                value: entry.value,
+                label: entry.alias && entry.alias !== entry.value ? `${entry.value} (${entry.alias})` : entry.value,
+            }))
     }, [modelEntries])
 }

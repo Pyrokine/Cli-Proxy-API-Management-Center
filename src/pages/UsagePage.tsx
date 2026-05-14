@@ -1,27 +1,16 @@
-import {IconBot, IconKey, IconLayoutDashboard, IconScrollText, IconSettings} from '@/components/ui/icons'
-import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
-import {type TabItem, Tabs} from '@/components/ui/Tabs'
-import {
-    CredentialsTab,
-    EventsTab,
-    FilterBar,
-    ModelsTab,
-    OverviewTab,
-    SettingsTab,
-    useChartData,
-    useSparklines,
-    useUsageData,
-    useUsageSummary,
-} from '@/components/usage'
-import {useAuthFileMap} from '@/components/usage/hooks/useAuthFileMap'
-import type {UsagePayload} from '@/components/usage/hooks/useUsageData'
-import type {ChartDrillDownInfo} from '@/components/usage/UsageChart'
-import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
-import {useMediaQuery} from '@/hooks/useMediaQuery'
-import {apiKeyAliasApi} from '@/services/api/apiKeys'
-import {useConfigStore} from '@/stores'
-import {toLocalDateTimeString} from '@/utils/format'
-import {type ChartDimension, filterUsageByDateRange, filterUsageBySelections} from '@/utils/usage'
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { EventsTab, FilterBar, OverviewTab, SettingsTab, useUsageData, useUsageSummary } from '@/components/usage'
+import { useAuthFileMap } from '@/components/usage/hooks/useAuthFileMap'
+import type { UsagePayload } from '@/components/usage/hooks/useUsageData'
+import { useHeaderRefresh } from '@/hooks/useHeaderRefresh'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { apiKeyAliasApi } from '@/services/api/apiKeys'
+import { providersApi } from '@/services/api/providers'
+import { usageApi } from '@/services/api/usage'
+import { useConfigStore } from '@/stores'
+import type { OpenAIProviderConfig } from '@/types'
+import { toLocalDateTimeString } from '@/utils/format'
+import { type ChartDimension, filterUsageByDateRange, filterUsageBySelections } from '@/utils/usage'
 import {
     CategoryScale,
     Chart as ChartJS,
@@ -33,36 +22,37 @@ import {
     Title,
     Tooltip,
 } from 'chart.js'
-import {useCallback, useEffect, useMemo, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styles from './UsagePage.module.scss'
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
-const DATE_RANGE_STORAGE_KEY = 'cli-proxy-usage-date-range-v1'
-const DEFAULT_CHART_LINES    = ['all']
-const DEFAULT_PRESET         = '24h'
+const DEFAULT_PRESET = '30d'
+const ACTIVE_TAB_STORAGE_KEY = 'cli-proxy-usage-active-tab-v1'
+const ALL_PRESET_PLACEHOLDER_FROM = '2020-01-01T00:00'
 
-function initDateRange(): { from: string; to: string; preset: string } {
+type UsageTab = 'overview' | 'events' | 'settings'
+
+function initActiveTab(): UsageTab {
     try {
         if (typeof localStorage !== 'undefined') {
-            const raw = localStorage.getItem(DATE_RANGE_STORAGE_KEY)
-            if (raw) {
-                const parsed = JSON.parse(raw) as { from?: string; to?: string; preset?: string }
-                if (parsed.from && parsed.to) {
-                    return { from: parsed.from, to: parsed.to, preset: parsed.preset ?? '' }
-                }
+            const raw = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY)
+            if (raw === 'overview' || raw === 'events' || raw === 'settings') {
+                return raw
             }
         }
     } catch {
         /* ignore */
     }
+    return 'overview'
+}
 
-    // Default to 24h preset
+function initDateRange(): { from: string; to: string; preset: string } {
     const now = new Date()
     return {
-        from: toLocalDateTimeString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+        from: toLocalDateTimeString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
         to: toLocalDateTimeString(now),
         preset: DEFAULT_PRESET,
     }
@@ -71,7 +61,7 @@ function initDateRange(): { from: string; to: string; preset: string } {
 /** Calculate chart hour window from the date range span. */
 function calcHourWindow(from: string, to: string): number | undefined {
     const fromMs = new Date(from).getTime()
-    const toMs   = new Date(to).getTime()
+    const toMs = new Date(to).getTime()
     if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
         return undefined
     }
@@ -82,50 +72,80 @@ function calcHourWindow(from: string, to: string): number | undefined {
     return Math.ceil(hours)
 }
 
-const TAB_KEYS = {
-    OVERVIEW: 'overview',
-    MODELS: 'models',
-    CREDENTIALS: 'credentials',
-    EVENTS: 'events',
-    SETTINGS: 'settings',
-} as const
-
 export function UsagePage() {
-    const { t }                               = useTranslation()
-    const isMobile                            = useMediaQuery('(max-width: 768px)')
-    const config                              = useConfigStore((state) => state.config)
-    const { authFileMap, authFileMapLoading } = useAuthFileMap()
-
-    // Data hook
-    const {
-              usage,
-              loading,
-              error,
-              lastRefreshedAt,
-              modelPrices,
-              setModelPrices,
-              loadUsage,
-              handleExport,
-              handleImport,
-              handleImportChange,
-              importInputRef,
-              exporting,
-              importing,
-          } = useUsageData()
-
-    useHeaderRefresh(loadUsage)
+    const { t } = useTranslation()
+    const isMobile = useMediaQuery('(max-width: 768px)')
+    const config = useConfigStore((state) => state.config)
 
     // Date range state
-    const [dateRange, setDateRange]                     = useState(() => initDateRange())
-    const [selectedModels, setSelectedModels]           = useState<string[]>([])
+    const [dateRange, setDateRange] = useState(() => initDateRange())
+    const [selectedModels, setSelectedModels] = useState<string[]>([])
     const [selectedCredentials, setSelectedCredentials] = useState<string[]>([])
-    const [chartDimension, setChartDimension]           = useState<ChartDimension>('total')
-    const [aliases, setAliases]                         = useState<Record<string, string>>({})
-    const [activeTab, setActiveTab]                     = useState<string>(TAB_KEYS.OVERVIEW)
-    const [drillDownSearch, setDrillDownSearch]         = useState<string | undefined>()
+    const [selectedApiKeys, setSelectedApiKeys] = useState<string[]>([])
+    const [aliases, setAliases] = useState<Record<string, string>>({})
+    const [activeTab, setActiveTabState] = useState<UsageTab>(() => initActiveTab())
+    const usageStatsTabActive = activeTab !== 'settings'
+    const { authFileMap, authFileMapLoading } = useAuthFileMap(usageStatsTabActive)
+    const [fallbackNowMs] = useState(() => Date.now())
+    const [summaryRefreshToken, setSummaryRefreshToken] = useState(0)
+    const [eventsRefreshToken, setEventsRefreshToken] = useState(0)
+    const [eventsVisibleDateRange, setEventsVisibleDateRange] = useState<{ from: string; to: string } | null>(null)
+    const [openaiProvidersForUsage, setOpenaiProvidersForUsage] = useState<OpenAIProviderConfig[] | null>(null)
+
+    const needsRawUsage = false
+
+    // Data hook
+    const handleUsageViewsRefresh = useCallback(async () => {
+        setSummaryRefreshToken((prev) => prev + 1)
+        setEventsRefreshToken((prev) => prev + 1)
+    }, [])
+
+    const {
+        usage,
+        loading,
+        error,
+        lastRefreshedAt,
+        modelPrices,
+        priceSaveFeedback,
+        setModelPrices,
+        loadUsage,
+        handleExport,
+        handleImport,
+        handleImportChange,
+        importInputRef,
+        exporting,
+        importing,
+    } = useUsageData({
+        enabled: needsRawUsage,
+        loadModelPricesEnabled: true,
+        onAfterImport: handleUsageViewsRefresh,
+        onAfterPricesSaved: handleUsageViewsRefresh,
+    })
+
+    const setActiveTab = useCallback((next: UsageTab) => {
+        setActiveTabState(next)
+        try {
+            localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, next)
+        } catch {
+            /* ignore */
+        }
+    }, [])
+
+    // Auto-derive chart dimension from filter state (priority: model > api_key > credential)
+    const chartDimension: ChartDimension =
+        selectedModels.length > 0
+            ? 'model'
+            : selectedApiKeys.length > 0
+              ? 'api_key'
+              : selectedCredentials.length > 0
+                ? 'credential'
+                : 'total'
 
     // noinspection DuplicatedCode
     useEffect(() => {
+        if (!usageStatsTabActive) {
+            return
+        }
         let cancelled = false
         void apiKeyAliasApi
             .list()
@@ -140,171 +160,343 @@ export function UsagePage() {
         return () => {
             cancelled = true
         }
-    }, [])
+    }, [usageStatsTabActive])
 
-    // Persist date range
     useEffect(() => {
-        try {
-            localStorage.setItem(DATE_RANGE_STORAGE_KEY, JSON.stringify(dateRange))
-        } catch {
-            /* ignore */
+        if (!usageStatsTabActive) {
+            return
         }
-    }, [dateRange])
+        let cancelled = false
+        void providersApi
+            .getOpenAIProviders()
+            .then((data) => {
+                if (!cancelled) {
+                    setOpenaiProvidersForUsage(data)
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setOpenaiProvidersForUsage(null)
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [usageStatsTabActive, config?.openaiCompatibility])
 
     const handleDateRangeChange = useCallback((from: string, to: string, preset?: string) => {
-        setDateRange({ from, to, preset: preset ?? '' })
+        // When "all" is selected, start from an epoch placeholder so the first
+        // summary request can discover the real earliest point, then converge the
+        // window to that point once data arrives.
+        if (preset === 'all') {
+            setDateRange({ from: ALL_PRESET_PLACEHOLDER_FROM, to, preset: 'all' })
+        } else {
+            setDateRange({ from, to, preset: preset ?? '' })
+        }
     }, [])
+
+    // Refresh button: re-fetch data and, for time-relative presets, slide the
+    // window so it ends at "now" instead of the locked-in initial timestamp.
+    // Custom (no preset) ranges stay untouched in absolute time, but still need
+    // a manual reload because the params object does not change by itself.
+    const handleRefresh = useCallback(() => {
+        let shouldReloadSummary = false
+        let shouldReloadEvents = false
+
+        setDateRange((prev) => {
+            const now = new Date()
+            const nowStr = toLocalDateTimeString(now)
+            switch (prev.preset) {
+                case '24h':
+                    return {
+                        ...prev,
+                        from: toLocalDateTimeString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+                        to: nowStr,
+                    }
+                case '7d':
+                    return {
+                        ...prev,
+                        from: toLocalDateTimeString(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
+                        to: nowStr,
+                    }
+                case '30d':
+                    return {
+                        ...prev,
+                        from: toLocalDateTimeString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
+                        to: nowStr,
+                    }
+                case 'all':
+                    return { ...prev, to: nowStr }
+                default:
+                    shouldReloadSummary = true
+                    shouldReloadEvents = activeTab === 'events'
+                    return prev
+            }
+        })
+
+        if (needsRawUsage) {
+            void loadUsage().catch(() => {})
+        }
+        if (shouldReloadSummary) {
+            setSummaryRefreshToken((prev) => prev + 1)
+        }
+        if (shouldReloadEvents) {
+            setEventsRefreshToken((prev) => prev + 1)
+        }
+    }, [activeTab, loadUsage, needsRawUsage])
+
+    const isAllPreset = dateRange.preset === 'all'
+    const allSummaryResolutionKey = useMemo(
+        () =>
+            [dateRange.to, selectedModels.join(','), selectedApiKeys.join(','), selectedCredentials.join(',')].join(
+                '|'
+            ),
+        [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials]
+    )
+    const [allSummaryResolution, setAllSummaryResolution] = useState<{ key: string; from: string }>({
+        key: '',
+        from: '',
+    })
+    const [allSummaryResolving, setAllSummaryResolving] = useState(false)
+    const resolvedAllFrom =
+        isAllPreset && allSummaryResolution.key === allSummaryResolutionKey ? allSummaryResolution.from : ''
+    const effectiveDateFrom = isAllPreset ? resolvedAllFrom : dateRange.from
+    const effectiveDateTo = dateRange.to
+    const effectiveRangeReady = !isAllPreset || resolvedAllFrom.length > 0
+    const granularityRangeFrom = effectiveDateFrom || dateRange.from
+    const hourWindowHours = calcHourWindow(granularityRangeFrom, effectiveDateTo)
+    const summaryGranularity: 'hourly' | 'daily' = (hourWindowHours ?? 0) > 7 * 24 ? 'daily' : 'hourly'
+    const hasSelectionFilters =
+        selectedModels.length > 0 || selectedCredentials.length > 0 || selectedApiKeys.length > 0
+
+    useEffect(() => {
+        if (!isAllPreset) {
+            const frameId = requestAnimationFrame(() => {
+                setAllSummaryResolution((prev) => (prev.key || prev.from ? { key: '', from: '' } : prev))
+                setAllSummaryResolving(false)
+            })
+            return () => cancelAnimationFrame(frameId)
+        }
+        if (resolvedAllFrom) {
+            return
+        }
+
+        let cancelled = false
+        const controller = new AbortController()
+        const frameId = requestAnimationFrame(() => {
+            setAllSummaryResolving(true)
+        })
+
+        void usageApi
+            .getEvents(
+                {
+                    from: ALL_PRESET_PLACEHOLDER_FROM,
+                    to: effectiveDateTo,
+                    page: 1,
+                    page_size: 1,
+                    model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+                    source: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
+                    api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+                    sort: 'timestamp',
+                    order: 'asc',
+                },
+                { signal: controller.signal }
+            )
+            .then((response) => {
+                if (cancelled) {
+                    return
+                }
+                const timestamp = response.events[0]?.timestamp
+                const resolvedFrom = timestamp ? toLocalDateTimeString(new Date(timestamp)) : ''
+                setAllSummaryResolution((prev) =>
+                    prev.key === allSummaryResolutionKey && prev.from === resolvedFrom
+                        ? prev
+                        : { key: allSummaryResolutionKey, from: resolvedFrom }
+                )
+            })
+            .catch(() => {})
+            .finally(() => {
+                if (!cancelled) {
+                    setAllSummaryResolving(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+            controller.abort()
+            cancelAnimationFrame(frameId)
+        }
+    }, [
+        isAllPreset,
+        resolvedAllFrom,
+        allSummaryResolutionKey,
+        effectiveDateTo,
+        selectedModels,
+        selectedCredentials,
+        selectedApiKeys,
+    ])
+
+    const rangeResolutionLoading = isAllPreset && allSummaryResolving && resolvedAllFrom.length === 0
+
+    // Summary API (pre-aggregated data from backend)
+    const summaryParams = useMemo(
+        () => ({
+            from: effectiveDateFrom,
+            to: effectiveDateTo,
+            granularity: summaryGranularity,
+            model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
+            groups: chartDimension === 'total' ? ('none' as const) : ('all' as const),
+        }),
+        [
+            effectiveDateFrom,
+            effectiveDateTo,
+            summaryGranularity,
+            selectedModels,
+            selectedApiKeys,
+            selectedCredentials,
+            chartDimension,
+        ]
+    )
+    const {
+        summary,
+        loading: summaryLoading,
+        error: summaryError,
+        reload: reloadSummary,
+    } = useUsageSummary(summaryParams, {
+        enabled: usageStatsTabActive && effectiveRangeReady,
+    })
 
     // Filtered usage: date range → model/credential selection
     const timeFilteredUsage = useMemo(
-        () => (usage ? filterUsageByDateRange(usage, dateRange.from, dateRange.to) : null),
-        [usage, dateRange.from, dateRange.to],
+        () => (usage && effectiveRangeReady ? filterUsageByDateRange(usage, effectiveDateFrom, effectiveDateTo) : null),
+        [usage, effectiveRangeReady, effectiveDateFrom, effectiveDateTo]
     )
-    const filteredUsage     = useMemo(
-        () =>
-            timeFilteredUsage
-            ? (filterUsageBySelections(timeFilteredUsage, selectedModels, selectedCredentials) as UsagePayload)
-            : null,
-        [timeFilteredUsage, selectedModels, selectedCredentials],
+    const filteredUsage = useMemo(() => {
+        if (!timeFilteredUsage) {
+            return null
+        }
+        return filterUsageBySelections(
+            timeFilteredUsage,
+            selectedModels,
+            selectedCredentials,
+            selectedApiKeys
+        ) as UsagePayload
+    }, [timeFilteredUsage, selectedModels, selectedCredentials, selectedApiKeys])
+
+    // Unfiltered summary used to populate the filter dropdowns so that selecting one
+    // option does not cause the other options to disappear.
+    const filterOptionsParams = useMemo(
+        () => ({
+            from: effectiveDateFrom,
+            to: effectiveDateTo,
+            granularity: summaryGranularity,
+            groups: 'none' as const,
+        }),
+        [effectiveDateFrom, effectiveDateTo, summaryGranularity]
     )
+    const { summary: filterOptionsSummary, reload: reloadFilterOptionsSummary } = useUsageSummary(filterOptionsParams, {
+        enabled: usageStatsTabActive && effectiveRangeReady && hasSelectionFilters,
+    })
 
-    const hourWindowHours = calcHourWindow(dateRange.from, dateRange.to)
-    const nowMs           = lastRefreshedAt?.getTime() ?? 0
+    // 健康监测: 跟顶部 dateRange + 维度筛选, 但 granularity 固定 hourly
+    // 主 summary 在 >7 天窗口下用 daily 粒度防折线图过密, 那样每天只能映射
+    // 到 1 个 hour cell, grid 几乎全 idle,独立请求保证每天 24 cells 都能填上
+    const heatmapSummaryParams = useMemo(
+        () => ({
+            from: effectiveDateFrom,
+            to: effectiveDateTo,
+            granularity: 'hourly' as const,
+            model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
+            groups: 'none' as const,
+        }),
+        [effectiveDateFrom, effectiveDateTo, selectedModels, selectedApiKeys, selectedCredentials]
+    )
+    const {
+        summary: heatmapSummary,
+        loading: heatmapSummaryLoading,
+        error: heatmapSummaryError,
+        reload: reloadHeatmapSummary,
+    } = useUsageSummary(heatmapSummaryParams, {
+        enabled: usageStatsTabActive && effectiveRangeReady,
+    })
 
-    // Sparklines
-    // Summary API (pre-aggregated data from backend)
-    const summaryParams = useMemo(() => ({ from: dateRange.from, to: dateRange.to }), [dateRange.from, dateRange.to])
-    const { summary }   = useUsageSummary(summaryParams)
+    useEffect(() => {
+        if (summaryRefreshToken === 0) {
+            return
+        }
+        if (isAllPreset) {
+            if (!effectiveRangeReady) {
+                return
+            }
+            const summaryReloads = [reloadSummary(), reloadHeatmapSummary()]
+            if (hasSelectionFilters) {
+                summaryReloads.push(reloadFilterOptionsSummary())
+            }
+            void Promise.all(summaryReloads)
+            return
+        }
+        if (!effectiveRangeReady) {
+            return
+        }
+        const reloads = [reloadSummary(), reloadHeatmapSummary()]
+        if (hasSelectionFilters) {
+            reloads.push(reloadFilterOptionsSummary())
+        }
+        void Promise.all(reloads)
+    }, [
+        summaryRefreshToken,
+        isAllPreset,
+        effectiveRangeReady,
+        reloadSummary,
+        reloadFilterOptionsSummary,
+        reloadHeatmapSummary,
+        hasSelectionFilters,
+        summary,
+        dateRange.to,
+        summaryGranularity,
+        selectedModels,
+        selectedApiKeys,
+        selectedCredentials,
+    ])
 
-    // Sparklines
-    const sparklines = useSparklines({ usage: filteredUsage, loading, nowMs, summary })
-
-    // Chart data — 优先使用 summary 预聚合，credential 维度回退到前端聚合
-    const chartData = useChartData({
-                                       usage: filteredUsage,
-                                       chartLines: DEFAULT_CHART_LINES,
-                                       isMobile,
-                                       hourWindowHours,
-                                       dimension: chartDimension,
-                                       aliases,
-                                       summary,
-                                   })
-
-    // 图表钻取：点击数据点 → 切换到 Events tab 并按模型搜索
-    const handleChartDrillDown = useCallback((info: ChartDrillDownInfo) => {
-        const search = info.datasetLabel !== 'all' ? info.datasetLabel : ''
-        setDrillDownSearch(search || undefined)
-        setActiveTab(TAB_KEYS.EVENTS)
+    const eventsDateRange = useMemo(
+        () => ({ from: effectiveDateFrom, to: effectiveDateTo }),
+        [effectiveDateFrom, effectiveDateTo]
+    )
+    const handleEventsVisibleDateRangeChange = useCallback((range: { from: string; to: string }) => {
+        setEventsVisibleDateRange((prev) => {
+            if (prev?.from === range.from && prev?.to === range.to) {
+                return prev
+            }
+            return range
+        })
     }, [])
 
-    const handleTabChange = useCallback((key: string) => {
-        setActiveTab(key)
-        if (key !== TAB_KEYS.EVENTS) {
-            setDrillDownSearch(undefined)
-        }
-    }, [])
+    const combinedSummaryLoading = (usageStatsTabActive && rangeResolutionLoading) || summaryLoading
+    const combinedSummaryError = summaryError
+    const combinedHeatmapLoading = (usageStatsTabActive && rangeResolutionLoading) || heatmapSummaryLoading
+    const combinedHeatmapError = heatmapSummaryError
+    const resolvedOpenaiProviders = openaiProvidersForUsage ?? config?.openaiCompatibility ?? []
 
-    // Tab items
-    const tabItems = useMemo(
-        (): TabItem[] => [
-            {
-                key: TAB_KEYS.OVERVIEW,
-                label: t('usage_stats.tab_overview'),
-                icon: <IconLayoutDashboard size={15} />,
-            },
-            { key: TAB_KEYS.MODELS, label: t('usage_stats.tab_models'), icon: <IconBot size={15} /> },
-            {
-                key: TAB_KEYS.CREDENTIALS,
-                label: t('usage_stats.tab_credentials'),
-                icon: <IconKey size={15} />,
-            },
-            {
-                key: TAB_KEYS.EVENTS,
-                label: t('usage_stats.tab_events'),
-                icon: <IconScrollText size={15} />,
-            },
-            {
-                key: TAB_KEYS.SETTINGS,
-                label: t('usage_stats.tab_settings'),
-                icon: <IconSettings size={15} />,
-            },
-        ],
-        [t],
-    )
+    const dateFromMs = useMemo(() => {
+        const ms = new Date(effectiveDateFrom).getTime()
+        return Number.isFinite(ms) ? ms : fallbackNowMs - 24 * 60 * 60 * 1000
+    }, [effectiveDateFrom, fallbackNowMs])
+    const dateToMs = useMemo(() => {
+        const ms = new Date(effectiveDateTo).getTime()
+        return Number.isFinite(ms) ? ms : fallbackNowMs
+    }, [effectiveDateTo, fallbackNowMs])
 
-    const renderTabContent = (activeKey: string) => {
-        switch (activeKey) {
-            case TAB_KEYS.OVERVIEW:
-                return (
-                    <OverviewTab
-                        usage={filteredUsage}
-                        unfilteredUsage={usage}
-                        loading={loading}
-                        nowMs={nowMs}
-                        sparklines={sparklines}
-                        chartData={chartData}
-                        isMobile={isMobile}
-                        chartDimension={chartDimension}
-                        onChartDimensionChange={setChartDimension}
-                        onChartDrillDown={handleChartDrillDown}
-                        summary={summary}
-                    />
-                )
-            case TAB_KEYS.MODELS:
-                return (
-                    <ModelsTab
-                        usage={filteredUsage}
-                        loading={loading}
-                        modelPrices={modelPrices}
-                        isMobile={isMobile}
-                        hourWindowHours={hourWindowHours}
-                        onChartDrillDown={handleChartDrillDown}
-                        summary={summary}
-                    />
-                )
-            case TAB_KEYS.CREDENTIALS:
-                return (
-                    <CredentialsTab
-                        usage={filteredUsage}
-                        loading={loading}
-                        authFileMapLoading={authFileMapLoading}
-                        modelPrices={modelPrices}
-                        geminiKeys={config?.geminiApiKeys || []}
-                        claudeConfigs={config?.claudeApiKeys || []}
-                        codexConfigs={config?.codexApiKeys || []}
-                        vertexConfigs={config?.vertexApiKeys || []}
-                        openaiProviders={config?.openaiCompatibility || []}
-                        authFileMap={authFileMap}
-                        summary={summary}
-                    />
-                )
-            case TAB_KEYS.EVENTS:
-                return (
-                    <EventsTab
-                        usage={filteredUsage}
-                        loading={loading}
-                        authFileMapLoading={authFileMapLoading}
-                        geminiKeys={config?.geminiApiKeys || []}
-                        claudeConfigs={config?.claudeApiKeys || []}
-                        codexConfigs={config?.codexApiKeys || []}
-                        vertexConfigs={config?.vertexApiKeys || []}
-                        openaiProviders={config?.openaiCompatibility || []}
-                        drillDownSearch={drillDownSearch}
-                        authFileMap={authFileMap}
-                        dateRange={dateRange}
-                    />
-                )
-            case TAB_KEYS.SETTINGS:
-                return <SettingsTab usage={usage} modelPrices={modelPrices} onPricesChange={setModelPrices} />
-            default:
-                return null
-        }
-    }
+    useHeaderRefresh(handleRefresh)
 
     return (
         <div className={styles.container}>
             {loading && !usage && (
-                <div className={styles.loadingOverlay} aria-busy='true'>
+                <div className={styles.loadingOverlay} aria-busy="true">
                     <div className={styles.loadingOverlayContent}>
                         <LoadingSpinner size={28} className={styles.loadingOverlaySpinner} />
                         <span className={styles.loadingOverlayText}>{t('common.loading')}</span>
@@ -316,39 +508,128 @@ export function UsagePage() {
                 <h1 className={styles.pageTitle}>{t('usage_stats.title')}</h1>
             </div>
 
-            <FilterBar
-                usage={usage}
-                dateFrom={dateRange.from}
-                dateTo={dateRange.to}
-                activePreset={dateRange.preset || undefined}
-                onDateRangeChange={handleDateRangeChange}
-                selectedModels={selectedModels}
-                onSelectedModelsChange={setSelectedModels}
-                selectedCredentials={selectedCredentials}
-                onSelectedCredentialsChange={setSelectedCredentials}
-                onExport={handleExport}
-                onImport={handleImport}
-                onRefresh={() => void loadUsage().catch(() => {
-                })}
-                loading={loading}
-                exporting={exporting}
-                importing={importing}
-                lastRefreshedAt={lastRefreshedAt}
-            />
+            <div className={styles.tabBar} role="tablist">
+                {(['overview', 'events', 'settings'] as const).map((tab) => (
+                    <button
+                        key={tab}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === tab}
+                        className={`${styles.tabButton} ${activeTab === tab ? styles.tabButtonActive : ''}`}
+                        onClick={() => setActiveTab(tab)}
+                    >
+                        {t(`usage_stats.tab_${tab}`)}
+                    </button>
+                ))}
+            </div>
+
+            {activeTab !== 'settings' && (
+                <FilterBar
+                    usage={usage}
+                    dateFrom={
+                        activeTab === 'events' ? eventsVisibleDateRange?.from || effectiveDateFrom : effectiveDateFrom
+                    }
+                    dateTo={activeTab === 'events' ? eventsVisibleDateRange?.to || dateRange.to : effectiveDateTo}
+                    activePreset={dateRange.preset || undefined}
+                    onDateRangeChange={handleDateRangeChange}
+                    selectedModels={selectedModels}
+                    onSelectedModelsChange={setSelectedModels}
+                    selectedCredentials={selectedCredentials}
+                    onSelectedCredentialsChange={setSelectedCredentials}
+                    selectedApiKeys={selectedApiKeys}
+                    onSelectedApiKeysChange={setSelectedApiKeys}
+                    summary={summary}
+                    optionsSummary={hasSelectionFilters ? filterOptionsSummary : summary}
+                    aliases={aliases}
+                    authFileMap={authFileMap}
+                    onExport={() =>
+                        handleExport({
+                            from: effectiveDateFrom,
+                            to: effectiveDateTo,
+                            model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+                            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+                            credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
+                        })
+                    }
+                    onImport={handleImport}
+                    onRefresh={handleRefresh}
+                    loading={loading || rangeResolutionLoading}
+                    exporting={exporting}
+                    importing={importing}
+                    lastRefreshedAt={lastRefreshedAt}
+                />
+            )}
 
             <input
                 ref={importInputRef}
-                type='file'
-                accept='.json,application/json'
+                type="file"
+                accept=".json,application/json"
                 style={{ display: 'none' }}
                 onChange={handleImportChange}
             />
 
             {error && <div className={styles.errorBox}>{error}</div>}
 
-            <Tabs items={tabItems} activeKey={activeTab} onChange={handleTabChange}>
-                {renderTabContent}
-            </Tabs>
+            {activeTab === 'overview' && (
+                <OverviewTab
+                    usage={filteredUsage}
+                    loading={combinedSummaryLoading}
+                    usageLoading={loading || rangeResolutionLoading}
+                    summaryError={combinedSummaryError}
+                    heatmapLoading={combinedHeatmapLoading}
+                    heatmapError={combinedHeatmapError}
+                    heatmapReady={!combinedHeatmapLoading && !combinedHeatmapError && !!heatmapSummary}
+                    isMobile={isMobile}
+                    chartDimension={chartDimension}
+                    summary={summary}
+                    heatmapSummary={heatmapSummary}
+                    fromMs={dateFromMs}
+                    toMs={dateToMs}
+                    modelPrices={modelPrices}
+                    aliases={aliases}
+                    onRefresh={handleRefresh}
+                    refreshing={summaryLoading || heatmapSummaryLoading}
+                    credentials={{
+                        loading: authFileMapLoading,
+                        geminiKeys: config?.geminiApiKeys || [],
+                        claudeConfigs: config?.claudeApiKeys || [],
+                        codexConfigs: config?.codexApiKeys || [],
+                        vertexConfigs: config?.vertexApiKeys || [],
+                        openaiProviders: resolvedOpenaiProviders,
+                        authFileMap: authFileMap,
+                    }}
+                />
+            )}
+
+            {activeTab === 'events' && (
+                <EventsTab
+                    enabled={effectiveRangeReady}
+                    refreshToken={eventsRefreshToken}
+                    geminiKeys={config?.geminiApiKeys || []}
+                    claudeConfigs={config?.claudeApiKeys || []}
+                    codexConfigs={config?.codexApiKeys || []}
+                    vertexConfigs={config?.vertexApiKeys || []}
+                    openaiProviders={resolvedOpenaiProviders}
+                    authFileMap={authFileMap}
+                    dateRange={eventsDateRange}
+                    activePreset={dateRange.preset || undefined}
+                    aliases={aliases}
+                    autoRefreshConfigSeconds={config?.autoRefreshInterval}
+                    onVisibleDateRangeChange={handleEventsVisibleDateRangeChange}
+                    selectedModels={selectedModels}
+                    selectedCredentials={selectedCredentials}
+                    selectedApiKeys={selectedApiKeys}
+                />
+            )}
+
+            {activeTab === 'settings' && (
+                <SettingsTab
+                    modelNames={Object.keys(modelPrices).sort((a, b) => a.localeCompare(b))}
+                    modelPrices={modelPrices}
+                    priceSaveFeedback={priceSaveFeedback}
+                    onPricesChange={setModelPrices}
+                />
+            )}
         </div>
     )
 }

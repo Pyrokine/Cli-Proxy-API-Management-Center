@@ -2,27 +2,27 @@
  * 可用模型获取
  */
 
-import {normalizeApiBase} from '@/utils/connection'
-import {normalizeModelList} from '@/utils/models'
+import { normalizeApiBase } from '@/utils/connection'
+import { normalizeModelList } from '@/utils/models'
 import axios from 'axios'
-import {apiCallApi, getApiCallErrorMessage} from './apiCall'
+import { apiCallApi, getApiCallErrorMessage } from './apiCall'
 
-const DEFAULT_CLAUDE_BASE_URL   = 'https://api.anthropic.com'
-const DEFAULT_GEMINI_BASE_URL   = 'https://generativelanguage.googleapis.com'
+const DEFAULT_CLAUDE_BASE_URL = 'https://api.anthropic.com'
+const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
-const CLAUDE_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
-const GEMINI_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
+const CLAUDE_MODELS_IN_FLIGHT = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
+const GEMINI_MODELS_IN_FLIGHT = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
 
 /** Fetch models from an endpoint via apiCall proxy and return a deduplicated list. */
 async function fetchModelList(
     endpoint: string,
-    headers: Record<string, string>,
+    headers: Record<string, string>
 ): Promise<ReturnType<typeof normalizeModelList>> {
     const result = await apiCallApi.request({
-                                                method: 'GET',
-                                                url: endpoint,
-                                                header: Object.keys(headers).length ? headers : undefined,
-                                            })
+        method: 'GET',
+        url: endpoint,
+        header: Object.keys(headers).length ? headers : undefined,
+    })
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
         throw new Error(getApiCallErrorMessage(result))
@@ -37,9 +37,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const buildRequestSignature = (url: string, headers: Record<string, string>) => {
     const headerSignature = Object.entries(headers)
-                                  .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                  .map(([key, value]) => `${key}:${value}`)
-                                  .join('|')
+        .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+        .map(([key, value]) => `${key}:${value}`)
+        .join('|')
     return `${url}||${headerSignature}`
 }
 
@@ -72,19 +72,19 @@ const buildV1ModelsEndpoint = (baseUrl: string): string => {
 
 const buildClaudeModelsEndpoint = (baseUrl: string): string => {
     const normalized = normalizeApiBase(baseUrl)
-    const fallback   = normalized || DEFAULT_CLAUDE_BASE_URL
-    let trimmed      = fallback.replace(/\/+$/g, '')
-    trimmed          = trimmed.replace(/\/v1\/models$/i, '')
-    trimmed          = trimmed.replace(/\/v1(?:\/.*)?$/i, '')
+    const fallback = normalized || DEFAULT_CLAUDE_BASE_URL
+    let trimmed = fallback.replace(/\/+$/g, '')
+    trimmed = trimmed.replace(/\/v1\/models$/i, '')
+    trimmed = trimmed.replace(/\/v1(?:\/.*)?$/i, '')
     return `${trimmed}/v1/models`
 }
 
 const buildGeminiModelsEndpoint = (baseUrl: string): string => {
     const normalized = normalizeApiBase(baseUrl)
-    const fallback   = normalized || DEFAULT_GEMINI_BASE_URL
-    let trimmed      = fallback.replace(/\/+$/g, '')
-    trimmed          = trimmed.replace(/\/v1beta\/models$/i, '')
-    trimmed          = trimmed.replace(/\/v1beta(?:\/.*)?$/i, '')
+    const fallback = normalized || DEFAULT_GEMINI_BASE_URL
+    let trimmed = fallback.replace(/\/+$/g, '')
+    trimmed = trimmed.replace(/\/v1beta\/models$/i, '')
+    trimmed = trimmed.replace(/\/v1beta(?:\/.*)?$/i, '')
     return `${trimmed}/v1beta/models`
 }
 
@@ -117,14 +117,14 @@ const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): s
 const fetchModelsViaApiCallWithEndpoint = async (
     endpoint: string,
     apiKey?: string,
-    headers: Record<string, string> = {},
+    headers: Record<string, string> = {}
 ) => {
     if (!endpoint) {
         throw new Error('Invalid base url')
     }
 
     const resolvedHeaders = { ...headers }
-    const hasAuthHeader   = Boolean(resolvedHeaders.Authorization || resolvedHeaders.authorization)
+    const hasAuthHeader = Boolean(resolvedHeaders.Authorization || resolvedHeaders.authorization)
     if (apiKey && !hasAuthHeader) {
         resolvedHeaders.Authorization = `Bearer ${apiKey}`
     }
@@ -150,7 +150,7 @@ export const modelsApi = {
         const response = await axios.get(endpoint, {
             headers: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
         })
-        const payload  = response.data?.data ?? response.data?.models ?? response.data
+        const payload = response.data?.data ?? response.data?.models ?? response.data
         return normalizeModelList(payload, { dedupe: true })
     },
 
@@ -192,7 +192,7 @@ export const modelsApi = {
         }
 
         const resolvedHeaders = { ...headers }
-        let resolvedApiKey    = String(apiKey ?? '').trim()
+        let resolvedApiKey = String(apiKey ?? '').trim()
         if (!resolvedApiKey && !hasHeader(resolvedHeaders, 'x-api-key')) {
             resolvedApiKey = resolveBearerTokenFromAuthorization(resolvedHeaders)
         }
@@ -205,7 +205,7 @@ export const modelsApi = {
         }
 
         const signature = buildRequestSignature(endpoint, resolvedHeaders)
-        const existing  = CLAUDE_MODELS_IN_FLIGHT.get(signature)
+        const existing = CLAUDE_MODELS_IN_FLIGHT.get(signature)
         if (existing) {
             return existing
         }
@@ -231,21 +231,21 @@ export const modelsApi = {
         }
 
         const resolvedHeaders = { ...headers }
-        const resolvedApiKey  = String(apiKey ?? '').trim()
+        const resolvedApiKey = String(apiKey ?? '').trim()
         if (resolvedApiKey && !hasHeader(resolvedHeaders, 'x-goog-api-key')) {
             resolvedHeaders['x-goog-api-key'] = resolvedApiKey
         }
 
         const signature = buildRequestSignature(endpoint, resolvedHeaders)
-        const existing  = GEMINI_MODELS_IN_FLIGHT.get(signature)
+        const existing = GEMINI_MODELS_IN_FLIGHT.get(signature)
         if (existing) {
             return existing
         }
 
         const request = (async () => {
-            const seen                                             = new Set<string>()
+            const seen = new Set<string>()
             const collected: ReturnType<typeof normalizeModelList> = []
-            let pageToken                                          = ''
+            let pageToken = ''
 
             for (let page = 0; page < 20; page += 1) {
                 const url = new URL(endpoint)
@@ -254,22 +254,20 @@ export const modelsApi = {
                 }
 
                 const result = await apiCallApi.request({
-                                                            method: 'GET',
-                                                            url: url.toString(),
-                                                            header: Object.keys(resolvedHeaders).length ?
-                                                                    resolvedHeaders :
-                                                                    undefined,
-                                                        })
+                    method: 'GET',
+                    url: url.toString(),
+                    header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
+                })
 
                 if (result.statusCode < 200 || result.statusCode >= 300) {
                     throw new Error(getApiCallErrorMessage(result))
                 }
 
-                const payload    = result.body ?? result.bodyText
+                const payload = result.body ?? result.bodyText
                 const normalized = normalizeModelList(payload, { dedupe: false })
                 normalized.forEach((model) => {
                     const name = stripGeminiModelResourceName(model.name)
-                    const key  = (name || '').toLowerCase()
+                    const key = (name || '').toLowerCase()
                     if (!key || seen.has(key)) {
                         return
                     }
@@ -281,9 +279,8 @@ export const modelsApi = {
                     collected.push(resolved)
                 })
 
-                const nextToken = isRecord(payload) && typeof payload.nextPageToken === 'string' ?
-                                  payload.nextPageToken :
-                                  ''
+                const nextToken =
+                    isRecord(payload) && typeof payload.nextPageToken === 'string' ? payload.nextPageToken : ''
                 if (!nextToken) {
                     break
                 }
