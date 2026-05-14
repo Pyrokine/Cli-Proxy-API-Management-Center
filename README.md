@@ -94,17 +94,19 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
       browser-side "chat/completions" test).
     - Ampcode integration (upstream URL/key, force mappings, model mapping table).
 - **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view
-  supported models per credential (when the server supports it), manage OAuth excluded models (supports `*` wildcards),
-  configure OAuth model alias mappings.
+  supported models per credential (when the server supports it), recent request buckets, manage OAuth excluded models
+  (supports `*` wildcards), and configure OAuth model alias mappings.
 - **OAuth**: start OAuth/device flows for supported providers, poll status, optionally submit callback `redirect_url`;
   includes iFlow cookie import.
-- **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Gemini CLI, and other providers.
-- **Usage**: requests/tokens charts (hour/day), per-API & per-model breakdown, cached/reasoning token breakdown, RPM/TPM
-  window, optional cost estimation with locally-saved model pricing.
+- **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Gemini CLI, Kimi and other
+  providers, with backend-scheduled refresh status and manual refresh.
+- **Usage**: requests/tokens charts (hour/day), per-API / per-model / per-credential breakdown, cached/reasoning token
+  breakdown, RPM/TPM window, all-time range resolution, service health cards, and editable local model pricing.
 - **Config**: edit `/config.yaml` in-browser with YAML highlighting + search, then save/reload.
-- **Logs**: tail logs with incremental polling, auto-refresh, search, hide management traffic, clear logs; download
-  request error log files.
-- **System**: quick links + fetch `/v1/models` (grouped view). Requires at least one proxy API key to query models.
+- **Logs**: tail logs with incremental polling, page auto-refresh interval control, search, hide management traffic,
+  show raw logs, clear logs, and download request error log files.
+- **System**: quick links, grouped `/v1/models`, model catalog source/refresh metadata, latest local/remote version and
+  build time, and release history with update actions. Requires at least one proxy API key to query models.
 
 ## Tech Stack
 
@@ -139,6 +141,8 @@ The UI language is automatically detected from browser settings and can be manua
 - Vite produces a **single HTML** output (`dist/index.html`) with all assets inlined (via `vite-plugin-singlefile`).
 - Tagging `vX.Y.Z` triggers `.github/workflows/release.yml` to publish `dist/management.html`.
 - The UI version shown in the footer is injected at build time (env `VERSION`, git tag, or `package.json` fallback).
+- The panel also carries a minimum backend compatibility marker (`__COMPAT_MIN_SERVER__`) so stale CPA builds can be
+  flagged in the UI.
 
 ## Security notes
 
@@ -162,12 +166,14 @@ The UI language is automatically detected from browser settings and can be manua
 ## Development
 
 ```bash
-npm run dev        # Vite dev server
-npm run build      # tsc + Vite build
-npm run preview    # serve dist locally
-npm run lint       # ESLint (fails on warnings)
-npm run format     # Prettier
-npm run type-check # tsc --noEmit
+npm run dev          # Vite dev server
+npm run build        # tsc + Vite build
+npm run preview      # serve dist locally
+npm run lint         # ESLint (fails on warnings)
+npm run lint:css     # Stylelint for CSS/SCSS
+npm run format       # Prettier write
+npm run format:check # Prettier check
+npm run type-check   # tsc --noEmit
 ```
 
 ## Contributing

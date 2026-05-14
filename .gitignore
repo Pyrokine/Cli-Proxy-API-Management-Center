@@ -6,26 +6,33 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-api.md
-usage.json
-CLAUDE.md
-AGENTS.md
-management-api*
-antigravity_usage.json
-codex_usage.json
-style.md
 
+# Build output
 node_modules
 dist
 dist-ssr
 *.local
-skills
 
-# Editor directories and files
+# Runtime data
+usage.json
+antigravity_usage.json
+codex_usage.json
+management-api*
+
+# AI tooling
+CLAUDE.md
+AGENTS.md
+.claude/
+.idea/
+
+# Project-specific notes
+api.md
+style.md
+
+# Editor
 settings.local.json
 .vscode/*
 !.vscode/extensions.json
-.idea
 .DS_Store
 *.suo
 *.ntvs*

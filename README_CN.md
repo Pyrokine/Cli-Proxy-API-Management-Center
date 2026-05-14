@@ -85,14 +85,14 @@ remote-management:
     - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
     - OpenAI 兼容提供商（多 Key、Header、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
     - Ampcode 集成（上游地址/密钥、强制映射、模型映射表）。
-- **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；管理 OAuth
+- **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；查看最近请求分桶；管理 OAuth
   排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。
 - **OAuth**：对支持的提供商发起 OAuth/设备码流程，轮询状态；可选提交回调 `redirect_url`；包含 iFlow Cookie 导入。
-- **配额管理**：管理 Claude、Antigravity、Codex、Gemini CLI 等提供商的配额上限与使用情况。
-- **使用统计**：按小时/天图表、按 API 与按模型统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、可选本地保存的模型价格用于费用估算。
+- **配额管理**：管理 Claude、Antigravity、Codex、Gemini CLI、Kimi 等提供商的配额上限与使用情况，支持后端定时刷新状态与手动刷新。
+- **使用统计**：按小时/天图表、按 API / 模型 / 凭证统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、全部时间范围解析、服务健康卡、可编辑本地模型价格用于费用估算。
 - **配置文件**：浏览器内编辑 `/config.yaml`（YAML 高亮 + 搜索），保存/重载。
-- **日志**：增量拉取日志、自动刷新、搜索、隐藏管理端流量、清空日志；下载请求错误日志文件。
-- **系统信息**：快捷链接 + 拉取 `/v1/models` 并分组展示（需要至少一个代理 API Key 才能查询模型）。
+- **日志**：增量拉取日志、页面自动刷新间隔控制、搜索、隐藏管理端流量、查看原始日志、清空日志；下载请求错误日志文件。
+- **系统信息**：快捷链接、拉取 `/v1/models` 并分组展示、查看模型目录来源与刷新信息、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作（需要至少一个代理 API Key 才能查询模型）。
 
 ## 技术栈
 
@@ -127,6 +127,7 @@ remote-management:
 - 使用 Vite 输出 **单文件 HTML**（`dist/index.html`），资源全部内联（`vite-plugin-singlefile`）。
 - 打 `vX.Y.Z` 标签会触发 `.github/workflows/release.yml`，发布 `dist/management.html`。
 - 页脚显示的 UI 版本在构建期注入（优先使用环境变量 `VERSION`，否则使用 git tag / `package.json`）。
+- 面板还会注入最低后端兼容版本标记（`__COMPAT_MIN_SERVER__`），用于在 UI 中提示后端过旧。
 
 ## 安全提示
 
@@ -144,12 +145,14 @@ remote-management:
 ## 开发命令
 
 ```bash
-npm run dev        # 启动开发服务器
-npm run build      # tsc + Vite 构建
-npm run preview    # 本地预览 dist
-npm run lint       # ESLint（warnings 视为失败）
-npm run format     # Prettier
-npm run type-check # tsc --noEmit
+npm run dev          # 启动开发服务器
+npm run build        # tsc + Vite 构建
+npm run preview      # 本地预览 dist
+npm run lint         # ESLint（warnings 视为失败）
+npm run lint:css     # CSS/SCSS 的 Stylelint 检查
+npm run format       # Prettier 写回格式
+npm run format:check # Prettier 只检查不改写
+npm run type-check   # tsc --noEmit
 ```
 
 ## 贡献
