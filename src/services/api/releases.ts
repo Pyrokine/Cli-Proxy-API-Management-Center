@@ -32,6 +32,8 @@ interface ReleasesResponse {
 export type ReleasesTarget = 'cpa' | 'panel'
 
 export const releasesApi = {
-    list: (page = 1, perPage = 100, target: ReleasesTarget = 'cpa') =>
-        apiClient.get<ReleasesResponse>(`/releases?page=${page}&per_page=${perPage}&target=${target}`),
+    list: (page = 1, perPage = 100, target: ReleasesTarget = 'cpa', force = false) =>
+        apiClient.get<ReleasesResponse>(
+            `/releases?page=${page}&per_page=${perPage}&target=${target}${force ? '&force=1' : ''}`
+        ),
 }

@@ -280,7 +280,7 @@ export function SystemPage() {
                 try {
                     const [cpaLatest, panelReleases] = await Promise.all([
                         versionApi.checkLatest(),
-                        releasesApi.list(1, 1, 'panel'),
+                        releasesApi.list(1, 1, 'panel', true),
                     ])
 
                     const latestCpaRaw =
