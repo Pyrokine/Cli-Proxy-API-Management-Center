@@ -2,22 +2,22 @@
  * Generic API call helper (proxied via management API).
  */
 
-import type {AxiosRequestConfig} from 'axios'
-import {apiClient} from './client'
+import type { AxiosRequestConfig } from 'axios'
+import { apiClient } from './client'
 
 interface ApiCallRequest {
-    authIndex?: string;
-    method: string;
-    url: string;
-    header?: Record<string, string>;
-    data?: string;
+    authIndex?: string
+    method: string
+    url: string
+    header?: Record<string, string>
+    data?: string
 }
 
 interface ApiCallResult<T = unknown> {
-    statusCode: number;
-    header: Record<string, string[]>;
-    bodyText: string;
-    body: T | null;
+    statusCode: number
+    header: Record<string, string[]>
+    bodyText: string
+    body: T | null
 }
 
 const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null } => {
@@ -26,7 +26,7 @@ const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null
     }
 
     if (typeof input === 'string') {
-        const text    = input
+        const text = input
         const trimmed = text.trim()
         if (!trimmed) {
             return { bodyText: text, body: null }
@@ -48,10 +48,10 @@ const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null
 export const getApiCallErrorMessage = (result: ApiCallResult): string => {
     const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
 
-    const status   = result.statusCode
-    const body     = result.body
+    const status = result.statusCode
+    const body = result.body
     const bodyText = result.bodyText
-    let message    = ''
+    let message = ''
 
     if (isRecord(body)) {
         const errorValue = body.error
@@ -82,9 +82,9 @@ export const getApiCallErrorMessage = (result: ApiCallResult): string => {
 
 export const apiCallApi = {
     request: async (payload: ApiCallRequest, config?: AxiosRequestConfig): Promise<ApiCallResult> => {
-        const response           = await apiClient.post<Record<string, unknown>>('/api-call', payload, config)
-        const statusCode         = Number(response?.status_code ?? response?.statusCode ?? 0)
-        const header             = (response?.header ?? response?.headers ?? {}) as Record<string, string[]>
+        const response = await apiClient.post<Record<string, unknown>>('/api-call', payload, config)
+        const statusCode = Number(response?.status_code ?? response?.statusCode ?? 0)
+        const header = (response?.header ?? response?.headers ?? {}) as Record<string, string[]>
         const { bodyText, body } = normalizeBody(response?.body)
 
         return {

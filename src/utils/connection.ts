@@ -1,4 +1,4 @@
-import {DEFAULT_API_PORT, MANAGEMENT_API_PREFIX} from './constants'
+import { DEFAULT_API_PORT, MANAGEMENT_API_PREFIX } from './constants'
 
 export const normalizeApiBase = (input: string): string => {
     let base = (input || '').trim()
@@ -25,7 +25,7 @@ export const computeApiUrl = (base: string): string => {
 export const detectApiBaseFromLocation = (): string => {
     try {
         const { protocol, hostname, port } = window.location
-        const normalizedPort               = port ? `:${port}` : ''
+        const normalizedPort = port ? `:${port}` : ''
         return normalizeApiBase(`${protocol}//${hostname}${normalizedPort}`)
     } catch (error) {
         console.warn('Failed to detect api base from location, fallback to default', error)

@@ -2,831 +2,920 @@
 @use '../styles/mixins' as *;
 
 .container {
-  width: 100%;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 
-  @include mobile {
-    min-height: auto;
-    overflow: visible;
-  }
+    @include mobile {
+        min-height: auto;
+        overflow: visible;
+    }
 }
 
 .pageTitle {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  margin: 0 0 $spacing-lg 0;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0 0 $spacing-lg 0;
 }
 
 .tabBar {
-  display: flex;
-  gap: $spacing-xs;
-  margin-bottom: $spacing-lg;
-  border-bottom: 1px solid var(--border-color);
+    display: flex;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-lg;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .tabItem {
-  @include button-reset;
-  padding: 12px 20px;
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  color: var(--text-secondary);
-  background: transparent;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  cursor: pointer;
-  transition: color 0.15s ease,
-  border-color 0.15s ease;
+    @include button-reset;
+    padding: 12px 20px;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
+    background: transparent;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    cursor: pointer;
+    transition:
+        color 0.15s ease,
+        border-color 0.15s ease;
 
-  &:hover {
-    color: var(--text-primary);
-  }
+    &:hover {
+        color: var(--text-primary);
+    }
 
-  &:focus,
-  &:focus-visible {
-    outline: none;
-    box-shadow: none;
-  }
+    &:focus,
+    &:focus-visible {
+        outline: none;
+        box-shadow: none;
+    }
 }
 
 .tabActive {
-  color: var(--primary-color);
-  border-bottom-color: var(--primary-color);
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
 }
 
 .content {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-lg;
-  flex: 1;
-  min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-lg;
+    flex: 1;
+    min-height: 0;
 
-  @include mobile {
-    gap: $spacing-md;
-    min-height: auto;
-  }
+    @include mobile {
+        gap: $spacing-md;
+        min-height: auto;
+    }
 }
 
 .logCard {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 
-  @include mobile {
-    flex: 0 0 auto;
-    min-height: auto;
-    overflow: visible;
-  }
+    @include mobile {
+        flex: 0 0 auto;
+        min-height: auto;
+        overflow: visible;
+    }
 }
 
 .toolbar {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  flex-wrap: wrap;
-  margin-left: auto;
-
-  @include mobile {
+    display: flex;
     align-items: flex-start;
-    margin-left: 0;
-    width: 100%;
-  }
+    justify-content: space-between;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+    margin-left: auto;
+
+    @include mobile {
+        margin-left: 0;
+        width: 100%;
+    }
+}
+
+.toolbarPrimary,
+.toolbarSecondary {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.toolbarSecondary {
+    justify-content: flex-end;
+}
+
+.autoRefreshControlGroup {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    flex-wrap: wrap;
+}
+
+.autoRefreshIntervalLabel {
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+// The "30s" dropdown sits immediately next to the auto-refresh switch in the
+// toolbar, where the default Select trigger's outline + filled background
+// reads as a separate control group from the switch — visually noisy. Drop
+// the border and lighten the bg so the pair scans as one auto-refresh
+// configuration block. R-526:wrap 自身也保留 0 padding,避免 button 缩成一团
+// 后 wrap 的 box-shadow/padding 形成"多一个框"的视觉。
+.intervalSelect {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+
+    > button[aria-expanded] {
+        border-color: transparent;
+        background: transparent;
+        height: 28px;
+        padding: 0 6px;
+        font-size: $font-size-xs;
+        box-shadow: none;
+    }
 }
 
 .filters {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-  flex-wrap: wrap;
-  margin-bottom: $spacing-md;
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    flex-wrap: wrap;
+    margin-bottom: $spacing-md;
 
-  :global(.form-group) {
-    margin: 0;
-  }
+    :global(.form-group) {
+        margin: 0;
+    }
 
-  @include mobile {
-    gap: $spacing-sm;
-    margin-bottom: $spacing-sm;
-  }
+    @include mobile {
+        gap: $spacing-sm;
+        margin-bottom: $spacing-sm;
+    }
 }
 
 .searchWrapper {
-  flex: 1;
-  min-width: 220px;
-  max-width: 420px;
+    flex: 1;
+    min-width: 220px;
+    max-width: 420px;
 }
 
 .filterPanelHeader {
-  display: flex;
-  align-items: center;
-  flex: 1 1 100%;
+    display: flex;
+    align-items: center;
+    flex: 1 1 100%;
 }
 
 .filterPanelToggle {
-  white-space: nowrap;
+    white-space: nowrap;
 }
 
 .filterPanelButtonContent {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .filterPanelCount {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  background: rgba($primary-color, 0.12);
-  color: var(--primary-color);
-  font-size: $font-size-xs;
-  line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: $radius-full;
+    background: rgba($primary-color, 0.12);
+    color: var(--primary-color);
+    font-size: $font-size-xs;
+    line-height: 1.2;
 }
 
 .structuredFilters {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1 1 100%;
-  padding: 8px 10px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 100%;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
 }
 
 .filterChipGroup {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .filterChipLabel {
-  font-size: $font-size-xs;
-  color: var(--text-secondary);
-  font-weight: $font-weight-semibold;
-  line-height: 28px;
-  min-width: 68px;
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+    font-weight: $font-weight-semibold;
+    line-height: 28px;
+    min-width: 68px;
 }
 
 .filterChipList {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
 }
 
 .filterChip {
-  @include button-reset;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: $radius-full;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: $font-size-xs;
-  line-height: 1.3;
-  cursor: pointer;
-  max-width: 280px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: border-color 0.15s ease,
-  color 0.15s ease,
-  background-color 0.15s ease;
+    @include button-reset;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: 1.3;
+    cursor: pointer;
+    max-width: 280px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition:
+        border-color 0.15s ease,
+        color 0.15s ease,
+        background-color 0.15s ease;
 
-  &:hover:not(:disabled) {
-    color: var(--text-primary);
-    border-color: var(--primary-color);
-  }
+    &:hover:not(:disabled) {
+        color: var(--text-primary);
+        border-color: var(--primary-color);
+    }
 
-  &:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
 }
 
 .filterChipActive {
-  color: var(--primary-color);
-  border-color: rgba($primary-color, 0.45);
-  background: rgba($primary-color, 0.14);
+    color: var(--primary-color);
+    border-color: rgba($primary-color, 0.45);
+    background: rgba($primary-color, 0.14);
 }
 
 .filterChipHint {
-  font-size: $font-size-xs;
-  color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
 }
 
 @include mobile {
-  .filterPanelHeader {
-    width: 100%;
-  }
+    .filterPanelHeader {
+        width: 100%;
+    }
 
-  .filterPanelToggle {
-    width: 100%;
-  }
+    .filterPanelToggle {
+        width: 100%;
+    }
 
-  .filterPanelButtonContent {
-    width: 100%;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
+    .filterPanelButtonContent {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
 
-  .filterChipGroup {
-    flex-direction: column;
-    gap: 6px;
-  }
+    .filterChipGroup {
+        flex-direction: column;
+        gap: 6px;
+    }
 
-  .filterChipLabel {
-    min-width: 0;
-    line-height: 1.2;
-  }
+    .filterChipLabel {
+        min-width: 0;
+        line-height: 1.2;
+    }
 }
 
 .searchInput {
-  padding-right: 44px !important;
+    padding-right: 44px !important;
 }
 
 .searchIcon {
-  color: var(--text-tertiary);
-  pointer-events: none;
+    color: var(--text-tertiary);
+    pointer-events: none;
 }
 
 .searchClear {
-  @include button-reset;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: $radius-full;
-  color: var(--text-secondary);
+    @include button-reset;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: $radius-full;
+    color: var(--text-secondary);
 
-  &:hover {
-    background: var(--bg-secondary);
-  }
+    &:hover {
+        background: var(--bg-secondary);
+    }
 }
 
 .filterStats {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: $font-size-xs;
-  color: var(--text-secondary);
-  white-space: nowrap;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .removedCount {
-  color: var(--text-tertiary);
+    color: var(--text-tertiary);
 }
 
 .actionButton {
-  white-space: nowrap;
+    white-space: nowrap;
+}
+
+.diskUsageBadge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    margin-left: auto;
+
+    @include mobile {
+        margin-left: 0;
+    }
 }
 
 .buttonContent {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 
-  svg {
-    flex: 0 0 auto;
-  }
+    svg {
+        flex: 0 0 auto;
+    }
 }
 
 .switchLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 
-  svg {
-    flex: 0 0 auto;
-  }
+    svg {
+        flex: 0 0 auto;
+    }
 }
 
 .logPanel {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  flex: 1 1 auto;
-  min-height: 280px;
-  max-height: calc(100vh - 320px);
-  overflow: auto;
-  position: relative;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
-  overscroll-behavior: contain;
-
-  @include tablet {
-    min-height: 240px;
-    max-height: calc(100vh - 300px);
-  }
-
-  @include mobile {
-    min-height: 360px;
-    max-height: 480px;
-    flex: 0 0 auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    flex: 1 1 auto;
+    min-height: 280px;
+    max-height: calc(100vh - 320px);
     overflow: auto;
-  }
+    position: relative;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+
+    @include tablet {
+        min-height: 240px;
+        max-height: calc(100vh - 300px);
+    }
+
+    @include mobile {
+        min-height: 360px;
+        max-height: 480px;
+        flex: 0 0 auto;
+        overflow: auto;
+    }
 }
 
 .errorPanel {
-  height: 480px;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+    height: 480px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .loadMoreBanner {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: $font-size-xs;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
 
-  @include mobile {
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
-    gap: $spacing-xs;
+    @include mobile {
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
+        gap: $spacing-xs;
 
-    > span {
-      width: 100%;
+        > span {
+            width: 100%;
+        }
     }
-  }
 }
 
 .loadMoreCount {
-  color: var(--text-tertiary);
-  white-space: nowrap;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.loadMoreNotice {
+    color: var(--warning-text, #d97706);
+    white-space: nowrap;
 }
 
 .loadMoreStats {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
 
-  @include mobile {
-    width: 100%;
-    flex-wrap: wrap;
-    gap: $spacing-sm;
+    @include mobile {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: $spacing-sm;
 
-    > span {
-      white-space: nowrap;
+        > span {
+            white-space: nowrap;
+        }
     }
-  }
 }
 
 .logList {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
 }
 
 .rawLog {
-  margin: 0;
-  padding: 10px 12px;
-  cursor: text;
-  user-select: text;
-  white-space: pre;
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-  monospace;
-  font-size: $font-size-xs;
-  line-height: 1.45;
-
-  @include tablet {
-    padding: 8px 10px;
+    margin: 0;
+    padding: 10px 12px;
+    cursor: text;
+    user-select: text;
+    white-space: pre;
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: $font-size-xs;
-  }
+    line-height: 1.45;
 
-  @include mobile {
-    padding: 8px 10px;
-    font-size: $font-size-xs;
-  }
+    @include tablet {
+        padding: 8px 10px;
+        font-size: $font-size-xs;
+    }
+
+    @include mobile {
+        padding: 8px 10px;
+        font-size: $font-size-xs;
+    }
 }
 
 .logRow {
-  display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: $spacing-md;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color);
-  border-left: 3px solid transparent;
-  cursor: copy;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-  monospace;
-  font-size: $font-size-xs;
-  line-height: 1.45;
-  color: var(--text-primary);
-
-  &:hover {
-    background: rgba($primary-color, 0.06);
-  }
-
-  @include tablet {
-    grid-template-columns: 140px 1fr;
-    gap: $spacing-sm;
-    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    gap: $spacing-md;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    border-left: 3px solid transparent;
+    cursor: copy;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: $font-size-xs;
-  }
+    line-height: 1.45;
+    color: var(--text-primary);
 
-  @include mobile {
-    grid-template-columns: 1fr;
-    gap: $spacing-xs;
-    padding: 8px 10px;
-    font-size: $font-size-xs;
-  }
+    &:hover {
+        background: rgba($primary-color, 0.06);
+    }
+
+    @include tablet {
+        grid-template-columns: 140px 1fr;
+        gap: $spacing-sm;
+        padding: 8px 10px;
+        font-size: $font-size-xs;
+    }
+
+    @include mobile {
+        grid-template-columns: 1fr;
+        gap: $spacing-xs;
+        padding: 8px 10px;
+        font-size: $font-size-xs;
+    }
 }
 
 .rowWarn {
-  border-left-color: var(--warning-color);
+    border-left-color: var(--warning-color);
 }
 
 .rowError {
-  border-left-color: var(--error-color);
+    border-left-color: var(--error-color);
 }
 
 .timestamp {
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  padding-top: 2px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    padding-top: 2px;
 
-  @include mobile {
-    white-space: normal;
-  }
+    @include mobile {
+        white-space: normal;
+    }
 }
 
 .rowMain {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
 }
 
 .badge,
 .pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: $radius-full;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .source {
-  color: var(--text-secondary);
-  max-width: 240px;
-  @include text-ellipsis;
+    color: var(--text-secondary);
+    max-width: 240px;
+    @include text-ellipsis;
 
-  @include mobile {
-    max-width: 100%;
-  }
+    @include mobile {
+        max-width: 100%;
+    }
 }
 
 .requestIdBadge {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-  'Courier New', monospace;
-  font-size: $font-size-xs;
-  color: #0891b2;
-  background: rgba(8, 145, 178, 0.1);
-  border-color: rgba(8, 145, 178, 0.25);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: $font-size-xs;
+    color: #0891b2;
+    background: rgba(8, 145, 178, 0.1);
+    border-color: rgba(8, 145, 178, 0.25);
 }
 
 .statusBadge {
-  font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums;
+    justify-content: center;
+    min-width: 42px;
+    text-align: center;
 }
 
 .statusSuccess {
-  color: var(--success-badge-text);
-  background: var(--success-badge-bg);
-  border-color: var(--success-badge-border);
+    color: var(--success-badge-text);
+    background: var(--success-badge-bg);
+    border-color: var(--success-badge-border);
 }
 
 .statusInfo {
-  color: var(--info-color);
-  background: rgba($primary-color, 0.12);
-  border-color: rgba($primary-color, 0.25);
+    color: var(--info-color);
+    background: rgba($primary-color, 0.12);
+    border-color: rgba($primary-color, 0.25);
 }
 
 .statusWarn {
-  color: var(--warning-text);
-  background: var(--warning-bg);
-  border-color: var(--warning-border);
+    color: var(--warning-text);
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
 }
 
 .statusError {
-  color: var(--failure-badge-text);
-  background: var(--failure-badge-bg);
-  border-color: var(--failure-badge-border);
+    color: var(--failure-badge-text);
+    background: var(--failure-badge-bg);
+    border-color: var(--failure-badge-border);
 }
 
 .levelInfo {
-  color: var(--info-color);
-  background: rgba($primary-color, 0.12);
-  border-color: rgba($primary-color, 0.25);
+    color: var(--info-color);
+    background: rgba($primary-color, 0.12);
+    border-color: rgba($primary-color, 0.25);
 }
 
 .levelWarn {
-  color: var(--warning-text);
-  background: var(--warning-bg);
-  border-color: var(--warning-border);
+    color: var(--warning-text);
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
 }
 
 .levelError {
-  color: var(--error-color);
-  background: rgba($error-color, 0.12);
-  border-color: rgba($error-color, 0.25);
+    color: var(--error-color);
+    background: rgba($error-color, 0.12);
+    border-color: rgba($error-color, 0.25);
 }
 
 .levelDebug,
 .levelTrace {
-  color: var(--text-secondary);
-  background: rgba(107, 114, 128, 0.12);
-  border-color: rgba(107, 114, 128, 0.25);
+    color: var(--text-secondary);
+    background: rgba(107, 114, 128, 0.12);
+    border-color: rgba(107, 114, 128, 0.25);
 }
 
 .methodBadge {
-  color: var(--text-primary);
-  background: rgba($primary-color, 0.08);
-  border-color: rgba($primary-color, 0.22);
+    color: var(--text-primary);
+    background: rgba($primary-color, 0.08);
+    border-color: rgba($primary-color, 0.22);
 }
 
 .path {
-  color: var(--text-primary);
-  font-weight: $font-weight-semibold;
-  max-width: 520px;
-  @include text-ellipsis;
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    max-width: 520px;
+    @include text-ellipsis;
 
-  @include mobile {
-    max-width: 100%;
-    flex-basis: 100%;
-  }
+    @include mobile {
+        max-width: 100%;
+        flex-basis: 100%;
+    }
 }
 
 .message {
-  color: var(--text-secondary);
-  word-break: break-word;
+    color: var(--text-secondary);
+    word-break: break-word;
 
-  @include mobile {
-    flex-basis: 100%;
-  }
+    @include mobile {
+        flex-basis: 100%;
+    }
 }
 
 .traceButton {
-  @include button-reset;
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  border: 1px solid rgba($primary-color, 0.3);
-  background: rgba($primary-color, 0.1);
-  color: var(--primary-color);
-  font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
-  line-height: 1.2;
-  cursor: pointer;
-  transition: background-color 0.15s ease,
-  border-color 0.15s ease;
+    @include button-reset;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: $radius-full;
+    border: 1px solid rgba($primary-color, 0.3);
+    background: rgba($primary-color, 0.1);
+    color: var(--primary-color);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    line-height: 1.2;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease;
 
-  &:hover {
-    background: rgba($primary-color, 0.16);
-    border-color: rgba($primary-color, 0.45);
-  }
+    &:hover {
+        background: rgba($primary-color, 0.16);
+        border-color: rgba($primary-color, 0.45);
+    }
 }
 
 .tracePanel {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
 }
 
 .traceNotice {
-  padding: 8px 10px;
-  border-radius: $radius-md;
-  border: 1px solid var(--warning-border);
-  background: var(--warning-bg);
-  color: var(--warning-text);
-  font-size: $font-size-xs;
+    padding: 8px 10px;
+    border-radius: $radius-md;
+    border: 1px solid var(--warning-border);
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    font-size: $font-size-xs;
 }
 
 .traceSectionTitle {
-  margin: 4px 0 0;
-  font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
+    margin: 4px 0 0;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
 }
 
 .traceCandidatesHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
 }
 
 .traceInfoGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 
-  @include mobile {
-    grid-template-columns: 1fr;
-  }
+    @include mobile {
+        grid-template-columns: 1fr;
+    }
 }
 
 .traceInfoItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
 }
 
 .traceInfoItemWide {
-  grid-column: 1 / -1;
+    grid-column: 1 / -1;
 }
 
 .traceInfoLabel {
-  font-size: $font-size-xs;
-  color: var(--text-secondary);
-  font-weight: $font-weight-semibold;
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+    font-weight: $font-weight-semibold;
 }
 
 .traceInfoValue {
-  font-size: $font-size-xs;
-  color: var(--text-primary);
-  word-break: break-word;
+    font-size: $font-size-xs;
+    color: var(--text-primary);
+    word-break: break-word;
 }
 
 .traceSourceType {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: $radius-full;
-  border: 1px solid var(--border-color);
-  font-size: $font-size-xs;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
 }
 
 .traceCandidates {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 320px;
-  overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 320px;
+    overflow: auto;
 }
 
 .traceCandidate {
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  padding: 10px;
-  background: var(--bg-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    padding: 10px;
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .traceCandidateHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .traceModelBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  border: 1px solid var(--success-badge-border, #6ee7b7);
-  font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
-  color: var(--success-badge-text, #065f46);
-  background: var(--success-badge-bg, #d1fae5);
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: $radius-full;
+    border: 1px solid var(--success-badge-border, #6ee7b7);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    color: var(--success-badge-text, #065f46);
+    background: var(--success-badge-bg, #d1fae5);
 }
 
 .traceDelta {
-  font-size: $font-size-xs;
-  color: var(--text-secondary);
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
 }
 
 .traceCandidateGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 
-  @include mobile {
-    grid-template-columns: 1fr;
-  }
+    @include mobile {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-height: 820px) {
-  .pageTitle {
-    font-size: $font-size-xl;
-    margin-bottom: $spacing-md;
-  }
+    .pageTitle {
+        font-size: $font-size-xl;
+        margin-bottom: $spacing-md;
+    }
 
-  .tabBar {
-    margin-bottom: $spacing-md;
-  }
+    .tabBar {
+        margin-bottom: $spacing-md;
+    }
 
-  .tabItem {
-    padding: 10px 16px;
-  }
+    .tabItem {
+        padding: 10px 16px;
+    }
 
-  .content {
-    gap: $spacing-md;
-  }
+    .content {
+        gap: $spacing-md;
+    }
 
-  .logCard {
-    padding: $spacing-md;
-  }
+    .logCard {
+        padding: $spacing-md;
+    }
 
-  .logPanel {
-    min-height: 200px;
-    max-height: calc(100vh - 280px);
-  }
+    .logPanel {
+        min-height: 200px;
+        max-height: calc(100vh - 280px);
+    }
 
-  .logRow {
-    padding: 8px 10px;
-    font-size: $font-size-xs;
-  }
+    .logRow {
+        padding: 8px 10px;
+        font-size: $font-size-xs;
+    }
 
-  .errorPanel {
-    height: 360px;
-  }
+    .errorPanel {
+        height: 360px;
+    }
 }
 
 @media (max-height: 600px) {
-  .pageTitle {
-    font-size: $font-size-xl;
-    margin-bottom: $spacing-sm;
-  }
+    .pageTitle {
+        font-size: $font-size-xl;
+        margin-bottom: $spacing-sm;
+    }
 
-  .tabBar {
-    margin-bottom: $spacing-sm;
-  }
+    .tabBar {
+        margin-bottom: $spacing-sm;
+    }
 
-  .tabItem {
-    padding: 8px 12px;
+    .tabItem {
+        padding: 8px 12px;
+        font-size: $font-size-xs;
+    }
+
+    .content {
+        gap: $spacing-sm;
+    }
+
+    .filters {
+        margin-bottom: $spacing-sm;
+        gap: $spacing-sm;
+    }
+
+    .logCard {
+        padding: $spacing-sm;
+    }
+
+    .logPanel {
+        min-height: 160px;
+        max-height: calc(100vh - 220px);
+    }
+
+    .logRow {
+        padding: 6px 8px;
+        font-size: $font-size-xs;
+        grid-template-columns: 130px 1fr;
+        gap: $spacing-xs;
+    }
+
+    .loadMoreBanner {
+        padding: 6px 10px;
+    }
+
+    .errorPanel {
+        height: 280px;
+    }
+}
+
+.previewContent {
+    margin: 0;
+    padding: $spacing-md;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: $font-mono;
     font-size: $font-size-xs;
-  }
-
-  .content {
-    gap: $spacing-sm;
-  }
-
-  .filters {
-    margin-bottom: $spacing-sm;
-    gap: $spacing-sm;
-  }
-
-  .logCard {
-    padding: $spacing-sm;
-  }
-
-  .logPanel {
-    min-height: 160px;
-    max-height: calc(100vh - 220px);
-  }
-
-  .logRow {
-    padding: 6px 8px;
-    font-size: $font-size-xs;
-    grid-template-columns: 130px 1fr;
-    gap: $spacing-xs;
-  }
-
-  .loadMoreBanner {
-    padding: 6px 10px;
-  }
-
-  .errorPanel {
-    height: 280px;
-  }
+    line-height: $line-height-relaxed;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
 }

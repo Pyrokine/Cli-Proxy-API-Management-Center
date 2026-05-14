@@ -3,34 +3,34 @@
  * 从原项目 src/core/config-service.js 迁移
  */
 
-import {configApi} from '@/services/api/config'
-import type {Config} from '@/types'
-import type {RawConfigSection} from '@/types/config'
-import {CACHE_EXPIRY_MS} from '@/utils/constants'
-import {create} from 'zustand'
+import { configApi } from '@/services/api/config'
+import type { Config } from '@/types'
+import type { RawConfigSection } from '@/types/config'
+import { getCacheExpiryMs } from '@/utils/constants'
+import { create } from 'zustand'
 
 interface ConfigCache {
-    data: unknown;
-    timestamp: number;
+    data: unknown
+    timestamp: number
 }
 
 interface ConfigState {
-    config: Config | null;
-    cache: Map<string, ConfigCache>;
-    loading: boolean;
-    error: string | null;
+    config: Config | null
+    cache: Map<string, ConfigCache>
+    loading: boolean
+    error: string | null
 
     // 操作
     fetchConfig: {
-        (section?: undefined, forceRefresh?: boolean): Promise<Config>;
-        (section: RawConfigSection, forceRefresh?: boolean): Promise<unknown>;
-    };
-    updateConfigValue: (section: RawConfigSection, value: unknown) => void;
-    clearCache: (section?: RawConfigSection) => void;
-    isCacheValid: (section?: RawConfigSection) => boolean;
+        (section?: undefined, forceRefresh?: boolean): Promise<Config>
+        (section: RawConfigSection, forceRefresh?: boolean): Promise<unknown>
+    }
+    updateConfigValue: (section: RawConfigSection, value: unknown) => void
+    clearCache: (section?: RawConfigSection) => void
+    isCacheValid: (section?: RawConfigSection) => boolean
 }
 
-let configRequestToken                                                     = 0
+let configRequestToken = 0
 let inFlightConfigRequest: { id: number; promise: Promise<Config> } | null = null
 
 const SECTION_KEYS: RawConfigSection[] = [
@@ -42,6 +42,7 @@ const SECTION_KEYS: RawConfigSection[] = [
     'request-log',
     'logging-to-file',
     'logs-max-total-size-mb',
+    'error-logs-max-files',
     'ws-auth',
     'force-model-prefix',
     'routing/strategy',
@@ -54,6 +55,7 @@ const SECTION_KEYS: RawConfigSection[] = [
     'openai-compatibility',
     'oauth-excluded-models',
     'auto-refresh-interval',
+    'remote-management',
 ]
 
 const extractSectionValue = (config: Config | null, section?: RawConfigSection) => {
@@ -77,6 +79,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
             return config.loggingToFile
         case 'logs-max-total-size-mb':
             return config.logsMaxTotalSizeMb
+        case 'error-logs-max-files':
+            return config.errorLogsMaxFiles
         case 'ws-auth':
             return config.wsAuth
         case 'force-model-prefix':
@@ -101,6 +105,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
             return config.oauthExcludedModels
         case 'auto-refresh-interval':
             return config.autoRefreshInterval
+        case 'remote-management':
+            return config.remoteManagement
         default:
             if (!section) {
                 return undefined
@@ -146,10 +152,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
         const requestId = (configRequestToken += 1)
         try {
-            const requestPromise  = configApi.getConfig()
+            const requestPromise = configApi.getConfig()
             inFlightConfigRequest = { id: requestId, promise: requestPromise }
-            const data            = await requestPromise
-            const now             = Date.now()
+            const data = await requestPromise
+            const now = Date.now()
 
             // 如果在请求过程中连接已被切换/登出，
             // 则忽略旧请求的结果，避免覆盖新会话的状态
@@ -168,22 +174,20 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
             })
 
             set({
-                    config: data,
-                    cache: newCache,
-                    loading: false,
-                })
+                config: data,
+                cache: newCache,
+                loading: false,
+            })
 
             return section ? extractSectionValue(data, section) : data
         } catch (error: unknown) {
             const message =
-                      error instanceof Error ?
-                      error.message :
-                      typeof error === 'string' ? error : 'Failed to fetch config'
+                error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failed to fetch config'
             if (requestId === configRequestToken) {
                 set({
-                        error: message || 'Failed to fetch config',
-                        loading: false,
-                    })
+                    error: message || 'Failed to fetch config',
+                    loading: false,
+                })
             }
             throw error
         } finally {
@@ -195,8 +199,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
     updateConfigValue: (section, value) => {
         set((state) => {
-            const raw                = { ...(state.config?.raw || {}) }
-            raw[section]             = value
+            const raw = { ...(state.config?.raw || {}) }
+            raw[section] = value
             const nextConfig: Config = { ...(state.config || {}), raw }
 
             switch (section) {
@@ -223,6 +227,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
                     break
                 case 'logs-max-total-size-mb':
                     nextConfig.logsMaxTotalSizeMb = value as Config['logsMaxTotalSizeMb']
+                    break
+                case 'error-logs-max-files':
+                    nextConfig.errorLogsMaxFiles = value as Config['errorLogsMaxFiles']
                     break
                 case 'ws-auth':
                     nextConfig.wsAuth = value as Config['wsAuth']
@@ -260,6 +267,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
                 case 'auto-refresh-interval':
                     nextConfig.autoRefreshInterval = value as Config['autoRefreshInterval']
                     break
+                case 'remote-management':
+                    nextConfig.remoteManagement = value as Config['remoteManagement']
+                    break
                 default:
                     break
             }
@@ -273,7 +283,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
     clearCache: (section) => {
         const { cache } = get()
-        const newCache  = new Map(cache)
+        const newCache = new Map(cache)
 
         if (section) {
             newCache.delete(section)
@@ -295,13 +305,13 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
     isCacheValid: (section) => {
         const { cache } = get()
-        const cacheKey  = section || '__full__'
-        const cached    = cache.get(cacheKey)
+        const cacheKey = section || '__full__'
+        const cached = cache.get(cacheKey)
 
         if (!cached) {
             return false
         }
 
-        return Date.now() - cached.timestamp < CACHE_EXPIRY_MS
+        return Date.now() - cached.timestamp < getCacheExpiryMs()
     },
 }))

@@ -7,7 +7,7 @@
  * domain-specific fields and actions.
  */
 
-import type {SetStateAction} from 'react'
+import type { SetStateAction } from 'react'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -23,12 +23,12 @@ const resolveAction = <T>(action: SetStateAction<T>, prev: T): T =>
 
 /** Minimum fields every provider draft must have. */
 export interface BaseDraft {
-    initialized: boolean;
-    baselineSignature: string;
-    form: object;
-    testModel: string;
-    testStatus: string;
-    testMessage: string;
+    initialized: boolean
+    baselineSignature: string
+    form: object
+    testModel: string
+    testStatus: string
+    testMessage: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -37,18 +37,18 @@ export interface BaseDraft {
 /* ------------------------------------------------------------------ */
 
 export interface DraftSliceState<D extends BaseDraft> {
-    drafts: Record<string, D>;
-    refCounts: Record<string, number>;
-    acquireDraft: (key: string) => void;
-    releaseDraft: (key: string) => void;
-    ensureDraft: (key: string) => void;
-    initDraft: (key: string, draft: Omit<D, 'initialized'>) => void;
-    setDraftBaselineSignature: (key: string, signature: string) => void;
-    setDraftForm: (key: string, action: SetStateAction<D['form']>) => void;
-    setDraftTestModel: (key: string, action: SetStateAction<string>) => void;
-    setDraftTestStatus: (key: string, action: SetStateAction<D['testStatus']>) => void;
-    setDraftTestMessage: (key: string, action: SetStateAction<string>) => void;
-    clearDraft: (key: string) => void;
+    drafts: Record<string, D>
+    refCounts: Record<string, number>
+    acquireDraft: (key: string) => void
+    releaseDraft: (key: string) => void
+    ensureDraft: (key: string) => void
+    initDraft: (key: string, draft: Omit<D, 'initialized'>) => void
+    setDraftBaselineSignature: (key: string, signature: string) => void
+    setDraftForm: (key: string, action: SetStateAction<D['form']>) => void
+    setDraftTestModel: (key: string, action: SetStateAction<string>) => void
+    setDraftTestStatus: (key: string, action: SetStateAction<D['testStatus']>) => void
+    setDraftTestMessage: (key: string, action: SetStateAction<string>) => void
+    clearDraft: (key: string) => void
 }
 
 /* ------------------------------------------------------------------ */
@@ -56,9 +56,9 @@ export interface DraftSliceState<D extends BaseDraft> {
 /* ------------------------------------------------------------------ */
 
 type ZustandSetGet<S> = {
-    set: (partial: Partial<S> | ((state: S) => Partial<S>)) => void;
-    get: () => S;
-};
+    set: (partial: Partial<S> | ((state: S) => Partial<S>)) => void
+    get: () => S
+}
 
 /**
  * Create the shared draft-management actions.
@@ -69,7 +69,7 @@ type ZustandSetGet<S> = {
  */
 export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<D>>(
     buildEmpty: () => D,
-    { set, get }: ZustandSetGet<S>,
+    { set, get }: ZustandSetGet<S>
 ): DraftSliceState<D> {
     const patchDraft = (state: DraftSliceState<D>, key: string, patch: Partial<D>): Partial<DraftSliceState<D>> => {
         const existing = state.drafts[key] ?? buildEmpty()
@@ -91,7 +91,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
             }
             set((state) => {
                 const existingDraft = state.drafts[key]
-                const currentCount  = state.refCounts[key] ?? 0
+                const currentCount = state.refCounts[key] ?? 0
                 return {
                     drafts: existingDraft ? state.drafts : { ...state.drafts, [key]: buildEmpty() },
                     refCounts: { ...state.refCounts, [key]: currentCount + 1 },
@@ -131,7 +131,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
                 (state) =>
                     ({
                         drafts: { ...state.drafts, [key]: buildEmpty() },
-                    }) as Partial<S>,
+                    }) as Partial<S>
             )
         },
 
@@ -150,7 +150,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
                             ...state.drafts,
                             [key]: { ...draft, initialized: true } as D,
                         },
-                    }) as Partial<S>,
+                    }) as Partial<S>
             )
         },
 
@@ -177,7 +177,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
                 return
             }
             set((state) => {
-                const existing  = state.drafts[key] ?? buildEmpty()
+                const existing = state.drafts[key] ?? buildEmpty()
                 const nextValue = resolveAction(action, existing.testModel)
                 return patchDraft(state, key, { testModel: nextValue } as Partial<D>) as Partial<S>
             })
@@ -188,7 +188,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
                 return
             }
             set((state) => {
-                const existing  = state.drafts[key] ?? buildEmpty()
+                const existing = state.drafts[key] ?? buildEmpty()
                 const nextValue = resolveAction(action, existing.testStatus)
                 return patchDraft(state, key, { testStatus: nextValue } as Partial<D>) as Partial<S>
             })
@@ -199,7 +199,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
                 return
             }
             set((state) => {
-                const existing  = state.drafts[key] ?? buildEmpty()
+                const existing = state.drafts[key] ?? buildEmpty()
                 const nextValue = resolveAction(action, existing.testMessage)
                 return patchDraft(state, key, { testMessage: nextValue } as Partial<D>) as Partial<S>
             })

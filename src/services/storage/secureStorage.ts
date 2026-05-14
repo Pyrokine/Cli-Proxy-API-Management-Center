@@ -3,18 +3,14 @@
  * 使用 AES-256-GCM 加密敏感数据，存储到 sessionStorage（关闭 tab 自动清除）
  */
 
-import { decryptData, encryptData } from '@/utils/encryption'
+import { decryptData, encryptData, isSecureStorageEncryptionAvailable } from '@/utils/encryption'
 
 interface StorageOptions {
-    encrypt?: boolean;
-    persistent?: boolean;  // true = localStorage (非敏感数据), false = sessionStorage (默认)
+    encrypt?: boolean
+    persistent?: boolean // true = localStorage (非敏感数据), false = sessionStorage (默认)
 }
 
 class SecureStorageService {
-    private storage(persistent: boolean): Storage {
-        return persistent ? localStorage : sessionStorage
-    }
-
     /**
      * 存储数据
      */
@@ -29,8 +25,6 @@ class SecureStorageService {
         const stringValue = JSON.stringify(value)
         const storedValue = encrypt ? await encryptData(stringValue) : stringValue
 
-        // If encryption failed (Web Crypto unavailable), encryptData returns ''.
-        // Don't write empty string — remove key instead to avoid corrupt persist state.
         if (!storedValue) {
             this.removeItem(key, options)
             return
@@ -90,6 +84,14 @@ class SecureStorageService {
             localStorage.removeItem(key)
         }
     }
+
+    private storage(persistent: boolean): Storage {
+        return persistent ? localStorage : sessionStorage
+    }
 }
 
 export const secureStorage = new SecureStorageService()
+
+export function isSecureStorageProtected(): boolean {
+    return isSecureStorageEncryptionAvailable()
+}

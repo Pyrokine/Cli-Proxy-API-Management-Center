@@ -3,20 +3,20 @@
  * 从原项目 src/modules/theme.js 迁移
  */
 
-import type {Theme} from '@/types'
-import {STORAGE_KEY_THEME} from '@/utils/constants'
-import {create} from 'zustand'
-import {persist} from 'zustand/middleware'
+import type { Theme } from '@/types'
+import { STORAGE_KEY_THEME } from '@/utils/constants'
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
-type ResolvedTheme = 'light' | 'dark';
-type AppliedTheme = ResolvedTheme | 'white';
+type ResolvedTheme = 'light' | 'dark'
+type AppliedTheme = ResolvedTheme | 'white'
 
 interface ThemeState {
-    theme: Theme;
-    resolvedTheme: ResolvedTheme;
-    setTheme: (theme: Theme) => void;
-    cycleTheme: () => void;
-    initializeTheme: () => () => void;
+    theme: Theme
+    resolvedTheme: ResolvedTheme
+    setTheme: (theme: Theme) => void
+    cycleTheme: () => void
+    initializeTheme: () => () => void
 }
 
 const getSystemTheme = (): ResolvedTheme => {
@@ -68,16 +68,16 @@ export const useThemeStore = create<ThemeState>()(
                 const resolved = resolveTheme(theme)
                 applyTheme(resolved)
                 set({
-                        theme,
-                        resolvedTheme: normalizeResolvedTheme(resolved),
-                    })
+                    theme,
+                    resolvedTheme: normalizeResolvedTheme(resolved),
+                })
             },
 
             cycleTheme: () => {
                 const { theme, setTheme } = get()
-                const order: Theme[]      = ['light', 'white', 'dark', 'auto']
-                const currentIndex        = order.indexOf(theme)
-                const nextTheme           = order[(currentIndex + 1) % order.length]
+                const order: Theme[] = ['light', 'white', 'dark', 'auto']
+                const currentIndex = order.indexOf(theme)
+                const nextTheme = order[(currentIndex + 1) % order.length]
                 setTheme(nextTheme)
             },
 
@@ -89,12 +89,11 @@ export const useThemeStore = create<ThemeState>()(
 
                 // 监听系统主题变化（仅在 auto 模式下生效）
                 if (!window.matchMedia) {
-                    return () => {
-                    }
+                    return () => {}
                 }
 
                 const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-                const listener   = () => {
+                const listener = () => {
                     const { theme: currentTheme } = get()
                     if (currentTheme === 'auto') {
                         const resolved = resolveAutoTheme()
@@ -110,6 +109,6 @@ export const useThemeStore = create<ThemeState>()(
         }),
         {
             name: STORAGE_KEY_THEME,
-        },
-    ),
+        }
+    )
 )

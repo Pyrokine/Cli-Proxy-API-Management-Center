@@ -10,322 +10,322 @@ $diff-prefix-width: 20px;
 // Diff 颜色通过 CSS 自定义属性跟随主题切换（定义在 themes.scss）
 
 .diffModal {
-  :global(.modal-body) {
-    padding: 0;
-    max-height: none;
-    overflow: hidden;
-  }
+    :global(.modal-body) {
+        padding: 0;
+        max-height: none;
+        overflow: hidden;
+    }
 }
 
 .content {
-  display: flex;
-  flex-direction: column;
-  height: 70vh;
-  min-height: 420px;
+    display: flex;
+    flex-direction: column;
+    height: 70vh;
+    min-height: 420px;
 }
 
 .emptyState {
-  flex: 1;
-  border: 1px dashed var(--border-color);
-  border-radius: $radius-md;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: $font-size-base;
-  display: grid;
-  place-items: center;
-  margin: $spacing-md;
+    flex: 1;
+    border: 1px dashed var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: $font-size-base;
+    display: grid;
+    place-items: center;
+    margin: $spacing-md;
 }
 
 // ── File container ────────────────────────────────
 
 .validationErrors,
 .validationWarnings {
-  margin: $spacing-md $spacing-md 0;
-  padding: $spacing-sm $spacing-md;
-  border-radius: $radius-md;
-  font-size: $font-size-sm;
-  line-height: 1.5;
+    margin: $spacing-md $spacing-md 0;
+    padding: $spacing-sm $spacing-md;
+    border-radius: $radius-md;
+    font-size: $font-size-sm;
+    line-height: 1.5;
 
-  strong {
-    display: block;
-    margin-bottom: $spacing-xs;
-  }
+    strong {
+        display: block;
+        margin-bottom: $spacing-xs;
+    }
 
-  ul {
-    margin: 0;
-    padding-left: 1.5em;
-  }
+    ul {
+        margin: 0;
+        padding-left: 1.5em;
+    }
 
-  li + li {
-    margin-top: 2px;
-  }
+    li + li {
+        margin-top: 2px;
+    }
 }
 
 .validationErrors {
-  background: color-mix(in srgb, var(--danger-color, #e53e3e) 10%, var(--bg-primary));
-  border: 1px solid color-mix(in srgb, var(--danger-color, #e53e3e) 30%, var(--border-color));
-  color: var(--danger-color, #e53e3e);
+    background: color-mix(in srgb, var(--danger-color, #e53e3e) 10%, var(--bg-primary));
+    border: 1px solid color-mix(in srgb, var(--danger-color, #e53e3e) 30%, var(--border-color));
+    color: var(--danger-color, #e53e3e);
 }
 
 .validationWarnings {
-  background: color-mix(in srgb, var(--warning-color, #d69e2e) 10%, var(--bg-primary));
-  border: 1px solid color-mix(in srgb, var(--warning-color, #d69e2e) 30%, var(--border-color));
-  color: var(--warning-color, #d69e2e);
+    background: color-mix(in srgb, var(--warning-color, #d69e2e) 10%, var(--bg-primary));
+    border: 1px solid color-mix(in srgb, var(--warning-color, #d69e2e) 30%, var(--border-color));
+    color: var(--warning-color, #d69e2e);
 }
 
 .diffContainer {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 // ── File header ───────────────────────────────────
 
 .fileHeader {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: 10px $spacing-md;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: 10px $spacing-md;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .fileIcon {
-  flex-shrink: 0;
-  color: var(--text-tertiary);
+    flex-shrink: 0;
+    color: var(--text-tertiary);
 }
 
 .fileName {
-  font-size: $font-size-base;
-  font-weight: $font-weight-semibold;
-  font-family: $diff-mono;
-  color: var(--text-primary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    font-family: $diff-mono;
+    color: var(--text-primary);
 }
 
 .fileStats {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  font-size: $font-size-sm;
-  font-weight: $font-weight-semibold;
-  font-family: $diff-mono;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    font-family: $diff-mono;
 }
 
 .statAdditions {
-  color: var(--diff-add-color);
+    color: var(--diff-add-color);
 }
 
 .statDeletions {
-  color: var(--diff-del-color);
+    color: var(--diff-del-color);
 }
 
 .statBar {
-  display: inline-flex;
-  gap: 2px;
-  margin-left: 2px;
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
 }
 
 .statBlock {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
 }
 
 .statBlockAdd {
-  background: var(--diff-add-color);
+    background: var(--diff-add-color);
 }
 
 .statBlockDel {
-  background: var(--diff-del-color);
+    background: var(--diff-del-color);
 }
 
 // ── Diff body (scrollable) ────────────────────────
 
 .diffBody {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  font-family: $diff-mono;
-  font-size: $diff-font-size;
-  line-height: $diff-line-height;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    font-family: $diff-mono;
+    font-size: $diff-font-size;
+    line-height: $diff-line-height;
 }
 
 // ── Hunk ──────────────────────────────────────────
 
 .hunk + .hunk {
-  border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
 }
 
 .hunkHeader {
-  display: flex;
-  align-items: center;
-  background: color-mix(in srgb, var(--diff-hunk-color) 8%, var(--bg-primary));
-  border-bottom: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
-  color: color-mix(in srgb, var(--diff-hunk-color) 75%, var(--text-secondary));
-  min-height: $diff-line-height;
+    display: flex;
+    align-items: center;
+    background: color-mix(in srgb, var(--diff-hunk-color) 8%, var(--bg-primary));
+    border-bottom: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
+    color: color-mix(in srgb, var(--diff-hunk-color) 75%, var(--text-secondary));
+    min-height: $diff-line-height;
 }
 
 .hunkGutter {
-  width: $diff-gutter-width;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
-  border-right: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
+    width: $diff-gutter-width;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    border-right: 1px solid color-mix(in srgb, var(--diff-hunk-color) 12%, var(--border-color));
 }
 
 .hunkExpandIcon {
-  color: color-mix(in srgb, var(--diff-hunk-color) 70%, var(--text-tertiary));
-  opacity: 0.7;
+    color: color-mix(in srgb, var(--diff-hunk-color) 70%, var(--text-tertiary));
+    opacity: 0.7;
 }
 
 .hunkText {
-  padding: 4px $spacing-sm 4px ($diff-prefix-width + $spacing-sm);
-  font-size: $diff-font-size;
-  white-space: nowrap;
+    padding: 4px $spacing-sm 4px ($diff-prefix-width + $spacing-sm);
+    font-size: $diff-font-size;
+    white-space: nowrap;
 }
 
 // ── Diff line ─────────────────────────────────────
 
 .diffLine {
-  display: flex;
-  min-height: $diff-line-height;
+    display: flex;
+    min-height: $diff-line-height;
 }
 
 // ── Line number gutters ───────────────────────────
 
 .lineNum {
-  width: $diff-gutter-width;
-  flex-shrink: 0;
-  padding: 0 8px;
-  text-align: right;
-  color: var(--text-tertiary);
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-  border-right: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-  box-sizing: border-box;
+    width: $diff-gutter-width;
+    flex-shrink: 0;
+    padding: 0 8px;
+    text-align: right;
+    color: var(--text-tertiary);
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+    border-right: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+    box-sizing: border-box;
 }
 
 .lineNumEmpty {
-  color: transparent;
+    color: transparent;
 }
 
 // ── Prefix column (+/-/space) ───────────────────────────
 
 .linePrefix {
-  width: $diff-prefix-width;
-  flex-shrink: 0;
-  text-align: center;
-  user-select: none;
-  font-weight: $font-weight-semibold;
+    width: $diff-prefix-width;
+    flex-shrink: 0;
+    text-align: center;
+    user-select: none;
+    font-weight: $font-weight-semibold;
 }
 
 // ── Code text ─────────────────────────────────────
 
 .lineText {
-  flex: 1;
-  min-width: 0;
-  padding-right: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
+    flex: 1;
+    min-width: 0;
+    padding-right: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 // ── Context lines ─────────────────────────────────
 
 .context {
-  background: var(--bg-primary);
+    background: var(--bg-primary);
 
-  .linePrefix {
-    color: var(--text-tertiary);
-  }
+    .linePrefix {
+        color: var(--text-tertiary);
+    }
 
-  .lineText {
-    color: var(--text-primary);
-  }
+    .lineText {
+        color: var(--text-primary);
+    }
 }
 
 // ── Deletion lines ────────────────────────────────
 
 .deletion {
-  background: color-mix(in srgb, var(--diff-del-color) 8%, var(--bg-primary));
+    background: color-mix(in srgb, var(--diff-del-color) 8%, var(--bg-primary));
 
-  .lineNum {
-    background: color-mix(in srgb, var(--diff-del-color) 12%, var(--bg-primary));
-    border-right-color: color-mix(in srgb, var(--diff-del-color) 18%, var(--border-color));
-    color: color-mix(in srgb, var(--diff-del-color) 60%, var(--text-tertiary));
-  }
+    .lineNum {
+        background: color-mix(in srgb, var(--diff-del-color) 12%, var(--bg-primary));
+        border-right-color: color-mix(in srgb, var(--diff-del-color) 18%, var(--border-color));
+        color: color-mix(in srgb, var(--diff-del-color) 60%, var(--text-tertiary));
+    }
 
-  .linePrefix {
-    color: var(--diff-del-color);
-  }
+    .linePrefix {
+        color: var(--diff-del-color);
+    }
 
-  .lineText {
-    color: var(--text-primary);
-  }
+    .lineText {
+        color: var(--text-primary);
+    }
 }
 
 // ── Addition lines ────────────────────────────────
 
 .addition {
-  background: color-mix(in srgb, var(--diff-add-color) 8%, var(--bg-primary));
+    background: color-mix(in srgb, var(--diff-add-color) 8%, var(--bg-primary));
 
-  .lineNum {
-    background: color-mix(in srgb, var(--diff-add-color) 12%, var(--bg-primary));
-    border-right-color: color-mix(in srgb, var(--diff-add-color) 18%, var(--border-color));
-    color: color-mix(in srgb, var(--diff-add-color) 60%, var(--text-tertiary));
-  }
+    .lineNum {
+        background: color-mix(in srgb, var(--diff-add-color) 12%, var(--bg-primary));
+        border-right-color: color-mix(in srgb, var(--diff-add-color) 18%, var(--border-color));
+        color: color-mix(in srgb, var(--diff-add-color) 60%, var(--text-tertiary));
+    }
 
-  .linePrefix {
-    color: var(--diff-add-color);
-  }
+    .linePrefix {
+        color: var(--diff-add-color);
+    }
 
-  .lineText {
-    color: var(--text-primary);
-  }
+    .lineText {
+        color: var(--text-primary);
+    }
 }
 
 // ── Mobile responsive ─────────────────────────────
 
 @include mobile {
-  .content {
-    height: 65vh;
-    min-height: 360px;
-  }
+    .content {
+        height: 65vh;
+        min-height: 360px;
+    }
 
-  .lineNum {
-    width: 36px;
-    padding: 0 4px;
-    font-size: $font-size-sm;
-  }
+    .lineNum {
+        width: 36px;
+        padding: 0 4px;
+        font-size: $font-size-sm;
+    }
 
-  .linePrefix {
-    width: 16px;
-    font-size: $font-size-sm;
-  }
+    .linePrefix {
+        width: 16px;
+        font-size: $font-size-sm;
+    }
 
-  .hunkGutter {
-    width: 36px;
-  }
+    .hunkGutter {
+        width: 36px;
+    }
 
-  .hunkText {
-    padding-left: 20px;
-  }
+    .hunkText {
+        padding-left: 20px;
+    }
 
-  .diffBody {
-    font-size: $font-size-sm;
-    line-height: 18px;
-  }
+    .diffBody {
+        font-size: $font-size-sm;
+        line-height: 18px;
+    }
 
-  .fileName {
-    font-size: $font-size-sm;
-  }
+    .fileName {
+        font-size: $font-size-sm;
+    }
 
-  .fileStats {
-    font-size: $font-size-sm;
-  }
+    .fileStats {
+        font-size: $font-size-sm;
+    }
 }

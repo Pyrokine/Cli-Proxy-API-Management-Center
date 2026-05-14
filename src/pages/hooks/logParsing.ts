@@ -1,17 +1,17 @@
-import {HTTP_METHODS, type HttpMethod, type LogLevel, type ParsedLogLine} from './logTypes'
+import { HTTP_METHODS, type HttpMethod, type LogLevel, type ParsedLogLine } from './logTypes'
 
 const HTTP_METHOD_REGEX = new RegExp(`\\b(${HTTP_METHODS.join('|')})\\b`)
 
-const LOG_TIMESTAMP_REGEX         = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)]?/
-const LOG_LEVEL_REGEX             = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal)\s*]?(?=\s|\[|$)\s*/i
-const LOG_SOURCE_REGEX            = /^\[(?<source>[^\]]+)]/
-const LOG_LATENCY_REGEX           = /\b\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m)(?:\s*\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m))*\b/i
-const LOG_IPV4_REGEX              = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
-const LOG_IPV6_REGEX              = /\b(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}\b/i
-const LOG_REQUEST_ID_REGEX        = /^(?<id>[a-f0-9]{8}|--------)$/i
-const LOG_TIME_OF_DAY_REGEX       = /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
+const LOG_TIMESTAMP_REGEX = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)]?/
+const LOG_LEVEL_REGEX = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal)\s*]?(?=\s|\[|$)\s*/i
+const LOG_SOURCE_REGEX = /^\[(?<source>[^\]]+)]/
+const LOG_LATENCY_REGEX = /\b\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m)(?:\s*\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m))*\b/i
+const LOG_IPV4_REGEX = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
+const LOG_IPV6_REGEX = /\b(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}\b/i
+const LOG_REQUEST_ID_REGEX = /^(?<id>[a-f0-9]{8}|--------)$/i
+const LOG_TIME_OF_DAY_REGEX = /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
 const GIN_TIMESTAMP_SEGMENT_REGEX =
-          /^\[GIN]\s+(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{2})\s*-\s*(?<time>\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s*$/
+    /^\[GIN]\s+(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{2})\s*-\s*(?<time>\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s*$/
 
 const HTTP_STATUS_TEXTS = [
     'OK',
@@ -84,7 +84,7 @@ const extractIp = (text: string): string | undefined => {
 
 const normalizeTimestampToSeconds = (value: string): string => {
     const trimmed = value.trim()
-    const match   = trimmed.match(/^(?<date>\d{4}-\d{2}-\d{2})[ T](?<time>\d{2}:\d{2}:\d{2})/)
+    const match = trimmed.match(/^(?<date>\d{4}-\d{2}-\d{2})[ T](?<time>\d{2}:\d{2}:\d{2})/)
     if (!match?.groups) {
         return trimmed
     }
@@ -155,9 +155,9 @@ const extractHttpMethodAndPath = (text: string): { method?: HttpMethod; path?: s
     }
 
     const method = match[1] as HttpMethod
-    const index  = match.index ?? 0
-    const after  = text.slice(index + match[0].length).trim()
-    const path   = after ? after.split(/\s+/)[0] : undefined
+    const index = match.index ?? 0
+    const after = text.slice(index + match[0].length).trim()
+    const path = after ? after.split(/\s+/)[0] : undefined
     return { method, path }
 }
 
@@ -184,14 +184,14 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
     let level: LogLevel | undefined
     const lvlMatch = remaining.match(LOG_LEVEL_REGEX)
     if (lvlMatch) {
-        level     = extractLogLevel(lvlMatch.groups!.level)
+        level = extractLogLevel(lvlMatch.groups!.level)
         remaining = remaining.slice(lvlMatch[0].length).trim()
     }
 
     let source: string | undefined
     const sourceMatch = remaining.match(LOG_SOURCE_REGEX)
     if (sourceMatch) {
-        source    = sourceMatch.groups!.source
+        source = sourceMatch.groups!.source
         remaining = remaining.slice(sourceMatch[0].length).trim()
     }
 
@@ -214,9 +214,9 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             const match = segments[ginIndex].match(GIN_TIMESTAMP_SEGMENT_REGEX)
             if (match?.groups) {
                 const { year, month, day, time } = match.groups
-                const ginTimestamp               = `${year}-${month}-${day} ${time}`
-                const normalizedGin              = normalizeTimestampToSeconds(ginTimestamp)
-                const normalizedParsed           = timestamp ? normalizeTimestampToSeconds(timestamp) : undefined
+                const ginTimestamp = `${year}-${month}-${day} ${time}`
+                const normalizedGin = normalizeTimestampToSeconds(ginTimestamp)
+                const normalizedParsed = timestamp ? normalizeTimestampToSeconds(timestamp) : undefined
 
                 if (!timestamp) {
                     timestamp = ginTimestamp
@@ -280,8 +280,8 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         })
         if (methodIndex >= 0) {
             const parsed = extractHttpMethodAndPath(segments[methodIndex])
-            method       = parsed.method
-            path         = parsed.path
+            method = parsed.method
+            path = parsed.path
             consumed.add(methodIndex)
         }
 
@@ -307,8 +307,8 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         ip = extractIp(remaining)
 
         const parsed = extractHttpMethodAndPath(remaining)
-        method       = parsed.method
-        path         = parsed.path
+        method = parsed.method
+        path = parsed.path
     }
 
     if (!level) {

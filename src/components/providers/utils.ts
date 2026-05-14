@@ -1,5 +1,5 @@
-import type {AmpcodeConfig, AmpcodeModelMapping, ApiKeyEntry} from '@/types'
-import type {AmpcodeFormState, ModelEntry} from './types'
+import type { AmpcodeConfig, AmpcodeModelMapping, ApiKeyEntry } from '@/types'
+import type { AmpcodeFormState, ModelEntry } from './types'
 
 export const parseTextList = (text: string): string[] =>
     text
@@ -35,14 +35,6 @@ const normalizeClaudeBaseUrl = (baseUrl: string): string => {
         trimmed = `http://${trimmed}`
     }
     return trimmed
-}
-
-export const buildOpenAIModelsEndpoint = (baseUrl: string): string => {
-    const trimmed = normalizeOpenAIBaseUrl(baseUrl)
-    if (!trimmed) {
-        return ''
-    }
-    return `${trimmed}/models`
 }
 
 export const buildOpenAIChatCompletionsEndpoint = (baseUrl: string): string => {
@@ -87,12 +79,12 @@ const ampcodeMappingsToEntries = (mappings?: AmpcodeModelMapping[]): ModelEntry[
 }
 
 export const entriesToAmpcodeMappings = (entries: ModelEntry[]): AmpcodeModelMapping[] => {
-    const seen                            = new Set<string>()
+    const seen = new Set<string>()
     const mappings: AmpcodeModelMapping[] = []
 
     entries.forEach((entry) => {
         const from = entry.name.trim()
-        const to   = entry.alias.trim()
+        const to = entry.alias.trim()
         if (!from || !to) {
             return
         }

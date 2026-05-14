@@ -1,9 +1,10 @@
 export type SourceInfo = {
-    displayName: string;
-    type: string;
-};
+    displayName: string
+    type: string
+}
 
 export type CredentialInfo = {
-    name: string;
-    type: string;
-};
+    name: string
+    rawName?: string
+    type: string
+}

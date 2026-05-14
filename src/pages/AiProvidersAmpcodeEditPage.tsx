@@ -1,26 +1,26 @@
-import type {AmpcodeFormState} from '@/components/providers'
-import {buildAmpcodeFormState, entriesToAmpcodeMappings} from '@/components/providers/utils'
-import {Button} from '@/components/ui/Button'
-import {Input} from '@/components/ui/Input'
-import {ModelInputList} from '@/components/ui/ModelInputList'
-import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
-import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
-import {ampcodeApi} from '@/services/api'
-import {apiKeyAliasApi} from '@/services/api/apiKeys'
-import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
-import type {AmpcodeConfig} from '@/types'
-import {formatKeyDisplay} from '@/utils/format'
-import {getErrorMessage} from '@/utils/helpers'
-import {useEffect, useMemo, useRef, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import type { AmpcodeFormState } from '@/components/providers'
+import { buildAmpcodeFormState, entriesToAmpcodeMappings } from '@/components/providers/utils'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { ModelInputList } from '@/components/ui/ModelInputList'
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
+import { useEditPageNavigation } from '@/hooks/useEditPageNavigation'
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
+import { ampcodeApi } from '@/services/api'
+import { apiKeyAliasApi } from '@/services/api/apiKeys'
+import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores'
+import type { AmpcodeConfig } from '@/types'
+import { formatKeyDisplay } from '@/utils/format'
+import { getErrorMessage } from '@/utils/helpers'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import layoutStyles from './ProviderEditLayout.module.scss'
-import {ProviderEditShell} from './ProviderEditShell'
+import { ProviderEditShell } from './ProviderEditShell'
 
 const normalizeMappingEntries = (entries: Array<{ name: string; alias: string }>) =>
     (entries ?? []).reduce<Array<{ from: string; to: string }>>((acc, entry) => {
         const from = String(entry?.name ?? '').trim()
-        const to   = String(entry?.alias ?? '').trim()
+        const to = String(entry?.alias ?? '').trim()
         if (!from && !to) {
             return acc
         }
@@ -30,32 +30,32 @@ const normalizeMappingEntries = (entries: Array<{ name: string; alias: string }>
 
 const buildAmpcodeSignature = (form: AmpcodeFormState) =>
     JSON.stringify({
-                       upstreamUrl: String(form.upstreamUrl ?? '').trim(),
-                       upstreamApiKey: String(form.upstreamApiKey ?? '').trim(),
-                       forceModelMappings: Boolean(form.forceModelMappings),
-                       modelMappings: normalizeMappingEntries(form.mappingEntries),
-                   })
+        upstreamUrl: String(form.upstreamUrl ?? '').trim(),
+        upstreamApiKey: String(form.upstreamApiKey ?? '').trim(),
+        forceModelMappings: Boolean(form.forceModelMappings),
+        modelMappings: normalizeMappingEntries(form.mappingEntries),
+    })
 
 export function AiProvidersAmpcodeEditPage() {
-    const { t }                                  = useTranslation()
+    const { t } = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
-    const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
-    const disableControls                        = connectionStatus !== 'connected'
+    const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const disableControls = connectionStatus !== 'connected'
 
-    const config            = useConfigStore((state) => state.config)
+    const config = useConfigStore((state) => state.config)
     const updateConfigValue = useConfigStore((state) => state.updateConfigValue)
-    const clearCache        = useConfigStore((state) => state.clearCache)
+    const clearCache = useConfigStore((state) => state.clearCache)
 
-    const [form, setForm]                           = useState<AmpcodeFormState>(() => buildAmpcodeFormState(null))
-    const [loading, setLoading]                     = useState(false)
-    const [loaded, setLoaded]                       = useState(false)
-    const [mappingsDirty, setMappingsDirty]         = useState(false)
-    const [error, setError]                         = useState('')
-    const [saving, setSaving]                       = useState(false)
+    const [form, setForm] = useState<AmpcodeFormState>(() => buildAmpcodeFormState(null))
+    const [loading, setLoading] = useState(false)
+    const [loaded, setLoaded] = useState(false)
+    const [mappingsDirty, setMappingsDirty] = useState(false)
+    const [error, setError] = useState('')
+    const [saving, setSaving] = useState(false)
     const [baselineSignature, setBaselineSignature] = useState(() => buildAmpcodeSignature(buildAmpcodeFormState(null)))
-    const initializedRef                            = useRef(false)
-    const mountedRef                                = useRef(false)
-    const [aliases, setAliases]                     = useState<Record<string, string>>({})
+    const initializedRef = useRef(false)
+    const mountedRef = useRef(false)
+    const [aliases, setAliases] = useState<Record<string, string>>({})
 
     const title = useMemo(() => t('ai_providers.ampcode_modal_title'), [t])
 
@@ -126,62 +126,58 @@ export function AiProvidersAmpcodeEditPage() {
     }, [clearCache, t, updateConfigValue])
 
     const currentSignature = useMemo(() => buildAmpcodeSignature(form), [form])
-    const isDirty          = baselineSignature !== currentSignature
-    const canGuard         = !loading && !saving
+    const isDirty = baselineSignature !== currentSignature
+    const canGuard = !loading && !saving
 
     const { allowNextNavigation } = useUnsavedChangesGuard({
-                                                               enabled: canGuard,
-                                                               shouldBlock: ({
-                                                                                 currentLocation,
-                                                                                 nextLocation,
-                                                                             }) => isDirty &&
-                                                                                   currentLocation.pathname !==
-                                                                                   nextLocation.pathname,
-                                                               dialog: {
-                                                                   title: t('common.unsaved_changes_title'),
-                                                                   message: t('common.unsaved_changes_message'),
-                                                                   confirmText: t('common.leave'),
-                                                                   cancelText: t('common.stay'),
-                                                                   variant: 'danger',
-                                                               },
-                                                           })
+        enabled: canGuard,
+        shouldBlock: ({ currentLocation, nextLocation }) =>
+            isDirty && currentLocation.pathname !== nextLocation.pathname,
+        dialog: {
+            title: t('common.unsaved_changes_title'),
+            message: t('common.unsaved_changes_message'),
+            confirmText: t('common.leave'),
+            cancelText: t('common.stay'),
+            variant: 'danger',
+        },
+    })
 
     const clearAmpcodeUpstreamApiKey = async () => {
         showConfirmation({
-                             title: t('ai_providers.ampcode_clear_upstream_api_key_title', {
-                                 defaultValue: 'Clear Upstream API Key',
-                             }),
-                             message: t('ai_providers.ampcode_clear_upstream_api_key_confirm'),
-                             variant: 'danger',
-                             confirmText: t('common.confirm'),
-                             onConfirm: async () => {
-                                 setSaving(true)
-                                 setError('')
-                                 try {
-                                     await ampcodeApi.clearUpstreamApiKey()
-                                     const previous            = config?.ampcode ?? {}
-                                     const next: AmpcodeConfig = { ...previous }
-                                     delete next.upstreamApiKey
-                                     updateConfigValue('ampcode', next)
-                                     clearCache('ampcode')
-                                     showNotification(t('notification.ampcode_upstream_api_key_cleared'), 'success')
-                                 } catch (err: unknown) {
-                                     const message = getErrorMessage(err)
-                                     setError(message)
-                                     showNotification(`${t('notification.update_failed')}: ${message}`, 'error')
-                                 } finally {
-                                     setSaving(false)
-                                 }
-                             },
-                         })
+            title: t('ai_providers.ampcode_clear_upstream_api_key_title', {
+                defaultValue: 'Clear Upstream API Key',
+            }),
+            message: t('ai_providers.ampcode_clear_upstream_api_key_confirm'),
+            variant: 'danger',
+            confirmText: t('common.confirm'),
+            onConfirm: async () => {
+                setSaving(true)
+                setError('')
+                try {
+                    await ampcodeApi.clearUpstreamApiKey()
+                    const previous = config?.ampcode ?? {}
+                    const next: AmpcodeConfig = { ...previous }
+                    delete next.upstreamApiKey
+                    updateConfigValue('ampcode', next)
+                    clearCache('ampcode')
+                    showNotification(t('notification.ampcode_upstream_api_key_cleared'), 'success')
+                } catch (err: unknown) {
+                    const message = getErrorMessage(err)
+                    setError(message)
+                    showNotification(`${t('notification.update_failed')}: ${message}`, 'error')
+                } finally {
+                    setSaving(false)
+                }
+            },
+        })
     }
 
     const performSaveAmpcode = async () => {
         setSaving(true)
         setError('')
         try {
-            const upstreamUrl   = form.upstreamUrl.trim()
-            const overrideKey   = form.upstreamApiKey.trim()
+            const upstreamUrl = form.upstreamUrl.trim()
+            const overrideKey = form.upstreamApiKey.trim()
             const modelMappings = entriesToAmpcodeMappings(form.mappingEntries)
 
             if (upstreamUrl) {
@@ -204,7 +200,7 @@ export function AiProvidersAmpcodeEditPage() {
                 await ampcodeApi.updateUpstreamApiKey(overrideKey)
             }
 
-            const previous            = config?.ampcode ?? {}
+            const previous = config?.ampcode ?? {}
             const next: AmpcodeConfig = {
                 upstreamUrl: upstreamUrl || undefined,
                 forceModelMappings: form.forceModelMappings,
@@ -248,14 +244,14 @@ export function AiProvidersAmpcodeEditPage() {
     const saveAmpcode = async () => {
         if (!loaded && mappingsDirty) {
             showConfirmation({
-                                 title: t('ai_providers.ampcode_mappings_overwrite_title', {
-                                     defaultValue: 'Overwrite Mappings',
-                                 }),
-                                 message: t('ai_providers.ampcode_mappings_overwrite_confirm'),
-                                 variant: 'secondary',
-                                 confirmText: t('common.confirm'),
-                                 onConfirm: performSaveAmpcode,
-                             })
+                title: t('ai_providers.ampcode_mappings_overwrite_title', {
+                    defaultValue: 'Overwrite Mappings',
+                }),
+                message: t('ai_providers.ampcode_mappings_overwrite_confirm'),
+                variant: 'secondary',
+                confirmText: t('common.confirm'),
+                onConfirm: performSaveAmpcode,
+            })
             return
         }
 
@@ -275,6 +271,9 @@ export function AiProvidersAmpcodeEditPage() {
             onSave={() => void saveAmpcode()}
             swipeRef={swipeRef}
         >
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.5 }}>
+                {t('ai_providers.ampcode_subtitle')}
+            </p>
             <Input
                 label={t('ai_providers.ampcode_upstream_url_label')}
                 placeholder={t('ai_providers.ampcode_upstream_url_placeholder')}
@@ -286,7 +285,7 @@ export function AiProvidersAmpcodeEditPage() {
             <Input
                 label={t('ai_providers.ampcode_upstream_api_key_label')}
                 placeholder={t('ai_providers.ampcode_upstream_api_key_placeholder')}
-                type='password'
+                type="password"
                 value={form.upstreamApiKey}
                 onChange={(e) => setForm((prev) => ({ ...prev, upstreamApiKey: e.target.value }))}
                 disabled={loading || saving || disableControls}
@@ -296,13 +295,13 @@ export function AiProvidersAmpcodeEditPage() {
                 <div className={layoutStyles.upstreamApiKeyHint}>
                     {t('ai_providers.ampcode_upstream_api_key_current', {
                         key: config?.ampcode?.upstreamApiKey
-                             ? formatKeyDisplay(config.ampcode.upstreamApiKey, aliases)
-                             : t('common.not_set'),
+                            ? formatKeyDisplay(config.ampcode.upstreamApiKey, aliases)
+                            : t('common.not_set'),
                     })}
                 </div>
                 <Button
-                    variant='danger'
-                    size='sm'
+                    variant="danger"
+                    size="sm"
                     onClick={() => void clearAmpcodeUpstreamApiKey()}
                     disabled={loading || saving || disableControls || !config?.ampcode?.upstreamApiKey}
                 >
@@ -310,17 +309,17 @@ export function AiProvidersAmpcodeEditPage() {
                 </Button>
             </div>
 
-            <div className='form-group'>
+            <div className="form-group">
                 <ToggleSwitch
                     label={t('ai_providers.ampcode_force_model_mappings_label')}
                     checked={form.forceModelMappings}
                     onChange={(value) => setForm((prev) => ({ ...prev, forceModelMappings: value }))}
                     disabled={loading || saving || disableControls}
                 />
-                <div className='hint'>{t('ai_providers.ampcode_force_model_mappings_hint')}</div>
+                <div className="hint">{t('ai_providers.ampcode_force_model_mappings_hint')}</div>
             </div>
 
-            <div className='form-group'>
+            <div className="form-group">
                 <label>{t('ai_providers.ampcode_model_mappings_label')}</label>
                 <ModelInputList
                     entries={form.mappingEntries}
@@ -335,7 +334,7 @@ export function AiProvidersAmpcodeEditPage() {
                     removeButtonAriaLabel={t('common.delete')}
                     disabled={loading || saving || disableControls}
                 />
-                <div className='hint'>{t('ai_providers.ampcode_model_mappings_hint')}</div>
+                <div className="hint">{t('ai_providers.ampcode_model_mappings_hint')}</div>
             </div>
         </ProviderEditShell>
     )

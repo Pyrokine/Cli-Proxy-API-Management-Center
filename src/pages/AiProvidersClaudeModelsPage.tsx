@@ -1,18 +1,18 @@
-import {modelsApi} from '@/services/api'
-import {buildHeaderObject} from '@/utils/headers'
-import {useCallback, useMemo} from 'react'
-import {useOutletContext} from 'react-router-dom'
-import type {ClaudeEditOutletContext} from './AiProvidersClaudeEditLayout'
-import {ProviderModelsPage} from './ProviderModelsPage'
+import { modelsApi } from '@/services/api'
+import { buildHeaderObject, hasHeader } from '@/utils/headers'
+import { useCallback, useMemo } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import type { ClaudeEditOutletContext } from './AiProvidersClaudeEditLayout'
+import { ProviderModelsPage } from './ProviderModelsPage'
 
 export function AiProvidersClaudeModelsPage() {
     const {
-              disableControls,
-              loading: initialLoading,
-              saving,
-              form,
-              mergeDiscoveredModels,
-          } = useOutletContext<ClaudeEditOutletContext>()
+        disableControls,
+        loading: initialLoading,
+        saving,
+        form,
+        mergeDiscoveredModels,
+    } = useOutletContext<ClaudeEditOutletContext>()
 
     const buildEndpoint = useCallback(() => modelsApi.buildClaudeModelsEndpoint(form.baseUrl ?? ''), [form.baseUrl])
 
@@ -23,23 +23,23 @@ export function AiProvidersClaudeModelsPage() {
 
     const fetchDeps = useMemo(
         () => [fetchModels, form.apiKey, form.baseUrl, form.headers] as const,
-        [fetchModels, form.apiKey, form.baseUrl, form.headers],
+        [fetchModels, form.apiKey, form.baseUrl, form.headers]
     )
 
     const canAutoFetch = useCallback(() => {
-        const headerObject     = buildHeaderObject(form.headers)
-        const hasCustomXApiKey = Object.keys(headerObject).some((key) => key.toLowerCase() === 'x-api-key')
-        const hasAuthorization = Object.keys(headerObject).some((key) => key.toLowerCase() === 'authorization')
+        const headerObject = buildHeaderObject(form.headers)
+        const hasCustomXApiKey = hasHeader(headerObject, 'x-api-key')
+        const hasAuthorization = hasHeader(headerObject, 'authorization')
         return Boolean(form.apiKey.trim()) || hasCustomXApiKey || hasAuthorization
     }, [form.apiKey, form.headers])
 
     const buildAutoFetchSignature = useCallback(() => {
-        const headerObject    = buildHeaderObject(form.headers)
-        const nextEndpoint    = modelsApi.buildClaudeModelsEndpoint(form.baseUrl ?? '')
+        const headerObject = buildHeaderObject(form.headers)
+        const nextEndpoint = modelsApi.buildClaudeModelsEndpoint(form.baseUrl ?? '')
         const headerSignature = Object.entries(headerObject)
-                                      .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                      .map(([key, value]) => `${key}:${value}`)
-                                      .join('|')
+            .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+            .map(([key, value]) => `${key}:${value}`)
+            .join('|')
         return `${nextEndpoint}||${form.apiKey.trim()}||${headerSignature}`
     }, [form.apiKey, form.baseUrl, form.headers])
 
@@ -50,18 +50,18 @@ export function AiProvidersClaudeModelsPage() {
             if (!shouldAttach) {
                 return ''
             }
-            const hasCustomXApiKey = Object.keys(headerObject).some((key) => key.toLowerCase() === 'x-api-key')
-            const hasAuthorization = Object.keys(headerObject).some((key) => key.toLowerCase() === 'authorization')
+            const hasCustomXApiKey = hasHeader(headerObject, 'x-api-key')
+            const hasAuthorization = hasHeader(headerObject, 'authorization')
             return ` [diag: apiKeyField=${form.apiKey.trim() ? 'yes' : 'no'}, customXApiKey=${
                 hasCustomXApiKey ? 'yes' : 'no'
             }, customAuthorization=${hasAuthorization ? 'yes' : 'no'}]`
         },
-        [form.apiKey, form.headers],
+        [form.apiKey, form.headers]
     )
 
     return (
         <ProviderModelsPage
-            i18nPrefix='claude_models'
+            i18nPrefix="claude_models"
             disableControls={disableControls}
             initialLoading={initialLoading}
             saving={saving}

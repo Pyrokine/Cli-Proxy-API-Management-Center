@@ -3,30 +3,40 @@
  * 从原项目 src/modules/login.js 和 src/core/connection.js 迁移
  */
 
-import {apiClient} from '@/services/api/client'
-import {secureStorage} from '@/services/storage/secureStorage'
-import type {AuthState, ConnectionStatus, LoginCredentials} from '@/types'
-import {detectApiBaseFromLocation, normalizeApiBase} from '@/utils/connection'
-import {STORAGE_KEY_AUTH} from '@/utils/constants'
-import {create} from 'zustand'
-import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
-import {useConfigStore} from './useConfigStore'
-import {useUsageStatsStore} from './useUsageStatsStore'
+import { apiClient } from '@/services/api/client'
+import { versionApi } from '@/services/api/version'
+import { secureStorage } from '@/services/storage/secureStorage'
+import type { AuthState, ConnectionStatus, LoginCredentials } from '@/types'
+import { detectApiBaseFromLocation, normalizeApiBase } from '@/utils/connection'
+import { STORAGE_KEY_AUTH } from '@/utils/constants'
+import { create } from 'zustand'
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
+import { useConfigStore } from './useConfigStore'
+import { useUsageStatsStore } from './useUsageStatsStore'
 
 interface AuthStoreState extends AuthState {
-    connectionStatus: ConnectionStatus;
-    connectionError: string | null;
+    connectionStatus: ConnectionStatus
+    connectionError: string | null
+    hydrated: boolean
+    serverVersionSource: 'header' | 'version' | null
 
     // 操作
-    login: (credentials: LoginCredentials) => Promise<void>;
-    logout: () => void;
-    checkAuth: () => Promise<boolean>;
-    restoreSession: () => Promise<boolean>;
-    updateServerVersion: (version: string | null, buildDate?: string | null) => void;
-    updateConnectionStatus: (status: ConnectionStatus, error?: string | null) => void;
+    login: (credentials: LoginCredentials) => Promise<void>
+    logout: () => void
+    checkAuth: () => Promise<boolean>
+    restoreSession: () => Promise<boolean>
+    refreshServerVersion: () => Promise<void>
+    updateServerVersion: (
+        version: string | null,
+        buildDate?: string | null,
+        source?: 'header' | 'version',
+        minPanelVersion?: string | null
+    ) => void
+    updateConnectionStatus: (status: ConnectionStatus, error?: string | null) => void
 }
 
 let restoreSessionPromise: Promise<boolean> | null = null
+let refreshServerVersionPromise: Promise<void> | null = null
 
 export const useAuthStore = create<AuthStoreState>()(
     persist(
@@ -38,8 +48,11 @@ export const useAuthStore = create<AuthStoreState>()(
             rememberPassword: false,
             serverVersion: null,
             serverBuildDate: null,
+            serverMinPanelVersion: null,
+            serverVersionSource: null,
             connectionStatus: 'disconnected',
             connectionError: null,
+            hydrated: false,
 
             // 恢复会话并自动登录
             restoreSession: () => {
@@ -48,35 +61,33 @@ export const useAuthStore = create<AuthStoreState>()(
                 }
 
                 restoreSessionPromise = (async () => {
+                    await waitForAuthHydration()
+
                     const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
-                    const legacyBase  =
-                              await secureStorage.getItem<string>('apiBase') ||
-                              await secureStorage.getItem<string>('apiUrl', { encrypt: true })
-                    const legacyKey   = await secureStorage.getItem<string>('managementKey')
+                    const legacyBase =
+                        (await secureStorage.getItem<string>('apiBase')) ||
+                        (await secureStorage.getItem<string>('apiUrl', { encrypt: true }))
+                    const legacyKey = await secureStorage.getItem<string>('managementKey')
 
                     const { apiBase, managementKey, rememberPassword } = get()
-                    const resolvedBase                                 = normalizeApiBase(apiBase ||
-                                                                                          legacyBase ||
-                                                                                          detectApiBaseFromLocation())
-                    const resolvedKey                                  = managementKey || legacyKey || ''
-                    const resolvedRememberPassword                     = rememberPassword ||
-                                                                         Boolean(managementKey) ||
-                                                                         Boolean(legacyKey)
+                    const resolvedBase = normalizeApiBase(apiBase || legacyBase || detectApiBaseFromLocation())
+                    const resolvedKey = managementKey || legacyKey || ''
+                    const resolvedRememberPassword = rememberPassword || wasLoggedIn
 
                     set({
-                            apiBase: resolvedBase,
-                            managementKey: resolvedKey,
-                            rememberPassword: resolvedRememberPassword,
-                        })
+                        apiBase: resolvedBase,
+                        managementKey: resolvedKey,
+                        rememberPassword: resolvedRememberPassword,
+                    })
                     apiClient.setConfig({ apiBase: resolvedBase, managementKey: resolvedKey })
 
-                    if (wasLoggedIn && resolvedBase && resolvedKey) {
+                    if (resolvedBase && resolvedKey && (wasLoggedIn || Boolean(managementKey) || Boolean(legacyKey))) {
                         try {
                             await get().login({
-                                                  apiBase: resolvedBase,
-                                                  managementKey: resolvedKey,
-                                                  rememberPassword: resolvedRememberPassword,
-                                              })
+                                apiBase: resolvedBase,
+                                managementKey: resolvedKey,
+                                rememberPassword: resolvedRememberPassword,
+                            })
                             return true
                         } catch (error) {
                             console.warn('Auto login failed:', error)
@@ -92,31 +103,49 @@ export const useAuthStore = create<AuthStoreState>()(
 
             // 登录
             login: async (credentials) => {
-                const apiBase          = normalizeApiBase(credentials.apiBase)
-                const managementKey    = credentials.managementKey.trim()
+                const apiBase = normalizeApiBase(credentials.apiBase)
+                const managementKey = credentials.managementKey.trim()
                 const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false
 
                 try {
-                    set({ connectionStatus: 'connecting' })
+                    set({
+                        connectionStatus: 'connecting',
+                        serverVersion: null,
+                        serverBuildDate: null,
+                        serverMinPanelVersion: null,
+                        serverVersionSource: null,
+                    })
 
                     // 配置 API 客户端
                     apiClient.setConfig({
-                                            apiBase,
-                                            managementKey,
-                                        })
+                        apiBase,
+                        managementKey,
+                    })
 
                     // 测试连接 - 获取配置
                     await useConfigStore.getState().fetchConfig(undefined, true)
+                    await get()
+                        .refreshServerVersion()
+                        .catch((error) => {
+                            console.warn('Fetch server version failed:', error)
+                        })
 
                     // 登录成功
                     set({
-                            isAuthenticated: true,
-                            apiBase,
-                            managementKey,
-                            rememberPassword,
-                            connectionStatus: 'connected',
-                            connectionError: null,
-                        })
+                        isAuthenticated: true,
+                        apiBase,
+                        managementKey,
+                        rememberPassword,
+                        connectionStatus: 'connected',
+                        connectionError: null,
+                    })
+                    await Promise.all([
+                        secureStorage.setItem('apiBase', apiBase, { encrypt: true, persistent: rememberPassword }),
+                        secureStorage.setItem('managementKey', managementKey, {
+                            encrypt: true,
+                            persistent: rememberPassword,
+                        }),
+                    ])
                     if (rememberPassword) {
                         localStorage.setItem('isLoggedIn', 'true')
                     } else {
@@ -124,13 +153,12 @@ export const useAuthStore = create<AuthStoreState>()(
                     }
                 } catch (error: unknown) {
                     const message =
-                              error instanceof Error ?
-                              error.message :
-                              typeof error === 'string' ? error : 'Connection failed'
+                        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Connection failed'
                     set({
-                            connectionStatus: 'error',
-                            connectionError: message || 'Connection failed',
-                        })
+                        isAuthenticated: false,
+                        connectionStatus: 'error',
+                        connectionError: message || 'Connection failed',
+                    })
                     throw error
                 }
             },
@@ -141,14 +169,23 @@ export const useAuthStore = create<AuthStoreState>()(
                 useConfigStore.getState().clearCache()
                 useUsageStatsStore.getState().clearUsageStats()
                 set({
-                        isAuthenticated: false,
-                        apiBase: '',
-                        managementKey: '',
-                        serverVersion: null,
-                        serverBuildDate: null,
-                        connectionStatus: 'disconnected',
-                        connectionError: null,
-                    })
+                    isAuthenticated: false,
+                    apiBase: '',
+                    managementKey: '',
+                    serverVersion: null,
+                    serverBuildDate: null,
+                    serverMinPanelVersion: null,
+                    serverVersionSource: null,
+                    connectionStatus: 'disconnected',
+                    connectionError: null,
+                    hydrated: true,
+                })
+                secureStorage.removeItem('apiBase', { persistent: true })
+                secureStorage.removeItem('apiBase', { persistent: false })
+                secureStorage.removeItem('apiUrl', { persistent: true })
+                secureStorage.removeItem('apiUrl', { persistent: false })
+                secureStorage.removeItem('managementKey', { persistent: true })
+                secureStorage.removeItem('managementKey', { persistent: false })
                 localStorage.removeItem('isLoggedIn')
             },
 
@@ -167,32 +204,75 @@ export const useAuthStore = create<AuthStoreState>()(
                     // 验证连接
                     await useConfigStore.getState().fetchConfig()
 
-                    set({
-                            isAuthenticated: true,
-                            connectionStatus: 'connected',
+                    await get()
+                        .refreshServerVersion()
+                        .catch((error) => {
+                            console.warn('Fetch server version failed:', error)
                         })
+
+                    set({
+                        isAuthenticated: true,
+                        connectionStatus: 'connected',
+                    })
 
                     return true
                 } catch {
                     set({
-                            isAuthenticated: false,
-                            connectionStatus: 'error',
-                        })
+                        isAuthenticated: false,
+                        connectionStatus: 'error',
+                    })
                     return false
                 }
             },
 
+            refreshServerVersion: async () => {
+                if (refreshServerVersionPromise) {
+                    return refreshServerVersionPromise
+                }
+
+                refreshServerVersionPromise = versionApi
+                    .get()
+                    .then((info) => {
+                        get().updateServerVersion(
+                            info?.version || null,
+                            info?.build_time || null,
+                            'version',
+                            info?.min_panel_version || null
+                        )
+                    })
+                    .catch((error: unknown) => {
+                        if (error instanceof Error && /404/.test(error.message)) {
+                            return
+                        }
+                        throw error
+                    })
+                    .finally(() => {
+                        refreshServerVersionPromise = null
+                    })
+
+                return refreshServerVersionPromise
+            },
+
             // 更新服务器版本
-            updateServerVersion: (version, buildDate) => {
-                set({ serverVersion: version || null, serverBuildDate: buildDate || null })
+            updateServerVersion: (version, buildDate, source = 'header', minPanelVersion = null) => {
+                const currentSource = get().serverVersionSource
+                if (source === 'header' && currentSource === 'version') {
+                    return
+                }
+                set((state) => ({
+                    serverVersion: version || null,
+                    serverBuildDate: buildDate || null,
+                    serverMinPanelVersion: source === 'version' ? minPanelVersion || null : state.serverMinPanelVersion,
+                    serverVersionSource: version || buildDate ? source : null,
+                }))
             },
 
             // 更新连接状态
             updateConnectionStatus: (status, error = null) => {
                 set({
-                        connectionStatus: status,
-                        connectionError: error,
-                    })
+                    connectionStatus: status,
+                    connectionError: error,
+                })
             },
         }),
         {
@@ -200,37 +280,82 @@ export const useAuthStore = create<AuthStoreState>()(
             storage: createJSONStorage<AuthStoreState>(() => {
                 const asyncStorage: StateStorage = {
                     getItem: async (name) => {
-                        const raw = await secureStorage.getItem<string>(name, { encrypt: true })
-                        return raw ?? null
+                        const persistentRaw = await secureStorage.getItem<string>(name, {
+                            encrypt: true,
+                            persistent: true,
+                        })
+                        if (persistentRaw !== null) {
+                            return persistentRaw
+                        }
+                        const sessionRaw = await secureStorage.getItem<string>(name, {
+                            encrypt: true,
+                            persistent: false,
+                        })
+                        return sessionRaw ?? null
                     },
                     setItem: async (name, value) => {
-                        await secureStorage.setItem(name, value, { encrypt: true })
+                        let persistent: boolean
+                        try {
+                            const parsed = JSON.parse(value) as { state?: { rememberPassword?: boolean } }
+                            persistent = Boolean(parsed.state?.rememberPassword)
+                        } catch {
+                            persistent = false
+                        }
+                        await secureStorage.setItem(name, value, { encrypt: true, persistent })
+                        if (persistent) {
+                            sessionStorage.removeItem(name)
+                        } else {
+                            localStorage.removeItem(name)
+                        }
                     },
                     removeItem: (name) => {
-                        secureStorage.removeItem(name)
+                        sessionStorage.removeItem(name)
+                        localStorage.removeItem(name)
                     },
                 }
                 return asyncStorage
             }),
-            partialize: (state) => ({
-                apiBase: state.apiBase,
-                ...(state.rememberPassword ? { managementKey: state.managementKey } : {}),
-                rememberPassword: state.rememberPassword,
-                serverVersion: state.serverVersion,
-                serverBuildDate: state.serverBuildDate,
-            } as unknown as AuthStoreState),
-        },
-    ),
+            partialize: (state) =>
+                ({
+                    apiBase: state.apiBase,
+                    managementKey: state.managementKey,
+                    rememberPassword: state.rememberPassword,
+                    serverVersion: state.serverVersion,
+                    serverBuildDate: state.serverBuildDate,
+                    serverMinPanelVersion: state.serverMinPanelVersion,
+                    serverVersionSource: state.serverVersionSource,
+                }) as unknown as AuthStoreState,
+            onRehydrateStorage: () => () => {
+                useAuthStore.setState({ hydrated: true })
+            },
+        }
+    )
 )
 
-// 监听全局未授权事件
+function waitForAuthHydration(): Promise<void> {
+    if (useAuthStore.persist.hasHydrated()) {
+        return Promise.resolve()
+    }
+    return new Promise((resolve) => {
+        const unsubscribe = useAuthStore.persist.onFinishHydration(() => {
+            unsubscribe()
+            resolve()
+        })
+    })
+}
+
+// 监听全局未授权事件 — 仅标记连接状态，不触发 logout 以避免级联请求
 if (typeof window !== 'undefined') {
     window.addEventListener('unauthorized', () => {
-        useAuthStore.getState().logout()
+        const state = useAuthStore.getState()
+        if (state.isAuthenticated) {
+            state.updateConnectionStatus('error', 'Management key is invalid or expired')
+            useAuthStore.setState({ isAuthenticated: false, hydrated: true })
+        }
     })
 
     window.addEventListener('server-version-update', ((e: CustomEvent) => {
         const detail = e.detail || {}
-        useAuthStore.getState().updateServerVersion(detail.version || null, detail.buildDate || null)
+        useAuthStore.getState().updateServerVersion(detail.version || null, detail.buildDate || null, 'header')
     }) as EventListener)
 }

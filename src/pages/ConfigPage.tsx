@@ -1,25 +1,25 @@
-import {DiffModal} from '@/components/config/DiffModal'
-import {VisualConfigEditor} from '@/components/config/VisualConfigEditor'
-import {Button} from '@/components/ui/Button'
-import {IconCheck, IconChevronDown, IconChevronUp, IconRefreshCw, IconSearch} from '@/components/ui/icons'
-import {Input} from '@/components/ui/Input'
-import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
-import {useVisualConfig} from '@/hooks/useVisualConfig'
-import {configFileApi, type ConfigValidationError} from '@/services/api/configFile'
-import {useAuthStore, useNotificationStore, useThemeStore} from '@/stores'
-import {mergeConfigWithDefaults} from '@/utils/configDefaults'
-import {yaml} from '@codemirror/lang-yaml'
-import {highlightSelectionMatches, search, searchKeymap} from '@codemirror/search'
-import {keymap} from '@codemirror/view'
-import CodeMirror, {ReactCodeMirrorRef} from '@uiw/react-codemirror'
-import type {KeyboardEvent as ReactKeyboardEvent} from 'react'
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
-import {createPortal} from 'react-dom'
-import {useTranslation} from 'react-i18next'
-import {parse as parseYaml, parseDocument} from 'yaml'
+import { DiffModal } from '@/components/config/DiffModal'
+import { VisualConfigEditor } from '@/components/config/VisualConfigEditor'
+import { Button } from '@/components/ui/Button'
+import { IconCheck, IconChevronDown, IconChevronUp, IconRefreshCw, IconSearch } from '@/components/ui/icons'
+import { Input } from '@/components/ui/Input'
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
+import { useVisualConfig } from '@/hooks/useVisualConfig'
+import { configFileApi, type ConfigValidationError } from '@/services/api/configFile'
+import { useAuthStore, useConfigStore, useNotificationStore, useThemeStore } from '@/stores'
+import { mergeConfigWithDefaults } from '@/utils/configDefaults'
+import { yaml } from '@codemirror/lang-yaml'
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
+import { keymap } from '@codemirror/view'
+import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
+import { parse as parseYaml, parseDocument } from 'yaml'
 import styles from './ConfigPage.module.scss'
 
-type ConfigEditorTab = 'visual' | 'source';
+type ConfigEditorTab = 'visual' | 'source'
 
 function readCommercialModeFromYaml(yamlContent: string): boolean {
     try {
@@ -34,22 +34,24 @@ function readCommercialModeFromYaml(yamlContent: string): boolean {
 }
 
 export function ConfigPage() {
-    const { t }            = useTranslation()
+    const { t } = useTranslation()
     const showNotification = useNotificationStore((state) => state.showNotification)
     const showConfirmation = useNotificationStore((state) => state.showConfirmation)
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const resolvedTheme    = useThemeStore((state) => state.resolvedTheme)
+    const clearConfigCache = useConfigStore((state) => state.clearCache)
+    const fetchConfig = useConfigStore((state) => state.fetchConfig)
+    const resolvedTheme = useThemeStore((state) => state.resolvedTheme)
 
     const {
-              visualValues,
-              visualDirty,
-              visualParseError,
-              validationErrors: visualValidationErrors,
-              visualHasPayloadValidationErrors,
-              loadVisualValuesFromYaml,
-              applyVisualChangesToYaml,
-              setVisualValues,
-          } = useVisualConfig()
+        visualValues,
+        visualDirty,
+        visualParseError,
+        validationErrors: visualValidationErrors,
+        visualHasPayloadValidationErrors,
+        loadVisualValuesFromYaml,
+        applyVisualChangesToYaml,
+        setVisualValues,
+    } = useVisualConfig()
 
     const [activeTab, setActiveTab] = useState<ConfigEditorTab>(() => {
         const saved = localStorage.getItem('config-management:tab')
@@ -59,50 +61,50 @@ export function ConfigPage() {
         return 'visual'
     })
 
-    const [content, setContent]                       = useState('')
-    const [loading, setLoading]                       = useState(true)
-    const [saving, setSaving]                         = useState(false)
-    const [error, setError]                           = useState('')
-    const [dirty, setDirty]                           = useState(false)
-    const [diffModalOpen, setDiffModalOpen]           = useState(false)
-    const [serverYaml, setServerYaml]                 = useState('')
-    const [mergedYaml, setMergedYaml]                 = useState('')
+    const [content, setContent] = useState('')
+    const [loading, setLoading] = useState(true)
+    const [saving, setSaving] = useState(false)
+    const [error, setError] = useState('')
+    const [dirty, setDirty] = useState(false)
+    const [diffModalOpen, setDiffModalOpen] = useState(false)
+    const [serverYaml, setServerYaml] = useState('')
+    const [mergedYaml, setMergedYaml] = useState('')
     const [validationWarnings, setValidationWarnings] = useState<string[]>([])
-    const [validationErrors, setValidationErrors]     = useState<ConfigValidationError[]>([])
+    const [validationErrors, setValidationErrors] = useState<ConfigValidationError[]>([])
 
     // Search state
-    const [searchQuery, setSearchQuery]             = useState('')
-    const [searchResults, setSearchResults]         = useState<{ current: number; total: number }>({
-                                                                                                       current: 0,
-                                                                                                       total: 0,
-                                                                                                   })
+    const [searchQuery, setSearchQuery] = useState('')
+    const [searchResults, setSearchResults] = useState<{ current: number; total: number }>({
+        current: 0,
+        total: 0,
+    })
     const [lastSearchedQuery, setLastSearchedQuery] = useState('')
-    const editorRef                                 = useRef<ReactCodeMirrorRef>(null)
-    const floatingActionsRef                        = useRef<HTMLDivElement>(null)
+    const editorRef = useRef<ReactCodeMirrorRef>(null)
+    const floatingActionsRef = useRef<HTMLDivElement>(null)
 
-    const disableControls           = connectionStatus !== 'connected'
-    const isDirty                   = dirty || visualDirty
-    const { allowNextNavigation }   = useUnsavedChangesGuard({
-                                                                 enabled: !loading && !disableControls,
-                                                                 shouldBlock: isDirty,
-                                                                 dialog: {
-                                                                     title: t('common.unsaved_changes_title'),
-                                                                     message: t('common.unsaved_changes_message'),
-                                                                     confirmText: t('common.leave'),
-                                                                     cancelText: t('common.stay'),
-                                                                     variant: 'danger',
-                                                                 },
-                                                             })
-    const hasVisualModeError        = !!visualParseError
+    const disableControls = connectionStatus !== 'connected'
+    const isDirty = dirty || visualDirty
+    const { allowNextNavigation } = useUnsavedChangesGuard({
+        enabled: !loading && !disableControls,
+        shouldBlock: isDirty,
+        dialog: {
+            title: t('common.unsaved_changes_title'),
+            message: t('common.unsaved_changes_message'),
+            confirmText: t('common.leave'),
+            cancelText: t('common.stay'),
+            variant: 'danger',
+        },
+    })
+    const hasVisualModeError = !!visualParseError
     const hasVisualValidationErrors =
-              activeTab === 'visual' &&
-              (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors)
+        activeTab === 'visual' &&
+        (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors)
 
     const loadConfig = useCallback(async () => {
         setLoading(true)
         setError('')
         try {
-            const data   = await configFileApi.fetchConfigYaml()
+            const data = await configFileApi.fetchConfigYaml()
             const merged = mergeConfigWithDefaults(data)
             setContent(merged)
             setDirty(false)
@@ -119,7 +121,9 @@ export function ConfigPage() {
     }, [loadVisualValuesFromYaml, t])
 
     useEffect(() => {
-        void loadConfig()
+        queueMicrotask(() => {
+            void loadConfig()
+        })
     }, [loadConfig])
 
     useEffect(() => {
@@ -127,24 +131,28 @@ export function ConfigPage() {
             return
         }
 
-        setActiveTab('source')
-        localStorage.setItem('config-management:tab', 'source')
-        showNotification(
-            t('config_management.visual_mode_unavailable_detail', { message: visualParseError }),
-            'error',
-        )
+        queueMicrotask(() => {
+            setActiveTab('source')
+            localStorage.setItem('config-management:tab', 'source')
+            showNotification(
+                t('config_management.visual_mode_unavailable_detail', { message: visualParseError }),
+                'error'
+            )
+        })
     }, [activeTab, showNotification, t, visualParseError])
 
     const handleConfirmSave = async () => {
         setSaving(true)
         try {
             const previousCommercialMode = readCommercialModeFromYaml(serverYaml)
-            const nextCommercialMode     = readCommercialModeFromYaml(mergedYaml)
-            const commercialModeChanged  = previousCommercialMode !== nextCommercialMode
+            const nextCommercialMode = readCommercialModeFromYaml(mergedYaml)
+            const commercialModeChanged = previousCommercialMode !== nextCommercialMode
 
             await configFileApi.saveConfigYaml(mergedYaml)
+            clearConfigCache()
+            await fetchConfig(undefined, true)
             const latestContent = await configFileApi.fetchConfigYaml()
-            const latestMerged  = mergeConfigWithDefaults(latestContent)
+            const latestMerged = mergeConfigWithDefaults(latestContent)
             setDirty(false)
             setDiffModalOpen(false)
             setContent(latestMerged)
@@ -180,10 +188,9 @@ export function ConfigPage() {
                     showNotification(
                         t('config_management.visual_mode_latest_yaml_invalid', {
                             message:
-                                latestDocument.errors[0]?.message ??
-                                t('config_management.visual_mode_save_blocked'),
+                                latestDocument.errors[0]?.message ?? t('config_management.visual_mode_save_blocked'),
                         }),
-                        'error',
+                        'error'
                     )
                     return
                 }
@@ -191,8 +198,7 @@ export function ConfigPage() {
 
             // In source mode, save exactly what the user edited.
             // In visual mode, materialize visual changes into the latest YAML.
-            const nextMergedYaml =
-                      activeTab === 'source' ? content : applyVisualChangesToYaml(latestServerYaml)
+            const nextMergedYaml = activeTab === 'source' ? content : applyVisualChangesToYaml(latestServerYaml)
 
             // Validate config before showing the diff modal
             try {
@@ -211,7 +217,7 @@ export function ConfigPage() {
             let diffOriginal = latestServerYaml
             if (activeTab !== 'source') {
                 try {
-                    const doc    = parseDocument(latestServerYaml)
+                    const doc = parseDocument(latestServerYaml)
                     diffOriginal = doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 })
                 } catch {
                     /* keep raw on parse failure */
@@ -264,7 +270,7 @@ export function ConfigPage() {
                 if (!result.ok) {
                     showNotification(
                         t('config_management.visual_mode_unavailable_detail', { message: result.error }),
-                        'error',
+                        'error'
                     )
                     return
                 }
@@ -273,15 +279,7 @@ export function ConfigPage() {
             setActiveTab(tab)
             localStorage.setItem('config-management:tab', tab)
         },
-        [
-            activeTab,
-            applyVisualChangesToYaml,
-            content,
-            loadVisualValuesFromYaml,
-            showNotification,
-            t,
-            visualDirty,
-        ],
+        [activeTab, applyVisualChangesToYaml, content, loadVisualValuesFromYaml, showNotification, t, visualDirty]
     )
 
     // Search functionality
@@ -290,11 +288,11 @@ export function ConfigPage() {
             return
         }
 
-        const view              = editorRef.current.view
-        const doc               = view.state.doc.toString()
+        const view = editorRef.current.view
+        const doc = view.state.doc.toString()
         const matches: number[] = []
-        const lowerQuery        = query.toLowerCase()
-        const lowerDoc          = doc.toLowerCase()
+        const lowerQuery = query.toLowerCase()
+        const lowerDoc = doc.toLowerCase()
 
         let pos = 0
         while (pos < lowerDoc.length) {
@@ -312,8 +310,8 @@ export function ConfigPage() {
         }
 
         // Find current match based on cursor position
-        const selection  = view.state.selection.main
-        const cursorPos  = direction === 'prev' ? selection.from : selection.to
+        const selection = view.state.selection.main
+        const cursorPos = direction === 'prev' ? selection.from : selection.to
         let currentIndex = 0
 
         if (direction === 'next') {
@@ -347,9 +345,9 @@ export function ConfigPage() {
 
         // Scroll to and select the match
         view.dispatch({
-                          selection: { anchor: matchPos, head: matchPos + query.length },
-                          scrollIntoView: true,
-                      })
+            selection: { anchor: matchPos, head: matchPos + query.length },
+            scrollIntoView: true,
+        })
         view.focus()
     }, [])
 
@@ -372,7 +370,7 @@ export function ConfigPage() {
             setLastSearchedQuery(searchQuery)
             performSearch(searchQuery, direction)
         },
-        [searchQuery, performSearch],
+        [searchQuery, performSearch]
     )
 
     const handleSearchKeyDown = useCallback(
@@ -382,7 +380,7 @@ export function ConfigPage() {
                 executeSearch(e.shiftKey ? 'prev' : 'next')
             }
         },
-        [executeSearch],
+        [executeSearch]
     )
 
     const handlePrevMatch = useCallback(() => {
@@ -429,10 +427,7 @@ export function ConfigPage() {
     }, [])
 
     // CodeMirror extensions
-    const extensions = useMemo(
-        () => [yaml(), search(), highlightSelectionMatches(), keymap.of(searchKeymap)],
-        [],
-    )
+    const extensions = useMemo(() => [yaml(), search(), highlightSelectionMatches(), keymap.of(searchKeymap)], [])
 
     // Status text
     const getStatusText = () => {
@@ -480,15 +475,15 @@ export function ConfigPage() {
         }
 
         showConfirmation({
-                             title: t('common.unsaved_changes_title'),
-                             message: t('config_management.reload_confirm_message'),
-                             confirmText: t('config_management.reload'),
-                             cancelText: t('common.cancel'),
-                             variant: 'danger',
-                             onConfirm: async () => {
-                                 await loadConfig()
-                             },
-                         })
+            title: t('common.unsaved_changes_title'),
+            message: t('config_management.reload_confirm_message'),
+            confirmText: t('config_management.reload'),
+            cancelText: t('common.cancel'),
+            variant: 'danger',
+            onConfirm: async () => {
+                await loadConfig()
+            },
+        })
     }, [isDirty, loadConfig, showConfirmation, t])
 
     const floatingActions = (
@@ -496,7 +491,7 @@ export function ConfigPage() {
             <div className={styles.floatingActionList}>
                 <div className={`${styles.floatingStatus} ${getStatusClass()}`}>{getStatusText()}</div>
                 <button
-                    type='button'
+                    type="button"
                     className={styles.floatingActionButton}
                     onClick={handleReload}
                     disabled={loading || saving}
@@ -506,7 +501,7 @@ export function ConfigPage() {
                     <IconRefreshCw size={16} />
                 </button>
                 <button
-                    type='button'
+                    type="button"
                     className={styles.floatingActionButton}
                     onClick={handleSave}
                     disabled={
@@ -522,20 +517,18 @@ export function ConfigPage() {
                     aria-label={t('config_management.save')}
                 >
                     <IconCheck size={16} />
-                    {isDirty && <span className={styles.dirtyDot} aria-hidden='true' />}
+                    {isDirty && <span className={styles.dirtyDot} aria-hidden="true" />}
                 </button>
             </div>
         </div>
     )
 
-    const pageEyebrow     =
-              activeTab === 'visual'
-              ? t('config_management.tabs.visual', { defaultValue: '可视化编辑' })
-              : t('config_management.tabs.source', { defaultValue: '源文件编辑' })
+    const pageEyebrow =
+        activeTab === 'visual'
+            ? t('config_management.tabs.visual', { defaultValue: '可视化编辑' })
+            : t('config_management.tabs.source', { defaultValue: '源文件编辑' })
     const pageDescription =
-              activeTab === 'visual'
-              ? t('config_management.visual.notice')
-              : t('config_management.description')
+        activeTab === 'visual' ? t('config_management.visual.notice') : t('config_management.description')
 
     return (
         <div className={styles.container}>
@@ -550,7 +543,7 @@ export function ConfigPage() {
                     <div className={`${styles.statusBadge} ${getStatusClass()}`}>{getStatusText()}</div>
                     <div className={styles.tabBar}>
                         <button
-                            type='button'
+                            type="button"
                             className={`${styles.tabItem} ${activeTab === 'visual' ? styles.tabActive : ''}`}
                             onClick={() => handleTabChange('visual')}
                             disabled={saving || loading}
@@ -558,7 +551,7 @@ export function ConfigPage() {
                             {t('config_management.tabs.visual', { defaultValue: '可视化编辑' })}
                         </button>
                         <button
-                            type='button'
+                            type="button"
                             className={`${styles.tabItem} ${activeTab === 'source' ? styles.tabActive : ''}`}
                             onClick={() => handleTabChange('source')}
                             disabled={saving || loading}
@@ -571,9 +564,9 @@ export function ConfigPage() {
 
             <div className={styles.workspaceShell}>
                 <div className={styles.content}>
-                    {error && <div className='error-box'>{error}</div>}
+                    {error && <div className="error-box">{error}</div>}
                     {!error && visualParseError && (
-                        <div className='error-box'>
+                        <div className="error-box">
                             {t('config_management.visual_mode_unavailable_detail', { message: visualParseError })}
                         </div>
                     )}
@@ -587,115 +580,110 @@ export function ConfigPage() {
                             onChange={setVisualValues}
                         />
                     ) : (
-                         <div className={styles.sourceWorkspace}>
-                             <div className={styles.sourceToolbar}>
-                                 <div className={styles.searchInputWrapper}>
-                                     <Input
-                                         value={searchQuery}
-                                         onChange={(e) => handleSearchChange(e.target.value)}
-                                         onKeyDown={handleSearchKeyDown}
-                                         placeholder={t('config_management.search_placeholder', {
-                                             defaultValue: '搜索配置内容...',
-                                         })}
-                                         disabled={disableControls || loading}
-                                         className={styles.searchInput}
-                                         rightElement={
-                                             <div className={styles.searchRight}>
-                                                 {searchQuery && lastSearchedQuery === searchQuery && (
-                                                     <span className={styles.searchCount}>
-                            {searchResults.total > 0
-                             ? `${searchResults.current} / ${searchResults.total}`
-                             : t('config_management.search_no_results', {
-                                    defaultValue: '无结果',
-                                })}
-                          </span>
-                                                 )}
-                                                 <button
-                                                     type='button'
-                                                     className={styles.searchButton}
-                                                     onClick={() => executeSearch('next')}
-                                                     disabled={!searchQuery || disableControls || loading}
-                                                     title={t(
-                                                         'config_management.search_button',
-                                                         { defaultValue: '搜索' },
-                                                     )}
-                                                 >
-                                                     <IconSearch size={16} />
-                                                 </button>
-                                             </div>
-                                         }
-                                     />
-                                 </div>
+                        <div className={styles.sourceWorkspace}>
+                            <div className={styles.sourceToolbar}>
+                                <div className={styles.searchInputWrapper}>
+                                    <Input
+                                        value={searchQuery}
+                                        onChange={(e) => handleSearchChange(e.target.value)}
+                                        onKeyDown={handleSearchKeyDown}
+                                        placeholder={t('config_management.search_placeholder', {
+                                            defaultValue: '搜索配置内容...',
+                                        })}
+                                        disabled={disableControls || loading}
+                                        className={styles.searchInput}
+                                        rightElement={
+                                            <div className={styles.searchRight}>
+                                                {searchQuery && lastSearchedQuery === searchQuery && (
+                                                    <span className={styles.searchCount}>
+                                                        {searchResults.total > 0
+                                                            ? `${searchResults.current} / ${searchResults.total}`
+                                                            : t('config_management.search_no_results', {
+                                                                  defaultValue: '无结果',
+                                                              })}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    className={styles.searchButton}
+                                                    onClick={() => executeSearch('next')}
+                                                    disabled={!searchQuery || disableControls || loading}
+                                                    title={t('config_management.search_button', {
+                                                        defaultValue: '搜索',
+                                                    })}
+                                                >
+                                                    <IconSearch size={16} />
+                                                </button>
+                                            </div>
+                                        }
+                                    />
+                                </div>
 
-                                 <div className={styles.searchActions}>
-                                     <Button
-                                         variant='secondary'
-                                         size='sm'
-                                         onClick={handlePrevMatch}
-                                         disabled={
-                                             !searchQuery ||
-                                             lastSearchedQuery !==
-                                             searchQuery ||
-                                             searchResults.total ===
-                                             0
-                                         }
-                                         title={t('config_management.search_prev', { defaultValue: '上一个' })}
-                                     >
-                                         <IconChevronUp size={16} />
-                                     </Button>
-                                     <Button
-                                         variant='secondary'
-                                         size='sm'
-                                         onClick={handleNextMatch}
-                                         disabled={
-                                             !searchQuery ||
-                                             lastSearchedQuery !==
-                                             searchQuery ||
-                                             searchResults.total ===
-                                             0
-                                         }
-                                         title={t('config_management.search_next', { defaultValue: '下一个' })}
-                                     >
-                                         <IconChevronDown size={16} />
-                                     </Button>
-                                 </div>
-                             </div>
+                                <div className={styles.searchActions}>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={handlePrevMatch}
+                                        disabled={
+                                            !searchQuery ||
+                                            lastSearchedQuery !== searchQuery ||
+                                            searchResults.total === 0
+                                        }
+                                        title={t('config_management.search_prev', { defaultValue: '上一个' })}
+                                    >
+                                        <IconChevronUp size={16} />
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={handleNextMatch}
+                                        disabled={
+                                            !searchQuery ||
+                                            lastSearchedQuery !== searchQuery ||
+                                            searchResults.total === 0
+                                        }
+                                        title={t('config_management.search_next', { defaultValue: '下一个' })}
+                                    >
+                                        <IconChevronDown size={16} />
+                                    </Button>
+                                </div>
+                            </div>
 
-                             <div className={styles.editorWrapper}>
-                                 <CodeMirror
-                                     ref={editorRef}
-                                     value={content}
-                                     onChange={handleChange}
-                                     extensions={extensions}
-                                     theme={resolvedTheme}
-                                     editable={!disableControls && !loading}
-                                     placeholder={t('config_management.editor_placeholder')}
-                                     height='100%'
-                                     style={{ height: '100%' }}
-                                     basicSetup={{
-                                         lineNumbers: true,
-                                         highlightActiveLineGutter: true,
-                                         highlightActiveLine: true,
-                                         foldGutter: true,
-                                         dropCursor: true,
-                                         allowMultipleSelections: true,
-                                         indentOnInput: true,
-                                         bracketMatching: true,
-                                         closeBrackets: true,
-                                         autocompletion: false,
-                                         rectangularSelection: true,
-                                         crosshairCursor: false,
-                                         highlightSelectionMatches: true,
-                                         closeBracketsKeymap: true,
-                                         searchKeymap: true,
-                                         foldKeymap: true,
-                                         completionKeymap: false,
-                                         lintKeymap: true,
-                                     }}
-                                 />
-                             </div>
-                         </div>
-                     )}
+                            <div className={styles.editorWrapper}>
+                                <CodeMirror
+                                    ref={editorRef}
+                                    value={content}
+                                    onChange={handleChange}
+                                    extensions={extensions}
+                                    theme={resolvedTheme}
+                                    editable={!disableControls && !loading}
+                                    placeholder={t('config_management.editor_placeholder')}
+                                    height="100%"
+                                    style={{ height: '100%' }}
+                                    basicSetup={{
+                                        lineNumbers: true,
+                                        highlightActiveLineGutter: true,
+                                        highlightActiveLine: true,
+                                        foldGutter: true,
+                                        dropCursor: true,
+                                        allowMultipleSelections: true,
+                                        indentOnInput: true,
+                                        bracketMatching: true,
+                                        closeBrackets: true,
+                                        autocompletion: false,
+                                        rectangularSelection: true,
+                                        crosshairCursor: false,
+                                        highlightSelectionMatches: true,
+                                        closeBracketsKeymap: true,
+                                        searchKeymap: true,
+                                        foldKeymap: true,
+                                        completionKeymap: false,
+                                        lintKeymap: true,
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 

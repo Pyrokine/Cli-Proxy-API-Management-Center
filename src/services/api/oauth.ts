@@ -2,40 +2,35 @@
  * OAuth 与设备码登录相关 API
  */
 
-import {apiClient} from './client'
+import { apiClient } from './client'
 
-export type OAuthProvider = 'codex' | 'anthropic' | 'antigravity' | 'gemini-cli' | 'kimi' | 'qwen';
+export type OAuthProvider = 'codex' | 'anthropic' | 'antigravity' | 'gemini-cli' | 'kimi' | 'qwen'
 
 interface OAuthStartResponse {
-    url: string;
-    state?: string;
+    url: string
+    state?: string
 }
 
 interface OAuthCallbackResponse {
-    status: 'ok';
+    status: 'ok'
 }
 
 interface IFlowCookieAuthResponse {
-    status: 'ok' | 'error';
-    error?: string;
-    saved_path?: string;
-    email?: string;
-    expired?: string;
-    type?: string;
+    status: 'ok' | 'error'
+    error?: string
+    saved_path?: string
+    email?: string
+    expired?: string
+    type?: string
 }
 
-const WEBUI_SUPPORTED: OAuthProvider[]                              = [
-    'codex',
-    'anthropic',
-    'antigravity',
-    'gemini-cli',
-]
+const WEBUI_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli']
 const CALLBACK_PROVIDER_MAP: Partial<Record<OAuthProvider, string>> = {
     'gemini-cli': 'gemini',
 }
 
 export const oauthApi = {
-    startAuth: (provider: OAuthProvider, options?: { projectId?: string }) => {
+    startAuth: (provider: OAuthProvider, options?: { projectId?: string; nonce?: string }) => {
         const params: Record<string, string | boolean> = {}
         if (WEBUI_SUPPORTED.includes(provider)) {
             params.is_webui = true
@@ -43,14 +38,17 @@ export const oauthApi = {
         if (provider === 'gemini-cli' && options?.projectId) {
             params.project_id = options.projectId
         }
+        if (options?.nonce) {
+            params.nonce = options.nonce
+        }
         return apiClient.get<OAuthStartResponse>(`/${provider}-auth-url`, {
             params: Object.keys(params).length ? params : undefined,
         })
     },
 
-    getAuthStatus: (state: string) =>
+    getAuthStatus: (state: string, nonce?: string) =>
         apiClient.get<{ status: 'ok' | 'wait' | 'error'; error?: string }>(`/get-auth-status`, {
-            params: { state },
+            params: nonce ? { state, nonce } : { state },
         }),
 
     submitCallback: (provider: OAuthProvider, redirectUrl: string) => {

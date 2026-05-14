@@ -1,10 +1,10 @@
-import type {ModelInfo} from '@/utils/models'
+import type { ModelInfo } from '@/utils/models'
 import styles from './ProviderEditForm.module.scss'
 
 interface ModelCheckboxListProps {
-    models: ModelInfo[];
-    selected: Set<string>;
-    onToggle: (name: string) => void;
+    models: ModelInfo[]
+    selected: Set<string>
+    onToggle: (name: string) => void
 }
 
 export function ModelCheckboxList({ models, selected, onToggle }: ModelCheckboxListProps) {
@@ -17,7 +17,7 @@ export function ModelCheckboxList({ models, selected, onToggle }: ModelCheckboxL
                         key={model.name}
                         className={`${styles.modelDiscoveryRow} ${checked ? styles.modelDiscoveryRowSelected : ''}`}
                     >
-                        <input type='checkbox' checked={checked} onChange={() => onToggle(model.name)} />
+                        <input type="checkbox" checked={checked} onChange={() => onToggle(model.name)} />
                         <div className={styles.modelDiscoveryMeta}>
                             <div className={styles.modelDiscoveryName}>
                                 {model.name}

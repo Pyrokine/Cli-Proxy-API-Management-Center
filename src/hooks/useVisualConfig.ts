@@ -8,9 +8,9 @@ import type {
     VisualConfigValidationErrors,
     VisualConfigValues,
 } from '@/types/visualConfig'
-import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
-import {useCallback, useMemo, useState} from 'react'
-import {isMap, parse as parseYaml, parseDocument} from 'yaml'
+import { DEFAULT_VISUAL_VALUES } from '@/types/visualConfig'
+import { useCallback, useMemo, useState } from 'react'
+import { isMap, parse as parseYaml, parseDocument } from 'yaml'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -58,8 +58,8 @@ function parseApiKeysText(raw: unknown): string {
     return keys.join('\n')
 }
 
-type YamlDocument = ReturnType<typeof parseDocument>;
-type YamlPath = string[];
+type YamlDocument = ReturnType<typeof parseDocument>
+type YamlPath = string[]
 
 function docHas(doc: YamlDocument, path: YamlPath): boolean {
     return doc.hasIn(path)
@@ -95,7 +95,7 @@ function setBooleanInDoc(doc: YamlDocument, path: YamlPath, value: boolean): voi
 }
 
 function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
-    const safe    = typeof value === 'string' ? value : ''
+    const safe = typeof value === 'string' ? value : ''
     const trimmed = safe.trim()
     if (trimmed !== '') {
         doc.setIn(path, safe)
@@ -109,7 +109,7 @@ function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void
 }
 
 function setIntFromStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
-    const safe    = typeof value === 'string' ? value : ''
+    const safe = typeof value === 'string' ? value : ''
     const trimmed = safe.trim()
     if (trimmed === '') {
         if (docHas(doc, path)) {
@@ -134,6 +134,157 @@ function deepClone<T>(value: T): T {
         return structuredClone(value)
     }
     return JSON.parse(JSON.stringify(value)) as T
+}
+
+function arePayloadModelEntriesEqual(left: PayloadRule['models'], right: PayloadRule['models']): boolean {
+    if (left === right) {
+        return true
+    }
+    if (left.length !== right.length) {
+        return false
+    }
+    for (let i = 0; i < left.length; i++) {
+        const current = left[i]
+        const next = right[i]
+        if (!current || !next) {
+            return false
+        }
+        if (current.id !== next.id || current.name !== next.name || current.protocol !== next.protocol) {
+            return false
+        }
+    }
+    return true
+}
+
+function arePayloadParamEntriesEqual(left: PayloadRule['params'], right: PayloadRule['params']): boolean {
+    if (left === right) {
+        return true
+    }
+    if (left.length !== right.length) {
+        return false
+    }
+    for (let i = 0; i < left.length; i++) {
+        const current = left[i]
+        const next = right[i]
+        if (!current || !next) {
+            return false
+        }
+        if (
+            current.id !== next.id ||
+            current.path !== next.path ||
+            current.valueType !== next.valueType ||
+            current.value !== next.value
+        ) {
+            return false
+        }
+    }
+    return true
+}
+
+function arePayloadRulesEqual(left: PayloadRule[], right: PayloadRule[]): boolean {
+    if (left === right) {
+        return true
+    }
+    if (left.length !== right.length) {
+        return false
+    }
+    for (let i = 0; i < left.length; i++) {
+        const current = left[i]
+        const next = right[i]
+        if (!current || !next) {
+            return false
+        }
+        if (current.id !== next.id) {
+            return false
+        }
+        if (!arePayloadModelEntriesEqual(current.models, next.models)) {
+            return false
+        }
+        if (!arePayloadParamEntriesEqual(current.params, next.params)) {
+            return false
+        }
+    }
+    return true
+}
+
+function arePayloadFilterRulesEqual(left: PayloadFilterRule[], right: PayloadFilterRule[]): boolean {
+    if (left === right) {
+        return true
+    }
+    if (left.length !== right.length) {
+        return false
+    }
+    for (let i = 0; i < left.length; i++) {
+        const current = left[i]
+        const next = right[i]
+        if (!current || !next) {
+            return false
+        }
+        if (current.id !== next.id) {
+            return false
+        }
+        if (!arePayloadModelEntriesEqual(current.models, next.models)) {
+            return false
+        }
+        if (current.params.length !== next.params.length) {
+            return false
+        }
+        for (let j = 0; j < current.params.length; j++) {
+            if (current.params[j] !== next.params[j]) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfigValues): boolean {
+    return (
+        left.host === right.host &&
+        left.port === right.port &&
+        left.tlsEnable === right.tlsEnable &&
+        left.tlsCert === right.tlsCert &&
+        left.tlsKey === right.tlsKey &&
+        left.tlsTrustForwardedProto === right.tlsTrustForwardedProto &&
+        left.rmAllowRemote === right.rmAllowRemote &&
+        left.rmSecretKey === right.rmSecretKey &&
+        left.rmDisableControlPanel === right.rmDisableControlPanel &&
+        left.rmAutoUpdatePanel === right.rmAutoUpdatePanel &&
+        left.rmAutoUpdateCPA === right.rmAutoUpdateCPA &&
+        left.rmAutoCheckUpdate === right.rmAutoCheckUpdate &&
+        left.rmCheckInterval === right.rmCheckInterval &&
+        left.rmPanelRepo === right.rmPanelRepo &&
+        left.rmCpaRepo === right.rmCpaRepo &&
+        left.authDir === right.authDir &&
+        left.usageDataDir === right.usageDataDir &&
+        left.apiKeysText === right.apiKeysText &&
+        left.debug === right.debug &&
+        left.commercialMode === right.commercialMode &&
+        left.loggingToFile === right.loggingToFile &&
+        left.logsMaxTotalSizeMb === right.logsMaxTotalSizeMb &&
+        left.usageStatisticsEnabled === right.usageStatisticsEnabled &&
+        left.proxyUrl === right.proxyUrl &&
+        left.forceModelPrefix === right.forceModelPrefix &&
+        left.requestRetry === right.requestRetry &&
+        left.maxRetryCredentials === right.maxRetryCredentials &&
+        left.maxRetryInterval === right.maxRetryInterval &&
+        left.quotaSwitchProject === right.quotaSwitchProject &&
+        left.quotaSwitchPreviewModel === right.quotaSwitchPreviewModel &&
+        left.routingStrategy === right.routingStrategy &&
+        left.routingSessionAffinity === right.routingSessionAffinity &&
+        left.routingSessionAffinityTTL === right.routingSessionAffinityTTL &&
+        left.wsAuth === right.wsAuth &&
+        left.allowQueryAuth === right.allowQueryAuth &&
+        left.corsAllowedOrigins === right.corsAllowedOrigins &&
+        left.streaming.keepaliveSeconds === right.streaming.keepaliveSeconds &&
+        left.streaming.bootstrapRetries === right.streaming.bootstrapRetries &&
+        left.streaming.nonstreamKeepaliveInterval === right.streaming.nonstreamKeepaliveInterval &&
+        arePayloadRulesEqual(left.payloadDefaultRules, right.payloadDefaultRules) &&
+        arePayloadRulesEqual(left.payloadDefaultRawRules, right.payloadDefaultRawRules) &&
+        arePayloadRulesEqual(left.payloadOverrideRules, right.payloadOverrideRules) &&
+        arePayloadRulesEqual(left.payloadOverrideRawRules, right.payloadOverrideRawRules) &&
+        arePayloadFilterRulesEqual(left.payloadFilterRules, right.payloadFilterRules)
+    )
 }
 
 function parsePayloadParamValue(raw: unknown): { valueType: PayloadParamValueType; value: string } {
@@ -173,31 +324,31 @@ function parsePayloadRules(rules: unknown): PayloadRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models    = Array.isArray(modelsRaw)
-                          ? modelsRaw.map((model, modelIndex) => {
-                const modelRecord = asRecord(model)
-                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                return {
-                    id: `model-${index}-${modelIndex}`,
-                    name,
-                    protocol: parsePayloadProtocol(modelRecord?.protocol),
-                }
-            })
-                          : []
+        const models = Array.isArray(modelsRaw)
+            ? modelsRaw.map((model, modelIndex) => {
+                  const modelRecord = asRecord(model)
+                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                  return {
+                      id: `model-${index}-${modelIndex}`,
+                      name,
+                      protocol: parsePayloadProtocol(modelRecord?.protocol),
+                  }
+              })
+            : []
 
         const paramsRecord = asRecord(record.params)
-        const params       = paramsRecord
-                             ? Object.entries(paramsRecord).map(([path, value], pIndex) => {
-                const parsedValue = parsePayloadParamValue(value)
-                return {
-                    id: `param-${index}-${pIndex}`,
-                    path,
-                    valueType: parsedValue.valueType,
-                    value: parsedValue.value,
-                }
-            })
-                             : []
+        const params = paramsRecord
+            ? Object.entries(paramsRecord).map(([path, value], pIndex) => {
+                  const parsedValue = parsePayloadParamValue(value)
+                  return {
+                      id: `param-${index}-${pIndex}`,
+                      path,
+                      valueType: parsedValue.valueType,
+                      value: parsedValue.value,
+                  }
+              })
+            : []
 
         return { id: `payload-rule-${index}`, models, params }
     })
@@ -212,43 +363,117 @@ function parsePayloadFilterRules(rules: unknown): PayloadFilterRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models    = Array.isArray(modelsRaw)
-                          ? modelsRaw.map((model, modelIndex) => {
-                const modelRecord = asRecord(model)
-                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                return {
-                    id: `filter-model-${index}-${modelIndex}`,
-                    name,
-                    protocol: parsePayloadProtocol(modelRecord?.protocol),
-                }
-            })
-                          : []
+        const models = Array.isArray(modelsRaw)
+            ? modelsRaw.map((model, modelIndex) => {
+                  const modelRecord = asRecord(model)
+                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                  return {
+                      id: `filter-model-${index}-${modelIndex}`,
+                      name,
+                      protocol: parsePayloadProtocol(modelRecord?.protocol),
+                  }
+              })
+            : []
 
         const paramsRaw = record.params
-        const params    = Array.isArray(paramsRaw) ? paramsRaw.map(String) : []
+        const params = Array.isArray(paramsRaw) ? paramsRaw.map(String) : []
 
         return { id: `payload-filter-rule-${index}`, models, params }
     })
 }
 
-function resolveApiKeysText(parsed: Record<string, unknown>): string {
-    if (Object.prototype.hasOwnProperty.call(parsed, 'api-keys')) {
-        return parseApiKeysText(parsed['api-keys'])
-    }
+type ApiKeysStorageMode = 'legacy' | 'auth-provider'
+type ApiKeysEntryMode = 'string' | 'object'
 
-    const auth                 = asRecord(parsed.auth)
-    const providers            = asRecord(auth?.providers)
+type ApiKeysStorageMetadata = {
+    source: ApiKeysStorageMode
+    providerListKey?: 'api-keys' | 'api-key-entries'
+    entryMode: ApiKeysEntryMode
+    originalEntries: unknown[]
+    syncLegacy: boolean
+}
+
+const DEFAULT_API_KEYS_STORAGE_METADATA: ApiKeysStorageMetadata = {
+    source: 'legacy',
+    entryMode: 'string',
+    originalEntries: [],
+    syncLegacy: false,
+}
+
+function replaceApiKeyValue(entry: unknown, apiKey: string): unknown {
+    const record = asRecord(entry)
+    if (!record) {
+        return apiKey
+    }
+    if ('api-key' in record) {
+        return { ...record, 'api-key': apiKey }
+    }
+    if ('apiKey' in record) {
+        return { ...record, apiKey }
+    }
+    if ('key' in record) {
+        return { ...record, key: apiKey }
+    }
+    if ('Key' in record) {
+        return { ...record, Key: apiKey }
+    }
+    return { ...record, 'api-key': apiKey }
+}
+
+function buildApiKeyEntries(
+    apiKeys: string[],
+    metadata: ApiKeysStorageMetadata
+): Array<string | Record<string, unknown>> {
+    return apiKeys.map((apiKey, index) => {
+        const originalEntry = metadata.originalEntries[index]
+        if (metadata.entryMode === 'object') {
+            const replaced = replaceApiKeyValue(originalEntry, apiKey)
+            return asRecord(replaced) ?? { 'api-key': apiKey }
+        }
+        const record = asRecord(originalEntry)
+        return record ? { ...record, ...(replaceApiKeyValue(record, apiKey) as Record<string, unknown>) } : apiKey
+    })
+}
+
+function resolveApiKeysStorage(parsed: Record<string, unknown>): { text: string; metadata: ApiKeysStorageMetadata } {
+    const legacyEntries = Array.isArray(parsed['api-keys']) ? parsed['api-keys'] : []
+    const auth = asRecord(parsed.auth)
+    const providers = asRecord(auth?.providers)
     const configApiKeyProvider = asRecord(providers?.['config-api-key'])
-    if (!configApiKeyProvider) {
-        return ''
+
+    if (configApiKeyProvider) {
+        const providerEntries = Array.isArray(configApiKeyProvider['api-key-entries'])
+            ? configApiKeyProvider['api-key-entries']
+            : Array.isArray(configApiKeyProvider['api-keys'])
+              ? configApiKeyProvider['api-keys']
+              : []
+        const providerListKey = Array.isArray(configApiKeyProvider['api-key-entries']) ? 'api-key-entries' : 'api-keys'
+
+        return {
+            text: parseApiKeysText(providerEntries),
+            metadata: {
+                source: 'auth-provider',
+                providerListKey,
+                entryMode:
+                    providerListKey === 'api-key-entries' || providerEntries.some((entry) => Boolean(asRecord(entry)))
+                        ? 'object'
+                        : 'string',
+                originalEntries: providerEntries,
+                syncLegacy: legacyEntries.length > 0,
+            },
+        }
     }
 
-    if (Object.prototype.hasOwnProperty.call(configApiKeyProvider, 'api-key-entries')) {
-        return parseApiKeysText(configApiKeyProvider['api-key-entries'])
+    return {
+        text: parseApiKeysText(legacyEntries),
+        metadata: {
+            source: 'legacy',
+            entryMode: legacyEntries.some((entry) => Boolean(asRecord(entry))) ? 'object' : 'string',
+            originalEntries: legacyEntries,
+            syncLegacy: false,
+        },
     }
-
-    return parseApiKeysText(configApiKeyProvider['api-keys'])
 }
 
 function parseRawPayloadParamValue(raw: unknown): string {
@@ -272,28 +497,28 @@ function parseRawPayloadRules(rules: unknown): PayloadRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models    = Array.isArray(modelsRaw)
-                          ? modelsRaw.map((model, modelIndex) => {
-                const modelRecord = asRecord(model)
-                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                return {
-                    id: `raw-model-${index}-${modelIndex}`,
-                    name,
-                    protocol: parsePayloadProtocol(modelRecord?.protocol),
-                }
-            })
-                          : []
+        const models = Array.isArray(modelsRaw)
+            ? modelsRaw.map((model, modelIndex) => {
+                  const modelRecord = asRecord(model)
+                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                  return {
+                      id: `raw-model-${index}-${modelIndex}`,
+                      name,
+                      protocol: parsePayloadProtocol(modelRecord?.protocol),
+                  }
+              })
+            : []
 
         const paramsRecord = asRecord(record.params)
-        const params       = paramsRecord
-                             ? Object.entries(paramsRecord).map(([path, value], pIndex) => ({
-                id: `raw-param-${index}-${pIndex}`,
-                path,
-                valueType: 'json' as const,
-                value: parseRawPayloadParamValue(value),
-            }))
-                             : []
+        const params = paramsRecord
+            ? Object.entries(paramsRecord).map(([path, value], pIndex) => ({
+                  id: `raw-param-${index}-${pIndex}`,
+                  path,
+                  valueType: 'json' as const,
+                  value: parseRawPayloadParamValue(value),
+              }))
+            : []
 
         return { id: `payload-raw-rule-${index}`, models, params }
     })
@@ -323,9 +548,7 @@ function getNonNegativeIntegerError(value: string): VisualConfigValidationErrorC
     return undefined
 }
 
-function getVisualConfigValidationErrors(
-    values: VisualConfigValues,
-): VisualConfigValidationErrors {
+function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConfigValidationErrors {
     return {
         port: getPortError(values.port),
         logsMaxTotalSizeMb: getNonNegativeIntegerError(values.logsMaxTotalSizeMb),
@@ -338,9 +561,7 @@ function getVisualConfigValidationErrors(
     }
 }
 
-export function getPayloadParamValidationError(
-    param: PayloadParamEntry,
-): PayloadParamValidationErrorCode | undefined {
+export function getPayloadParamValidationError(param: PayloadParamEntry): PayloadParamValidationErrorCode | undefined {
     const trimmedValue = param.value.trim()
     if (!trimmedValue) {
         return undefined
@@ -371,9 +592,7 @@ export function getPayloadParamValidationError(
 }
 
 function hasPayloadParamValidationErrors(rules: PayloadRule[]): boolean {
-    return rules.some((rule) =>
-                          rule.params.some((param) => getPayloadParamValidationError(param) !== undefined),
-    )
+    return rules.some((rule) => rule.params.some((param) => getPayloadParamValidationError(param) !== undefined))
 }
 
 function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string, unknown>> {
@@ -397,7 +616,7 @@ function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string
                 let value: unknown = param.value
                 if (param.valueType === 'number') {
                     const num = Number(param.value)
-                    value     = Number.isFinite(num) ? num : param.value
+                    value = Number.isFinite(num) ? num : param.value
                 } else if (param.valueType === 'boolean') {
                     value = param.value === 'true'
                 } else if (param.valueType === 'json') {
@@ -428,8 +647,9 @@ function serializePayloadFilterRulesForYaml(rules: PayloadFilterRule[]): Array<R
                     return obj
                 })
 
-            const params = (Array.isArray(rule.params) ? rule.params : []).map((path) => String(path).trim()).filter(
-                Boolean)
+            const params = (Array.isArray(rule.params) ? rule.params : [])
+                .map((path) => String(path).trim())
+                .filter(Boolean)
 
             return { models, params }
         })
@@ -464,23 +684,18 @@ function serializeRawPayloadRulesForYaml(rules: PayloadRule[]): Array<Record<str
 
 export function useVisualConfig() {
     const [visualValues, setVisualValuesState] = useState<VisualConfigValues>({
-                                                                                  ...DEFAULT_VISUAL_VALUES,
-                                                                              })
+        ...DEFAULT_VISUAL_VALUES,
+    })
 
-    const [baselineValues, setBaselineValues]     = useState<VisualConfigValues>({
-                                                                                     ...DEFAULT_VISUAL_VALUES,
-                                                                                 })
+    const [baselineValues, setBaselineValues] = useState<VisualConfigValues>({
+        ...DEFAULT_VISUAL_VALUES,
+    })
+    const [apiKeysStorage, setApiKeysStorage] = useState<ApiKeysStorageMetadata>(DEFAULT_API_KEYS_STORAGE_METADATA)
     const [visualParseError, setVisualParseError] = useState<string | null>(null)
 
-    const validationErrors = useMemo(
-        () => getVisualConfigValidationErrors(visualValues),
-        [visualValues],
-    )
+    const validationErrors = useMemo(() => getVisualConfigValidationErrors(visualValues), [visualValues])
 
-    const visualHasValidationErrors = useMemo(
-        () => Object.values(validationErrors).some(Boolean),
-        [validationErrors],
-    )
+    const visualHasValidationErrors = useMemo(() => Object.values(validationErrors).some(Boolean), [validationErrors])
 
     const visualHasPayloadValidationErrors = useMemo(
         () =>
@@ -493,11 +708,11 @@ export function useVisualConfig() {
             visualValues.payloadDefaultRawRules,
             visualValues.payloadOverrideRules,
             visualValues.payloadOverrideRawRules,
-        ],
+        ]
     )
 
     const visualDirty = useMemo(() => {
-        return JSON.stringify(visualValues) !== JSON.stringify(baselineValues)
+        return !areVisualConfigValuesEqual(visualValues, baselineValues)
     }, [baselineValues, visualValues])
 
     const loadVisualValuesFromYaml = useCallback((yamlContent: string) => {
@@ -510,13 +725,14 @@ export function useVisualConfig() {
             }
 
             const parsedRaw: unknown = parseYaml(yamlContent) || {}
-            const parsed             = asRecord(parsedRaw) ?? {}
-            const tls                = asRecord(parsed.tls)
-            const remoteManagement   = asRecord(parsed['remote-management'])
-            const quotaExceeded      = asRecord(parsed['quota-exceeded'])
-            const routing            = asRecord(parsed.routing)
-            const payload            = asRecord(parsed.payload)
-            const streaming          = asRecord(parsed.streaming)
+            const parsed = asRecord(parsedRaw) ?? {}
+            const { text: apiKeysText, metadata: nextApiKeysStorage } = resolveApiKeysStorage(parsed)
+            const tls = asRecord(parsed.tls)
+            const remoteManagement = asRecord(parsed['remote-management'])
+            const quotaExceeded = asRecord(parsed['quota-exceeded'])
+            const routing = asRecord(parsed.routing)
+            const payload = asRecord(parsed.payload)
+            const streaming = asRecord(parsed.streaming)
 
             const newValues: VisualConfigValues = {
                 host: typeof parsed.host === 'string' ? parsed.host : '',
@@ -525,24 +741,32 @@ export function useVisualConfig() {
                 tlsEnable: Boolean(tls?.enable),
                 tlsCert: typeof tls?.cert === 'string' ? tls.cert : '',
                 tlsKey: typeof tls?.key === 'string' ? tls.key : '',
+                tlsTrustForwardedProto: Boolean(tls?.['trust-forwarded-proto']),
 
                 rmAllowRemote: Boolean(remoteManagement?.['allow-remote']),
                 rmSecretKey: typeof remoteManagement?.['secret-key'] === 'string' ? remoteManagement['secret-key'] : '',
                 rmDisableControlPanel: Boolean(remoteManagement?.['disable-control-panel']),
+                rmAutoUpdatePanel:
+                    remoteManagement?.['auto-update-panel'] === undefined
+                        ? true
+                        : Boolean(remoteManagement['auto-update-panel']),
+                rmAutoUpdateCPA: Boolean(remoteManagement?.['auto-update-cpa']),
+                rmAutoCheckUpdate: Boolean(remoteManagement?.['auto-check-update']),
+                rmCheckInterval: String(remoteManagement?.['check-interval'] ?? ''),
                 rmPanelRepo:
                     typeof remoteManagement?.['panel-github-repository'] === 'string'
-                    ? remoteManagement['panel-github-repository']
-                    : typeof remoteManagement?.['panel-repo'] === 'string'
-                      ? remoteManagement['panel-repo']
-                      : '',
+                        ? remoteManagement['panel-github-repository']
+                        : typeof remoteManagement?.['panel-repo'] === 'string'
+                          ? remoteManagement['panel-repo']
+                          : '',
                 rmCpaRepo:
                     typeof remoteManagement?.['cpa-github-repository'] === 'string'
-                    ? remoteManagement['cpa-github-repository']
-                    : '',
+                        ? remoteManagement['cpa-github-repository']
+                        : '',
 
                 authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
                 usageDataDir: typeof parsed['usage-data-dir'] === 'string' ? parsed['usage-data-dir'] : '',
-                apiKeysText: resolveApiKeysText(parsed),
+                apiKeysText,
 
                 debug: Boolean(parsed.debug),
                 commercialMode: Boolean(parsed['commercial-mode']),
@@ -558,13 +782,22 @@ export function useVisualConfig() {
                 wsAuth: parsed['ws-auth'] === undefined ? true : Boolean(parsed['ws-auth']),
                 allowQueryAuth: parsed['allow-query-auth'] === true,
                 corsAllowedOrigins: Array.isArray(parsed['cors-allowed-origins'])
-                                    ? (parsed['cors-allowed-origins'] as string[]).join(', ')
-                                    : '',
+                    ? (parsed['cors-allowed-origins'] as string[]).join(', ')
+                    : '',
 
                 quotaSwitchProject: Boolean(quotaExceeded?.['switch-project'] ?? true),
                 quotaSwitchPreviewModel: Boolean(quotaExceeded?.['switch-preview-model'] ?? true),
 
                 routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
+                routingSessionAffinity: Boolean(
+                    routing?.['session-affinity'] ?? routing?.sessionAffinity ?? routing?.['sessionAffinity']
+                ),
+                routingSessionAffinityTTL:
+                    typeof routing?.['session-affinity-ttl'] === 'string'
+                        ? routing['session-affinity-ttl']
+                        : typeof routing?.sessionAffinityTTL === 'string'
+                          ? routing.sessionAffinityTTL
+                          : '',
 
                 payloadDefaultRules: parsePayloadRules(payload?.default),
                 payloadDefaultRawRules: parseRawPayloadRules(payload?.['default-raw']),
@@ -581,6 +814,7 @@ export function useVisualConfig() {
 
             setVisualValuesState(newValues)
             setBaselineValues(deepClone(newValues))
+            setApiKeysStorage(nextApiKeysStorage)
             setVisualParseError(null)
             return { ok: true as const }
         } catch (error: unknown) {
@@ -605,11 +839,18 @@ export function useVisualConfig() {
                 setStringInDoc(doc, ['host'], values.host)
                 setIntFromStringInDoc(doc, ['port'], values.port)
 
-                if (docHas(doc, ['tls']) || values.tlsEnable || values.tlsCert.trim() || values.tlsKey.trim()) {
+                if (
+                    docHas(doc, ['tls']) ||
+                    values.tlsEnable ||
+                    values.tlsCert.trim() ||
+                    values.tlsKey.trim() ||
+                    values.tlsTrustForwardedProto
+                ) {
                     ensureMapInDoc(doc, ['tls'])
                     setBooleanInDoc(doc, ['tls', 'enable'], values.tlsEnable)
                     setStringInDoc(doc, ['tls', 'cert'], values.tlsCert)
                     setStringInDoc(doc, ['tls', 'key'], values.tlsKey)
+                    setBooleanInDoc(doc, ['tls', 'trust-forwarded-proto'], values.tlsTrustForwardedProto)
                     deleteIfMapEmpty(doc, ['tls'])
                 }
 
@@ -618,6 +859,10 @@ export function useVisualConfig() {
                     values.rmAllowRemote ||
                     values.rmSecretKey.trim() ||
                     values.rmDisableControlPanel ||
+                    values.rmAutoUpdatePanel ||
+                    values.rmAutoUpdateCPA ||
+                    values.rmAutoCheckUpdate ||
+                    values.rmCheckInterval.trim() ||
                     values.rmPanelRepo.trim() ||
                     values.rmCpaRepo.trim()
                 ) {
@@ -625,6 +870,10 @@ export function useVisualConfig() {
                     setBooleanInDoc(doc, ['remote-management', 'allow-remote'], values.rmAllowRemote)
                     setStringInDoc(doc, ['remote-management', 'secret-key'], values.rmSecretKey)
                     setBooleanInDoc(doc, ['remote-management', 'disable-control-panel'], values.rmDisableControlPanel)
+                    setBooleanInDoc(doc, ['remote-management', 'auto-update-panel'], values.rmAutoUpdatePanel)
+                    setBooleanInDoc(doc, ['remote-management', 'auto-update-cpa'], values.rmAutoUpdateCPA)
+                    setBooleanInDoc(doc, ['remote-management', 'auto-check-update'], values.rmAutoCheckUpdate)
+                    setIntFromStringInDoc(doc, ['remote-management', 'check-interval'], values.rmCheckInterval)
                     setStringInDoc(doc, ['remote-management', 'panel-github-repository'], values.rmPanelRepo)
                     setStringInDoc(doc, ['remote-management', 'cpa-github-repository'], values.rmCpaRepo)
                     if (docHas(doc, ['remote-management', 'panel-repo'])) {
@@ -637,11 +886,49 @@ export function useVisualConfig() {
                 setStringInDoc(doc, ['usage-data-dir'], values.usageDataDir)
                 if (values.apiKeysText !== baselineValues.apiKeysText) {
                     const apiKeys = values.apiKeysText
-                                          .split('\n')
-                                          .map((key) => key.trim())
-                                          .filter(Boolean)
-                    if (apiKeys.length > 0) {
-                        doc.setIn(['api-keys'], apiKeys)
+                        .split('\n')
+                        .map((key) => key.trim())
+                        .filter(Boolean)
+                    const entries = buildApiKeyEntries(apiKeys, apiKeysStorage)
+
+                    if (apiKeysStorage.source === 'auth-provider') {
+                        ensureMapInDoc(doc, ['auth'])
+                        ensureMapInDoc(doc, ['auth', 'providers'])
+                        ensureMapInDoc(doc, ['auth', 'providers', 'config-api-key'])
+                        if (entries.length > 0) {
+                            doc.setIn(
+                                [
+                                    'auth',
+                                    'providers',
+                                    'config-api-key',
+                                    apiKeysStorage.providerListKey ?? 'api-key-entries',
+                                ],
+                                entries
+                            )
+                        } else if (
+                            docHas(doc, [
+                                'auth',
+                                'providers',
+                                'config-api-key',
+                                apiKeysStorage.providerListKey ?? 'api-key-entries',
+                            ])
+                        ) {
+                            doc.deleteIn([
+                                'auth',
+                                'providers',
+                                'config-api-key',
+                                apiKeysStorage.providerListKey ?? 'api-key-entries',
+                            ])
+                        }
+                        if (apiKeysStorage.syncLegacy) {
+                            if (entries.length > 0) {
+                                doc.setIn(['api-keys'], entries)
+                            } else if (docHas(doc, ['api-keys'])) {
+                                doc.deleteIn(['api-keys'])
+                            }
+                        }
+                    } else if (entries.length > 0) {
+                        doc.setIn(['api-keys'], entries)
                     } else if (docHas(doc, ['api-keys'])) {
                         doc.deleteIn(['api-keys'])
                     }
@@ -663,9 +950,9 @@ export function useVisualConfig() {
                 setBooleanInDoc(doc, ['allow-query-auth'], values.allowQueryAuth)
 
                 const corsOrigins = values.corsAllowedOrigins
-                                          .split(',')
-                                          .map((s) => s.trim())
-                                          .filter(Boolean)
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
                 if (corsOrigins.length > 0) {
                     doc.setIn(['cors-allowed-origins'], corsOrigins)
                 } else if (docHas(doc, ['cors-allowed-origins'])) {
@@ -679,28 +966,30 @@ export function useVisualConfig() {
                     deleteIfMapEmpty(doc, ['quota-exceeded'])
                 }
 
-                if (docHas(doc, ['routing']) || values.routingStrategy !== 'round-robin') {
+                if (
+                    docHas(doc, ['routing']) ||
+                    values.routingStrategy !== 'round-robin' ||
+                    values.routingSessionAffinity ||
+                    values.routingSessionAffinityTTL.trim()
+                ) {
                     ensureMapInDoc(doc, ['routing'])
                     doc.setIn(['routing', 'strategy'], values.routingStrategy)
+                    setBooleanInDoc(doc, ['routing', 'session-affinity'], values.routingSessionAffinity)
+                    setStringInDoc(doc, ['routing', 'session-affinity-ttl'], values.routingSessionAffinityTTL)
                     deleteIfMapEmpty(doc, ['routing'])
                 }
 
-                const keepaliveSeconds           =
-                          typeof values.streaming?.keepaliveSeconds === 'string' ?
-                          values.streaming.keepaliveSeconds :
-                          ''
-                const bootstrapRetries           =
-                          typeof values.streaming?.bootstrapRetries === 'string' ?
-                          values.streaming.bootstrapRetries :
-                          ''
+                const keepaliveSeconds =
+                    typeof values.streaming?.keepaliveSeconds === 'string' ? values.streaming.keepaliveSeconds : ''
+                const bootstrapRetries =
+                    typeof values.streaming?.bootstrapRetries === 'string' ? values.streaming.bootstrapRetries : ''
                 const nonstreamKeepaliveInterval =
-                          typeof values.streaming?.nonstreamKeepaliveInterval === 'string'
-                          ? values.streaming.nonstreamKeepaliveInterval
-                          : ''
+                    typeof values.streaming?.nonstreamKeepaliveInterval === 'string'
+                        ? values.streaming.nonstreamKeepaliveInterval
+                        : ''
 
-                const streamingDefined = docHas(doc, ['streaming']) ||
-                                         keepaliveSeconds.trim() ||
-                                         bootstrapRetries.trim()
+                const streamingDefined =
+                    docHas(doc, ['streaming']) || keepaliveSeconds.trim() || bootstrapRetries.trim()
                 if (streamingDefined) {
                     ensureMapInDoc(doc, ['streaming'])
                     setIntFromStringInDoc(doc, ['streaming', 'keepalive-seconds'], keepaliveSeconds)
@@ -727,7 +1016,7 @@ export function useVisualConfig() {
                     if (values.payloadDefaultRawRules.length > 0) {
                         doc.setIn(
                             ['payload', 'default-raw'],
-                            serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules),
+                            serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules)
                         )
                     } else if (docHas(doc, ['payload', 'default-raw'])) {
                         doc.deleteIn(['payload', 'default-raw'])
@@ -740,7 +1029,7 @@ export function useVisualConfig() {
                     if (values.payloadOverrideRawRules.length > 0) {
                         doc.setIn(
                             ['payload', 'override-raw'],
-                            serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules),
+                            serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules)
                         )
                     } else if (docHas(doc, ['payload', 'override-raw'])) {
                         doc.deleteIn(['payload', 'override-raw'])
@@ -758,7 +1047,7 @@ export function useVisualConfig() {
                 return currentYaml
             }
         },
-        [baselineValues, visualValues],
+        [apiKeysStorage, baselineValues, visualValues]
     )
 
     const setVisualValues = useCallback((newValues: Partial<VisualConfigValues>) => {
@@ -844,7 +1133,7 @@ export const VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS = [
         defaultLabel: 'JSON',
     },
 ] as const satisfies ReadonlyArray<{
-    value: PayloadParamValueType;
-    labelKey: string;
-    defaultLabel: string;
+    value: PayloadParamValueType
+    labelKey: string
+    defaultLabel: string
 }>

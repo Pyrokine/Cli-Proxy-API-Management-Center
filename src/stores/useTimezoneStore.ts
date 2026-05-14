@@ -3,17 +3,17 @@
  * 支持用户选择时区，影响全局日期时间显示
  */
 
-import {create} from 'zustand'
-import {persist} from 'zustand/middleware'
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 const STORAGE_KEY = 'cli-proxy-timezone'
 
 /** 空字符串表示跟随浏览器本地时区 */
-type TimezoneValue = string;
+type TimezoneValue = string
 
 interface TimezoneState {
-    timezone: TimezoneValue;
-    setTimezone: (tz: TimezoneValue) => void;
+    timezone: TimezoneValue
+    setTimezone: (tz: TimezoneValue) => void
 }
 
 /**
@@ -51,8 +51,8 @@ export const useTimezoneStore = create<TimezoneState>()(
                 set({ timezone: tz })
             },
         }),
-        { name: STORAGE_KEY },
-    ),
+        { name: STORAGE_KEY }
+    )
 )
 
 /** 获取当前有效时区（供非组件代码调用） */

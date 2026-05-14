@@ -2,355 +2,356 @@
 @use '../styles/variables.scss' as *;
 
 .dashboard {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-md;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
 }
 
 .header {
-  margin-bottom: $spacing-sm;
+    margin-bottom: $spacing-sm;
 }
 
 .title {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-  margin: 0;
-  line-height: $line-height-heading;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: $line-height-heading;
 }
 
 .subtitle {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  margin: $spacing-xs 0 0 0;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    margin: $spacing-xs 0 0 0;
 }
 
 .connectionCard {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  padding: $spacing-sm $spacing-md;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    padding: $spacing-sm $spacing-md;
+    flex-wrap: wrap;
 }
 
 .connectionStatus {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
 }
 
 .statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-quaternary);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-quaternary);
 
-  &.connected {
-    background: $success-color;
-    box-shadow: 0 0 8px rgba($success-color, 0.5);
-  }
+    &.connected {
+        background: $success-color;
+        box-shadow: 0 0 8px rgba($success-color, 0.5);
+    }
 
-  &.connecting {
-    background: $warning-color;
-    animation: pulse 1s ease-in-out infinite;
-  }
+    &.connecting {
+        background: $warning-color;
+        animation: pulse 1s ease-in-out infinite;
+    }
 
-  &.disconnected {
-    background: $error-color;
-  }
+    &.disconnected {
+        background: $error-color;
+    }
 }
 
 @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
 }
 
 .statusText {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--text-primary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
 }
 
 .connectionInfo {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    flex-wrap: wrap;
 }
 
 .serverUrl {
-  font-family: $font-mono;
-  font-size: $font-size-base;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  padding: 4px 10px;
-  border-radius: $radius-md;
-  border: 1px solid var(--border-color);
+    font-family: $font-mono;
+    font-size: $font-size-base;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    padding: 4px 10px;
+    border-radius: $radius-md;
+    border: 1px solid var(--border-color);
 }
 
 .serverVersion {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--primary-color);
-  background: rgba($primary-color, 0.1);
-  padding: 4px 10px;
-  border-radius: $radius-full;
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--primary-color);
+    background: rgba($primary-color, 0.1);
+    padding: 4px 10px;
+    border-radius: $radius-full;
 }
 
 .buildDate {
-  font-size: $font-size-base;
-  color: var(--text-secondary);
+    font-size: $font-size-base;
+    color: var(--text-secondary);
 }
 
 .statsGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: $spacing-md;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: $spacing-md;
 
-  @media (max-width: $breakpoint-tablet) {
-    grid-template-columns: repeat(2, 1fr);
-  }
+    @media (max-width: $breakpoint-tablet) {
+        grid-template-columns: repeat(2, 1fr);
+    }
 
-  @media (max-width: $breakpoint-xs) {
-    grid-template-columns: 1fr;
-  }
+    @media (max-width: $breakpoint-xs) {
+        grid-template-columns: 1fr;
+    }
 }
 
 .statCard {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: $spacing-sm $spacing-md;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  text-decoration: none;
-  transition: all $transition-fast;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: $spacing-sm $spacing-md;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    text-decoration: none;
+    transition: all $transition-fast;
 
-  &:hover {
-    border-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
-  }
+    &:hover {
+        border-color: var(--primary-color);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        transform: translateY(-2px);
+    }
 }
 
 .statIcon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: $radius-md;
-  background: var(--bg-secondary);
-  color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+    color: var(--primary-color);
 }
 
 .statContent {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .statValue {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  line-height: $line-height-tight;
-  color: var(--text-primary);
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    line-height: $line-height-tight;
+    color: var(--text-primary);
 }
 
 .statLabel {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--text-secondary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
 }
 
 .statSublabel {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  opacity: 0.8;
-  margin-top: 2px;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    margin-top: 2px;
 }
 
 .section {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-md;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
 }
 
 .sectionTitle {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  line-height: $line-height-heading;
-  color: var(--text-primary);
-  margin: 0;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    line-height: $line-height-heading;
+    color: var(--text-primary);
+    margin: 0;
 }
 
 .actionsGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $spacing-sm;
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-sm;
 
-  a {
-    text-decoration: none;
-  }
+    a {
+        text-decoration: none;
+    }
 }
 
 .actionButton {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-sm;
-
-  // Button 内部的 span 需要 flex 对齐图标和文字
-  > span {
     display: inline-flex;
     align-items: center;
     gap: $spacing-sm;
-  }
 
-  svg {
-    flex-shrink: 0;
-  }
+    // Button 内部的 span 需要 flex 对齐图标和文字
+    > span {
+        display: inline-flex;
+        align-items: center;
+        gap: $spacing-sm;
+    }
+
+    svg {
+        flex-shrink: 0;
+    }
 }
 
 .configGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: $spacing-sm;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: $spacing-sm;
 }
 
 .configItem {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  padding: $spacing-sm $spacing-md;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    padding: $spacing-sm $spacing-md;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
 }
 
 .configLabel {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--text-secondary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
 }
 
 .configValue {
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
-  color: var(--text-primary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
 
-  &.enabled {
-    color: $success-color;
-  }
+    &.enabled {
+        color: $success-color;
+    }
 
-  &.disabled {
-    color: var(--text-secondary);
-  }
+    &.disabled {
+        color: var(--text-secondary);
+    }
 }
 
 .configValueMono {
-  font-size: $font-size-base;
-  font-family: $font-mono;
-  color: var(--text-secondary);
-  word-break: break-all;
+    font-size: $font-size-base;
+    font-family: $font-mono;
+    color: var(--text-secondary);
+    word-break: break-all;
 }
 
 .configBadge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 7px;
-  border-radius: $radius-full;
-  border: 1px solid var(--border-color);
-  font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  line-height: $line-height-tight;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 7px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    line-height: $line-height-tight;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .configBadgeRoundRobin {
-  color: var(--primary-color);
-  border-color: rgba($primary-color, 0.24);
-  background: rgba($primary-color, 0.12);
+    color: var(--primary-color);
+    border-color: rgba($primary-color, 0.24);
+    background: rgba($primary-color, 0.12);
 }
 
 .configBadgeFillFirst {
-  color: $success-color;
-  border-color: rgba($success-color, 0.3);
-  background: rgba($success-color, 0.12);
+    color: $success-color;
+    border-color: rgba($success-color, 0.3);
+    background: rgba($success-color, 0.12);
 }
 
 .configBadgeUnknown {
-  color: var(--text-secondary);
-  background: var(--bg-primary);
+    color: var(--text-secondary);
+    background: var(--bg-primary);
 }
 
 .configItemFull {
-  grid-column: 1 / -1;
+    grid-column: 1 / -1;
 }
 
 // Usage stats section
 .usageGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: $spacing-sm;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: $spacing-sm;
 }
 
 .usageCard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-sm;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: $spacing-sm;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    text-align: center;
 }
 
 .usageValue {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  color: var(--primary-color);
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--primary-color);
 }
 
 .usageLabel {
-  font-size: $font-size-sm;
-  color: var(--text-secondary);
-  margin-top: 4px;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    margin-top: 4px;
 }
 
 .usageLoading,
 .usageEmpty {
-  padding: $spacing-md;
-  text-align: center;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+    padding: $spacing-md;
+    text-align: center;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
 }
 
 .viewMoreLink {
-  display: inline-flex;
-  align-items: center;
-  font-size: $font-size-base;
-  color: var(--primary-color);
-  text-decoration: none;
-  margin-top: $spacing-xs;
+    display: inline-flex;
+    align-items: center;
+    font-size: $font-size-base;
+    color: var(--primary-color);
+    text-decoration: none;
+    margin-top: $spacing-xs;
 
-  &:hover {
-    text-decoration: underline;
-  }
+    &:hover {
+        text-decoration: underline;
+    }
 }

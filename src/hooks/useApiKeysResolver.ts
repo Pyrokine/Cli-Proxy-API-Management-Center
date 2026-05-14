@@ -1,14 +1,14 @@
-import {apiKeysApi} from '@/services/api/apiKeys'
-import {useConfigStore} from '@/stores'
-import {normalizeApiKeyList} from '@/utils/format'
-import {useCallback, useRef} from 'react'
+import { apiKeysApi } from '@/services/api/apiKeys'
+import { useConfigStore } from '@/stores'
+import { normalizeApiKeyList } from '@/utils/format'
+import { useCallback, useRef } from 'react'
 
 /**
  * Resolves API keys from config or server with caching.
  * Shared by DashboardPage and SystemPage.
  */
 export function useApiKeysResolver() {
-    const config       = useConfigStore((state) => state.config)
+    const config = useConfigStore((state) => state.config)
     const apiKeysCache = useRef<string[]>([])
 
     const clearCache = useCallback(() => {
@@ -27,7 +27,7 @@ export function useApiKeysResolver() {
         }
 
         try {
-            const list       = await apiKeysApi.list()
+            const list = await apiKeysApi.list()
             const normalized = normalizeApiKeyList(list)
             if (normalized.length) {
                 apiKeysCache.current = normalized

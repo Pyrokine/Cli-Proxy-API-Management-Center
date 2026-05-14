@@ -1,19 +1,19 @@
-import type {VertexFormState} from '@/components/providers'
-import {Input} from '@/components/ui/Input'
-import {ModelInputList} from '@/components/ui/ModelInputList'
-import {modelsToEntries} from '@/components/ui/modelInputListUtils'
+import type { VertexFormState } from '@/components/providers'
+import { Input } from '@/components/ui/Input'
+import { ModelInputList } from '@/components/ui/ModelInputList'
+import { modelsToEntries } from '@/components/ui/modelInputListUtils'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {providersApi} from '@/services/api'
-import type {ProviderKeyConfig} from '@/types'
-import {buildHeaderObject, headersToEntries} from '@/utils/headers'
-import {useTranslation} from 'react-i18next'
-import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField} from './ProviderFormFields'
+import { providersApi } from '@/services/api'
+import type { ProviderKeyConfig } from '@/types'
+import { buildHeaderObject, headersToEntries } from '@/utils/headers'
+import { useTranslation } from 'react-i18next'
+import { ProviderEditShell } from './ProviderEditShell'
+import { HeadersField, PrefixField } from './ProviderFormFields'
 
 // ---- Form helpers ----
 
@@ -29,9 +29,9 @@ const buildEmptyForm = (): VertexFormState => ({
 
 const buildSignature = (form: VertexFormState) =>
     JSON.stringify({
-                       ...buildBaseSignatureFields(form),
-                       models: normalizeModelEntriesForSignature(form.modelEntries),
-                   })
+        ...buildBaseSignatureFields(form),
+        models: normalizeModelEntriesForSignature(form.modelEntries),
+    })
 
 // ---- Page component ----
 
@@ -44,14 +44,14 @@ export function AiProvidersVertexEditPage() {
         buildSignature,
         loadConfigs: async ({ fetchConfig, updateConfigValue, clearCache }) => {
             const [configResult, vertexResult] = await Promise.all([
-                                                                       fetchConfig('vertex-api-key'),
-                                                                       providersApi.getVertexConfigs(),
-                                                                   ])
-            const list                         = Array.isArray(vertexResult)
-                                                 ? (vertexResult as ProviderKeyConfig[])
-                                                 : Array.isArray(configResult)
-                                                   ? (configResult as ProviderKeyConfig[])
-                                                   : []
+                fetchConfig('vertex-api-key'),
+                providersApi.getVertexConfigs(),
+            ])
+            const list = Array.isArray(vertexResult)
+                ? (vertexResult as ProviderKeyConfig[])
+                : Array.isArray(configResult)
+                  ? (configResult as ProviderKeyConfig[])
+                  : []
             updateConfigValue('vertex-api-key', list)
             clearCache('vertex-api-key')
             return list
@@ -63,23 +63,22 @@ export function AiProvidersVertexEditPage() {
         }),
         formToPayload: (form) => ({
             apiKey: form.apiKey.trim(),
-            priority: form.priority !== undefined && Number.isFinite(form.priority)
-                      ? Math.trunc(form.priority)
-                      : undefined,
+            priority:
+                form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : undefined,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: form.modelEntries
-                        .map((entry) => {
-                            const name  = entry.name.trim()
-                            const alias = entry.alias.trim()
-                            if (!name || !alias) {
-                                return null
-                            }
-                            return { name, alias }
-                        })
-                        .filter(Boolean) as ProviderKeyConfig['models'],
+                .map((entry) => {
+                    const name = entry.name.trim()
+                    const alias = entry.alias.trim()
+                    if (!name || !alias) {
+                        return null
+                    }
+                    return { name, alias }
+                })
+                .filter(Boolean) as ProviderKeyConfig['models'],
         }),
         saveConfigs: (configs) => providersApi.saveVertexConfigs(configs),
         validateBeforeSave: (form) => {
@@ -97,20 +96,20 @@ export function AiProvidersVertexEditPage() {
     }
 
     const {
-              form,
-              setForm,
-              loading,
-              saving,
-              error,
-              invalidIndexParam,
-              invalidIndex,
-              canSave,
-              disabled,
-              title,
-              handleSave,
-              handleBack,
-              swipeRef,
-          } = useProviderEditForm<VertexFormState, ProviderKeyConfig>(editOptions)
+        form,
+        setForm,
+        loading,
+        saving,
+        error,
+        invalidIndexParam,
+        invalidIndex,
+        canSave,
+        disabled,
+        title,
+        handleSave,
+        handleBack,
+        swipeRef,
+    } = useProviderEditForm<VertexFormState, ProviderKeyConfig>(editOptions)
 
     return (
         <ProviderEditShell
@@ -152,7 +151,7 @@ export function AiProvidersVertexEditPage() {
                 onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
                 disabled={disabled}
             />
-            <div className='form-group'>
+            <div className="form-group">
                 <label>{t('ai_providers.vertex_models_label')}</label>
                 <ModelInputList
                     entries={form.modelEntries}
@@ -164,7 +163,7 @@ export function AiProvidersVertexEditPage() {
                     removeButtonAriaLabel={t('common.delete')}
                     disabled={disabled}
                 />
-                <div className='hint'>{t('ai_providers.vertex_models_hint')}</div>
+                <div className="hint">{t('ai_providers.vertex_models_hint')}</div>
             </div>
         </ProviderEditShell>
     )

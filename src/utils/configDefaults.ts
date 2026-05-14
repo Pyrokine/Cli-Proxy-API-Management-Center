@@ -1,8 +1,8 @@
-import {isMap, parse as parseYaml, parseDocument} from 'yaml'
+import { isMap, parse as parseYaml, parseDocument } from 'yaml'
 
 /**
- * 完整配置模板，包含所有可配置字段的默认值和分区注释。
- * 当后端返回的 YAML 缺少某些字段时，用此模板补充。
+ * 完整配置模板，包含所有可配置字段的默认值和分区注释
+ * 当后端返回的 YAML 缺少某些字段时，用此模板补充
  */
 const CONFIG_TEMPLATE = `\
 # ── 服务器 ──────────────────────────
@@ -33,6 +33,14 @@ commercial-mode: false
 logging-to-file: false
 # logs-max-total-size-mb: 0
 usage-statistics-enabled: false
+# usage-retention:
+#   days: 30                   # -1 to disable
+#   max-db-size-mb: 1024       # 0 to disable
+#   warning-threshold-pct: 80  # warn when the DB reaches this percentage of max-db-size-mb
+
+# ── 管理面板 ────────────────────────
+auto-refresh-interval: 3     # seconds; 0 to disable
+model-refresh-interval: 3    # hours; 0 to disable
 
 # ── 网络 ────────────────────────────
 # proxy-url: ""
@@ -50,6 +58,12 @@ quota-exceeded:
   switch-project: true
   switch-preview-model: true
 
+# ── 配额刷新 ────────────────────────
+# quota-refresh:
+#   enabled: false
+#   interval: 600       # seconds (10 minutes)
+#   max-interval: 1800  # seconds (30 minutes)
+
 # ── 流式传输 ────────────────────────
 streaming:
   keepalive-seconds: 0
@@ -64,9 +78,9 @@ streaming:
 `
 
 /**
- * 将后端返回的 YAML 与完整默认模板合并。
+ * 将后端返回的 YAML 与完整默认模板合并
  *
- * 策略：以模板为骨架，将后端的值叠加上去。
+ * 策略：以模板为骨架，将后端的值叠加上去
  * - 后端有的字段保留后端值
  * - 后端缺失的字段保留模板默认值（含注释）
  * - 后端有但模板没有的字段追加到末尾

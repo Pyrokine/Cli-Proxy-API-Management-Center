@@ -2,9 +2,9 @@
  * 配置相关 API
  */
 
-import type {Config} from '@/types'
-import {apiClient} from './client'
-import {normalizeConfigResponse} from './transformers'
+import type { Config } from '@/types'
+import { apiClient } from './client'
+import { normalizeConfigResponse } from './transformers'
 
 // noinspection JSUnusedLocalSymbols,JSUnusedGlobalSymbols
 export const configApi = {
@@ -71,8 +71,8 @@ export const configApi = {
      * 获取日志总大小上限（MB）
      */
     async getLogsMaxTotalSizeMb(): Promise<number> {
-        const data   = await apiClient.get<Record<string, unknown>>('/logs-max-total-size-mb')
-        const value  = data?.['logs-max-total-size-mb'] ?? data?.logsMaxTotalSizeMb ?? 0
+        const data = await apiClient.get<Record<string, unknown>>('/logs-max-total-size-mb')
+        const value = data?.['logs-max-total-size-mb'] ?? data?.logsMaxTotalSizeMb ?? 0
         const parsed = Number(value)
         return Number.isFinite(parsed) ? parsed : 0
     },
@@ -104,7 +104,7 @@ export const configApi = {
      * 获取路由策略
      */
     async getRoutingStrategy(): Promise<string> {
-        const data     = await apiClient.get<Record<string, unknown>>('/routing/strategy')
+        const data = await apiClient.get<Record<string, unknown>>('/routing/strategy')
         const strategy = data?.strategy ?? data?.['routing-strategy'] ?? data?.routingStrategy
         return typeof strategy === 'string' ? strategy : 'round-robin'
     },
@@ -118,10 +118,10 @@ export const configApi = {
      * 获取自动刷新间隔（秒）
      */
     async getAutoRefreshInterval(): Promise<number> {
-        const data   = await apiClient.get<Record<string, unknown>>('/auto-refresh-interval')
-        const value  = data?.['auto-refresh-interval'] ?? data?.autoRefreshInterval ?? 60
+        const data = await apiClient.get<Record<string, unknown>>('/auto-refresh-interval')
+        const value = data?.['auto-refresh-interval'] ?? data?.autoRefreshInterval ?? 3
         const parsed = Number(value)
-        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 3
     },
 
     /**

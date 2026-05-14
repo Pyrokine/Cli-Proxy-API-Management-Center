@@ -2,15 +2,15 @@
  * Vertex credential import API
  */
 
-import {apiClient} from './client'
+import { apiClient } from './client'
 
 interface VertexImportResponse {
-    status: 'ok';
-    project_id?: string;
-    email?: string;
-    location?: string;
-    'auth-file'?: string;
-    auth_file?: string;
+    status: 'ok'
+    project_id?: string
+    email?: string
+    location?: string
+    'auth-file'?: string
+    auth_file?: string
 }
 
 export const vertexApi = {

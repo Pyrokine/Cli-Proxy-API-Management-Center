@@ -1,102 +1,102 @@
-import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
-import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
-import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
-import type {RawConfigSection} from '@/types/config'
-import {normalizeHeaderEntries} from '@/utils/headers'
-import {parseIndexParam} from '@/utils/helpers'
-import {type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState} from 'react'
-import {useTranslation} from 'react-i18next'
-import {useParams} from 'react-router-dom'
+import { useEditPageNavigation } from '@/hooks/useEditPageNavigation'
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
+import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores'
+import type { RawConfigSection } from '@/types/config'
+import { normalizeHeaderEntries } from '@/utils/headers'
+import { parseIndexParam } from '@/utils/helpers'
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useParams } from 'react-router-dom'
 
 // ---- Generic form state constraint ----
 
 interface BaseFormState {
-    apiKey: string;
-    priority?: number;
-    prefix?: string;
-    baseUrl?: string;
-    proxyUrl?: string;
-    headers: Array<{ key: string; value: string }>;
-    modelEntries: Array<{ name: string; alias: string }>;
+    apiKey: string
+    priority?: number
+    prefix?: string
+    baseUrl?: string
+    proxyUrl?: string
+    headers: Array<{ key: string; value: string }>
+    modelEntries: Array<{ name: string; alias: string }>
 }
 
 // ---- Configuration for provider-specific behavior ----
 
 export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
     /** Config key used in config store (e.g. 'codex-api-key') */
-    configKey: RawConfigSection;
+    configKey: RawConfigSection
 
     /** Build a blank form */
-    buildEmptyForm: () => TForm;
+    buildEmptyForm: () => TForm
 
     /**
      * Build a deterministic signature string from the form for dirty checking.
      * Must use consistent normalization so baseline and current can be compared.
      */
-    buildSignature: (form: TForm) => string;
+    buildSignature: (form: TForm) => string
 
     /**
      * Load configs from server. Receives fetchConfig + extra helpers.
      * Should return the config array.
      */
     loadConfigs: (helpers: {
-        fetchConfig: (key: RawConfigSection) => Promise<unknown>;
-        updateConfigValue: (key: RawConfigSection, value: unknown) => void;
-        clearCache: (key: RawConfigSection) => void;
-    }) => Promise<TConfig[]>;
+        fetchConfig: (key: RawConfigSection) => Promise<unknown>
+        updateConfigValue: (key: RawConfigSection, value: unknown) => void
+        clearCache: (key: RawConfigSection) => void
+    }) => Promise<TConfig[]>
 
     /** Convert a stored config entry into form state */
-    configToForm: (config: TConfig) => TForm;
+    configToForm: (config: TConfig) => TForm
 
     /** Convert form state to the payload for saving */
-    formToPayload: (form: TForm) => TConfig;
+    formToPayload: (form: TForm) => TConfig
 
     /**
      * Save the full config list to server.
      */
-    saveConfigs: (configs: TConfig[]) => Promise<unknown>;
+    saveConfigs: (configs: TConfig[]) => Promise<unknown>
 
     /** Optional pre-save validation. Return an error notification key to abort, or undefined to proceed. */
-    validateBeforeSave?: (form: TForm) => string | undefined;
+    validateBeforeSave?: (form: TForm) => string | undefined
 
     /** Translation keys */
     i18n: {
-        editTitle: string;
-        addTitle: string;
-        saveSuccessEdit: string;
-        saveSuccessAdd: string;
-    };
+        editTitle: string
+        addTitle: string
+        saveSuccessEdit: string
+        saveSuccessAdd: string
+    }
 }
 
 // ---- Return type ----
 
 interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig> {
     // Form
-    form: TForm;
-    setForm: Dispatch<SetStateAction<TForm>>;
-    configs: TConfig[];
+    form: TForm
+    setForm: Dispatch<SetStateAction<TForm>>
+    configs: TConfig[]
 
     // State
-    loading: boolean;
-    saving: boolean;
-    error: string;
-    isDirty: boolean;
+    loading: boolean
+    saving: boolean
+    error: string
+    isDirty: boolean
 
     // Index
-    editIndex: number | null;
-    invalidIndexParam: boolean;
-    invalidIndex: boolean;
+    editIndex: number | null
+    invalidIndexParam: boolean
+    invalidIndex: boolean
 
     // Controls
-    disableControls: boolean;
-    canSave: boolean;
-    disabled: boolean;
-    title: string;
+    disableControls: boolean
+    canSave: boolean
+    disabled: boolean
+    title: string
 
     // Actions
-    handleSave: () => Promise<void>;
-    handleBack: () => void;
-    swipeRef: ReturnType<typeof useEditPageNavigation>['swipeRef'];
+    handleSave: () => Promise<void>
+    handleBack: () => void
+    swipeRef: ReturnType<typeof useEditPageNavigation>['swipeRef']
 }
 
 /**
@@ -104,30 +104,30 @@ interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig> {
  * Encapsulates: config loading, form state, dirty tracking, unsaved-changes guard, save logic.
  */
 export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
-    config: ProviderEditFormConfig<TForm, TConfig>,
+    config: ProviderEditFormConfig<TForm, TConfig>
 ): ProviderEditFormReturn<TForm, TConfig> {
-    const { t }  = useTranslation()
+    const { t } = useTranslation()
     const params = useParams<{ index?: string }>()
 
     const { showNotification } = useNotificationStore()
-    const connectionStatus     = useAuthStore((state) => state.connectionStatus)
-    const disableControls      = connectionStatus !== 'connected'
+    const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const disableControls = connectionStatus !== 'connected'
 
-    const fetchConfig       = useConfigStore((state) => state.fetchConfig)
+    const fetchConfig = useConfigStore((state) => state.fetchConfig)
     const updateConfigValue = useConfigStore((state) => state.updateConfigValue)
-    const clearCache        = useConfigStore((state) => state.clearCache)
+    const clearCache = useConfigStore((state) => state.clearCache)
 
-    const [configs, setConfigs]                     = useState<TConfig[]>([])
-    const [loading, setLoading]                     = useState(true)
-    const [saving, setSaving]                       = useState(false)
-    const [error, setError]                         = useState('')
-    const [form, setForm]                           = useState<TForm>(() => config.buildEmptyForm())
+    const [configs, setConfigs] = useState<TConfig[]>([])
+    const [loading, setLoading] = useState(true)
+    const [saving, setSaving] = useState(false)
+    const [error, setError] = useState('')
+    const [form, setForm] = useState<TForm>(() => config.buildEmptyForm())
     const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(config.buildEmptyForm()))
 
     // ---- Index parsing ----
 
-    const hasIndexParam     = typeof params.index === 'string'
-    const editIndex         = useMemo(() => parseIndexParam(params.index), [params.index])
+    const hasIndexParam = typeof params.index === 'string'
+    const editIndex = useMemo(() => parseIndexParam(params.index), [params.index])
     const invalidIndexParam = hasIndexParam && editIndex === null
 
     const initialData = useMemo(() => {
@@ -149,30 +149,35 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
 
     useEffect(() => {
         let cancelled = false
-        setLoading(true)
-        setError('')
+        queueMicrotask(() => {
+            if (cancelled) {
+                return
+            }
+            setLoading(true)
+            setError('')
 
-        config
-            .loadConfigs({ fetchConfig, updateConfigValue, clearCache })
-            .then((result) => {
-                if (cancelled) {
-                    return
-                }
-                setConfigs(result)
-            })
-            .catch((err: unknown) => {
-                if (cancelled) {
-                    return
-                }
-                const message = err instanceof Error ? err.message : ''
-                setError(message || t('notification.refresh_failed'))
-            })
-            .finally(() => {
-                if (cancelled) {
-                    return
-                }
-                setLoading(false)
-            })
+            config
+                .loadConfigs({ fetchConfig, updateConfigValue, clearCache })
+                .then((result) => {
+                    if (cancelled) {
+                        return
+                    }
+                    setConfigs(result)
+                })
+                .catch((err: unknown) => {
+                    if (cancelled) {
+                        return
+                    }
+                    const message = err instanceof Error ? err.message : ''
+                    setError(message || t('notification.refresh_failed'))
+                })
+                .finally(() => {
+                    if (cancelled) {
+                        return
+                    }
+                    setLoading(false)
+                })
+        })
 
         return () => {
             cancelled = true
@@ -187,44 +192,42 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
             return
         }
 
-        if (initialData) {
-            const nextForm = config.configToForm(initialData)
+        queueMicrotask(() => {
+            if (initialData) {
+                const nextForm = config.configToForm(initialData)
+                setForm(nextForm)
+                setBaselineSignature(config.buildSignature(nextForm))
+                return
+            }
+            const nextForm = config.buildEmptyForm()
             setForm(nextForm)
             setBaselineSignature(config.buildSignature(nextForm))
-            return
-        }
-        const nextForm = config.buildEmptyForm()
-        setForm(nextForm)
-        setBaselineSignature(config.buildSignature(nextForm))
+        })
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialData, loading])
 
     // ---- Dirty tracking ----
 
     const currentSignature = useMemo(() => config.buildSignature(form), [config, form])
-    const isDirty          = baselineSignature !== currentSignature
+    const isDirty = baselineSignature !== currentSignature
 
     // ---- Unsaved changes guard ----
 
-    const canSave  = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex
+    const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex
     const canGuard = !loading && !saving && !invalidIndexParam && !invalidIndex
 
     const { allowNextNavigation } = useUnsavedChangesGuard({
-                                                               enabled: canGuard,
-                                                               shouldBlock: ({
-                                                                                 currentLocation,
-                                                                                 nextLocation,
-                                                                             }) => isDirty &&
-                                                                                   currentLocation.pathname !==
-                                                                                   nextLocation.pathname,
-                                                               dialog: {
-                                                                   title: t('common.unsaved_changes_title'),
-                                                                   message: t('common.unsaved_changes_message'),
-                                                                   confirmText: t('common.leave'),
-                                                                   cancelText: t('common.stay'),
-                                                                   variant: 'danger',
-                                                               },
-                                                           })
+        enabled: canGuard,
+        shouldBlock: ({ currentLocation, nextLocation }) =>
+            isDirty && currentLocation.pathname !== nextLocation.pathname,
+        dialog: {
+            title: t('common.unsaved_changes_title'),
+            message: t('common.unsaved_changes_message'),
+            confirmText: t('common.leave'),
+            cancelText: t('common.stay'),
+            variant: 'danger',
+        },
+    })
 
     // ---- Save ----
 
@@ -247,16 +250,16 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
             const payload = config.formToPayload(form)
 
             const nextList =
-                      editIndex !== null ?
-                      configs.map((item, idx) => (idx === editIndex ? payload : item)) :
-                          [...configs, payload]
+                editIndex !== null
+                    ? configs.map((item, idx) => (idx === editIndex ? payload : item))
+                    : [...configs, payload]
 
             await config.saveConfigs(nextList)
             updateConfigValue(config.configKey, nextList)
             clearCache(config.configKey)
             showNotification(
                 editIndex !== null ? t(config.i18n.saveSuccessEdit) : t(config.i18n.saveSuccessAdd),
-                'success',
+                'success'
             )
             allowNextNavigation()
             setBaselineSignature(config.buildSignature(form))
@@ -269,18 +272,18 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
             setSaving(false)
         }
     }, [
-                                       allowNextNavigation,
-                                       canSave,
-                                       clearCache,
-                                       config,
-                                       configs,
-                                       editIndex,
-                                       form,
-                                       handleBack,
-                                       showNotification,
-                                       t,
-                                       updateConfigValue,
-                                   ])
+        allowNextNavigation,
+        canSave,
+        clearCache,
+        config,
+        configs,
+        editIndex,
+        form,
+        handleBack,
+        showNotification,
+        t,
+        updateConfigValue,
+    ])
 
     return {
         form,
@@ -324,11 +327,11 @@ export const buildBaseSignatureFields = (form: BaseFormState) => ({
  */
 export const normalizeModelEntriesForSignature = (
     entries: Array<{ name: string; alias: string }>,
-    normalizeName: (name: string) => string = (name) => String(name ?? '').trim(),
+    normalizeName: (name: string) => string = (name) => String(name ?? '').trim()
 ) =>
     (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
         const name = normalizeName(entry?.name ?? '')
-        let alias  = String(entry?.alias ?? '').trim()
+        let alias = String(entry?.alias ?? '').trim()
         if (name && alias === name) {
             alias = ''
         }

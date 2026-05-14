@@ -1,55 +1,55 @@
-import {IconBot, IconFileText, IconKey, IconSatellite} from '@/components/ui/icons'
-import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
-import {apiKeysApi, authFilesApi, providersApi} from '@/services/api'
-import {useAuthStore, useConfigStore, useModelsStore} from '@/stores'
-import {formatDateTime} from '@/utils/format'
-import {type ReactNode, useCallback, useEffect, useState} from 'react'
-import {useTranslation} from 'react-i18next'
-import {Link} from 'react-router-dom'
+import { IconBot, IconKey, IconSatellite } from '@/components/ui/icons'
+import { useApiKeysResolver } from '@/hooks/useApiKeysResolver'
+import { apiKeysApi, authFilesApi, providersApi } from '@/services/api'
+import { useAuthStore, useConfigStore, useModelsStore } from '@/stores'
+import { formatDateTime } from '@/utils/format'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import styles from './DashboardPage.module.scss'
 
 interface QuickStat {
-    label: string;
-    value: number | string;
-    icon: ReactNode;
-    path: string;
-    loading?: boolean;
-    sublabel?: string;
+    label: string
+    value: number | string
+    icon: ReactNode
+    path: string
+    loading?: boolean
+    sublabel?: string
 }
 
 interface ProviderStats {
-    gemini: number | null;
-    codex: number | null;
-    claude: number | null;
-    openai: number | null;
+    gemini: number | null
+    codex: number | null
+    claude: number | null
+    openai: number | null
 }
 
 export function DashboardPage() {
-    const { t, i18n }      = useTranslation()
+    const { t, i18n } = useTranslation()
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const serverVersion    = useAuthStore((state) => state.serverVersion)
-    const serverBuildDate  = useAuthStore((state) => state.serverBuildDate)
-    const apiBase          = useAuthStore((state) => state.apiBase)
-    const config           = useConfigStore((state) => state.config)
+    const serverVersion = useAuthStore((state) => state.serverVersion)
+    const serverBuildDate = useAuthStore((state) => state.serverBuildDate)
+    const apiBase = useAuthStore((state) => state.apiBase)
+    const config = useConfigStore((state) => state.config)
 
-    const models               = useModelsStore((state) => state.models)
-    const modelsLoading        = useModelsStore((state) => state.loading)
+    const models = useModelsStore((state) => state.models)
+    const modelsLoading = useModelsStore((state) => state.loading)
     const fetchModelsFromStore = useModelsStore((state) => state.fetchModels)
 
     const [stats, setStats] = useState<{
-        apiKeys: number | null;
-        authFiles: number | null;
+        apiKeys: number | null
+        authFiles: number | null
     }>({
-           apiKeys: null,
-           authFiles: null,
-       })
+        apiKeys: null,
+        authFiles: null,
+    })
 
     const [providerStats, setProviderStats] = useState<ProviderStats>({
-                                                                          gemini: null,
-                                                                          codex: null,
-                                                                          claude: null,
-                                                                          openai: null,
-                                                                      })
+        gemini: null,
+        codex: null,
+        claude: null,
+        openai: null,
+    })
 
     const [loading, setLoading] = useState(true)
 
@@ -65,7 +65,7 @@ export function DashboardPage() {
         }
 
         try {
-            const apiKeys    = await resolveApiKeys()
+            const apiKeys = await resolveApiKeys()
             const primaryKey = apiKeys[0]
             await fetchModelsFromStore(apiBase, primaryKey)
         } catch {
@@ -78,57 +78,59 @@ export function DashboardPage() {
             setLoading(true)
             try {
                 const results = await Promise.allSettled([
-                                                             apiKeysApi.list(),
-                                                             authFilesApi.list(),
-                                                             providersApi.getGeminiKeys(),
-                                                             providersApi.getCodexConfigs(),
-                                                             providersApi.getClaudeConfigs(),
-                                                             providersApi.getOpenAIProviders(),
-                                                         ])
+                    apiKeysApi.list(),
+                    authFilesApi.list(),
+                    providersApi.getGeminiKeys(),
+                    providersApi.getCodexConfigs(),
+                    providersApi.getClaudeConfigs(),
+                    providersApi.getOpenAIProviders(),
+                ])
 
                 const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] = results
 
                 setStats({
-                             apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
-                             authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null,
-                         })
+                    apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
+                    authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null,
+                })
 
                 setProviderStats({
-                                     gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
-                                     codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
-                                     claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
-                                     openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null,
-                                 })
+                    gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
+                    codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
+                    claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
+                    openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null,
+                })
             } finally {
                 setLoading(false)
             }
         }
 
-        if (connectionStatus === 'connected') {
-            void fetchStats()
-            void fetchModels()
-        } else {
-            setLoading(false)
-        }
+        queueMicrotask(() => {
+            if (connectionStatus === 'connected') {
+                void fetchStats()
+                void fetchModels()
+            } else {
+                setLoading(false)
+            }
+        })
     }, [connectionStatus, fetchModels])
 
-    // Calculate total provider keys only when all provider stats are available.
     const providerStatsReady =
-              providerStats.gemini !== null &&
-              providerStats.codex !== null &&
-              providerStats.claude !== null &&
-              providerStats.openai !== null
-    const hasProviderStats   =
-              providerStats.gemini !== null ||
-              providerStats.codex !== null ||
-              providerStats.claude !== null ||
-              providerStats.openai !== null
-    const totalProviderKeys  = providerStatsReady
-                               ? (providerStats.gemini ?? 0) +
-                                 (providerStats.codex ?? 0) +
-                                 (providerStats.claude ?? 0) +
-                                 (providerStats.openai ?? 0)
-                               : 0
+        providerStats.gemini !== null &&
+        providerStats.codex !== null &&
+        providerStats.claude !== null &&
+        providerStats.openai !== null
+    const hasProviderStats =
+        providerStats.gemini !== null ||
+        providerStats.codex !== null ||
+        providerStats.claude !== null ||
+        providerStats.openai !== null
+    const totalProviderKeys = providerStatsReady
+        ? (providerStats.gemini ?? 0) +
+          (providerStats.codex ?? 0) +
+          (providerStats.claude ?? 0) +
+          (providerStats.openai ?? 0)
+        : 0
+    const totalCredentials = totalProviderKeys + (stats.authFiles ?? 0)
 
     const quickStats: QuickStat[] = [
         {
@@ -140,27 +142,18 @@ export function DashboardPage() {
             sublabel: t('nav.config_management'),
         },
         {
-            label: t('nav.ai_providers'),
-            value: loading ? '-' : providerStatsReady ? totalProviderKeys : '-',
+            label: t('dashboard.total_credentials'),
+            value: loading ? '-' : totalCredentials,
             icon: <IconBot size={24} />,
             path: '/credentials',
             loading: loading,
-            sublabel: hasProviderStats
-                      ? t('dashboard.provider_keys_detail', {
-                    gemini: providerStats.gemini ?? '-',
-                    codex: providerStats.codex ?? '-',
-                    claude: providerStats.claude ?? '-',
-                    openai: providerStats.openai ?? '-',
-                })
-                      : undefined,
-        },
-        {
-            label: t('nav.auth_files'),
-            value: stats.authFiles ?? '-',
-            icon: <IconFileText size={24} />,
-            path: '/credentials',
-            loading: loading && stats.authFiles === null,
-            sublabel: t('dashboard.oauth_credentials'),
+            sublabel:
+                hasProviderStats || stats.authFiles !== null
+                    ? t('dashboard.credentials_detail', {
+                          apiKeys: totalProviderKeys,
+                          authFiles: stats.authFiles ?? 0,
+                      })
+                    : undefined,
         },
         {
             label: t('dashboard.available_models'),
@@ -172,21 +165,21 @@ export function DashboardPage() {
         },
     ]
 
-    const routingStrategyRaw        = config?.routingStrategy?.trim() || ''
-    const routingStrategyDisplay    = !routingStrategyRaw
-                                      ? '-'
-                                      : routingStrategyRaw === 'round-robin'
-                                        ? t('basic_settings.routing_strategy_round_robin')
-                                        : routingStrategyRaw === 'fill-first'
-                                          ? t('basic_settings.routing_strategy_fill_first')
-                                          : routingStrategyRaw
+    const routingStrategyRaw = config?.routingStrategy?.trim() || ''
+    const routingStrategyDisplay = !routingStrategyRaw
+        ? '-'
+        : routingStrategyRaw === 'round-robin'
+          ? t('basic_settings.routing_strategy_round_robin')
+          : routingStrategyRaw === 'fill-first'
+            ? t('basic_settings.routing_strategy_fill_first')
+            : routingStrategyRaw
     const routingStrategyBadgeClass = !routingStrategyRaw
-                                      ? styles.configBadgeUnknown
-                                      : routingStrategyRaw === 'round-robin'
-                                        ? styles.configBadgeRoundRobin
-                                        : routingStrategyRaw === 'fill-first'
-                                          ? styles.configBadgeFillFirst
-                                          : styles.configBadgeUnknown
+        ? styles.configBadgeUnknown
+        : routingStrategyRaw === 'round-robin'
+          ? styles.configBadgeRoundRobin
+          : routingStrategyRaw === 'fill-first'
+            ? styles.configBadgeFillFirst
+            : styles.configBadgeUnknown
 
     return (
         <div className={styles.dashboard}>
@@ -197,29 +190,30 @@ export function DashboardPage() {
 
             <div className={styles.connectionCard}>
                 <div className={styles.connectionStatus}>
-          <span
-              className={`${styles.statusDot} ${
-                  connectionStatus === 'connected'
-                  ? styles.connected
-                  : connectionStatus === 'connecting'
-                    ? styles.connecting
-                    : styles.disconnected
-              }`}
-          />
+                    <span
+                        className={`${styles.statusDot} ${
+                            connectionStatus === 'connected'
+                                ? styles.connected
+                                : connectionStatus === 'connecting'
+                                  ? styles.connecting
+                                  : styles.disconnected
+                        }`}
+                    />
                     <span className={styles.statusText}>
-            {t(
-                connectionStatus === 'connected'
-                ? 'common.connected'
-                : connectionStatus === 'connecting'
-                  ? 'common.connecting'
-                  : 'common.disconnected',
-            )}
-          </span>
+                        {t(
+                            connectionStatus === 'connected'
+                                ? 'common.connected'
+                                : connectionStatus === 'connecting'
+                                  ? 'common.connecting'
+                                  : 'common.disconnected'
+                        )}
+                    </span>
                 </div>
                 <div className={styles.connectionInfo}>
                     <span className={styles.serverUrl}>{apiBase || '-'}</span>
-                    {serverVersion &&
-                     <span className={styles.serverVersion}>v{serverVersion.trim().replace(/^[vV]+/, '')}</span>}
+                    {serverVersion && (
+                        <span className={styles.serverVersion}>v{serverVersion.trim().replace(/^[vV]+/, '')}</span>
+                    )}
                     {serverBuildDate && (
                         <span className={styles.buildDate}>{formatDateTime(serverBuildDate, i18n.language)}</span>
                     )}
@@ -233,9 +227,9 @@ export function DashboardPage() {
                         <div className={styles.statContent}>
                             <span className={styles.statValue}>{stat.loading ? '...' : stat.value}</span>
                             <span className={styles.statLabel}>{stat.label}</span>
-                            {stat.sublabel &&
-                             !stat.loading &&
-                             <span className={styles.statSublabel}>{stat.sublabel}</span>}
+                            {stat.sublabel && !stat.loading && (
+                                <span className={styles.statSublabel}>{stat.sublabel}</span>
+                            )}
                         </div>
                     </Link>
                 ))}
@@ -248,27 +242,30 @@ export function DashboardPage() {
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.debug_enable')}</span>
                             <span
-                                className={`${styles.configValue} ${config.debug ? styles.enabled : styles.disabled}`}>
-                {config.debug ? t('common.yes') : t('common.no')}
-              </span>
+                                className={`${styles.configValue} ${config.debug ? styles.enabled : styles.disabled}`}
+                            >
+                                {config.debug ? t('common.yes') : t('common.no')}
+                            </span>
                         </div>
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.usage_statistics_enable')}</span>
                             <span
-                                className={`${styles.configValue} ${config.usageStatisticsEnabled ?
-                                                                    styles.enabled :
-                                                                    styles.disabled}`}
+                                className={`${styles.configValue} ${
+                                    config.usageStatisticsEnabled ? styles.enabled : styles.disabled
+                                }`}
                             >
-                {config.usageStatisticsEnabled ? t('common.yes') : t('common.no')}
-              </span>
+                                {config.usageStatisticsEnabled ? t('common.yes') : t('common.no')}
+                            </span>
                         </div>
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.logging_to_file_enable')}</span>
-                            <span className={`${styles.configValue} ${config.loggingToFile ?
-                                                                      styles.enabled :
-                                                                      styles.disabled}`}>
-                {config.loggingToFile ? t('common.yes') : t('common.no')}
-              </span>
+                            <span
+                                className={`${styles.configValue} ${
+                                    config.loggingToFile ? styles.enabled : styles.disabled
+                                }`}
+                            >
+                                {config.loggingToFile ? t('common.yes') : t('common.no')}
+                            </span>
                         </div>
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.retry_count_label')}</span>
@@ -277,11 +274,10 @@ export function DashboardPage() {
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('basic_settings.ws_auth_enable')}</span>
                             <span
-                                className={`${styles.configValue} ${
-                                    config.wsAuth ? styles.enabled : styles.disabled
-                                }`}>
-                {config.wsAuth ? t('common.yes') : t('common.no')}
-              </span>
+                                className={`${styles.configValue} ${config.wsAuth ? styles.enabled : styles.disabled}`}
+                            >
+                                {config.wsAuth ? t('common.yes') : t('common.no')}
+                            </span>
                         </div>
                         <div className={styles.configItem}>
                             <span className={styles.configLabel}>{t('dashboard.routing_strategy')}</span>
@@ -296,7 +292,7 @@ export function DashboardPage() {
                             </div>
                         )}
                     </div>
-                    <Link to='/config' className={styles.viewMoreLink}>
+                    <Link to="/config" className={styles.viewMoreLink}>
                         {t('dashboard.edit_settings')} →
                     </Link>
                 </div>

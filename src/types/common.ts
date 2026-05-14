@@ -2,22 +2,22 @@
  * 通用类型定义
  */
 
-export type Theme = 'light' | 'white' | 'dark' | 'auto';
+export type Theme = 'light' | 'white' | 'dark' | 'auto'
 
-export type Language = 'zh-CN' | 'en' | 'ru';
+export type Language = 'zh-CN' | 'en' | 'ru'
 
-export type NotificationType = 'info' | 'success' | 'warning' | 'error';
+export type NotificationType = 'info' | 'success' | 'warning' | 'error'
 
 export interface Notification {
-    id: string;
-    message: string;
-    type: NotificationType;
-    duration?: number;
+    id: string
+    message: string
+    type: NotificationType
+    duration?: number
 }
 
 export interface PaginationState {
-    currentPage: number;
-    pageSize: number;
-    totalPages: number;
-    totalItems?: number;
+    currentPage: number
+    pageSize: number
+    totalPages: number
+    totalItems?: number
 }

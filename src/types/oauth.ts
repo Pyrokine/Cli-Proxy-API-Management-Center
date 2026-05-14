@@ -5,7 +5,7 @@
 
 // OAuth 模型别名
 export interface OAuthModelAliasEntry {
-    name: string;
-    alias: string;
-    fork?: boolean;
+    name: string
+    alias: string
+    fork?: boolean
 }

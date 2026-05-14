@@ -1,22 +1,22 @@
-import type {ProviderFormState} from '@/components/providers'
-import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {Input} from '@/components/ui/Input'
-import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
-import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {useModelDiscovery} from '@/hooks/useModelDiscovery'
+import type { ProviderFormState } from '@/components/providers'
+import { excludedModelsToText, parseTextList } from '@/components/providers/utils'
+import { Input } from '@/components/ui/Input'
+import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils'
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
+import { useModelDiscovery } from '@/hooks/useModelDiscovery'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {modelsApi, providersApi} from '@/services/api'
-import type {ProviderKeyConfig} from '@/types'
-import {buildHeaderObject, headersToEntries} from '@/utils/headers'
-import {getErrorMessage} from '@/utils/helpers'
-import {useTranslation} from 'react-i18next'
-import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField, PriorityField, ProviderModelSection} from './ProviderFormFields'
+import { modelsApi, providersApi } from '@/services/api'
+import type { ProviderKeyConfig } from '@/types'
+import { buildHeaderObject, headersToEntries } from '@/utils/headers'
+import { getErrorMessage } from '@/utils/helpers'
+import { useTranslation } from 'react-i18next'
+import { ProviderEditShell } from './ProviderEditShell'
+import { HeadersField, PrefixField, PriorityField, ProviderModelSection } from './ProviderFormFields'
 
 // ---- Form helpers ----
 
@@ -36,11 +36,11 @@ const buildEmptyForm = (): ProviderFormState => ({
 
 const buildSignature = (form: ProviderFormState) =>
     JSON.stringify({
-                       ...buildBaseSignatureFields(form),
-                       websockets: Boolean(form.websockets),
-                       models: normalizeModelEntriesForSignature(form.modelEntries),
-                       excludedModels: parseTextList(form.excludedText ?? ''),
-                   })
+        ...buildBaseSignatureFields(form),
+        websockets: Boolean(form.websockets),
+        models: normalizeModelEntriesForSignature(form.modelEntries),
+        excludedModels: parseTextList(form.excludedText ?? ''),
+    })
 
 // ---- Page component ----
 
@@ -89,21 +89,21 @@ export function AiProvidersCodexEditPage() {
     }
 
     const {
-              form,
-              setForm,
-              loading,
-              saving,
-              error,
-              invalidIndexParam,
-              invalidIndex,
-              disableControls,
-              canSave,
-              disabled,
-              title,
-              handleSave,
-              handleBack,
-              swipeRef,
-          } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>(editOptions)
+        form,
+        setForm,
+        loading,
+        saving,
+        error,
+        invalidIndexParam,
+        invalidIndex,
+        disableControls,
+        canSave,
+        disabled,
+        title,
+        handleSave,
+        handleBack,
+        swipeRef,
+    } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>(editOptions)
 
     // ---- Model discovery ----
 
@@ -114,18 +114,16 @@ export function AiProvidersCodexEditPage() {
         {
             buildEndpoint: (baseUrl) => modelsApi.buildV1ModelsEndpoint(baseUrl),
             fetchModels: (baseUrl, apiKey, headers) => {
-                const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() ===
-                                                                                  'authorization')
+                const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
                 return modelsApi.fetchV1ModelsViaApiCall(baseUrl, hasCustomAuthorization ? undefined : apiKey, headers)
             },
             canAutoFetch: (apiKey, headers) => {
-                const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() ===
-                                                                                  'authorization')
+                const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
                 return Boolean(apiKey) || hasCustomAuthorization
             },
             buildErrorMessage: (err) => `${t('ai_providers.codex_models_fetch_error')}: ${getErrorMessage(err)}`,
             i18nPrefix: 'codex',
-        },
+        }
     )
 
     const canOpenDiscovery = discovery.canOpen && Boolean((form.baseUrl ?? '').trim())
@@ -157,7 +155,7 @@ export function AiProvidersCodexEditPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
                 disabled={disabled}
             />
-            <div className='form-group'>
+            <div className="form-group">
                 <label>{t('ai_providers.codex_websockets_label')}</label>
                 <ToggleSwitch
                     checked={Boolean(form.websockets)}
@@ -165,7 +163,7 @@ export function AiProvidersCodexEditPage() {
                     disabled={disabled}
                     ariaLabel={t('ai_providers.codex_websockets_label')}
                 />
-                <div className='hint'>{t('ai_providers.codex_websockets_hint')}</div>
+                <div className="hint">{t('ai_providers.codex_websockets_hint')}</div>
             </div>
             <Input
                 label={t('ai_providers.codex_add_modal_proxy_label')}
@@ -184,7 +182,7 @@ export function AiProvidersCodexEditPage() {
                 disabled={disabled}
                 discovery={discovery}
                 discoveryDisabled={!canOpenDiscovery}
-                i18nPrefix='codex'
+                i18nPrefix="codex"
             />
         </ProviderEditShell>
     )

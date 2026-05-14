@@ -1,49 +1,76 @@
 /**
  * 通知状态管理
- * 替代原项目中的 showNotification 方法
+ * Toast 通知 + 确认弹窗 + 持久通知中心
  */
 
-import type {Notification, NotificationType} from '@/types'
-import {NOTIFICATION_DURATION_MS} from '@/utils/constants'
-import {generateId} from '@/utils/helpers'
-import type {ReactNode} from 'react'
-import {create} from 'zustand'
+import type { Notification, NotificationType } from '@/types'
+import { NOTIFICATION_DURATION_MS } from '@/utils/constants'
+import { generateId } from '@/utils/helpers'
+import type { NotificationSourceId } from '@/utils/notifications'
+import type { ReactNode } from 'react'
+import { create } from 'zustand'
 
 interface ConfirmationOptions {
-    title?: string;
-    message: ReactNode;
-    confirmText?: string;
-    cancelText?: string;
-    variant?: 'danger' | 'primary' | 'secondary';
-    onConfirm: () => void | Promise<void>;
-    onCancel?: () => void;
+    title?: string
+    message: ReactNode
+    confirmText?: string
+    cancelText?: string
+    variant?: 'danger' | 'primary' | 'secondary'
+    onConfirm: () => void | Promise<void>
+    onCancel?: () => void
+}
+
+/** 持久通知（通知中心面板） */
+export interface PersistentNotification {
+    id: string
+    message: string
+    type: NotificationType
+    timestamp: number
+    read: boolean
+    /** 来源标识，见 utils/notifications.ts NotificationSourceId */
+    source: NotificationSourceId
 }
 
 interface NotificationState {
-    notifications: Notification[];
+    // Toast 通知
+    notifications: Notification[]
+    showNotification: (message: string, type?: NotificationType, duration?: number) => void
+    removeNotification: (id: string) => void
+
+    // 确认弹窗
     confirmation: {
-        isOpen: boolean;
-        isLoading: boolean;
-        options: ConfirmationOptions | null;
-    };
-    showNotification: (message: string, type?: NotificationType, duration?: number) => void;
-    removeNotification: (id: string) => void;
-    clearAll: () => void;
-    showConfirmation: (options: ConfirmationOptions) => void;
-    hideConfirmation: () => void;
-    setConfirmationLoading: (loading: boolean) => void;
+        isOpen: boolean
+        isLoading: boolean
+        options: ConfirmationOptions | null
+    }
+    showConfirmation: (options: ConfirmationOptions) => void
+    hideConfirmation: () => void
+    setConfirmationLoading: (loading: boolean) => void
+
+    // 持久通知中心
+    persistentNotifications: PersistentNotification[]
+    panelOpen: boolean
+    addPersistentNotification: (message: string, type: NotificationType, source: NotificationSourceId) => void
+    markAsRead: (id: string) => void
+    markAllAsRead: () => void
+    clearAllPersistent: () => void
+    togglePanel: () => void
+    closePanel: () => void
+    unreadCount: () => number
 }
 
-export const useNotificationStore = create<NotificationState>((set) => ({
+export const useNotificationStore = create<NotificationState>((set, get) => ({
     notifications: [],
     confirmation: {
         isOpen: false,
         isLoading: false,
         options: null,
     },
+    persistentNotifications: [],
+    panelOpen: false,
 
     showNotification: (message, type = 'info', duration = NOTIFICATION_DURATION_MS) => {
-        const id                         = generateId()
+        const id = generateId()
         const notification: Notification = {
             id,
             message,
@@ -71,18 +98,14 @@ export const useNotificationStore = create<NotificationState>((set) => ({
         }))
     },
 
-    clearAll: () => {
-        set({ notifications: [] })
-    },
-
     showConfirmation: (options) => {
         set({
-                confirmation: {
-                    isOpen: true,
-                    isLoading: false,
-                    options,
-                },
-            })
+            confirmation: {
+                isOpen: true,
+                isLoading: false,
+                options,
+            },
+        })
     },
 
     hideConfirmation: () => {
@@ -102,5 +125,48 @@ export const useNotificationStore = create<NotificationState>((set) => ({
                 isLoading: loading,
             },
         }))
+    },
+
+    // 持久通知中心
+    addPersistentNotification: (message, type, source) => {
+        const notification: PersistentNotification = {
+            id: generateId(),
+            message,
+            type,
+            timestamp: Date.now(),
+            read: false,
+            source,
+        }
+        set((state) => ({
+            persistentNotifications: [notification, ...state.persistentNotifications].slice(0, 100),
+        }))
+    },
+
+    markAsRead: (id) => {
+        set((state) => ({
+            persistentNotifications: state.persistentNotifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+        }))
+    },
+
+    markAllAsRead: () => {
+        set((state) => ({
+            persistentNotifications: state.persistentNotifications.map((n) => ({ ...n, read: true })),
+        }))
+    },
+
+    clearAllPersistent: () => {
+        set({ persistentNotifications: [] })
+    },
+
+    togglePanel: () => {
+        set((state) => ({ panelOpen: !state.panelOpen }))
+    },
+
+    closePanel: () => {
+        set({ panelOpen: false })
+    },
+
+    unreadCount: () => {
+        return get().persistentNotifications.filter((n) => !n.read).length
     },
 }))

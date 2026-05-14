@@ -8,25 +8,25 @@
  * - This store makes the Claude edit draft shared across route layers keyed by provider index/new.
  */
 
-import type {ProviderFormState} from '@/components/providers/types'
-import type {SetStateAction} from 'react'
-import {create} from 'zustand'
-import {createDraftSlice, type DraftSliceState} from './createDraftSlice'
+import type { ProviderFormState } from '@/components/providers/types'
+import type { SetStateAction } from 'react'
+import { create } from 'zustand'
+import { createDraftSlice, type DraftSliceState } from './createDraftSlice'
 
-type ClaudeTestStatus = 'idle' | 'loading' | 'success' | 'error';
+type ClaudeTestStatus = 'idle' | 'loading' | 'success' | 'error'
 
 type ClaudeEditDraft = {
-    initialized: boolean;
-    baselineSignature: string;
-    form: ProviderFormState;
-    testModel: string;
-    testStatus: ClaudeTestStatus;
-    testMessage: string;
-};
+    initialized: boolean
+    baselineSignature: string
+    form: ProviderFormState
+    testModel: string
+    testStatus: ClaudeTestStatus
+    testMessage: string
+}
 
 interface ClaudeEditDraftState extends DraftSliceState<ClaudeEditDraft> {
-    setDraftForm: (key: string, action: SetStateAction<ProviderFormState>) => void;
-    setDraftTestStatus: (key: string, action: SetStateAction<ClaudeTestStatus>) => void;
+    setDraftForm: (key: string, action: SetStateAction<ProviderFormState>) => void
+    setDraftTestStatus: (key: string, action: SetStateAction<ClaudeTestStatus>) => void
 }
 
 const buildEmptyForm = (): ProviderFormState => ({

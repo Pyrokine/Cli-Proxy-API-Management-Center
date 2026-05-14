@@ -8,34 +8,34 @@
  * - This store makes the OpenAI edit draft shared across route layers keyed by provider index/new.
  */
 
-import type {OpenAIFormState} from '@/components/providers/types'
-import {buildApiKeyEntry} from '@/components/providers/utils'
-import type {SetStateAction} from 'react'
-import {create} from 'zustand'
-import {createDraftSlice, type DraftSliceState} from './createDraftSlice'
+import type { OpenAIFormState } from '@/components/providers/types'
+import { buildApiKeyEntry } from '@/components/providers/utils'
+import type { SetStateAction } from 'react'
+import { create } from 'zustand'
+import { createDraftSlice, type DraftSliceState } from './createDraftSlice'
 
-export type OpenAITestStatus = 'idle' | 'loading' | 'success' | 'error';
+export type OpenAITestStatus = 'idle' | 'loading' | 'success' | 'error'
 
 export type KeyTestStatus = {
-    status: OpenAITestStatus;
-    message: string;
-};
+    status: OpenAITestStatus
+    message: string
+}
 
 type OpenAIEditDraft = {
-    initialized: boolean;
-    baselineSignature: string;
-    form: OpenAIFormState;
-    testModel: string;
-    testStatus: OpenAITestStatus;
-    testMessage: string;
-    keyTestStatuses: KeyTestStatus[];
-};
+    initialized: boolean
+    baselineSignature: string
+    form: OpenAIFormState
+    testModel: string
+    testStatus: OpenAITestStatus
+    testMessage: string
+    keyTestStatuses: KeyTestStatus[]
+}
 
 interface OpenAIEditDraftState extends DraftSliceState<OpenAIEditDraft> {
-    setDraftForm: (key: string, action: SetStateAction<OpenAIFormState>) => void;
-    setDraftTestStatus: (key: string, action: SetStateAction<OpenAITestStatus>) => void;
-    setDraftKeyTestStatus: (draftKey: string, keyIndex: number, status: KeyTestStatus) => void;
-    resetDraftKeyTestStatuses: (draftKey: string, count: number) => void;
+    setDraftForm: (key: string, action: SetStateAction<OpenAIFormState>) => void
+    setDraftTestStatus: (key: string, action: SetStateAction<OpenAITestStatus>) => void
+    setDraftKeyTestStatus: (draftKey: string, keyIndex: number, status: KeyTestStatus) => void
+    resetDraftKeyTestStatuses: (draftKey: string, count: number) => void
 }
 
 const buildEmptyForm = (): OpenAIFormState => ({
@@ -66,8 +66,8 @@ export const useOpenAIEditDraftStore = create<OpenAIEditDraftState>((set, get) =
             return
         }
         set((state) => {
-            const existing         = state.drafts[draftKey] ?? buildEmptyDraft()
-            const nextStatuses     = [...existing.keyTestStatuses]
+            const existing = state.drafts[draftKey] ?? buildEmptyDraft()
+            const nextStatuses = [...existing.keyTestStatuses]
             nextStatuses[keyIndex] = status
             return {
                 drafts: {

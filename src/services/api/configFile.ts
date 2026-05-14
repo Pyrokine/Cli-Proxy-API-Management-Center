@@ -2,22 +2,22 @@
  * 配置文件相关 API（/config.yaml）
  */
 
-import {apiClient} from './client'
+import { apiClient } from './client'
 
 export interface ConfigValidationError {
-    field: string;
-    message: string;
+    field: string
+    message: string
 }
 
 interface ConfigValidationResult {
-    valid: boolean;
-    errors: ConfigValidationError[];
-    warnings: string[];
+    valid: boolean
+    errors: ConfigValidationError[]
+    warnings: string[]
 }
 
 export const configFileApi = {
     async fetchConfigYaml(): Promise<string> {
-        const response      = await apiClient.getRaw('/config.yaml', {
+        const response = await apiClient.getRaw('/config.yaml', {
             responseType: 'text',
             headers: { Accept: 'application/yaml, text/yaml, text/plain' },
         })

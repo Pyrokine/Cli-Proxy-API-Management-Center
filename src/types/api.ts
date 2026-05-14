@@ -5,15 +5,15 @@
 
 // API 客户端配置
 export interface ApiClientConfig {
-    apiBase: string;
-    managementKey: string;
-    timeout?: number;
+    apiBase: string
+    managementKey: string
+    timeout?: number
 }
 
 // API 错误
 export type ApiError = Error & {
-    status?: number;
-    code?: string;
-    details?: unknown;
-    data?: unknown;
-};
+    status?: number
+    code?: string
+    details?: unknown
+    data?: unknown
+}

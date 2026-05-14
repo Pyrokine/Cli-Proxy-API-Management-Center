@@ -1,16 +1,16 @@
-import {Button} from '@/components/ui/Button'
-import {HeaderInputList} from '@/components/ui/HeaderInputList'
-import {Input} from '@/components/ui/Input'
-import {ModelInputList} from '@/components/ui/ModelInputList'
-import type {ModelDiscoveryReturn} from '@/hooks/useModelDiscovery'
-import type {Dispatch, SetStateAction} from 'react'
-import {useTranslation} from 'react-i18next'
-import {ModelDiscoveryModal} from './ModelDiscoveryModal'
+import { Button } from '@/components/ui/Button'
+import { HeaderInputList } from '@/components/ui/HeaderInputList'
+import { Input } from '@/components/ui/Input'
+import { ModelInputList } from '@/components/ui/ModelInputList'
+import type { ModelDiscoveryReturn } from '@/hooks/useModelDiscovery'
+import type { Dispatch, SetStateAction } from 'react'
+import { useTranslation } from 'react-i18next'
+import { ModelDiscoveryModal } from './ModelDiscoveryModal'
 import styles from './ProviderEditForm.module.scss'
 
 // ---- Shared form field change helpers ----
 
-type FormUpdater<T> = Dispatch<SetStateAction<T>>;
+type FormUpdater<T> = Dispatch<SetStateAction<T>>
 
 const fieldChange = <T extends Record<string, unknown>>(setForm: FormUpdater<T>, field: keyof T, value: unknown) =>
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -18,9 +18,9 @@ const fieldChange = <T extends Record<string, unknown>>(setForm: FormUpdater<T>,
 // ---- Priority Input ----
 
 interface PriorityFieldProps<T extends { priority?: number }> {
-    form: T;
-    setForm: FormUpdater<T>;
-    disabled: boolean;
+    form: T
+    setForm: FormUpdater<T>
+    disabled: boolean
 }
 
 export function PriorityField<T extends { priority?: number }>({ form, setForm, disabled }: PriorityFieldProps<T>) {
@@ -29,16 +29,16 @@ export function PriorityField<T extends { priority?: number }>({ form, setForm, 
         <Input
             label={t('ai_providers.priority_label')}
             hint={t('ai_providers.priority_hint')}
-            type='number'
+            type="number"
             step={1}
             value={form.priority ?? ''}
             onChange={(e) => {
-                const raw    = e.target.value
+                const raw = e.target.value
                 const parsed = raw.trim() === '' ? undefined : Number(raw)
                 fieldChange(
                     setForm,
                     'priority' as keyof T,
-                    parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
+                    parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined
                 )
             }}
             disabled={disabled}
@@ -49,9 +49,9 @@ export function PriorityField<T extends { priority?: number }>({ form, setForm, 
 // ---- Prefix Input ----
 
 interface PrefixFieldProps<T extends { prefix?: string }> {
-    form: T;
-    setForm: FormUpdater<T>;
-    disabled: boolean;
+    form: T
+    setForm: FormUpdater<T>
+    disabled: boolean
 }
 
 export function PrefixField<T extends { prefix?: string }>({ form, setForm, disabled }: PrefixFieldProps<T>) {
@@ -71,9 +71,9 @@ export function PrefixField<T extends { prefix?: string }>({ form, setForm, disa
 // ---- Custom Headers ----
 
 interface HeadersFieldProps {
-    entries: Array<{ key: string; value: string }>;
-    onChange: (entries: Array<{ key: string; value: string }>) => void;
-    disabled: boolean;
+    entries: Array<{ key: string; value: string }>
+    onChange: (entries: Array<{ key: string; value: string }>) => void
+    disabled: boolean
 }
 
 export function HeadersField({ entries, onChange, disabled }: HeadersFieldProps) {
@@ -95,26 +95,26 @@ export function HeadersField({ entries, onChange, disabled }: HeadersFieldProps)
 // ---- Model Config Section (with optional discovery button) ----
 
 interface ModelConfigSectionProps {
-    entries: Array<{ name: string; alias: string }>;
-    onChange: (entries: Array<{ name: string; alias: string }>) => void;
-    onAddRow: () => void;
-    disabled: boolean;
+    entries: Array<{ name: string; alias: string }>
+    onChange: (entries: Array<{ name: string; alias: string }>) => void
+    onAddRow: () => void
+    disabled: boolean
     /** Translation key prefix for labels (e.g. 'codex', 'gemini') */
-    i18nPrefix: string;
+    i18nPrefix: string
     /** If provided, shows a "Discover Models" button */
-    onDiscovery?: () => void;
-    discoveryDisabled?: boolean;
+    onDiscovery?: () => void
+    discoveryDisabled?: boolean
 }
 
 function ModelConfigSection({
-                                entries,
-                                onChange,
-                                onAddRow,
-                                disabled,
-                                i18nPrefix,
-                                onDiscovery,
-                                discoveryDisabled,
-                            }: ModelConfigSectionProps) {
+    entries,
+    onChange,
+    onAddRow,
+    disabled,
+    i18nPrefix,
+    onDiscovery,
+    discoveryDisabled,
+}: ModelConfigSectionProps) {
     const { t } = useTranslation()
 
     return (
@@ -122,11 +122,11 @@ function ModelConfigSection({
             <div className={styles.modelConfigHeader}>
                 <label className={styles.modelConfigTitle}>{t(`ai_providers.${i18nPrefix}_models_label`)}</label>
                 <div className={styles.modelConfigToolbar}>
-                    <Button variant='secondary' size='sm' onClick={onAddRow} disabled={disabled}>
+                    <Button variant="secondary" size="sm" onClick={onAddRow} disabled={disabled}>
                         {t(`ai_providers.${i18nPrefix}_models_add_btn`)}
                     </Button>
                     {onDiscovery && (
-                        <Button variant='secondary' size='sm' onClick={onDiscovery} disabled={discoveryDisabled}>
+                        <Button variant="secondary" size="sm" onClick={onDiscovery} disabled={discoveryDisabled}>
                             {t(`ai_providers.${i18nPrefix}_models_fetch_button`)}
                         </Button>
                     )}
@@ -154,25 +154,25 @@ function ModelConfigSection({
 // ---- Excluded Models Textarea ----
 
 interface ExcludedModelsFieldProps {
-    value: string;
-    onChange: (value: string) => void;
-    disabled: boolean;
+    value: string
+    onChange: (value: string) => void
+    disabled: boolean
 }
 
 export function ExcludedModelsField({ value, onChange, disabled }: ExcludedModelsFieldProps) {
     const { t } = useTranslation()
     return (
-        <div className='form-group'>
+        <div className="form-group">
             <label>{t('ai_providers.excluded_models_label')}</label>
             <textarea
-                className='input'
+                className="input"
                 placeholder={t('ai_providers.excluded_models_placeholder')}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 rows={4}
                 disabled={disabled}
             />
-            <div className='hint'>{t('ai_providers.excluded_models_hint')}</div>
+            <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
         </div>
     )
 }
@@ -184,12 +184,12 @@ export function ExcludedModelsField({ value, onChange, disabled }: ExcludedModel
 interface ProviderModelSectionProps<
     T extends { modelEntries: Array<{ name: string; alias: string }>; excludedText: string },
 > {
-    form: T;
-    setForm: FormUpdater<T>;
-    disabled: boolean;
-    discovery: ModelDiscoveryReturn;
-    discoveryDisabled?: boolean;
-    i18nPrefix: string;
+    form: T
+    setForm: FormUpdater<T>
+    disabled: boolean
+    discovery: ModelDiscoveryReturn
+    discoveryDisabled?: boolean
+    i18nPrefix: string
 }
 
 export function ProviderModelSection<
