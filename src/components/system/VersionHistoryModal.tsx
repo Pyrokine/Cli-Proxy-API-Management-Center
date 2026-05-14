@@ -33,11 +33,11 @@ interface VersionHistoryModalProps {
 
 /* ---------- helpers ---------- */
 
-/** Parse "v1.3.2-aug.1-dirty" → { major, minor, patch, aug, groupKey } */
+/** Parse "v1.3.2-augmented.1" or "v1.3.2-aug.1" → { major, minor, patch, aug, groupKey } */
 function parseVersion(tag: string) {
     const match = tag
         .replace(/^v/i, '')
-        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-aug\.(?<aug>\d+))?(?:-.+)?$/i)
+        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?:aug|augmented)\.(?<aug>\d+))?$/i)
     if (!match?.groups) {
         return null
     }

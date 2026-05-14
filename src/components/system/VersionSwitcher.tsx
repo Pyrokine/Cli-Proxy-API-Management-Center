@@ -33,7 +33,7 @@ function formatBytes(size: number): string {
 }
 
 function parseSemver(tag: string): [number, number, number, number] | null {
-    const m = tag.replace(/^v/i, '').match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:-aug\.(\d+))?(?:-.+)?$/i)
+    const m = tag.replace(/^v/i, '').match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:-(?:aug|augmented)\.(\d+))?$/i)
     if (!m) {
         return null
     }
