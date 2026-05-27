@@ -1,0 +1,63 @@
+@use '../../../styles/variables' as *;
+
+.modal {
+    :global(.modal-body) {
+        max-height: min(72vh, 760px);
+        overflow: auto;
+    }
+}
+
+.content {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+.loading {
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    padding: $spacing-lg 0;
+    text-align: center;
+}
+
+.fieldGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 $spacing-md;
+
+    @media (max-width: 720px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+.previewBlock {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+}
+
+.previewHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.previewTextarea {
+    min-height: 140px;
+    resize: vertical;
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}
+
+.headersTextarea {
+    min-height: 120px;
+    resize: vertical;
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}
