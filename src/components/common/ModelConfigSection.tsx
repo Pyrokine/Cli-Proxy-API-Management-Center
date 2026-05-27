@@ -1,9 +1,9 @@
-import type { ModelEntry } from '@/components/providers/types'
-import { Button } from '@/components/ui/Button'
-import { ModelInputList } from '@/components/ui/ModelInputList'
+import type {ModelEntry} from '@/components/providers/types'
+import {Button} from '@/components/ui/Button'
+import {ModelInputList} from '@/components/ui/ModelInputList'
 import styles from '@/pages/ProviderEditForm.module.scss'
-import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { useTranslation } from 'react-i18next'
+import type {Dispatch, ReactNode, SetStateAction} from 'react'
+import {useTranslation} from 'react-i18next'
 
 interface ModelConfigSectionProps<F extends { modelEntries: ModelEntry[] }> {
     /** Section title label */
@@ -33,17 +33,17 @@ interface ModelConfigSectionProps<F extends { modelEntries: ModelEntry[] }> {
  * Renders the section header (title + add/fetch buttons), hint, ModelInputList, and optional children.
  */
 export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
-    title,
-    hint,
-    addLabel,
-    fetchLabel,
-    entries,
-    setForm,
-    onFetchModels,
-    disabled,
-    fetchDisabled,
-    children,
-}: ModelConfigSectionProps<F>) {
+                                                                                 title,
+                                                                                 hint,
+                                                                                 addLabel,
+                                                                                 fetchLabel,
+                                                                                 entries,
+                                                                                 setForm,
+                                                                                 onFetchModels,
+                                                                                 disabled,
+                                                                                 fetchDisabled,
+                                                                                 children,
+                                                                             }: ModelConfigSectionProps<F>) {
     const { t } = useTranslation()
 
     return (
@@ -52,8 +52,8 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                 <label className={styles.modelConfigTitle}>{title}</label>
                 <div className={styles.modelConfigToolbar}>
                     <Button
-                        variant="secondary"
-                        size="sm"
+                        variant='secondary'
+                        size='sm'
                         onClick={() =>
                             setForm((prev) => ({
                                 ...prev,
@@ -64,7 +64,7 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                     >
                         {addLabel}
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={onFetchModels} disabled={disabled || fetchDisabled}>
+                    <Button variant='secondary' size='sm' onClick={onFetchModels} disabled={disabled || fetchDisabled}>
                         {fetchLabel}
                     </Button>
                 </div>

@@ -1,4 +1,4 @@
-import type { ChangeEvent, ReactNode } from 'react'
+import type {ChangeEvent, ReactNode} from 'react'
 import styles from './ToggleSwitch.module.scss'
 
 interface ToggleSwitchProps {
@@ -11,13 +11,13 @@ interface ToggleSwitchProps {
 }
 
 export function ToggleSwitch({
-    checked,
-    onChange,
-    label,
-    ariaLabel,
-    disabled = false,
-    labelPosition = 'right',
-}: ToggleSwitchProps) {
+                                 checked,
+                                 onChange,
+                                 label,
+                                 ariaLabel,
+                                 disabled = false,
+                                 labelPosition = 'right',
+                             }: ToggleSwitchProps) {
     const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
         onChange(event.target.checked)
     }
@@ -29,7 +29,7 @@ export function ToggleSwitch({
     return (
         <label className={className}>
             <input
-                type="checkbox"
+                type='checkbox'
                 checked={checked}
                 onChange={handleChange}
                 disabled={disabled}

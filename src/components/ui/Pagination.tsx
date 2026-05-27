@@ -1,7 +1,7 @@
-import { useCallback, useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
+import {useCallback, useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './Pagination.module.scss'
-import { Select } from './Select'
+import {Select} from './Select'
 
 interface PaginationProps {
     total: number
@@ -23,7 +23,7 @@ function buildPageNumbers(current: number, total: number): (number | 'ellipsis')
         pages.push('ellipsis')
     }
     const start = Math.max(2, current - 1)
-    const end = Math.min(total - 1, current + 1)
+    const end   = Math.min(total - 1, current + 1)
     for (let i = start; i <= end; i++) {
         pages.push(i)
     }
@@ -35,19 +35,19 @@ function buildPageNumbers(current: number, total: number): (number | 'ellipsis')
 }
 
 export function Pagination({
-    total,
-    page,
-    pageSize,
-    pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
-    onPageChange,
-    onPageSizeChange,
-}: PaginationProps) {
+                               total,
+                               page,
+                               pageSize,
+                               pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
+                               onPageChange,
+                               onPageSizeChange,
+                           }: PaginationProps) {
     const { t } = useTranslation()
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
-    const safePage = Math.max(1, Math.min(page, totalPages))
+    const safePage   = Math.max(1, Math.min(page, totalPages))
     const rangeStart = total === 0 ? 0 : (safePage - 1) * pageSize + 1
-    const rangeEnd = Math.min(safePage * pageSize, total)
+    const rangeEnd   = Math.min(safePage * pageSize, total)
 
     const pages = useMemo(() => buildPageNumbers(safePage, totalPages), [safePage, totalPages])
 
@@ -62,7 +62,7 @@ export function Pagination({
                 }
             }
         },
-        [onPageSizeChange, onPageChange, total, safePage]
+        [onPageSizeChange, onPageChange, total, safePage],
     )
 
     if (total === 0) {
@@ -92,20 +92,20 @@ export function Pagination({
                 </button>
 
                 {pages.map((p, idx) =>
-                    p === 'ellipsis' ? (
-                        <span key={`e${idx}`} className={styles.ellipsis}>
+                               p === 'ellipsis' ? (
+                                   <span key={`e${idx}`} className={styles.ellipsis}>
                             &hellip;
                         </span>
-                    ) : (
-                        <button
-                            key={p}
-                            className={`${styles.pageBtn} ${p === safePage ? styles.pageBtnActive : ''}`}
-                            onClick={() => onPageChange(p)}
-                            aria-current={p === safePage ? 'page' : undefined}
-                        >
-                            {p}
-                        </button>
-                    )
+                               ) : (
+                                   <button
+                                       key={p}
+                                       className={`${styles.pageBtn} ${p === safePage ? styles.pageBtnActive : ''}`}
+                                       onClick={() => onPageChange(p)}
+                                       aria-current={p === safePage ? 'page' : undefined}
+                                   >
+                                       {p}
+                                   </button>
+                               ),
                 )}
 
                 <button

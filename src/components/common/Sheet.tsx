@@ -1,9 +1,9 @@
-import { Input } from '@/components/ui/Input'
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
-import { Pagination } from '@/components/ui/Pagination'
-import { type ReactNode, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { DataStatusCard, type DataStatusValue } from './DataStatusCard'
+import {Input} from '@/components/ui/Input'
+import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
+import {Pagination} from '@/components/ui/Pagination'
+import {type ReactNode, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {DataStatusCard, type DataStatusValue} from './DataStatusCard'
 import styles from './Sheet.module.scss'
 
 export interface SheetColumn<T> {
@@ -53,39 +53,39 @@ function compareSortValue(left: string | number, right: string | number): number
 }
 
 export function Sheet<T>({
-    rows,
-    columns,
-    rowKey,
-    status,
-    errorMessage,
-    onRetry,
-    retrying,
-    emptyText,
-    emptyHint,
-    loadingText,
-    loadingFallback,
-    skeletonVariant = 'rows',
-    skeletonRowCount = 3,
-    searchable = false,
-    searchPlaceholder,
-    searchPredicate,
-    defaultSortKey,
-    defaultSortDir = 'desc',
-    pagination = false,
-    defaultPageSize = 25,
-    pageSizeOptions = [10, 25, 50, 100],
-    toolbarContent,
-    summaryContent,
-    className,
-    refreshing = false,
-    refreshingText,
-}: SheetProps<T>) {
-    const { t } = useTranslation()
+                             rows,
+                             columns,
+                             rowKey,
+                             status,
+                             errorMessage,
+                             onRetry,
+                             retrying,
+                             emptyText,
+                             emptyHint,
+                             loadingText,
+                             loadingFallback,
+                             skeletonVariant = 'rows',
+                             skeletonRowCount = 3,
+                             searchable = false,
+                             searchPlaceholder,
+                             searchPredicate,
+                             defaultSortKey,
+                             defaultSortDir = 'desc',
+                             pagination = false,
+                             defaultPageSize = 25,
+                             pageSizeOptions = [10, 25, 50, 100],
+                             toolbarContent,
+                             summaryContent,
+                             className,
+                             refreshing = false,
+                             refreshingText,
+                         }: SheetProps<T>) {
+    const { t }                         = useTranslation()
     const [searchValue, setSearchValue] = useState('')
-    const [sortKey, setSortKey] = useState<string | null>(defaultSortKey ?? null)
-    const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
-    const [page, setPage] = useState(1)
-    const [pageSize, setPageSize] = useState(defaultPageSize)
+    const [sortKey, setSortKey]         = useState<string | null>(defaultSortKey ?? null)
+    const [sortDir, setSortDir]         = useState<'asc' | 'desc'>(defaultSortDir)
+    const [page, setPage]               = useState(1)
+    const [pageSize, setPageSize]       = useState(defaultPageSize)
 
     const filteredRows = useMemo(() => {
         if (!searchable || !searchValue.trim()) {
@@ -96,12 +96,12 @@ export function Sheet<T>({
             return rows.filter((row) => searchPredicate(row, keyword))
         }
         return rows.filter((row) =>
-            columns.some((column) => {
-                const value = column.sortValue ? column.sortValue(row) : ''
-                return String(value ?? '')
-                    .toLowerCase()
-                    .includes(keyword)
-            })
+                               columns.some((column) => {
+                                   const value = column.sortValue ? column.sortValue(row) : ''
+                                   return String(value ?? '')
+                                       .toLowerCase()
+                                       .includes(keyword)
+                               }),
         )
     }, [columns, rows, searchPredicate, searchValue, searchable])
 
@@ -115,17 +115,20 @@ export function Sheet<T>({
         }
         const direction = sortDir === 'asc' ? 1 : -1
         return [...filteredRows].sort(
-            (left, right) => direction * compareSortValue(column.sortValue!(left), column.sortValue!(right))
+            (left, right) => direction * compareSortValue(column.sortValue!(left), column.sortValue!(right)),
         )
     }, [columns, filteredRows, sortDir, sortKey])
+
+    const totalPages  = pagination ? Math.max(1, Math.ceil(sortedRows.length / pageSize)) : 1
+    const currentPage = pagination ? Math.min(page, totalPages) : page
 
     const pagedRows = useMemo(() => {
         if (!pagination) {
             return sortedRows
         }
-        const start = (page - 1) * pageSize
+        const start = (currentPage - 1) * pageSize
         return sortedRows.slice(start, start + pageSize)
-    }, [page, pageSize, pagination, sortedRows])
+    }, [currentPage, pageSize, pagination, sortedRows])
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -138,14 +141,15 @@ export function Sheet<T>({
         }
         setSortKey(key)
         setSortDir('asc')
+        setPage(1)
     }
 
     const renderHeader = (column: SheetColumn<T>) => {
-        const headerClassName = column.headerClassName
-            ? `${styles.sortableHeader} ${column.headerClassName}`
-            : styles.sortableHeader
+        const headerClassName                               = column.headerClassName
+                                                              ? `${styles.sortableHeader} ${column.headerClassName}`
+                                                              : styles.sortableHeader
         const ariaSort: 'none' | 'ascending' | 'descending' =
-            sortKey === column.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'
+                  sortKey === column.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'
 
         if (!column.sortable) {
             return (
@@ -157,7 +161,7 @@ export function Sheet<T>({
 
         return (
             <th key={column.key} className={headerClassName} aria-sort={ariaSort}>
-                <button type="button" className={styles.sortHeaderButton} onClick={() => handleSort(column.key)}>
+                <button type='button' className={styles.sortHeaderButton} onClick={() => handleSort(column.key)}>
                     {column.header}
                     {sortKey === column.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
                 </button>
@@ -208,7 +212,7 @@ export function Sheet<T>({
             >
                 <div className={styles.busyShell}>
                     {refreshing && (
-                        <div className={styles.busyOverlay} aria-busy="true">
+                        <div className={styles.busyOverlay} aria-busy='true'>
                             <div className={styles.busyPill}>
                                 <LoadingSpinner size={16} className={styles.busySpinner} />
                                 <span>{refreshingText || t('common.loading')}</span>
@@ -219,18 +223,18 @@ export function Sheet<T>({
                         <div className={styles.sheetTableWrap}>
                             <table className={styles.sheetTable}>
                                 <thead>
-                                    <tr>{columns.map((column) => renderHeader(column))}</tr>
+                                <tr>{columns.map((column) => renderHeader(column))}</tr>
                                 </thead>
                                 <tbody>
-                                    {pagedRows.map((row, index) => (
-                                        <tr key={rowKey(row, index)}>
-                                            {columns.map((column) => (
-                                                <td key={column.key} className={column.className}>
-                                                    {column.cell(row)}
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    ))}
+                                {pagedRows.map((row, index) => (
+                                    <tr key={rowKey(row, index)}>
+                                        {columns.map((column) => (
+                                            <td key={column.key} className={column.className}>
+                                                {column.cell(row)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
                                 </tbody>
                             </table>
                         </div>
@@ -239,7 +243,7 @@ export function Sheet<T>({
                         <div className={styles.paginationWrap}>
                             <Pagination
                                 total={sortedRows.length}
-                                page={page}
+                                page={currentPage}
                                 pageSize={pageSize}
                                 pageSizeOptions={pageSizeOptions}
                                 onPageChange={setPage}

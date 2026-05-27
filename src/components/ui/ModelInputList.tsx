@@ -1,7 +1,7 @@
-import { Fragment } from 'react'
-import { Button } from './Button'
-import { IconX } from './icons'
-import type { ModelEntry } from './modelInputListUtils'
+import {Fragment} from 'react'
+import {Button} from './Button'
+import {IconX} from './icons'
+import type {ModelEntry} from './modelInputListUtils'
 
 interface ModelInputListProps {
     entries: ModelEntry[]
@@ -21,25 +21,25 @@ interface ModelInputListProps {
 }
 
 export function ModelInputList({
-    entries,
-    onChange,
-    addLabel,
-    disabled = false,
-    namePlaceholder = 'model-name',
-    aliasPlaceholder = 'alias (optional)',
-    hideAddButton = false,
-    onAdd,
-    className = '',
-    rowClassName = '',
-    inputClassName = '',
-    removeButtonClassName = '',
-    removeButtonTitle = 'Remove',
-    removeButtonAriaLabel = 'Remove',
-}: ModelInputListProps) {
-    const currentEntries = entries.length ? entries : [{ name: '', alias: '' }]
+                                   entries,
+                                   onChange,
+                                   addLabel,
+                                   disabled = false,
+                                   namePlaceholder = 'model-name',
+                                   aliasPlaceholder = 'alias (optional)',
+                                   hideAddButton = false,
+                                   onAdd,
+                                   className = '',
+                                   rowClassName = '',
+                                   inputClassName = '',
+                                   removeButtonClassName = '',
+                                   removeButtonTitle = 'Remove',
+                                   removeButtonAriaLabel = 'Remove',
+                               }: ModelInputListProps) {
+    const currentEntries     = entries.length ? entries : [{ name: '', alias: '' }]
     const containerClassName = ['header-input-list', className].filter(Boolean).join(' ')
-    const inputClassNames = ['input', inputClassName].filter(Boolean).join(' ')
-    const rowClassNames = ['header-input-row', rowClassName].filter(Boolean).join(' ')
+    const inputClassNames    = ['input', inputClassName].filter(Boolean).join(' ')
+    const rowClassNames      = ['header-input-row', rowClassName].filter(Boolean).join(' ')
 
     const updateEntry = (index: number, field: 'name' | 'alias', value: string) => {
         const next = currentEntries.map((entry, idx) => (idx === index ? { ...entry, [field]: value } : entry))
@@ -71,7 +71,7 @@ export function ModelInputList({
                             onChange={(e) => updateEntry(index, 'name', e.target.value)}
                             disabled={disabled}
                         />
-                        <span className="header-separator">→</span>
+                        <span className='header-separator'>→</span>
                         <input
                             className={inputClassNames}
                             placeholder={aliasPlaceholder}
@@ -80,8 +80,8 @@ export function ModelInputList({
                             disabled={disabled}
                         />
                         <Button
-                            variant="ghost"
-                            size="sm"
+                            variant='ghost'
+                            size='sm'
                             onClick={() => removeEntry(index)}
                             disabled={disabled || currentEntries.length <= 1}
                             className={removeButtonClassName}
@@ -94,7 +94,7 @@ export function ModelInputList({
                 </Fragment>
             ))}
             {!hideAddButton && addLabel && (
-                <Button variant="secondary" size="sm" onClick={addEntry} disabled={disabled} className="align-start">
+                <Button variant='secondary' size='sm' onClick={addEntry} disabled={disabled} className='align-start'>
                     {addLabel}
                 </Button>
             )}

@@ -1,7 +1,7 @@
-import { DropdownPanel } from './DropdownPanel'
-import { IconChevronDown } from './icons'
+import {DropdownPanel} from './DropdownPanel'
+import {IconChevronDown} from './icons'
 import styles from './Select.module.scss'
-import { useDropdown } from './useDropdown'
+import {useDropdown} from './useDropdown'
 
 interface SelectOption {
     value: string
@@ -23,32 +23,32 @@ interface SelectProps {
 }
 
 export function Select({
-    value,
-    options,
-    onChange,
-    placeholder,
-    className,
-    disabled = false,
-    id,
-    ariaLabel,
-    ariaLabelledBy,
-    ariaDescribedBy,
-    fullWidth = true,
-}: SelectProps) {
+                           value,
+                           options,
+                           onChange,
+                           placeholder,
+                           className,
+                           disabled = false,
+                           id,
+                           ariaLabel,
+                           ariaLabelledBy,
+                           ariaDescribedBy,
+                           fullWidth = true,
+                       }: SelectProps) {
     const { isOpen, pos, wrapRef, dropdownRef, toggle, close } = useDropdown(options.length, 240, disabled)
 
-    const selected = options.find((o) => o.value === value)
-    const displayText = selected?.label ?? placeholder ?? ''
+    const selected      = options.find((o) => o.value === value)
+    const displayText   = selected?.label ?? placeholder ?? ''
     const isPlaceholder = !selected && placeholder
 
     return (
         <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}>
             <button
-                type="button"
+                type='button'
                 className={styles.trigger}
                 onClick={toggle}
                 id={id}
-                aria-haspopup="listbox"
+                aria-haspopup='listbox'
                 aria-expanded={isOpen}
                 aria-label={ariaLabel}
                 aria-labelledby={ariaLabelledBy}
@@ -58,7 +58,7 @@ export function Select({
                 <span className={`${styles.triggerText} ${isPlaceholder ? styles.placeholder : ''}`}>
                     {displayText}
                 </span>
-                <span className={styles.triggerIcon} aria-hidden="true">
+                <span className={styles.triggerIcon} aria-hidden='true'>
                     <IconChevronDown size={14} />
                 </span>
             </button>
@@ -75,8 +75,8 @@ export function Select({
                         return (
                             <button
                                 key={opt.value}
-                                type="button"
-                                role="option"
+                                type='button'
+                                role='option'
                                 aria-selected={active}
                                 className={`${styles.option} ${active ? styles.optionActive : ''}`}
                                 onClick={() => {

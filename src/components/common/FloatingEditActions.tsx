@@ -1,6 +1,6 @@
-import { Button } from '@/components/ui/Button'
+import {Button} from '@/components/ui/Button'
 import layoutStyles from '@/pages/ProviderEditLayout.module.scss'
-import { useTranslation } from 'react-i18next'
+import {useTranslation} from 'react-i18next'
 
 interface FloatingEditActionsProps {
     onBack: () => void
@@ -14,11 +14,11 @@ export function FloatingEditActions({ onBack, onSave, saving, canSave }: Floatin
 
     return (
         <div className={layoutStyles.floatingActions}>
-            <Button variant="secondary" size="sm" onClick={onBack} className={layoutStyles.floatingBackButton}>
+            <Button variant='secondary' size='sm' onClick={onBack} className={layoutStyles.floatingBackButton}>
                 {t('common.back')}
             </Button>
             <Button
-                size="sm"
+                size='sm'
                 onClick={onSave}
                 loading={saving}
                 disabled={!canSave}

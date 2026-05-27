@@ -1,8 +1,8 @@
-import { Button } from '@/components/ui/Button'
-import { Select } from '@/components/ui/Select'
+import {Button} from '@/components/ui/Button'
+import {Select} from '@/components/ui/Select'
 import styles from '@/pages/ProviderEditForm.module.scss'
-import type { Dispatch, SetStateAction } from 'react'
-import { useTranslation } from 'react-i18next'
+import type {Dispatch, SetStateAction} from 'react'
+import {useTranslation} from 'react-i18next'
 
 interface ModelTestPanelProps {
     testModel: string
@@ -32,22 +32,22 @@ interface ModelTestPanelProps {
  * Shared model connectivity test panel: model select, test button, and status badge.
  */
 export function ModelTestPanel({
-    testModel,
-    setTestModel,
-    testStatus,
-    setTestStatus,
-    testMessage,
-    setTestMessage,
-    modelSelectOptions,
-    availableModels,
-    isTesting,
-    disabled,
-    i18nPrefix,
-    onTest,
-    testButtonDisabled,
-    testButtonLabel,
-    testButtonTitle,
-}: ModelTestPanelProps) {
+                                   testModel,
+                                   setTestModel,
+                                   testStatus,
+                                   setTestStatus,
+                                   testMessage,
+                                   setTestMessage,
+                                   modelSelectOptions,
+                                   availableModels,
+                                   isTesting,
+                                   disabled,
+                                   i18nPrefix,
+                                   onTest,
+                                   testButtonDisabled,
+                                   testButtonLabel,
+                                   testButtonTitle,
+                               }: ModelTestPanelProps) {
     const { t } = useTranslation()
 
     return (
@@ -68,8 +68,8 @@ export function ModelTestPanel({
                         }}
                         placeholder={
                             availableModels.length
-                                ? t(`${i18nPrefix}_test_select_placeholder`)
-                                : t(`${i18nPrefix}_test_select_empty`)
+                            ? t(`${i18nPrefix}_test_select_placeholder`)
+                            : t(`${i18nPrefix}_test_select_empty`)
                         }
                         className={styles.openaiTestSelect}
                         ariaLabel={t(`${i18nPrefix}_test_title`)}
@@ -77,7 +77,7 @@ export function ModelTestPanel({
                     />
                     <Button
                         variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                        size="sm"
+                        size='sm'
                         onClick={onTest}
                         loading={testStatus === 'loading'}
                         disabled={

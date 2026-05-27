@@ -1,6 +1,6 @@
-import type { ReactNode, RefObject } from 'react'
-import { createPortal } from 'react-dom'
-import type { DropdownPos } from './useDropdown'
+import type {ReactNode, RefObject} from 'react'
+import {createPortal} from 'react-dom'
+import type {DropdownPos} from './useDropdown'
 
 interface DropdownPanelProps {
     dropdownRef: RefObject<HTMLDivElement | null>
@@ -13,19 +13,19 @@ interface DropdownPanelProps {
 }
 
 export function DropdownPanel({
-    dropdownRef,
-    pos,
-    className,
-    upClassName,
-    ariaLabel,
-    multiselectable,
-    children,
-}: DropdownPanelProps) {
+                                  dropdownRef,
+                                  pos,
+                                  className,
+                                  upClassName,
+                                  ariaLabel,
+                                  multiselectable,
+                                  children,
+                              }: DropdownPanelProps) {
     return createPortal(
         <div
             ref={dropdownRef}
             className={`${className} ${pos.up ? upClassName : ''}`}
-            role="listbox"
+            role='listbox'
             aria-label={ariaLabel}
             aria-multiselectable={multiselectable ? 'true' : undefined}
             style={{
@@ -39,6 +39,6 @@ export function DropdownPanel({
         >
             {children}
         </div>,
-        document.body
+        document.body,
     )
 }

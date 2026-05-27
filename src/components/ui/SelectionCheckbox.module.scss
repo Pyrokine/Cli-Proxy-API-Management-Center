@@ -38,11 +38,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition:
-        border-color $transition-fast,
-        background-color $transition-fast,
-        box-shadow $transition-fast,
-        transform $transition-fast;
+    transition: border-color $transition-fast,
+    background-color $transition-fast,
+    box-shadow $transition-fast,
+    transform $transition-fast;
 }
 
 .root:hover .box {
@@ -65,9 +64,8 @@
 
 .input:focus-visible + .box {
     border-color: var(--primary-color);
-    box-shadow:
-        0 0 0 3px color-mix(in srgb, var(--primary-color) 16%, transparent),
-        0 0 0 1px color-mix(in srgb, var(--primary-color) 50%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 16%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--primary-color) 50%, transparent);
 }
 
 .boxChecked {

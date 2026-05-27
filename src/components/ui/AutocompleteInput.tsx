@@ -8,9 +8,9 @@ import {
     useRef,
     useState,
 } from 'react'
-import { createPortal } from 'react-dom'
+import {createPortal} from 'react-dom'
 import styles from './AutocompleteInput.module.scss'
-import { IconChevronDown } from './icons'
+import {IconChevronDown} from './icons'
 
 interface AutocompleteInputProps {
     label?: string
@@ -29,28 +29,30 @@ interface AutocompleteInputProps {
 }
 
 export function AutocompleteInput({
-    label,
-    value,
-    onChange,
-    options,
-    placeholder,
-    disabled,
-    hint,
-    error,
-    className = '',
-    wrapperClassName = '',
-    wrapperStyle,
-    id,
-    rightElement,
-}: AutocompleteInputProps) {
-    const [isOpen, setIsOpen] = useState(false)
+                                      label,
+                                      value,
+                                      onChange,
+                                      options,
+                                      placeholder,
+                                      disabled,
+                                      hint,
+                                      error,
+                                      className = '',
+                                      wrapperClassName = '',
+                                      wrapperStyle,
+                                      id,
+                                      rightElement,
+                                  }: AutocompleteInputProps) {
+    const [isOpen, setIsOpen]                     = useState(false)
     const [highlightedIndex, setHighlightedIndex] = useState(-1)
-    const containerRef = useRef<HTMLDivElement>(null)
-    const dropdownRef = useRef<HTMLDivElement>(null)
-    const inputWrapRef = useRef<HTMLDivElement>(null)
+    const containerRef                            = useRef<HTMLDivElement>(null)
+    const dropdownRef                             = useRef<HTMLDivElement>(null)
+    const inputWrapRef                            = useRef<HTMLDivElement>(null)
 
     const normalizedOptions = options.map((opt) =>
-        typeof opt === 'string' ? { value: opt, label: opt } : { value: opt.value, label: opt.label || opt.value }
+                                              typeof opt === 'string' ?
+                                                  { value: opt, label: opt } :
+                                                  { value: opt.value, label: opt.label || opt.value },
     )
 
     const filteredOptions = normalizedOptions.filter((opt) => {
@@ -76,11 +78,11 @@ export function AutocompleteInput({
         if (!inputWrapRef.current) {
             return {}
         }
-        const rect = inputWrapRef.current.getBoundingClientRect()
-        const maxHeight = 200
-        const gap = 4
+        const rect       = inputWrapRef.current.getBoundingClientRect()
+        const maxHeight  = 200
+        const gap        = 4
         const spaceBelow = window.innerHeight - rect.bottom
-        const openUp = spaceBelow < maxHeight + gap && rect.top > spaceBelow
+        const openUp     = spaceBelow < maxHeight + gap && rect.top > spaceBelow
 
         return {
             position: 'fixed',
@@ -174,7 +176,7 @@ export function AutocompleteInput({
                     onKeyDown={handleKeyDown}
                     placeholder={placeholder}
                     disabled={disabled}
-                    autoComplete="off"
+                    autoComplete='off'
                     style={{ paddingRight: 32 }}
                 />
                 <div
@@ -188,27 +190,27 @@ export function AutocompleteInput({
 
             {/* Portal-based dropdown to avoid parent overflow:hidden clipping */}
             {showDropdown &&
-                createPortal(
-                    <div ref={dropdownRef} className="autocomplete-dropdown" style={dropdownStyle}>
-                        {filteredOptions.map((opt, index) => (
-                            <div
-                                key={`${opt.value}-${index}`}
-                                onClick={() => handleSelect(opt.value)}
-                                className={`${styles.option} ${index === highlightedIndex ? styles.highlighted : ''}`}
-                                onMouseEnter={() => setHighlightedIndex(index)}
-                            >
-                                <span className={styles.optionValue}>{opt.value}</span>
-                                {opt.label && opt.label !== opt.value && (
-                                    <span className={styles.optionLabel}>{opt.label}</span>
-                                )}
-                            </div>
-                        ))}
-                    </div>,
-                    document.body
-                )}
+             createPortal(
+                 <div ref={dropdownRef} className='autocomplete-dropdown' style={dropdownStyle}>
+                     {filteredOptions.map((opt, index) => (
+                         <div
+                             key={`${opt.value}-${index}`}
+                             onClick={() => handleSelect(opt.value)}
+                             className={`${styles.option} ${index === highlightedIndex ? styles.highlighted : ''}`}
+                             onMouseEnter={() => setHighlightedIndex(index)}
+                         >
+                             <span className={styles.optionValue}>{opt.value}</span>
+                             {opt.label && opt.label !== opt.value && (
+                                 <span className={styles.optionLabel}>{opt.label}</span>
+                             )}
+                         </div>
+                     ))}
+                 </div>,
+                 document.body,
+             )}
 
-            {hint && <div className="hint">{hint}</div>}
-            {error && <div className="error-box">{error}</div>}
+            {hint && <div className='hint'>{hint}</div>}
+            {error && <div className='error-box'>{error}</div>}
         </div>
     )
 }

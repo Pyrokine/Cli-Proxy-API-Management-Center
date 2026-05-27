@@ -2,18 +2,18 @@
  * 通知中心：铃铛图标 + 未读计数 + 下拉面板
  */
 
-import { Button } from '@/components/ui/Button'
-import { IconBell, IconCheckCheck, IconTrash2 } from '@/components/ui/icons'
-import type { PersistentNotification } from '@/stores/useNotificationStore'
-import { useNotificationStore } from '@/stores/useNotificationStore'
-import { PERSISTENT_NOTIFICATION_SOURCES } from '@/utils/notifications'
-import { useCallback, useEffect, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
+import {Button} from '@/components/ui/Button'
+import {IconBell, IconCheckCheck, IconTrash2} from '@/components/ui/icons'
+import type {PersistentNotification} from '@/stores/useNotificationStore'
+import {useNotificationStore} from '@/stores/useNotificationStore'
+import {PERSISTENT_NOTIFICATION_SOURCES} from '@/utils/notifications'
+import {useCallback, useEffect, useRef} from 'react'
+import {useTranslation} from 'react-i18next'
 
 import styles from './NotificationCenter.module.scss'
 
 function formatRelativeTime(timestamp: number, t: (key: string, options?: Record<string, unknown>) => string): string {
-    const diff = Date.now() - timestamp
+    const diff    = Date.now() - timestamp
     const seconds = Math.floor(diff / 1000)
     if (seconds < 60) {
         return t('notifications.just_now')
@@ -31,10 +31,10 @@ function formatRelativeTime(timestamp: number, t: (key: string, options?: Record
 }
 
 function NotificationItem({
-    item,
-    onClick,
-    t,
-}: {
+                              item,
+                              onClick,
+                              t,
+                          }: {
     item: PersistentNotification
     onClick: (id: string) => void
     t: (key: string, options?: Record<string, unknown>) => string
@@ -55,17 +55,17 @@ function NotificationItem({
 }
 
 export function NotificationCenter() {
-    const { t } = useTranslation()
-    const panelOpen = useNotificationStore((s) => s.panelOpen)
+    const { t }                   = useTranslation()
+    const panelOpen               = useNotificationStore((s) => s.panelOpen)
     const persistentNotifications = useNotificationStore((s) => s.persistentNotifications)
-    const togglePanel = useNotificationStore((s) => s.togglePanel)
-    const closePanel = useNotificationStore((s) => s.closePanel)
-    const markAsRead = useNotificationStore((s) => s.markAsRead)
-    const markAllAsRead = useNotificationStore((s) => s.markAllAsRead)
-    const clearAllPersistent = useNotificationStore((s) => s.clearAllPersistent)
-    const unreadCount = useNotificationStore((s) => s.unreadCount)
+    const togglePanel             = useNotificationStore((s) => s.togglePanel)
+    const closePanel              = useNotificationStore((s) => s.closePanel)
+    const markAsRead              = useNotificationStore((s) => s.markAsRead)
+    const markAllAsRead           = useNotificationStore((s) => s.markAllAsRead)
+    const clearAllPersistent      = useNotificationStore((s) => s.clearAllPersistent)
+    const unreadCount             = useNotificationStore((s) => s.unreadCount)
 
-    const count = unreadCount()
+    const count      = unreadCount()
     const wrapperRef = useRef<HTMLDivElement>(null)
 
     // 点击外部关闭面板
@@ -86,14 +86,14 @@ export function NotificationCenter() {
         (id: string) => {
             markAsRead(id)
         },
-        [markAsRead]
+        [markAsRead],
     )
 
     return (
         <div className={styles.wrapper} ref={wrapperRef}>
             <Button
-                variant="ghost"
-                size="sm"
+                variant='ghost'
+                size='sm'
                 onClick={togglePanel}
                 title={t('notifications.title')}
                 className={styles.bellButton}
@@ -108,8 +108,8 @@ export function NotificationCenter() {
                         <span className={styles.panelTitle}>{t('notifications.title')}</span>
                         <div className={styles.panelActions}>
                             <Button
-                                variant="ghost"
-                                size="sm"
+                                variant='ghost'
+                                size='sm'
                                 onClick={markAllAsRead}
                                 disabled={count === 0}
                                 title={t('notifications.mark_all_read')}
@@ -117,8 +117,8 @@ export function NotificationCenter() {
                                 <IconCheckCheck size={14} />
                             </Button>
                             <Button
-                                variant="ghost"
-                                size="sm"
+                                variant='ghost'
+                                size='sm'
                                 onClick={clearAllPersistent}
                                 disabled={persistentNotifications.length === 0}
                                 title={t('notifications.clear_all')}
@@ -131,10 +131,10 @@ export function NotificationCenter() {
                         {persistentNotifications.length === 0 ? (
                             <div className={styles.empty}>{t('notifications.empty')}</div>
                         ) : (
-                            persistentNotifications.map((item) => (
-                                <NotificationItem key={item.id} item={item} onClick={handleItemClick} t={t} />
-                            ))
-                        )}
+                             persistentNotifications.map((item) => (
+                                 <NotificationItem key={item.id} item={item} onClick={handleItemClick} t={t} />
+                             ))
+                         )}
                     </div>
                 </div>
             )}

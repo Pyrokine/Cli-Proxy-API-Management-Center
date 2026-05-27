@@ -34,16 +34,14 @@
 
     &:focus {
         outline: none;
-        box-shadow:
-            var(--shadow),
-            0 0 0 3px rgba($primary-color, 0.18);
+        box-shadow: var(--shadow),
+        0 0 0 3px rgba($primary-color, 0.18);
     }
 
     &[aria-expanded='true'] {
         border-color: var(--primary-color);
-        box-shadow:
-            var(--shadow),
-            0 0 0 3px rgba($primary-color, 0.18);
+        box-shadow: var(--shadow),
+        0 0 0 3px rgba($primary-color, 0.18);
     }
 }
 

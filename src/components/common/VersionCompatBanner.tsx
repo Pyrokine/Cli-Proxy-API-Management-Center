@@ -1,6 +1,6 @@
-import { useAuthStore } from '@/stores'
-import { useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {useAuthStore} from '@/stores'
+import {useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './VersionCompatBanner.module.scss'
 
 /**
@@ -9,12 +9,12 @@ import styles from './VersionCompatBanner.module.scss'
  *     baked at build time).
  *   - The server knows the minimum panel version it requires (min_panel_version
  *     returned from GET /v0/management/version).
- * Either direction failing is enough to warn; both indexes are compared using
- * a loose semver parse that ignores build suffixes after the first numeric
- * triple so strings like "v1.7.16-aug.1" still compare correctly.
+ * Either direction failing is enough to warn; augmented builds are ordered
+ * after the base semantic version so "v1.7.16-aug.1" requires matching
+ * augmented endpoints instead of being treated as plain "v1.7.16".
  */
 
-type LooseSemver = [number, number, number]
+type LooseSemver = [number, number, number, number]
 
 function parseSemver(input: string): LooseSemver | null {
     const trimmed = String(input ?? '').trim()
@@ -27,15 +27,22 @@ function parseSemver(input: string): LooseSemver | null {
     if (lowered === 'dev' || lowered === 'unknown' || lowered === '-') {
         return null
     }
-    const m = trimmed.replace(/^v/i, '').match(/^(\d+)\.(\d+)(?:\.(\d+))?/)
+    const m = trimmed
+        .replace(/^v/i, '')
+        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?:aug|augmented)\.(?<aug>\d+))?/i)
     if (!m) {
         return null
     }
-    return [Number(m[1]), Number(m[2]), m[3] !== undefined ? Number(m[3]) : 0]
+    return [
+        Number(m.groups!.major),
+        Number(m.groups!.minor),
+        m.groups!.patch !== undefined ? Number(m.groups!.patch) : 0,
+        m.groups!.aug !== undefined ? Number(m.groups!.aug) : 0,
+    ]
 }
 
 function compareSemver(a: LooseSemver, b: LooseSemver): number {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
         if (a[i] !== b[i]) {
             return a[i] - b[i]
         }
@@ -53,10 +60,10 @@ interface Mismatch {
 
 function detectMismatch(panelVersion: string, serverVersion: string, minPanelVersion: string): Mismatch | null {
     const compatMinServer = typeof __COMPAT_MIN_SERVER__ === 'string' ? __COMPAT_MIN_SERVER__ : ''
-    const panel = parseSemver(panelVersion)
-    const server = parseSemver(serverVersion)
-    const minServer = parseSemver(compatMinServer)
-    const minPanel = parseSemver(minPanelVersion)
+    const panel           = parseSemver(panelVersion)
+    const server          = parseSemver(serverVersion)
+    const minServer       = parseSemver(compatMinServer)
+    const minPanel        = parseSemver(minPanelVersion)
 
     // Missing data on either side: treat as compatible rather than risking a
     // false-positive banner during rollouts.
@@ -82,12 +89,12 @@ function detectMismatch(panelVersion: string, serverVersion: string, minPanelVer
 }
 
 export function VersionCompatBanner() {
-    const { t } = useTranslation()
-    const auth = useAuthStore()
+    const { t }                     = useTranslation()
+    const auth                      = useAuthStore()
     const [dismissed, setDismissed] = useState(false)
 
-    const panelVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
-    const serverVersion = auth.serverVersion || ''
+    const panelVersion    = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
+    const serverVersion   = auth.serverVersion || ''
     const minPanelVersion = auth.serverMinPanelVersion || ''
 
     const mismatch = detectMismatch(panelVersion, serverVersion, minPanelVersion)
@@ -97,15 +104,15 @@ export function VersionCompatBanner() {
     }
 
     const message =
-        mismatch.reason === 'server_too_old'
-            ? t('compat.server_too_old', {
+              mismatch.reason === 'server_too_old'
+              ? t('compat.server_too_old', {
                   defaultValue:
                       'Panel v{{panel}} requires server ≥ {{min}}, but server is v{{server}}. Upgrade the backend.',
                   panel: mismatch.panelVersion,
                   min: mismatch.minServerVersion,
                   server: mismatch.serverVersion,
               })
-            : t('compat.panel_too_old', {
+              : t('compat.panel_too_old', {
                   defaultValue:
                       'Server v{{server}} requires panel ≥ {{min}}, but panel is v{{panel}}. Upgrade the panel.',
                   panel: mismatch.panelVersion,
@@ -114,10 +121,10 @@ export function VersionCompatBanner() {
               })
 
     return (
-        <div className={styles.banner} role="alert">
+        <div className={styles.banner} role='alert'>
             <span className={styles.message}>{message}</span>
             <button
-                type="button"
+                type='button'
                 className={styles.dismiss}
                 onClick={() => setDismissed(true)}
                 aria-label={t('common.close', { defaultValue: 'Close' })}

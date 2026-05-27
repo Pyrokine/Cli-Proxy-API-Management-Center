@@ -1,12 +1,12 @@
-import { Button } from '@/components/ui/Button'
-import { Modal } from '@/components/ui/Modal'
-import { useNotificationStore } from '@/stores'
-import { useTranslation } from 'react-i18next'
+import {Button} from '@/components/ui/Button'
+import {Modal} from '@/components/ui/Modal'
+import {useNotificationStore} from '@/stores'
+import {useTranslation} from 'react-i18next'
 
 export function ConfirmationModal() {
-    const { t } = useTranslation()
-    const confirmation = useNotificationStore((state) => state.confirmation)
-    const hideConfirmation = useNotificationStore((state) => state.hideConfirmation)
+    const { t }                  = useTranslation()
+    const confirmation           = useNotificationStore((state) => state.confirmation)
+    const hideConfirmation       = useNotificationStore((state) => state.hideConfirmation)
     const setConfirmationLoading = useNotificationStore((state) => state.setConfirmationLoading)
 
     const { isOpen, isLoading, options } = confirmation
@@ -46,10 +46,10 @@ export function ConfirmationModal() {
             {typeof message === 'string' ? (
                 <p style={{ margin: '1rem 0' }}>{message}</p>
             ) : (
-                <div style={{ margin: '1rem 0' }}>{message}</div>
-            )}
+                 <div style={{ margin: '1rem 0' }}>{message}</div>
+             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
-                <Button variant="ghost" onClick={handleCancel} disabled={isLoading}>
+                <Button variant='ghost' onClick={handleCancel} disabled={isLoading}>
                     {cancelText || t('common.cancel')}
                 </Button>
                 <Button variant={variant} onClick={handleConfirm} loading={isLoading}>

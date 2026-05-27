@@ -1,6 +1,6 @@
-import { CardSkeleton, type CardSkeletonProps } from '@/components/common/CardSkeleton'
-import type { ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
+import {CardSkeleton, type CardSkeletonProps} from '@/components/common/CardSkeleton'
+import type {ReactNode} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './DataStatusCard.module.scss'
 
 /**
@@ -43,21 +43,21 @@ export interface DataStatusCardProps {
 }
 
 export function DataStatusCard({
-    status,
-    children,
-    loadingText,
-    emptyText,
-    emptyHint,
-    errorMessage,
-    onRetry,
-    retrying,
-    skeletonVariant = 'rows',
-    skeletonRowCount = 3,
-    skeletonShowTitle = false,
-    loadingFallback,
-    className,
-}: DataStatusCardProps) {
-    const { t } = useTranslation()
+                                   status,
+                                   children,
+                                   loadingText,
+                                   emptyText,
+                                   emptyHint,
+                                   errorMessage,
+                                   onRetry,
+                                   retrying,
+                                   skeletonVariant = 'rows',
+                                   skeletonRowCount = 3,
+                                   skeletonShowTitle = false,
+                                   loadingFallback,
+                                   className,
+                               }: DataStatusCardProps) {
+    const { t }   = useTranslation()
     const rootCls = className ? `${styles.statusRoot} ${className}` : styles.statusRoot
 
     if (status === 'ready' || status === 'loaded') {
@@ -69,7 +69,7 @@ export function DataStatusCard({
             return <>{loadingFallback}</>
         }
         return (
-            <div className={rootCls} role="status" aria-busy="true">
+            <div className={rootCls} role='status' aria-busy='true'>
                 <CardSkeleton variant={skeletonVariant} rowCount={skeletonRowCount} showTitle={skeletonShowTitle} />
                 {loadingText && <div className={styles.statusHint}>{loadingText}</div>}
             </div>
@@ -78,12 +78,12 @@ export function DataStatusCard({
 
     if (status === 'error') {
         return (
-            <div className={rootCls} role="alert">
+            <div className={rootCls} role='alert'>
                 <div className={`${styles.statusText} ${styles.statusError}`}>{t('common.error', '出错了')}</div>
                 {errorMessage && <div className={styles.statusHint}>{errorMessage}</div>}
                 {onRetry && (
                     <div className={styles.statusActions}>
-                        <button type="button" className={styles.retryButton} onClick={onRetry} disabled={retrying}>
+                        <button type='button' className={styles.retryButton} onClick={onRetry} disabled={retrying}>
                             {retrying ? t('common.loading', '加载中...') : t('common.retry', '重试')}
                         </button>
                     </div>
@@ -94,7 +94,7 @@ export function DataStatusCard({
 
     if (status === 'missing') {
         return (
-            <div className={rootCls} role="status">
+            <div className={rootCls} role='status'>
                 <div className={styles.statusText}>{emptyText || t('usage_stats.no_data', '暂无数据')}</div>
                 {emptyHint && <div className={styles.statusHint}>{emptyHint}</div>}
             </div>
@@ -103,12 +103,12 @@ export function DataStatusCard({
 
     // status === 'empty'
     return (
-        <div className={rootCls} role="status">
+        <div className={rootCls} role='status'>
             <div className={styles.statusText}>{emptyText || t('usage_stats.no_data', '暂无数据')}</div>
             {emptyHint && <div className={styles.statusHint}>{emptyHint}</div>}
             {onRetry && (
                 <div className={styles.statusActions}>
-                    <button type="button" className={styles.retryButton} onClick={onRetry} disabled={retrying}>
+                    <button type='button' className={styles.retryButton} onClick={onRetry} disabled={retrying}>
                         {retrying ? t('common.loading', '加载中...') : t('common.refresh', '刷新')}
                     </button>
                 </div>

@@ -1,4 +1,4 @@
-import type { ModelAlias } from '@/types'
+import type {ModelAlias} from '@/types'
 
 export interface ModelEntry {
     name: string
@@ -20,7 +20,7 @@ export const entriesToModels = (entries: ModelEntry[]): ModelAlias[] => {
         .filter((entry) => entry.name.trim())
         .map((entry) => {
             const model: ModelAlias = { name: entry.name.trim() }
-            const alias = entry.alias.trim()
+            const alias             = entry.alias.trim()
             if (alias && alias !== model.name) {
                 model.alias = alias
             }

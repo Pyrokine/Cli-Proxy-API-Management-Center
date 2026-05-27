@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode } from 'react'
+import type {InputHTMLAttributes, ReactNode} from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string
@@ -10,7 +10,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export function Input({ label, hint, error, leftElement, rightElement, className = '', ...rest }: InputProps) {
     return (
-        <div className="form-group">
+        <div className='form-group'>
             {label && <label>{label}</label>}
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                 {leftElement && (
@@ -38,8 +38,8 @@ export function Input({ label, hint, error, leftElement, rightElement, className
                     </div>
                 )}
             </div>
-            {hint && <div className="hint">{hint}</div>}
-            {error && <div className="error-box">{error}</div>}
+            {hint && <div className='hint'>{hint}</div>}
+            {error && <div className='error-box'>{error}</div>}
         </div>
     )
 }

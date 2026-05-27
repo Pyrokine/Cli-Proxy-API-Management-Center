@@ -1,8 +1,8 @@
-import { INLINE_LOGO_JPEG } from '@/assets/logoInline'
-import { NotificationCenter } from '@/components/common/NotificationCenter'
-import { PageTransition } from '@/components/common/PageTransition'
-import { VersionCompatBanner } from '@/components/common/VersionCompatBanner'
-import { Button } from '@/components/ui/Button'
+import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
+import {NotificationCenter} from '@/components/common/NotificationCenter'
+import {PageTransition} from '@/components/common/PageTransition'
+import {VersionCompatBanner} from '@/components/common/VersionCompatBanner'
+import {Button} from '@/components/ui/Button'
 import {
     IconSidebarAuthFiles,
     IconSidebarConfig,
@@ -14,15 +14,15 @@ import {
     IconSidebarSystem,
     IconSidebarUsage,
 } from '@/components/ui/icons'
-import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh'
-import { MainRoutes } from '@/router/MainRoutes'
-import { useAuthStore, useConfigStore, useLanguageStore, useNotificationStore, useThemeStore } from '@/stores'
-import type { Theme } from '@/types'
-import { LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER } from '@/utils/constants'
-import { isSupportedLanguage } from '@/utils/language'
-import { ReactNode, SVGProps, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { NavLink, useLocation } from 'react-router-dom'
+import {triggerHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {MainRoutes} from '@/router/MainRoutes'
+import {useAuthStore, useConfigStore, useLanguageStore, useNotificationStore, useThemeStore} from '@/stores'
+import type {Theme} from '@/types'
+import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
+import {isSupportedLanguage} from '@/utils/language'
+import {ReactNode, SVGProps, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {NavLink, useLocation} from 'react-router-dom'
 
 const sidebarIcons: Record<string, ReactNode> = {
     dashboard: <IconSidebarDashboard size={18} />,
@@ -53,82 +53,88 @@ const headerIconProps: SVGProps<SVGSVGElement> = {
 const headerIcons = {
     refresh: (
         <svg {...headerIconProps}>
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
+            <path d='M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8' />
+            <path d='M21 3v5h-5' />
         </svg>
     ),
     menu: (
         <svg {...headerIconProps}>
-            <path d="M4 7h16" />
-            <path d="M4 12h16" />
-            <path d="M4 17h16" />
+            <path d='M4 7h16' />
+            <path d='M4 12h16' />
+            <path d='M4 17h16' />
+        </svg>
+    ),
+    close: (
+        <svg {...headerIconProps}>
+            <path d='M18 6 6 18' />
+            <path d='m6 6 12 12' />
         </svg>
     ),
     chevronLeft: (
         <svg {...headerIconProps}>
-            <path d="m14 18-6-6 6-6" />
+            <path d='m14 18-6-6 6-6' />
         </svg>
     ),
     chevronRight: (
         <svg {...headerIconProps}>
-            <path d="m10 6 6 6-6 6" />
+            <path d='m10 6 6 6-6 6' />
         </svg>
     ),
     language: (
         <svg {...headerIconProps}>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20" />
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            <circle cx='12' cy='12' r='10' />
+            <path d='M2 12h20' />
+            <path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' />
         </svg>
     ),
     sun: (
         <svg {...headerIconProps}>
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2" />
-            <path d="M12 20v2" />
-            <path d="m4.93 4.93 1.41 1.41" />
-            <path d="m17.66 17.66 1.41 1.41" />
-            <path d="M2 12h2" />
-            <path d="M20 12h2" />
-            <path d="m6.34 17.66-1.41 1.41" />
-            <path d="m19.07 4.93-1.41 1.41" />
+            <circle cx='12' cy='12' r='4' />
+            <path d='M12 2v2' />
+            <path d='M12 20v2' />
+            <path d='m4.93 4.93 1.41 1.41' />
+            <path d='m17.66 17.66 1.41 1.41' />
+            <path d='M2 12h2' />
+            <path d='M20 12h2' />
+            <path d='m6.34 17.66-1.41 1.41' />
+            <path d='m19.07 4.93-1.41 1.41' />
         </svg>
     ),
     moon: (
         <svg {...headerIconProps}>
-            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z" />
+            <path d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z' />
         </svg>
     ),
     whiteTheme: (
         <svg {...headerIconProps}>
-            <circle cx="12" cy="12" r="7" />
-            <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+            <circle cx='12' cy='12' r='7' />
+            <circle cx='12' cy='12' r='3' fill='currentColor' stroke='none' />
         </svg>
     ),
     autoTheme: (
         <svg {...headerIconProps}>
             <defs>
-                <clipPath id="mainLayoutAutoThemeSunLeftHalf">
-                    <rect x="0" y="0" width="12" height="24" />
+                <clipPath id='mainLayoutAutoThemeSunLeftHalf'>
+                    <rect x='0' y='0' width='12' height='24' />
                 </clipPath>
             </defs>
-            <circle cx="12" cy="12" r="4" />
-            <circle cx="12" cy="12" r="4" clipPath="url(#mainLayoutAutoThemeSunLeftHalf)" fill="currentColor" />
-            <path d="M12 2v2" />
-            <path d="M12 20v2" />
-            <path d="M4.93 4.93l1.41 1.41" />
-            <path d="M17.66 17.66l1.41 1.41" />
-            <path d="M2 12h2" />
-            <path d="M20 12h2" />
-            <path d="M6.34 17.66l-1.41 1.41" />
-            <path d="M19.07 4.93l-1.41 1.41" />
+            <circle cx='12' cy='12' r='4' />
+            <circle cx='12' cy='12' r='4' clipPath='url(#mainLayoutAutoThemeSunLeftHalf)' fill='currentColor' />
+            <path d='M12 2v2' />
+            <path d='M12 20v2' />
+            <path d='M4.93 4.93l1.41 1.41' />
+            <path d='M17.66 17.66l1.41 1.41' />
+            <path d='M2 12h2' />
+            <path d='M20 12h2' />
+            <path d='M6.34 17.66l-1.41 1.41' />
+            <path d='M19.07 4.93l-1.41 1.41' />
         </svg>
     ),
     logout: (
         <svg {...headerIconProps}>
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <path d="m16 17 5-5-5-5" />
-            <path d="M21 12H9" />
+            <path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4' />
+            <path d='m16 17 5-5-5-5' />
+            <path d='M21 12H9' />
         </svg>
     ),
 }
@@ -185,37 +191,40 @@ const THEME_CARDS: Array<{
 ]
 
 export function MainLayout() {
-    const { t } = useTranslation()
+    const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
-    const location = useLocation()
+    const location             = useLocation()
 
-    const apiBase = useAuthStore((state) => state.apiBase)
+    const apiBase          = useAuthStore((state) => state.apiBase)
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const logout = useAuthStore((state) => state.logout)
+    const logout           = useAuthStore((state) => state.logout)
 
-    const config = useConfigStore((state) => state.config)
+    const config      = useConfigStore((state) => state.config)
     const fetchConfig = useConfigStore((state) => state.fetchConfig)
-    const clearCache = useConfigStore((state) => state.clearCache)
+    const clearCache  = useConfigStore((state) => state.clearCache)
 
-    const theme = useThemeStore((state) => state.theme)
-    const setTheme = useThemeStore((state) => state.setTheme)
-    const language = useLanguageStore((state) => state.language)
+    const theme       = useThemeStore((state) => state.theme)
+    const setTheme    = useThemeStore((state) => state.setTheme)
+    const language    = useLanguageStore((state) => state.language)
     const setLanguage = useLanguageStore((state) => state.setLanguage)
 
-    const [sidebarOpen, setSidebarOpen] = useState(false)
+    const [sidebarOpen, setSidebarOpen]           = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
-    const [themeMenuOpen, setThemeMenuOpen] = useState(false)
-    const [brandExpanded, setBrandExpanded] = useState(true)
-    const contentRef = useRef<HTMLDivElement | null>(null)
-    const languageMenuRef = useRef<HTMLDivElement | null>(null)
-    const themeMenuRef = useRef<HTMLDivElement | null>(null)
-    const brandCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const headerRef = useRef<HTMLElement | null>(null)
+    const [themeMenuOpen, setThemeMenuOpen]       = useState(false)
+    const [brandExpanded, setBrandExpanded]       = useState(true)
+    const contentRef                              = useRef<HTMLDivElement | null>(null)
+    const languageMenuRef                         = useRef<HTMLDivElement | null>(null)
+    const themeMenuRef                            = useRef<HTMLDivElement | null>(null)
+    const brandCollapseTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const headerRef                               = useRef<HTMLElement | null>(null)
 
-    const fullBrandName = 'CLI Proxy API Management Center'
-    const abbrBrandName = t('title.abbr')
-    const isLogsPage = location.pathname.startsWith('/logs')
+    const fullBrandName            = 'CLI Proxy API Management Center'
+    const abbrBrandName            = t('title.abbr')
+    const isLogsPage               = location.pathname.startsWith('/logs')
+    const mobileSidebarToggleLabel = sidebarOpen
+                                     ? t('sidebar.toggle_collapse', { defaultValue: 'Close navigation' })
+                                     : t('sidebar.toggle_expand', { defaultValue: 'Open navigation' })
 
     // 将顶栏高度写入 CSS 变量，确保侧栏/内容区计算一致，防止滚动时抖动
     useLayoutEffect(() => {
@@ -229,7 +238,9 @@ export function MainLayout() {
         updateHeaderHeight()
 
         const resizeObserver =
-            typeof ResizeObserver !== 'undefined' && headerRef.current ? new ResizeObserver(updateHeaderHeight) : null
+                  typeof ResizeObserver !== 'undefined' && headerRef.current ?
+                  new ResizeObserver(updateHeaderHeight) :
+                  null
         if (resizeObserver && headerRef.current) {
             resizeObserver.observe(headerRef.current)
         }
@@ -251,7 +262,7 @@ export function MainLayout() {
             if (!el) {
                 return
             }
-            const rect = el.getBoundingClientRect()
+            const rect    = el.getBoundingClientRect()
             const centerX = rect.left + rect.width / 2
             document.documentElement.style.setProperty('--content-center-x', `${centerX}px`)
         }
@@ -259,7 +270,9 @@ export function MainLayout() {
         updateContentCenter()
 
         const resizeObserver =
-            typeof ResizeObserver !== 'undefined' && contentRef.current ? new ResizeObserver(updateContentCenter) : null
+                  typeof ResizeObserver !== 'undefined' && contentRef.current ?
+                  new ResizeObserver(updateContentCenter) :
+                  null
 
         if (resizeObserver && contentRef.current) {
             resizeObserver.observe(contentRef.current)
@@ -369,7 +382,7 @@ export function MainLayout() {
             setTheme(nextTheme)
             setThemeMenuOpen(false)
         },
-        [setTheme]
+        [setTheme],
     )
 
     const handleLanguageSelect = useCallback(
@@ -380,7 +393,7 @@ export function MainLayout() {
             setLanguage(nextLanguage)
             setLanguageMenuOpen(false)
         },
-        [setLanguage]
+        [setLanguage],
     )
 
     useEffect(() => {
@@ -391,9 +404,9 @@ export function MainLayout() {
 
     // 连接状态变化时推送持久通知
     const addPersistentNotification = useNotificationStore((s) => s.addPersistentNotification)
-    const prevConnectionRef = useRef(connectionStatus)
+    const prevConnectionRef         = useRef(connectionStatus)
     useEffect(() => {
-        const prev = prevConnectionRef.current
+        const prev                = prevConnectionRef.current
         prevConnectionRef.current = connectionStatus
         if (prev === connectionStatus) {
             return
@@ -421,7 +434,7 @@ export function MainLayout() {
                 }
                 // 对比 Last-Modified 作为版本指纹
                 const lastModified = resp.headers.get('last-modified') || ''
-                const stored = sessionStorage.getItem('cpa-panel-last-modified')
+                const stored       = sessionStorage.getItem('cpa-panel-last-modified')
                 if (!stored) {
                     sessionStorage.setItem('cpa-panel-last-modified', lastModified)
                     return
@@ -433,7 +446,7 @@ export function MainLayout() {
                             defaultValue: 'A new panel version is available. Please refresh the page.',
                         }),
                         'info',
-                        'version'
+                        'version',
                     )
                 }
             } catch {
@@ -446,25 +459,28 @@ export function MainLayout() {
     }, [addPersistentNotification, t])
 
     const statusClass =
-        connectionStatus === 'connected'
-            ? 'success'
-            : connectionStatus === 'connecting'
-              ? 'warning'
-              : connectionStatus === 'error'
-                ? 'error'
-                : 'muted'
+              connectionStatus === 'connected'
+              ? 'success'
+              : connectionStatus === 'connecting'
+                ? 'warning'
+                : connectionStatus === 'error'
+                  ? 'error'
+                  : 'muted'
 
-    const navItems = [
-        { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
-        { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
-        { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
-        { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
-        ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
-        { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
-    ]
-    const navOrder = navItems.map((item) => item.path)
-    const getRouteOrder = (pathname: string) => {
-        const trimmedPath = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+    const navItems      = useMemo(
+        () => [
+            { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
+            { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
+            { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
+            { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
+            ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
+            { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
+        ],
+        [t, config?.loggingToFile],
+    )
+    const getRouteOrder = useCallback((pathname: string) => {
+        const navOrder       = navItems.map((item) => item.path)
+        const trimmedPath    = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
         const normalizedPath = trimmedPath === '/dashboard' ? '/' : trimmedPath
 
         const credentialsIndex = navOrder.indexOf('/credentials')
@@ -504,7 +520,7 @@ export function MainLayout() {
         }
         const nestedIndex = navOrder.findIndex((path) => path !== '/' && normalizedPath.startsWith(`${path}/`))
         return nestedIndex === -1 ? null : nestedIndex
-    }
+    }, [navItems])
 
     const getTransitionVariant = useCallback((fromPathname: string, toPathname: string) => {
         const normalize = (pathname: string) => {
@@ -512,8 +528,8 @@ export function MainLayout() {
             return trimmed === '/dashboard' ? '/' : trimmed
         }
 
-        const from = normalize(fromPathname)
-        const to = normalize(toPathname)
+        const from          = normalize(fromPathname)
+        const to            = normalize(toPathname)
         const isCredentials = (pathname: string) => pathname === '/credentials' || pathname.startsWith('/credentials/')
         if (isCredentials(from) && isCredentials(to)) {
             return 'ios'
@@ -523,10 +539,10 @@ export function MainLayout() {
 
     const handleRefreshAll = async () => {
         clearCache()
-        const results = await Promise.allSettled([fetchConfig(undefined, true), triggerHeaderRefresh()])
+        const results  = await Promise.allSettled([fetchConfig(undefined, true), triggerHeaderRefresh()])
         const rejected = results.find((result) => result.status === 'rejected')
         if (rejected && rejected.status === 'rejected') {
-            const reason = rejected.reason
+            const reason  = rejected.reason
             const message = typeof reason === 'string' ? reason : reason instanceof Error ? reason.message : ''
             showNotification(`${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`, 'error')
             return
@@ -535,88 +551,90 @@ export function MainLayout() {
     }
 
     return (
-        <div className="app-shell">
+        <div className='app-shell'>
             <VersionCompatBanner />
-            <header className="main-header" ref={headerRef}>
-                <div className="left">
+            <header className='main-header' ref={headerRef}>
+                <div className='left'>
                     <button
-                        className="sidebar-toggle-header"
+                        className='sidebar-toggle-header'
                         onClick={() => setSidebarCollapsed((prev) => !prev)}
                         title={
                             sidebarCollapsed
-                                ? t('sidebar.expand', { defaultValue: '展开' })
-                                : t('sidebar.collapse', { defaultValue: '收起' })
+                            ? t('sidebar.expand', { defaultValue: '展开' })
+                            : t('sidebar.collapse', { defaultValue: '收起' })
                         }
                     >
                         {sidebarCollapsed ? headerIcons.chevronRight : headerIcons.chevronLeft}
                     </button>
-                    <img src={INLINE_LOGO_JPEG} alt="CPAMC logo" className="brand-logo" />
+                    <Button
+                        className='mobile-menu-btn'
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => setSidebarOpen((prev) => !prev)}
+                        title={mobileSidebarToggleLabel}
+                        aria-label={mobileSidebarToggleLabel}
+                    >
+                        {sidebarOpen ? headerIcons.close : headerIcons.menu}
+                    </Button>
+                    <img src={INLINE_LOGO_JPEG} alt='CPAMC logo' className='brand-logo' />
                     <div
                         className={`brand-header ${brandExpanded ? 'expanded' : 'collapsed'}`}
                         onClick={handleBrandClick}
                         title={brandExpanded ? undefined : fullBrandName}
                     >
-                        <span className="brand-full">{fullBrandName}</span>
-                        <span className="brand-abbr">{abbrBrandName}</span>
+                        <span className='brand-full'>{fullBrandName}</span>
+                        <span className='brand-abbr'>{abbrBrandName}</span>
                     </div>
                 </div>
 
-                <div className="right">
-                    <div className="connection">
+                <div className='right'>
+                    <div className='connection'>
                         <span className={`status-badge ${statusClass}`}>
                             {t(
                                 connectionStatus === 'connected'
-                                    ? 'common.connected_status'
-                                    : connectionStatus === 'connecting'
-                                      ? 'common.connecting_status'
-                                      : 'common.disconnected_status'
+                                ? 'common.connected_status'
+                                : connectionStatus === 'connecting'
+                                  ? 'common.connecting_status'
+                                  : 'common.disconnected_status',
                             )}
                         </span>
-                        <span className="base">{apiBase || '-'}</span>
+                        <span className='base'>{apiBase || '-'}</span>
                     </div>
 
-                    <div className="header-actions">
-                        <Button
-                            className="mobile-menu-btn"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSidebarOpen((prev) => !prev)}
-                        >
-                            {headerIcons.menu}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={handleRefreshAll} title={t('header.refresh_all')}>
+                    <div className='header-actions'>
+                        <Button variant='ghost' size='sm' onClick={handleRefreshAll} title={t('header.refresh_all')}>
                             {headerIcons.refresh}
                         </Button>
                         <NotificationCenter />
                         <div className={`language-menu ${languageMenuOpen ? 'open' : ''}`} ref={languageMenuRef}>
                             <Button
-                                variant="ghost"
-                                size="sm"
+                                variant='ghost'
+                                size='sm'
                                 onClick={toggleLanguageMenu}
                                 title={t('language.switch')}
                                 aria-label={t('language.switch')}
-                                aria-haspopup="menu"
+                                aria-haspopup='menu'
                                 aria-expanded={languageMenuOpen}
                             >
                                 {headerIcons.language}
                             </Button>
                             {languageMenuOpen && (
                                 <div
-                                    className="notification entering language-menu-popover"
-                                    role="menu"
+                                    className='notification entering language-menu-popover'
+                                    role='menu'
                                     aria-label={t('language.switch')}
                                 >
                                     {LANGUAGE_ORDER.map((lang) => (
                                         <button
                                             key={lang}
-                                            type="button"
+                                            type='button'
                                             className={`language-menu-option ${language === lang ? 'active' : ''}`}
                                             onClick={() => handleLanguageSelect(lang)}
-                                            role="menuitemradio"
+                                            role='menuitemradio'
                                             aria-checked={language === lang}
                                         >
                                             <span>{t(LANGUAGE_LABEL_KEYS[lang])}</span>
-                                            {language === lang ? <span className="language-menu-check">✓</span> : null}
+                                            {language === lang ? <span className='language-menu-check'>✓</span> : null}
                                         </button>
                                     ))}
                                 </div>
@@ -624,90 +642,90 @@ export function MainLayout() {
                         </div>
                         <div className={`theme-menu ${themeMenuOpen ? 'open' : ''}`} ref={themeMenuRef}>
                             <Button
-                                variant="ghost"
-                                size="sm"
+                                variant='ghost'
+                                size='sm'
                                 onClick={toggleThemeMenu}
                                 title={t('theme.switch')}
                                 aria-label={t('theme.switch')}
-                                aria-haspopup="menu"
+                                aria-haspopup='menu'
                                 aria-expanded={themeMenuOpen}
                             >
                                 {theme === 'auto'
-                                    ? headerIcons.autoTheme
-                                    : theme === 'dark'
-                                      ? headerIcons.moon
-                                      : theme === 'white'
-                                        ? headerIcons.whiteTheme
-                                        : headerIcons.sun}
+                                 ? headerIcons.autoTheme
+                                 : theme === 'dark'
+                                   ? headerIcons.moon
+                                   : theme === 'white'
+                                     ? headerIcons.whiteTheme
+                                     : headerIcons.sun}
                             </Button>
                             {themeMenuOpen && (
                                 <div
-                                    className="notification entering theme-menu-popover"
-                                    role="menu"
+                                    className='notification entering theme-menu-popover'
+                                    role='menu'
                                     aria-label={t('theme.switch')}
                                 >
                                     {THEME_CARDS.map((tc) => (
                                         <button
                                             key={tc.key}
-                                            type="button"
+                                            type='button'
                                             className={`theme-card ${theme === tc.key ? 'active' : ''}`}
                                             onClick={() => handleThemeSelect(tc.key)}
-                                            role="menuitemradio"
+                                            role='menuitemradio'
                                             aria-checked={theme === tc.key}
                                         >
                                             <div
-                                                className="theme-card-preview"
+                                                className='theme-card-preview'
                                                 style={{
                                                     background: tc.colors.bg,
                                                     border: `1px solid ${tc.colors.border}`,
                                                 }}
                                             >
                                                 <div
-                                                    className="theme-card-header"
+                                                    className='theme-card-header'
                                                     style={{
                                                         background: tc.colors.card,
                                                         borderBottom: `1px solid ${tc.colors.border}`,
                                                     }}
                                                 />
-                                                <div className="theme-card-body">
+                                                <div className='theme-card-body'>
                                                     <div
-                                                        className="theme-card-sidebar"
+                                                        className='theme-card-sidebar'
                                                         style={{
                                                             background: tc.colors.card,
                                                             borderRight: `1px solid ${tc.colors.border}`,
                                                         }}
                                                     />
                                                     <div
-                                                        className="theme-card-content"
+                                                        className='theme-card-content'
                                                         style={{ background: tc.colors.bg }}
                                                     >
                                                         <div
-                                                            className="theme-card-line"
+                                                            className='theme-card-line'
                                                             style={{ background: tc.colors.textMuted }}
                                                         />
                                                         <div
-                                                            className="theme-card-line short"
+                                                            className='theme-card-line short'
                                                             style={{ background: tc.colors.textMuted }}
                                                         />
                                                     </div>
                                                 </div>
                                             </div>
-                                            <span className="theme-card-label">{t(tc.labelKey)}</span>
+                                            <span className='theme-card-label'>{t(tc.labelKey)}</span>
                                         </button>
                                     ))}
                                 </div>
                             )}
                         </div>
-                        <Button variant="ghost" size="sm" onClick={logout} title={t('header.logout')}>
+                        <Button variant='ghost' size='sm' onClick={logout} title={t('header.logout')}>
                             {headerIcons.logout}
                         </Button>
                     </div>
                 </div>
             </header>
 
-            <div className="main-body">
+            <div className='main-body'>
                 <button
-                    type="button"
+                    type='button'
                     className={`sidebar-backdrop ${sidebarOpen ? 'visible' : ''}`}
                     onClick={() => setSidebarOpen(false)}
                     aria-label={t('common.close')}
@@ -716,7 +734,7 @@ export function MainLayout() {
                 />
 
                 <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>
-                    <div className="nav-section">
+                    <div className='nav-section'>
                         {navItems.map((item) => (
                             <NavLink
                                 key={item.path}
@@ -725,8 +743,8 @@ export function MainLayout() {
                                 onClick={() => setSidebarOpen(false)}
                                 title={sidebarCollapsed ? item.label : undefined}
                             >
-                                <span className="nav-icon">{item.icon}</span>
-                                {!sidebarCollapsed && <span className="nav-label">{item.label}</span>}
+                                <span className='nav-icon'>{item.icon}</span>
+                                {!sidebarCollapsed && <span className='nav-label'>{item.label}</span>}
                             </NavLink>
                         ))}
                     </div>

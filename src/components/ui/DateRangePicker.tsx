@@ -1,6 +1,6 @@
-import { toLocalDateTimeString } from '@/utils/format'
-import { type ChangeEvent, useCallback, useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
+import {toLocalDateTimeString} from '@/utils/format'
+import {type ChangeEvent, useCallback, useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './DateRangePicker.module.scss'
 
 interface DateRangePreset {
@@ -22,7 +22,7 @@ interface DateRangePickerProps {
 const ALL_PRESET_PLACEHOLDER_FROM = '2020-01-01T00:00'
 
 function buildDefaultPresets(t: (key: string) => string, earliestDate?: Date): DateRangePreset[] {
-    const now = new Date()
+    const now     = new Date()
     const allFrom = earliestDate ?? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     return [
         {
@@ -55,35 +55,35 @@ function buildDefaultPresets(t: (key: string) => string, earliestDate?: Date): D
 export function DateRangePicker({ from, to, onChange, presets, activePreset, earliestDate }: DateRangePickerProps) {
     const { t } = useTranslation()
 
-    const defaultPresets = useMemo(() => buildDefaultPresets(t, earliestDate), [t, earliestDate])
+    const defaultPresets   = useMemo(() => buildDefaultPresets(t, earliestDate), [t, earliestDate])
     const effectivePresets = presets ?? defaultPresets
 
     const handleFromChange = useCallback(
         (e: ChangeEvent<HTMLInputElement>) => {
             onChange(e.target.value, to)
         },
-        [onChange, to]
+        [onChange, to],
     )
 
     const handleToChange = useCallback(
         (e: ChangeEvent<HTMLInputElement>) => {
             onChange(from, e.target.value)
         },
-        [onChange, from]
+        [onChange, from],
     )
 
     const handlePreset = useCallback(
         (preset: DateRangePreset) => {
             onChange(toLocalDateTimeString(preset.from), toLocalDateTimeString(preset.to), preset.key)
         },
-        [onChange]
+        [onChange],
     )
 
     // R-027:preset==='all' 时把 input 的展示值替换成 summary 真实最早时间,
     // 内部 from 仍保留 epoch 占位给后端 API 用,但 UI 不再把这个占位值直接暴露
     // 给用户,summary 尚未返回真实最早时间时显示空串,避免把 2020-01-01 误展示
     // 成业务数据
-    const isAllPreset = activePreset === 'all'
+    const isAllPreset     = activePreset === 'all'
     const resolvedAllFrom = useMemo(() => (earliestDate ? toLocalDateTimeString(earliestDate) : ''), [earliestDate])
 
     const displayFrom = isAllPreset ? resolvedAllFrom || (from === ALL_PRESET_PLACEHOLDER_FROM ? '' : from) : from
@@ -92,7 +92,7 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
         <div className={styles.container}>
             <div className={styles.dateInputs}>
                 <input
-                    type="datetime-local"
+                    type='datetime-local'
                     className={styles.dateInput}
                     value={displayFrom}
                     onChange={handleFromChange}
@@ -100,7 +100,7 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                 />
                 <span className={styles.separator}>–</span>
                 <input
-                    type="datetime-local"
+                    type='datetime-local'
                     className={styles.dateInput}
                     value={to}
                     onChange={handleToChange}
@@ -111,7 +111,7 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                 {effectivePresets.map((preset) => (
                     <button
                         key={preset.key}
-                        type="button"
+                        type='button'
                         className={activePreset === preset.key ? styles.presetActive : styles.preset}
                         onClick={() => handlePreset(preset)}
                         title={`${toLocalDateTimeString(preset.from)} ~ ${toLocalDateTimeString(preset.to)}`}
