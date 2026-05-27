@@ -10,16 +10,16 @@
           fill="url(#lobe-icons-gemini-fill-2)"></path>
     <defs>
         <linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-fill-0" x1="7" x2="11" y1="15.5" y2="12">
-            <stop stop-color="#08B962"></stop>
+            <stop offset="0" stop-color="#08B962"></stop>
             <stop offset="1" stop-color="#08B962" stop-opacity="0"></stop>
         </linearGradient>
         <linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-fill-1" x1="8" x2="11.5" y1="5.5" y2="11">
-            <stop stop-color="#F94543"></stop>
+            <stop offset="0" stop-color="#F94543"></stop>
             <stop offset="1" stop-color="#F94543" stop-opacity="0"></stop>
         </linearGradient>
         <linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-fill-2" x1="3.5" x2="17.5" y1="13.5"
                         y2="12">
-            <stop stop-color="#FABC12"></stop>
+            <stop offset="0" stop-color="#FABC12"></stop>
             <stop offset=".46" stop-color="#FABC12" stop-opacity="0"></stop>
         </linearGradient>
     </defs>

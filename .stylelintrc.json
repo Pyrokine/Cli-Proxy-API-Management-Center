@@ -1,5 +1,7 @@
 {
-    "extends": ["stylelint-config-standard"],
+    "extends": [
+        "stylelint-config-standard"
+    ],
     "customSyntax": "postcss-scss",
     "rules": {
         "alpha-value-notation": null,
@@ -23,17 +25,21 @@
         "property-no-unknown": [
             true,
             {
-                "ignoreProperties": ["composes"]
+                "ignoreProperties": [
+                    "composes"
+                ]
             }
         ],
         "property-no-vendor-prefix": null,
         "rule-empty-line-before": null,
-        "selector-class-pattern": null,
+        "selector-class-pattern": false,
         "selector-not-notation": null,
         "selector-pseudo-class-no-unknown": [
             true,
             {
-                "ignorePseudoClasses": ["global"]
+                "ignorePseudoClasses": [
+                    "global"
+                ]
             }
         ],
         "shorthand-property-no-redundant-values": null,
