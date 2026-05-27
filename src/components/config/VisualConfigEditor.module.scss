@@ -80,17 +80,16 @@
     gap: 18px;
     border-radius: 30px;
     border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
-    background:
-        radial-gradient(
-            circle at top right,
-            color-mix(in srgb, var(--primary-color) 12%, transparent),
-            transparent 36%
-        ),
-        linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--bg-primary) 94%, transparent),
-            color-mix(in srgb, var(--bg-secondary) 96%, transparent)
-        );
+    background: radial-gradient(
+        circle at top right,
+        color-mix(in srgb, var(--primary-color) 12%, transparent),
+        transparent 36%
+    ),
+    linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--bg-primary) 94%, transparent),
+        color-mix(in srgb, var(--bg-secondary) 96%, transparent)
+    );
     padding: clamp(22px, 3vw, 30px);
 
     &::before {
@@ -167,10 +166,9 @@
     border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
     background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
     text-align: left;
-    transition:
-        transform 0.18s ease,
-        border-color 0.18s ease,
-        background-color 0.18s ease;
+    transition: transform 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease;
 
     &:hover {
         transform: translateY(-1px);
@@ -276,10 +274,9 @@
     background: transparent;
     color: inherit;
     text-align: left;
-    transition:
-        transform 0.18s ease,
-        background-color 0.18s ease,
-        border-color 0.18s ease;
+    transition: transform 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
 
     &:hover {
         transform: translateX(2px);

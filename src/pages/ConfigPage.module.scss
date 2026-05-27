@@ -21,17 +21,16 @@
     padding: clamp(22px, 3vw, 30px);
     border-radius: 30px;
     border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background:
-        radial-gradient(
-            circle at top right,
-            color-mix(in srgb, var(--primary-color) 14%, transparent),
-            transparent 34%
-        ),
-        linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--bg-primary) 94%, transparent),
-            color-mix(in srgb, var(--bg-secondary) 96%, transparent)
-        );
+    background: radial-gradient(
+        circle at top right,
+        color-mix(in srgb, var(--primary-color) 14%, transparent),
+        transparent 34%
+    ),
+    linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--bg-primary) 94%, transparent),
+        color-mix(in srgb, var(--bg-secondary) 96%, transparent)
+    );
 
     &::before {
         content: '';
@@ -146,11 +145,10 @@
     font-size: $font-size-sm;
     font-weight: $font-weight-semibold;
     white-space: nowrap;
-    transition:
-        color 0.15s ease,
-        background-color 0.15s ease,
-        border-color 0.15s ease,
-        transform 0.15s ease;
+    transition: color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
 
     &:hover:not(:disabled) {
         color: var(--text-primary);
@@ -267,10 +265,9 @@
     background: var(--primary-color);
     border: 1px solid var(--primary-color);
     color: #fff;
-    transition:
-        background-color $transition-fast,
-        border-color $transition-fast,
-        opacity $transition-fast;
+    transition: background-color $transition-fast,
+    border-color $transition-fast,
+    opacity $transition-fast;
 
     &:hover:not(:disabled) {
         background: var(--primary-hover);
@@ -456,9 +453,8 @@
     border-radius: 999px;
     cursor: pointer;
     color: var(--text-primary);
-    transition:
-        background-color 0.2s ease,
-        transform 0.15s ease;
+    transition: background-color 0.2s ease,
+    transform 0.15s ease;
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--text-primary) 10%, transparent);

@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLAttributes, type PropsWithChildren, type ReactNode } from 'react'
+import {forwardRef, type HTMLAttributes, type PropsWithChildren, type ReactNode} from 'react'
 import styles from './ConfigSection.module.scss'
 
 interface ConfigSectionProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
@@ -10,7 +10,7 @@ interface ConfigSectionProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> 
 
 export const ConfigSection = forwardRef<HTMLElement, PropsWithChildren<ConfigSectionProps>>(function ConfigSection(
     { title, description, indexLabel, icon, className, children, ...rest },
-    ref
+    ref,
 ) {
     const sectionClassName = [styles.section, className].filter(Boolean).join(' ')
 

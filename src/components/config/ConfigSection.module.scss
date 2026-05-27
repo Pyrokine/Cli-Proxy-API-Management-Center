@@ -50,9 +50,8 @@
     height: 42px;
     padding: 0 12px;
     border-radius: 14px;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 92%, transparent), transparent),
-        color-mix(in srgb, var(--primary-color) 11%, var(--bg-secondary));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 92%, transparent), transparent),
+    color-mix(in srgb, var(--primary-color) 11%, var(--bg-secondary));
     border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
     color: var(--primary-hover);
     font-size: $font-size-xs;

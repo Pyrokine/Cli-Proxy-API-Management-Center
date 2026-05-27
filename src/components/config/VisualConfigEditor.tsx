@@ -1,4 +1,4 @@
-import { ConfigSection } from '@/components/config/ConfigSection'
+import {ConfigSection} from '@/components/config/ConfigSection'
 import {
     IconCode,
     IconDiamond,
@@ -10,9 +10,9 @@ import {
     IconTimer,
     IconTrendingUp,
 } from '@/components/ui/icons'
-import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
+import {Input} from '@/components/ui/Input'
+import {Select} from '@/components/ui/Select'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import type {
     PayloadFilterRule,
     PayloadParamValidationErrorCode,
@@ -22,10 +22,10 @@ import type {
     VisualConfigValidationErrors,
     VisualConfigValues,
 } from '@/types/visualConfig'
-import { type ComponentType, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {type ComponentType, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './VisualConfigEditor.module.scss'
-import { ApiKeysCardEditor, PayloadFilterRulesEditor, PayloadRulesEditor } from './VisualConfigEditorBlocks'
+import {ApiKeysCardEditor, PayloadFilterRulesEditor, PayloadRulesEditor} from './VisualConfigEditorBlocks'
 
 type VisualSectionId = 'server' | 'tls' | 'remote' | 'auth' | 'system' | 'network' | 'quota' | 'streaming' | 'payload'
 
@@ -47,7 +47,7 @@ interface VisualConfigEditorProps {
 
 function getValidationMessage(
     t: ReturnType<typeof useTranslation>['t'],
-    errorCode?: VisualConfigValidationErrorCode | PayloadParamValidationErrorCode
+    errorCode?: VisualConfigValidationErrorCode | PayloadParamValidationErrorCode,
 ) {
     if (!errorCode) {
         return undefined
@@ -88,10 +88,10 @@ function Divider() {
 }
 
 function SectionSubsection({
-    title,
-    description,
-    children,
-}: {
+                               title,
+                               description,
+                               children,
+                           }: {
     title: string
     description?: string
     children: ReactNode
@@ -108,15 +108,15 @@ function SectionSubsection({
 }
 
 function FieldShell({
-    label,
-    labelId,
-    htmlFor,
-    hint,
-    hintId,
-    error,
-    errorId,
-    children,
-}: {
+                        label,
+                        labelId,
+                        htmlFor,
+                        hint,
+                        hintId,
+                        error,
+                        errorId,
+                        children,
+                    }: {
     label: string
     labelId?: string
     htmlFor?: string
@@ -133,7 +133,7 @@ function FieldShell({
             </label>
             {children}
             {error ? (
-                <div id={errorId} className="error-box">
+                <div id={errorId} className='error-box'>
                     {error}
                 </div>
             ) : null}
@@ -147,64 +147,70 @@ function FieldShell({
 }
 
 export function VisualConfigEditor({
-    values,
-    validationErrors,
-    hasPayloadValidationErrors = false,
-    disabled = false,
-    onChange,
-}: VisualConfigEditorProps) {
-    const { t } = useTranslation()
-    const routingStrategyLabelId = useId()
-    const routingStrategyHintId = `${routingStrategyLabelId}-hint`
-    const keepaliveInputId = useId()
-    const keepaliveHintId = `${keepaliveInputId}-hint`
-    const keepaliveErrorId = `${keepaliveInputId}-error`
-    const nonstreamKeepaliveInputId = useId()
-    const nonstreamKeepaliveHintId = `${nonstreamKeepaliveInputId}-hint`
-    const nonstreamKeepaliveErrorId = `${nonstreamKeepaliveInputId}-error`
+                                       values,
+                                       validationErrors,
+                                       hasPayloadValidationErrors = false,
+                                       disabled = false,
+                                       onChange,
+                                   }: VisualConfigEditorProps) {
+    const { t }                                 = useTranslation()
+    const routingStrategyLabelId                = useId()
+    const routingStrategyHintId                 = `${routingStrategyLabelId}-hint`
+    const keepaliveInputId                      = useId()
+    const keepaliveHintId                       = `${keepaliveInputId}-hint`
+    const keepaliveErrorId                      = `${keepaliveInputId}-error`
+    const nonstreamKeepaliveInputId             = useId()
+    const nonstreamKeepaliveHintId              = `${nonstreamKeepaliveInputId}-hint`
+    const nonstreamKeepaliveErrorId             = `${nonstreamKeepaliveInputId}-error`
     const [activeSectionId, setActiveSectionId] = useState<VisualSectionId>('server')
-    const workspaceRef = useRef<HTMLDivElement | null>(null)
-    const sectionRefs = useRef<Partial<Record<VisualSectionId, HTMLElement | null>>>({})
+    const workspaceRef                          = useRef<HTMLDivElement | null>(null)
+    const sectionRefs                           = useRef<Partial<Record<VisualSectionId, HTMLElement | null>>>({})
 
-    const isKeepaliveDisabled = values.streaming.keepaliveSeconds === '' || values.streaming.keepaliveSeconds === '0'
+    const isKeepaliveDisabled          = values.streaming.keepaliveSeconds ===
+                                         '' ||
+                                         values.streaming.keepaliveSeconds ===
+                                         '0'
     const isNonstreamKeepaliveDisabled =
-        values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0'
+              values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0'
 
-    const portError = getValidationMessage(t, validationErrors?.port)
-    const logsMaxSizeError = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
-    const requestRetryError = getValidationMessage(t, validationErrors?.requestRetry)
+    const portError                = getValidationMessage(t, validationErrors?.port)
+    const logsMaxSizeError         = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
+    const requestRetryError        = getValidationMessage(t, validationErrors?.requestRetry)
     const maxRetryCredentialsError = getValidationMessage(t, validationErrors?.maxRetryCredentials)
-    const maxRetryIntervalError = getValidationMessage(t, validationErrors?.maxRetryInterval)
-    const keepaliveError = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds'])
-    const bootstrapRetriesError = getValidationMessage(t, validationErrors?.['streaming.bootstrapRetries'])
-    const nonstreamKeepaliveError = getValidationMessage(t, validationErrors?.['streaming.nonstreamKeepaliveInterval'])
+    const maxRetryIntervalError    = getValidationMessage(t, validationErrors?.maxRetryInterval)
+    const keepaliveError           = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds'])
+    const bootstrapRetriesError    = getValidationMessage(t, validationErrors?.['streaming.bootstrapRetries'])
+    const nonstreamKeepaliveError  = getValidationMessage(t, validationErrors?.['streaming.nonstreamKeepaliveInterval'])
 
-    const handleApiKeysTextChange = useCallback((apiKeysText: string) => onChange({ apiKeysText }), [onChange])
-    const handlePayloadDefaultRulesChange = useCallback(
+    const handleApiKeysTextChange             = useCallback(
+        (apiKeysText: string) => onChange({ apiKeysText }),
+        [onChange],
+    )
+    const handlePayloadDefaultRulesChange     = useCallback(
         (payloadDefaultRules: PayloadRule[]) => onChange({ payloadDefaultRules }),
-        [onChange]
+        [onChange],
     )
-    const handlePayloadDefaultRawRulesChange = useCallback(
+    const handlePayloadDefaultRawRulesChange  = useCallback(
         (payloadDefaultRawRules: PayloadRule[]) => onChange({ payloadDefaultRawRules }),
-        [onChange]
+        [onChange],
     )
-    const handlePayloadOverrideRulesChange = useCallback(
+    const handlePayloadOverrideRulesChange    = useCallback(
         (payloadOverrideRules: PayloadRule[]) => onChange({ payloadOverrideRules }),
-        [onChange]
+        [onChange],
     )
     const handlePayloadOverrideRawRulesChange = useCallback(
         (payloadOverrideRawRules: PayloadRule[]) => onChange({ payloadOverrideRawRules }),
-        [onChange]
+        [onChange],
     )
-    const handlePayloadFilterRulesChange = useCallback(
+    const handlePayloadFilterRulesChange      = useCallback(
         (payloadFilterRules: PayloadFilterRule[]) => onChange({ payloadFilterRules }),
-        [onChange]
+        [onChange],
     )
 
     const countErrors = useCallback(
         (fields: VisualConfigFieldPath[]) =>
             fields.reduce((total, field) => total + (validationErrors?.[field] ? 1 : 0), 0),
-        [validationErrors]
+        [validationErrors],
     )
 
     const sections = useMemo<VisualSection[]>(
@@ -264,10 +270,10 @@ export function VisualConfigEditor({
                 description: t('config_management.visual.sections.streaming.description'),
                 icon: IconSatellite,
                 errorCount: countErrors([
-                    'streaming.keepaliveSeconds',
-                    'streaming.bootstrapRetries',
-                    'streaming.nonstreamKeepaliveInterval',
-                ]),
+                                            'streaming.keepaliveSeconds',
+                                            'streaming.bootstrapRetries',
+                                            'streaming.nonstreamKeepaliveInterval',
+                                        ]),
             },
             {
                 id: 'payload',
@@ -277,7 +283,7 @@ export function VisualConfigEditor({
                 errorCount: hasPayloadValidationErrors ? 1 : 0,
             },
         ],
-        [countErrors, hasPayloadValidationErrors, t]
+        [countErrors, hasPayloadValidationErrors, t],
     )
 
     useEffect(() => {
@@ -299,7 +305,7 @@ export function VisualConfigEditor({
             {
                 rootMargin: '-10% 0px -30% 0px',
                 threshold: [0.05, 0.15, 0.3, 0.55],
-            }
+            },
         )
 
         for (const section of sections) {
@@ -325,7 +331,7 @@ export function VisualConfigEditor({
                 return (
                     <button
                         key={section.id}
-                        type="button"
+                        type='button'
                         className={`${styles.navButton} ${
                             activeSectionId === section.id ? styles.navButtonActive : ''
                         }`}
@@ -341,7 +347,7 @@ export function VisualConfigEditor({
                                     <span className={styles.navLabel}>{section.title}</span>
                                 </span>
                                 {section.errorCount > 0 ? (
-                                    <span className={styles.navBadge} aria-hidden="true">
+                                    <span className={styles.navBadge} aria-hidden='true'>
                                         {section.errorCount}
                                     </span>
                                 ) : null}
@@ -363,11 +369,11 @@ export function VisualConfigEditor({
 
                 <div className={styles.sections}>
                     <ConfigSection
-                        id="server"
+                        id='server'
                         ref={(node) => {
                             sectionRefs.current.server = node
                         }}
-                        indexLabel="01"
+                        indexLabel='01'
                         icon={<IconSettings size={16} />}
                         title={t('config_management.visual.sections.server.title')}
                         description={t('config_management.visual.sections.server.description')}
@@ -375,7 +381,7 @@ export function VisualConfigEditor({
                         <SectionGrid>
                             <Input
                                 label={t('config_management.visual.sections.server.host')}
-                                placeholder="127.0.0.1"
+                                placeholder='127.0.0.1'
                                 value={values.host}
                                 onChange={(e) => onChange({ host: e.target.value })}
                                 disabled={disabled}
@@ -383,8 +389,8 @@ export function VisualConfigEditor({
                             />
                             <Input
                                 label={t('config_management.visual.sections.server.port')}
-                                type="number"
-                                placeholder="8317"
+                                type='number'
+                                placeholder='8317'
                                 value={values.port}
                                 onChange={(e) => onChange({ port: e.target.value })}
                                 disabled={disabled}
@@ -394,11 +400,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="tls"
+                        id='tls'
                         ref={(node) => {
                             sectionRefs.current.tls = node
                         }}
-                        indexLabel="02"
+                        indexLabel='02'
                         icon={<IconShield size={16} />}
                         title={t('config_management.visual.sections.tls.title')}
                         description={t('config_management.visual.sections.tls.description')}
@@ -418,14 +424,14 @@ export function VisualConfigEditor({
                                     <SectionGrid>
                                         <Input
                                             label={t('config_management.visual.sections.tls.cert')}
-                                            placeholder="/path/to/cert.pem"
+                                            placeholder='/path/to/cert.pem'
                                             value={values.tlsCert}
                                             onChange={(e) => onChange({ tlsCert: e.target.value })}
                                             disabled={disabled}
                                         />
                                         <Input
                                             label={t('config_management.visual.sections.tls.key')}
-                                            placeholder="/path/to/key.pem"
+                                            placeholder='/path/to/key.pem'
                                             value={values.tlsKey}
                                             onChange={(e) => onChange({ tlsKey: e.target.value })}
                                             disabled={disabled}
@@ -434,7 +440,7 @@ export function VisualConfigEditor({
                                     <ToggleRow
                                         title={t('config_management.visual.sections.tls.trust_forwarded_proto')}
                                         description={t(
-                                            'config_management.visual.sections.tls.trust_forwarded_proto_desc'
+                                            'config_management.visual.sections.tls.trust_forwarded_proto_desc',
                                         )}
                                         checked={values.tlsTrustForwardedProto}
                                         disabled={disabled}
@@ -446,11 +452,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="remote"
+                        id='remote'
                         ref={(node) => {
                             sectionRefs.current.remote = node
                         }}
-                        indexLabel="03"
+                        indexLabel='03'
                         icon={<IconSatellite size={16} />}
                         title={t('config_management.visual.sections.remote.title')}
                         description={t('config_management.visual.sections.remote.description')}
@@ -531,7 +537,7 @@ export function VisualConfigEditor({
                             <SectionGrid>
                                 <Input
                                     label={t('config_management.visual.sections.remote.secret_key')}
-                                    type="password"
+                                    type='password'
                                     placeholder={t('config_management.visual.sections.remote.secret_key_placeholder')}
                                     value={values.rmSecretKey}
                                     onChange={(e) => onChange({ rmSecretKey: e.target.value })}
@@ -539,7 +545,7 @@ export function VisualConfigEditor({
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.remote.panel_repo')}
-                                    placeholder="https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
+                                    placeholder='https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
                                     value={values.rmPanelRepo}
                                     onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
                                     disabled={disabled}
@@ -548,7 +554,7 @@ export function VisualConfigEditor({
                                     label={t('config_management.visual.sections.remote.cpa_repo', {
                                         defaultValue: 'CPA GitHub Repository',
                                     })}
-                                    placeholder="https://github.com/Pyrokine/CLIProxyAPI"
+                                    placeholder='https://github.com/Pyrokine/CLIProxyAPI'
                                     value={values.rmCpaRepo}
                                     onChange={(e) => onChange({ rmCpaRepo: e.target.value })}
                                     disabled={disabled}
@@ -558,11 +564,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="auth"
+                        id='auth'
                         ref={(node) => {
                             sectionRefs.current.auth = node
                         }}
-                        indexLabel="04"
+                        indexLabel='04'
                         icon={<IconKey size={16} />}
                         title={t('config_management.visual.sections.auth.title')}
                         description={t('config_management.visual.sections.auth.description')}
@@ -570,7 +576,7 @@ export function VisualConfigEditor({
                         <SectionStack>
                             <Input
                                 label={t('config_management.visual.sections.auth.auth_dir')}
-                                placeholder="~/.cli-proxy-api"
+                                placeholder='~/.cli-proxy-api'
                                 value={values.authDir}
                                 onChange={(e) => onChange({ authDir: e.target.value })}
                                 disabled={disabled}
@@ -587,11 +593,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="system"
+                        id='system'
                         ref={(node) => {
                             sectionRefs.current.system = node
                         }}
-                        indexLabel="05"
+                        indexLabel='05'
                         icon={<IconDiamond size={16} />}
                         title={t('config_management.visual.sections.system.title')}
                         description={t('config_management.visual.sections.system.description')}
@@ -631,8 +637,8 @@ export function VisualConfigEditor({
                             <SectionGrid>
                                 <Input
                                     label={t('config_management.visual.sections.system.logs_max_size')}
-                                    type="number"
-                                    placeholder="0"
+                                    type='number'
+                                    placeholder='0'
                                     value={values.logsMaxTotalSizeMb}
                                     onChange={(e) => onChange({ logsMaxTotalSizeMb: e.target.value })}
                                     disabled={disabled}
@@ -640,7 +646,7 @@ export function VisualConfigEditor({
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.system.usage_data_dir')}
-                                    placeholder="~/.cli-proxy-api/usage"
+                                    placeholder='~/.cli-proxy-api/usage'
                                     value={values.usageDataDir}
                                     onChange={(e) => onChange({ usageDataDir: e.target.value })}
                                     disabled={disabled}
@@ -651,11 +657,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="network"
+                        id='network'
                         ref={(node) => {
                             sectionRefs.current.network = node
                         }}
-                        indexLabel="06"
+                        indexLabel='06'
                         icon={<IconTrendingUp size={16} />}
                         title={t('config_management.visual.sections.network.title')}
                         description={t('config_management.visual.sections.network.description')}
@@ -664,15 +670,15 @@ export function VisualConfigEditor({
                             <SectionGrid>
                                 <Input
                                     label={t('config_management.visual.sections.network.proxy_url')}
-                                    placeholder="socks5://user:pass@127.0.0.1:1080/"
+                                    placeholder='socks5://user:pass@127.0.0.1:1080/'
                                     value={values.proxyUrl}
                                     onChange={(e) => onChange({ proxyUrl: e.target.value })}
                                     disabled={disabled}
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.network.request_retry')}
-                                    type="number"
-                                    placeholder="3"
+                                    type='number'
+                                    placeholder='3'
                                     value={values.requestRetry}
                                     onChange={(e) => onChange({ requestRetry: e.target.value })}
                                     disabled={disabled}
@@ -680,8 +686,8 @@ export function VisualConfigEditor({
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.network.max_retry_credentials')}
-                                    type="number"
-                                    placeholder="0"
+                                    type='number'
+                                    placeholder='0'
                                     value={values.maxRetryCredentials}
                                     onChange={(e) => onChange({ maxRetryCredentials: e.target.value })}
                                     disabled={disabled}
@@ -690,8 +696,8 @@ export function VisualConfigEditor({
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.network.max_retry_interval')}
-                                    type="number"
-                                    placeholder="30"
+                                    type='number'
+                                    placeholder='30'
                                     value={values.maxRetryInterval}
                                     onChange={(e) => onChange({ maxRetryInterval: e.target.value })}
                                     disabled={disabled}
@@ -709,13 +715,13 @@ export function VisualConfigEditor({
                                             {
                                                 value: 'round-robin',
                                                 label: t(
-                                                    'config_management.visual.sections.network.strategy_round_robin'
+                                                    'config_management.visual.sections.network.strategy_round_robin',
                                                 ),
                                             },
                                             {
                                                 value: 'fill-first',
                                                 label: t(
-                                                    'config_management.visual.sections.network.strategy_fill_first'
+                                                    'config_management.visual.sections.network.strategy_fill_first',
                                                 ),
                                             },
                                         ]}
@@ -725,14 +731,14 @@ export function VisualConfigEditor({
                                         ariaDescribedBy={routingStrategyHintId}
                                         onChange={(nextValue) =>
                                             onChange({
-                                                routingStrategy: nextValue as VisualConfigValues['routingStrategy'],
-                                            })
+                                                         routingStrategy: nextValue as VisualConfigValues['routingStrategy'],
+                                                     })
                                         }
                                     />
                                 </FieldShell>
                                 <Input
                                     label={t('config_management.visual.sections.network.session_affinity_ttl')}
-                                    placeholder="1h"
+                                    placeholder='1h'
                                     value={values.routingSessionAffinityTTL}
                                     onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
                                     disabled={disabled}
@@ -772,11 +778,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="quota"
+                        id='quota'
                         ref={(node) => {
                             sectionRefs.current.quota = node
                         }}
-                        indexLabel="07"
+                        indexLabel='07'
                         icon={<IconTimer size={16} />}
                         title={t('config_management.visual.sections.quota.title')}
                         description={t('config_management.visual.sections.quota.description')}
@@ -796,15 +802,21 @@ export function VisualConfigEditor({
                                 disabled={disabled}
                                 onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
                             />
+                            <ToggleRow
+                                title={t('config_management.visual.sections.quota.antigravity_credits')}
+                                checked={values.quotaAntigravityCredits}
+                                disabled={disabled}
+                                onChange={(quotaAntigravityCredits) => onChange({ quotaAntigravityCredits })}
+                            />
                         </SectionGrid>
                     </ConfigSection>
 
                     <ConfigSection
-                        id="streaming"
+                        id='streaming'
                         ref={(node) => {
                             sectionRefs.current.streaming = node
                         }}
-                        indexLabel="08"
+                        indexLabel='08'
                         icon={<IconSatellite size={16} />}
                         title={t('config_management.visual.sections.streaming.title')}
                         description={t('config_management.visual.sections.streaming.description')}
@@ -822,17 +834,17 @@ export function VisualConfigEditor({
                                     <div className={styles.fieldControl}>
                                         <input
                                             id={keepaliveInputId}
-                                            className="input"
-                                            type="number"
-                                            placeholder="0"
+                                            className='input'
+                                            type='number'
+                                            placeholder='0'
                                             value={values.streaming.keepaliveSeconds}
                                             onChange={(e) =>
                                                 onChange({
-                                                    streaming: {
-                                                        ...values.streaming,
-                                                        keepaliveSeconds: e.target.value,
-                                                    },
-                                                })
+                                                             streaming: {
+                                                                 ...values.streaming,
+                                                                 keepaliveSeconds: e.target.value,
+                                                             },
+                                                         })
                                             }
                                             disabled={disabled}
                                         />
@@ -846,16 +858,16 @@ export function VisualConfigEditor({
 
                                 <Input
                                     label={t('config_management.visual.sections.streaming.bootstrap_retries')}
-                                    type="number"
-                                    placeholder="1"
+                                    type='number'
+                                    placeholder='1'
                                     value={values.streaming.bootstrapRetries}
                                     onChange={(e) =>
                                         onChange({
-                                            streaming: {
-                                                ...values.streaming,
-                                                bootstrapRetries: e.target.value,
-                                            },
-                                        })
+                                                     streaming: {
+                                                         ...values.streaming,
+                                                         bootstrapRetries: e.target.value,
+                                                     },
+                                                 })
                                     }
                                     disabled={disabled}
                                     hint={t('config_management.visual.sections.streaming.bootstrap_hint')}
@@ -875,17 +887,17 @@ export function VisualConfigEditor({
                                     <div className={styles.fieldControl}>
                                         <input
                                             id={nonstreamKeepaliveInputId}
-                                            className="input"
-                                            type="number"
-                                            placeholder="0"
+                                            className='input'
+                                            type='number'
+                                            placeholder='0'
                                             value={values.streaming.nonstreamKeepaliveInterval}
                                             onChange={(e) =>
                                                 onChange({
-                                                    streaming: {
-                                                        ...values.streaming,
-                                                        nonstreamKeepaliveInterval: e.target.value,
-                                                    },
-                                                })
+                                                             streaming: {
+                                                                 ...values.streaming,
+                                                                 nonstreamKeepaliveInterval: e.target.value,
+                                                             },
+                                                         })
                                             }
                                             disabled={disabled}
                                         />
@@ -901,11 +913,11 @@ export function VisualConfigEditor({
                     </ConfigSection>
 
                     <ConfigSection
-                        id="payload"
+                        id='payload'
                         ref={(node) => {
                             sectionRefs.current.payload = node
                         }}
-                        indexLabel="09"
+                        indexLabel='09'
                         icon={<IconCode size={16} />}
                         title={t('config_management.visual.sections.payload.title')}
                         description={t('config_management.visual.sections.payload.description')}

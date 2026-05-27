@@ -1,4 +1,4 @@
-import { isMap, parse as parseYaml, parseDocument } from 'yaml'
+import {isMap, parse as parseYaml, parseDocument} from 'yaml'
 
 /**
  * 完整配置模板，包含所有可配置字段的默认值和分区注释

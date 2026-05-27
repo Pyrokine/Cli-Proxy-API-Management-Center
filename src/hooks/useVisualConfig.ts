@@ -8,9 +8,9 @@ import type {
     VisualConfigValidationErrors,
     VisualConfigValues,
 } from '@/types/visualConfig'
-import { DEFAULT_VISUAL_VALUES } from '@/types/visualConfig'
-import { useCallback, useMemo, useState } from 'react'
-import { isMap, parse as parseYaml, parseDocument } from 'yaml'
+import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
+import {useCallback, useMemo, useState} from 'react'
+import {isMap, parse as parseYaml, parseDocument} from 'yaml'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -95,7 +95,7 @@ function setBooleanInDoc(doc: YamlDocument, path: YamlPath, value: boolean): voi
 }
 
 function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
-    const safe = typeof value === 'string' ? value : ''
+    const safe    = typeof value === 'string' ? value : ''
     const trimmed = safe.trim()
     if (trimmed !== '') {
         doc.setIn(path, safe)
@@ -109,7 +109,7 @@ function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void
 }
 
 function setIntFromStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
-    const safe = typeof value === 'string' ? value : ''
+    const safe    = typeof value === 'string' ? value : ''
     const trimmed = safe.trim()
     if (trimmed === '') {
         if (docHas(doc, path)) {
@@ -145,7 +145,7 @@ function arePayloadModelEntriesEqual(left: PayloadRule['models'], right: Payload
     }
     for (let i = 0; i < left.length; i++) {
         const current = left[i]
-        const next = right[i]
+        const next    = right[i]
         if (!current || !next) {
             return false
         }
@@ -165,7 +165,7 @@ function arePayloadParamEntriesEqual(left: PayloadRule['params'], right: Payload
     }
     for (let i = 0; i < left.length; i++) {
         const current = left[i]
-        const next = right[i]
+        const next    = right[i]
         if (!current || !next) {
             return false
         }
@@ -190,7 +190,7 @@ function arePayloadRulesEqual(left: PayloadRule[], right: PayloadRule[]): boolea
     }
     for (let i = 0; i < left.length; i++) {
         const current = left[i]
-        const next = right[i]
+        const next    = right[i]
         if (!current || !next) {
             return false
         }
@@ -216,7 +216,7 @@ function arePayloadFilterRulesEqual(left: PayloadFilterRule[], right: PayloadFil
     }
     for (let i = 0; i < left.length; i++) {
         const current = left[i]
-        const next = right[i]
+        const next    = right[i]
         if (!current || !next) {
             return false
         }
@@ -270,6 +270,7 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         left.maxRetryInterval === right.maxRetryInterval &&
         left.quotaSwitchProject === right.quotaSwitchProject &&
         left.quotaSwitchPreviewModel === right.quotaSwitchPreviewModel &&
+        left.quotaAntigravityCredits === right.quotaAntigravityCredits &&
         left.routingStrategy === right.routingStrategy &&
         left.routingSessionAffinity === right.routingSessionAffinity &&
         left.routingSessionAffinityTTL === right.routingSessionAffinityTTL &&
@@ -324,31 +325,31 @@ function parsePayloadRules(rules: unknown): PayloadRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models = Array.isArray(modelsRaw)
-            ? modelsRaw.map((model, modelIndex) => {
-                  const modelRecord = asRecord(model)
-                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                  return {
-                      id: `model-${index}-${modelIndex}`,
-                      name,
-                      protocol: parsePayloadProtocol(modelRecord?.protocol),
-                  }
-              })
-            : []
+        const models    = Array.isArray(modelsRaw)
+                          ? modelsRaw.map((model, modelIndex) => {
+                const modelRecord = asRecord(model)
+                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                return {
+                    id: `model-${index}-${modelIndex}`,
+                    name,
+                    protocol: parsePayloadProtocol(modelRecord?.protocol),
+                }
+            })
+                          : []
 
         const paramsRecord = asRecord(record.params)
-        const params = paramsRecord
-            ? Object.entries(paramsRecord).map(([path, value], pIndex) => {
-                  const parsedValue = parsePayloadParamValue(value)
-                  return {
-                      id: `param-${index}-${pIndex}`,
-                      path,
-                      valueType: parsedValue.valueType,
-                      value: parsedValue.value,
-                  }
-              })
-            : []
+        const params       = paramsRecord
+                             ? Object.entries(paramsRecord).map(([path, value], pIndex) => {
+                const parsedValue = parsePayloadParamValue(value)
+                return {
+                    id: `param-${index}-${pIndex}`,
+                    path,
+                    valueType: parsedValue.valueType,
+                    value: parsedValue.value,
+                }
+            })
+                             : []
 
         return { id: `payload-rule-${index}`, models, params }
     })
@@ -363,21 +364,21 @@ function parsePayloadFilterRules(rules: unknown): PayloadFilterRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models = Array.isArray(modelsRaw)
-            ? modelsRaw.map((model, modelIndex) => {
-                  const modelRecord = asRecord(model)
-                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                  return {
-                      id: `filter-model-${index}-${modelIndex}`,
-                      name,
-                      protocol: parsePayloadProtocol(modelRecord?.protocol),
-                  }
-              })
-            : []
+        const models    = Array.isArray(modelsRaw)
+                          ? modelsRaw.map((model, modelIndex) => {
+                const modelRecord = asRecord(model)
+                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                return {
+                    id: `filter-model-${index}-${modelIndex}`,
+                    name,
+                    protocol: parsePayloadProtocol(modelRecord?.protocol),
+                }
+            })
+                          : []
 
         const paramsRaw = record.params
-        const params = Array.isArray(paramsRaw) ? paramsRaw.map(String) : []
+        const params    = Array.isArray(paramsRaw) ? paramsRaw.map(String) : []
 
         return { id: `payload-filter-rule-${index}`, models, params }
     })
@@ -423,7 +424,7 @@ function replaceApiKeyValue(entry: unknown, apiKey: string): unknown {
 
 function buildApiKeyEntries(
     apiKeys: string[],
-    metadata: ApiKeysStorageMetadata
+    metadata: ApiKeysStorageMetadata,
 ): Array<string | Record<string, unknown>> {
     return apiKeys.map((apiKey, index) => {
         const originalEntry = metadata.originalEntries[index]
@@ -437,17 +438,17 @@ function buildApiKeyEntries(
 }
 
 function resolveApiKeysStorage(parsed: Record<string, unknown>): { text: string; metadata: ApiKeysStorageMetadata } {
-    const legacyEntries = Array.isArray(parsed['api-keys']) ? parsed['api-keys'] : []
-    const auth = asRecord(parsed.auth)
-    const providers = asRecord(auth?.providers)
+    const legacyEntries        = Array.isArray(parsed['api-keys']) ? parsed['api-keys'] : []
+    const auth                 = asRecord(parsed.auth)
+    const providers            = asRecord(auth?.providers)
     const configApiKeyProvider = asRecord(providers?.['config-api-key'])
 
     if (configApiKeyProvider) {
         const providerEntries = Array.isArray(configApiKeyProvider['api-key-entries'])
-            ? configApiKeyProvider['api-key-entries']
-            : Array.isArray(configApiKeyProvider['api-keys'])
-              ? configApiKeyProvider['api-keys']
-              : []
+                                ? configApiKeyProvider['api-key-entries']
+                                : Array.isArray(configApiKeyProvider['api-keys'])
+                                  ? configApiKeyProvider['api-keys']
+                                  : []
         const providerListKey = Array.isArray(configApiKeyProvider['api-key-entries']) ? 'api-key-entries' : 'api-keys'
 
         return {
@@ -457,8 +458,8 @@ function resolveApiKeysStorage(parsed: Record<string, unknown>): { text: string;
                 providerListKey,
                 entryMode:
                     providerListKey === 'api-key-entries' || providerEntries.some((entry) => Boolean(asRecord(entry)))
-                        ? 'object'
-                        : 'string',
+                    ? 'object'
+                    : 'string',
                 originalEntries: providerEntries,
                 syncLegacy: legacyEntries.length > 0,
             },
@@ -497,28 +498,28 @@ function parseRawPayloadRules(rules: unknown): PayloadRule[] {
         const record = asRecord(rule) ?? {}
 
         const modelsRaw = record.models
-        const models = Array.isArray(modelsRaw)
-            ? modelsRaw.map((model, modelIndex) => {
-                  const modelRecord = asRecord(model)
-                  const nameRaw = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
-                  const name = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
-                  return {
-                      id: `raw-model-${index}-${modelIndex}`,
-                      name,
-                      protocol: parsePayloadProtocol(modelRecord?.protocol),
-                  }
-              })
-            : []
+        const models    = Array.isArray(modelsRaw)
+                          ? modelsRaw.map((model, modelIndex) => {
+                const modelRecord = asRecord(model)
+                const nameRaw     = typeof model === 'string' ? model : (modelRecord?.name ?? modelRecord?.id ?? '')
+                const name        = typeof nameRaw === 'string' ? nameRaw : String(nameRaw ?? '')
+                return {
+                    id: `raw-model-${index}-${modelIndex}`,
+                    name,
+                    protocol: parsePayloadProtocol(modelRecord?.protocol),
+                }
+            })
+                          : []
 
         const paramsRecord = asRecord(record.params)
-        const params = paramsRecord
-            ? Object.entries(paramsRecord).map(([path, value], pIndex) => ({
-                  id: `raw-param-${index}-${pIndex}`,
-                  path,
-                  valueType: 'json' as const,
-                  value: parseRawPayloadParamValue(value),
-              }))
-            : []
+        const params       = paramsRecord
+                             ? Object.entries(paramsRecord).map(([path, value], pIndex) => ({
+                id: `raw-param-${index}-${pIndex}`,
+                path,
+                valueType: 'json' as const,
+                value: parseRawPayloadParamValue(value),
+            }))
+                             : []
 
         return { id: `payload-raw-rule-${index}`, models, params }
     })
@@ -616,7 +617,7 @@ function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string
                 let value: unknown = param.value
                 if (param.valueType === 'number') {
                     const num = Number(param.value)
-                    value = Number.isFinite(num) ? num : param.value
+                    value     = Number.isFinite(num) ? num : param.value
                 } else if (param.valueType === 'boolean') {
                     value = param.value === 'true'
                 } else if (param.valueType === 'json') {
@@ -684,13 +685,13 @@ function serializeRawPayloadRulesForYaml(rules: PayloadRule[]): Array<Record<str
 
 export function useVisualConfig() {
     const [visualValues, setVisualValuesState] = useState<VisualConfigValues>({
-        ...DEFAULT_VISUAL_VALUES,
-    })
+                                                                                  ...DEFAULT_VISUAL_VALUES,
+                                                                              })
 
-    const [baselineValues, setBaselineValues] = useState<VisualConfigValues>({
-        ...DEFAULT_VISUAL_VALUES,
-    })
-    const [apiKeysStorage, setApiKeysStorage] = useState<ApiKeysStorageMetadata>(DEFAULT_API_KEYS_STORAGE_METADATA)
+    const [baselineValues, setBaselineValues]     = useState<VisualConfigValues>({
+                                                                                     ...DEFAULT_VISUAL_VALUES,
+                                                                                 })
+    const [apiKeysStorage, setApiKeysStorage]     = useState<ApiKeysStorageMetadata>(DEFAULT_API_KEYS_STORAGE_METADATA)
     const [visualParseError, setVisualParseError] = useState<string | null>(null)
 
     const validationErrors = useMemo(() => getVisualConfigValidationErrors(visualValues), [visualValues])
@@ -708,7 +709,7 @@ export function useVisualConfig() {
             visualValues.payloadDefaultRawRules,
             visualValues.payloadOverrideRules,
             visualValues.payloadOverrideRawRules,
-        ]
+        ],
     )
 
     const visualDirty = useMemo(() => {
@@ -724,15 +725,15 @@ export function useVisualConfig() {
                 return { ok: false as const, error: message }
             }
 
-            const parsedRaw: unknown = parseYaml(yamlContent) || {}
-            const parsed = asRecord(parsedRaw) ?? {}
+            const parsedRaw: unknown                                  = parseYaml(yamlContent) || {}
+            const parsed                                              = asRecord(parsedRaw) ?? {}
             const { text: apiKeysText, metadata: nextApiKeysStorage } = resolveApiKeysStorage(parsed)
-            const tls = asRecord(parsed.tls)
-            const remoteManagement = asRecord(parsed['remote-management'])
-            const quotaExceeded = asRecord(parsed['quota-exceeded'])
-            const routing = asRecord(parsed.routing)
-            const payload = asRecord(parsed.payload)
-            const streaming = asRecord(parsed.streaming)
+            const tls                                                 = asRecord(parsed.tls)
+            const remoteManagement                                    = asRecord(parsed['remote-management'])
+            const quotaExceeded                                       = asRecord(parsed['quota-exceeded'])
+            const routing                                             = asRecord(parsed.routing)
+            const payload                                             = asRecord(parsed.payload)
+            const streaming                                           = asRecord(parsed.streaming)
 
             const newValues: VisualConfigValues = {
                 host: typeof parsed.host === 'string' ? parsed.host : '',
@@ -748,21 +749,21 @@ export function useVisualConfig() {
                 rmDisableControlPanel: Boolean(remoteManagement?.['disable-control-panel']),
                 rmAutoUpdatePanel:
                     remoteManagement?.['auto-update-panel'] === undefined
-                        ? true
-                        : Boolean(remoteManagement['auto-update-panel']),
+                    ? true
+                    : Boolean(remoteManagement['auto-update-panel']),
                 rmAutoUpdateCPA: Boolean(remoteManagement?.['auto-update-cpa']),
                 rmAutoCheckUpdate: Boolean(remoteManagement?.['auto-check-update']),
                 rmCheckInterval: String(remoteManagement?.['check-interval'] ?? ''),
                 rmPanelRepo:
                     typeof remoteManagement?.['panel-github-repository'] === 'string'
-                        ? remoteManagement['panel-github-repository']
-                        : typeof remoteManagement?.['panel-repo'] === 'string'
-                          ? remoteManagement['panel-repo']
-                          : '',
+                    ? remoteManagement['panel-github-repository']
+                    : typeof remoteManagement?.['panel-repo'] === 'string'
+                      ? remoteManagement['panel-repo']
+                      : '',
                 rmCpaRepo:
                     typeof remoteManagement?.['cpa-github-repository'] === 'string'
-                        ? remoteManagement['cpa-github-repository']
-                        : '',
+                    ? remoteManagement['cpa-github-repository']
+                    : '',
 
                 authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
                 usageDataDir: typeof parsed['usage-data-dir'] === 'string' ? parsed['usage-data-dir'] : '',
@@ -782,22 +783,23 @@ export function useVisualConfig() {
                 wsAuth: parsed['ws-auth'] === undefined ? true : Boolean(parsed['ws-auth']),
                 allowQueryAuth: parsed['allow-query-auth'] === true,
                 corsAllowedOrigins: Array.isArray(parsed['cors-allowed-origins'])
-                    ? (parsed['cors-allowed-origins'] as string[]).join(', ')
-                    : '',
+                                    ? (parsed['cors-allowed-origins'] as string[]).join(', ')
+                                    : '',
 
                 quotaSwitchProject: Boolean(quotaExceeded?.['switch-project'] ?? true),
                 quotaSwitchPreviewModel: Boolean(quotaExceeded?.['switch-preview-model'] ?? true),
+                quotaAntigravityCredits: Boolean(quotaExceeded?.['antigravity-credits'] ?? false),
 
                 routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
                 routingSessionAffinity: Boolean(
-                    routing?.['session-affinity'] ?? routing?.sessionAffinity ?? routing?.['sessionAffinity']
+                    routing?.['session-affinity'] ?? routing?.sessionAffinity ?? routing?.['sessionAffinity'],
                 ),
                 routingSessionAffinityTTL:
                     typeof routing?.['session-affinity-ttl'] === 'string'
-                        ? routing['session-affinity-ttl']
-                        : typeof routing?.sessionAffinityTTL === 'string'
-                          ? routing.sessionAffinityTTL
-                          : '',
+                    ? routing['session-affinity-ttl']
+                    : typeof routing?.sessionAffinityTTL === 'string'
+                      ? routing.sessionAffinityTTL
+                      : '',
 
                 payloadDefaultRules: parsePayloadRules(payload?.default),
                 payloadDefaultRawRules: parseRawPayloadRules(payload?.['default-raw']),
@@ -886,9 +888,9 @@ export function useVisualConfig() {
                 setStringInDoc(doc, ['usage-data-dir'], values.usageDataDir)
                 if (values.apiKeysText !== baselineValues.apiKeysText) {
                     const apiKeys = values.apiKeysText
-                        .split('\n')
-                        .map((key) => key.trim())
-                        .filter(Boolean)
+                                          .split('\n')
+                                          .map((key) => key.trim())
+                                          .filter(Boolean)
                     const entries = buildApiKeyEntries(apiKeys, apiKeysStorage)
 
                     if (apiKeysStorage.source === 'auth-provider') {
@@ -903,7 +905,7 @@ export function useVisualConfig() {
                                     'config-api-key',
                                     apiKeysStorage.providerListKey ?? 'api-key-entries',
                                 ],
-                                entries
+                                entries,
                             )
                         } else if (
                             docHas(doc, [
@@ -914,11 +916,11 @@ export function useVisualConfig() {
                             ])
                         ) {
                             doc.deleteIn([
-                                'auth',
-                                'providers',
-                                'config-api-key',
-                                apiKeysStorage.providerListKey ?? 'api-key-entries',
-                            ])
+                                             'auth',
+                                             'providers',
+                                             'config-api-key',
+                                             apiKeysStorage.providerListKey ?? 'api-key-entries',
+                                         ])
                         }
                         if (apiKeysStorage.syncLegacy) {
                             if (entries.length > 0) {
@@ -950,19 +952,27 @@ export function useVisualConfig() {
                 setBooleanInDoc(doc, ['allow-query-auth'], values.allowQueryAuth)
 
                 const corsOrigins = values.corsAllowedOrigins
-                    .split(',')
-                    .map((s) => s.trim())
-                    .filter(Boolean)
+                                          .split(',')
+                                          .map((s) => s.trim())
+                                          .filter(Boolean)
                 if (corsOrigins.length > 0) {
                     doc.setIn(['cors-allowed-origins'], corsOrigins)
                 } else if (docHas(doc, ['cors-allowed-origins'])) {
                     doc.deleteIn(['cors-allowed-origins'])
                 }
 
-                if (docHas(doc, ['quota-exceeded']) || !values.quotaSwitchProject || !values.quotaSwitchPreviewModel) {
+                if (
+                    docHas(doc, ['quota-exceeded']) ||
+                    !values.quotaSwitchProject ||
+                    !values.quotaSwitchPreviewModel ||
+                    values.quotaAntigravityCredits
+                ) {
                     ensureMapInDoc(doc, ['quota-exceeded'])
                     doc.setIn(['quota-exceeded', 'switch-project'], values.quotaSwitchProject)
                     doc.setIn(['quota-exceeded', 'switch-preview-model'], values.quotaSwitchPreviewModel)
+                    if (docHas(doc, ['quota-exceeded', 'antigravity-credits']) || values.quotaAntigravityCredits) {
+                        doc.setIn(['quota-exceeded', 'antigravity-credits'], values.quotaAntigravityCredits)
+                    }
                     deleteIfMapEmpty(doc, ['quota-exceeded'])
                 }
 
@@ -979,17 +989,21 @@ export function useVisualConfig() {
                     deleteIfMapEmpty(doc, ['routing'])
                 }
 
-                const keepaliveSeconds =
-                    typeof values.streaming?.keepaliveSeconds === 'string' ? values.streaming.keepaliveSeconds : ''
-                const bootstrapRetries =
-                    typeof values.streaming?.bootstrapRetries === 'string' ? values.streaming.bootstrapRetries : ''
+                const keepaliveSeconds           =
+                          typeof values.streaming?.keepaliveSeconds === 'string' ?
+                          values.streaming.keepaliveSeconds :
+                          ''
+                const bootstrapRetries           =
+                          typeof values.streaming?.bootstrapRetries === 'string' ?
+                          values.streaming.bootstrapRetries :
+                          ''
                 const nonstreamKeepaliveInterval =
-                    typeof values.streaming?.nonstreamKeepaliveInterval === 'string'
-                        ? values.streaming.nonstreamKeepaliveInterval
-                        : ''
+                          typeof values.streaming?.nonstreamKeepaliveInterval === 'string'
+                          ? values.streaming.nonstreamKeepaliveInterval
+                          : ''
 
                 const streamingDefined =
-                    docHas(doc, ['streaming']) || keepaliveSeconds.trim() || bootstrapRetries.trim()
+                          docHas(doc, ['streaming']) || keepaliveSeconds.trim() || bootstrapRetries.trim()
                 if (streamingDefined) {
                     ensureMapInDoc(doc, ['streaming'])
                     setIntFromStringInDoc(doc, ['streaming', 'keepalive-seconds'], keepaliveSeconds)
@@ -1016,7 +1030,7 @@ export function useVisualConfig() {
                     if (values.payloadDefaultRawRules.length > 0) {
                         doc.setIn(
                             ['payload', 'default-raw'],
-                            serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules)
+                            serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules),
                         )
                     } else if (docHas(doc, ['payload', 'default-raw'])) {
                         doc.deleteIn(['payload', 'default-raw'])
@@ -1029,7 +1043,7 @@ export function useVisualConfig() {
                     if (values.payloadOverrideRawRules.length > 0) {
                         doc.setIn(
                             ['payload', 'override-raw'],
-                            serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules)
+                            serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules),
                         )
                     } else if (docHas(doc, ['payload', 'override-raw'])) {
                         doc.deleteIn(['payload', 'override-raw'])
@@ -1047,7 +1061,7 @@ export function useVisualConfig() {
                 return currentYaml
             }
         },
-        [apiKeysStorage, baselineValues, visualValues]
+        [apiKeysStorage, baselineValues, visualValues],
     )
 
     const setVisualValues = useCallback((newValues: Partial<VisualConfigValues>) => {

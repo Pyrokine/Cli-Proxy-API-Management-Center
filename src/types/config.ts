@@ -3,12 +3,13 @@
  * 与基线 /config 返回结构保持一致（内部使用驼峰形式）
  */
 
-import type { AmpcodeConfig } from './ampcode'
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from './provider'
+import type {AmpcodeConfig} from './ampcode'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from './provider'
 
 export interface QuotaExceededConfig {
     switchProject?: boolean
     switchPreviewModel?: boolean
+    antigravityCredits?: boolean
 }
 
 export interface RemoteManagementConfig {
