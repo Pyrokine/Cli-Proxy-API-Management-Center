@@ -38,9 +38,8 @@
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     cursor: pointer;
-    transition:
-        color 0.15s ease,
-        border-color 0.15s ease;
+    transition: color 0.15s ease,
+    border-color 0.15s ease;
 
     &:hover {
         color: var(--text-primary);
@@ -129,7 +128,7 @@
 // reads as a separate control group from the switch — visually noisy. Drop
 // the border and lighten the bg so the pair scans as one auto-refresh
 // configuration block. R-526:wrap 自身也保留 0 padding,避免 button 缩成一团
-// 后 wrap 的 box-shadow/padding 形成"多一个框"的视觉。
+// 后 wrap 的 box-shadow/padding 形成"多一个框"的视觉，
 .intervalSelect {
     padding: 0;
     background: transparent;
@@ -247,10 +246,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition:
-        border-color 0.15s ease,
-        color 0.15s ease,
-        background-color 0.15s ease;
+    transition: border-color 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
 
     &:hover:not(:disabled) {
         color: var(--text-primary);
@@ -387,7 +385,9 @@
     flex: 1 1 auto;
     min-height: 280px;
     max-height: calc(100vh - 320px);
+    height: auto;
     overflow: auto;
+    resize: vertical;
     position: relative;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
@@ -400,6 +400,7 @@
 
     @include mobile {
         min-height: 360px;
+        height: 420px;
         max-height: 480px;
         flex: 0 0 auto;
         overflow: auto;
@@ -678,9 +679,8 @@
     font-weight: $font-weight-semibold;
     line-height: 1.2;
     cursor: pointer;
-    transition:
-        background-color 0.15s ease,
-        border-color 0.15s ease;
+    transition: background-color 0.15s ease,
+    border-color 0.15s ease;
 
     &:hover {
         background: rgba($primary-color, 0.16);
@@ -818,6 +818,15 @@
     }
 }
 
+@media (max-height: 960px) {
+    @media (min-width: 769px) {
+        .logPanel {
+            min-height: 160px;
+            max-height: calc(100vh - 300px);
+        }
+    }
+}
+
 @media (max-height: 820px) {
     .pageTitle {
         font-size: $font-size-xl;
@@ -834,6 +843,23 @@
 
     .content {
         gap: $spacing-md;
+    }
+
+    @media (min-width: 769px) {
+        .filters {
+            flex: 0 0 auto;
+            gap: $spacing-sm;
+            margin-bottom: $spacing-sm;
+            max-height: 260px;
+            overflow: auto;
+            padding-right: 4px;
+            overscroll-behavior: contain;
+        }
+
+        .logPanel {
+            min-height: 0;
+            max-height: calc(100vh - 280px);
+        }
     }
 
     .logCard {
@@ -877,6 +903,20 @@
     .filters {
         margin-bottom: $spacing-sm;
         gap: $spacing-sm;
+    }
+
+    @media (min-width: 769px) {
+        .filters {
+            max-height: 180px;
+            overflow: auto;
+            padding-right: 4px;
+            overscroll-behavior: contain;
+        }
+
+        .logPanel {
+            min-height: 0;
+            max-height: calc(100vh - 220px);
+        }
     }
 
     .logCard {

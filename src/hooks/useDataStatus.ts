@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import {useMemo} from 'react'
 
 export type DataStatusValue = 'checking' | 'missing' | 'loading' | 'loaded' | 'empty' | 'error' | 'refreshing' | 'ready'
 
@@ -28,13 +28,13 @@ function normalizeErrorMessage(error: unknown): string | undefined {
 }
 
 export function useDataStatus<T>({
-    loading,
-    error,
-    data,
-    isEmpty,
-    refreshing = false,
-    missing = false,
-}: UseDataStatusOptions<T>): UseDataStatusResult<T> {
+                                     loading,
+                                     error,
+                                     data,
+                                     isEmpty,
+                                     refreshing = false,
+                                     missing = false,
+                                 }: UseDataStatusOptions<T>): UseDataStatusResult<T> {
     return useMemo(() => {
         const normalizedData = data ?? null
         if (error) {
@@ -50,7 +50,7 @@ export function useDataStatus<T>({
                 data: normalizedData,
             }
         }
-        if (loading && !normalizedData) {
+        if (loading && (!normalizedData || isEmpty(normalizedData))) {
             return {
                 status: 'loading' as const,
                 data: normalizedData,

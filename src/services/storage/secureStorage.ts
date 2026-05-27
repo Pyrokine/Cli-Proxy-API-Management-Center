@@ -3,7 +3,7 @@
  * 使用 AES-256-GCM 加密敏感数据，存储到 sessionStorage（关闭 tab 自动清除）
  */
 
-import { decryptData, encryptData, isSecureStorageEncryptionAvailable } from '@/utils/encryption'
+import {decryptData, encryptData, isSecureStorageEncryptionAvailable} from '@/utils/encryption'
 
 interface StorageOptions {
     encrypt?: boolean
@@ -41,7 +41,7 @@ class SecureStorageService {
 
         // Check both storages for migration compatibility
         const store = this.storage(persistent)
-        let raw = store.getItem(key)
+        let raw     = store.getItem(key)
 
         // Fallback: check localStorage if sessionStorage is empty (migration from old version)
         if (raw === null && !persistent) {

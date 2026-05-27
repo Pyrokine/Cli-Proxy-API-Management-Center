@@ -1,6 +1,6 @@
-import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { EmptyState } from '@/components/ui/EmptyState'
+import {Button} from '@/components/ui/Button'
+import {Card} from '@/components/ui/Card'
+import {EmptyState} from '@/components/ui/EmptyState'
 import {
     IconChevronDown,
     IconChevronUp,
@@ -14,25 +14,25 @@ import {
     IconTrash2,
     IconX,
 } from '@/components/ui/icons'
-import { Input } from '@/components/ui/Input'
-import { Modal } from '@/components/ui/Modal'
-import { Pagination } from '@/components/ui/Pagination'
-import { Select } from '@/components/ui/Select'
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
-import { useHeaderRefresh } from '@/hooks/useHeaderRefresh'
-import { useLocalStorage } from '@/hooks/useLocalStorage'
-import { configApi } from '@/services/api/config'
-import { logsApi } from '@/services/api/logs'
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores'
-import { AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs } from '@/utils/autoRefresh'
-import { copyToClipboard } from '@/utils/clipboard'
-import { MANAGEMENT_API_PREFIX } from '@/utils/constants'
-import { downloadBlob } from '@/utils/download'
-import { formatFileSize, formatLogTimestamp, formatUnixTimestamp } from '@/utils/format'
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { parseLogLine } from './hooks/logParsing'
+import {Input} from '@/components/ui/Input'
+import {Modal} from '@/components/ui/Modal'
+import {Pagination} from '@/components/ui/Pagination'
+import {Select} from '@/components/ui/Select'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {useLocalStorage} from '@/hooks/useLocalStorage'
+import {configApi} from '@/services/api/config'
+import {logsApi} from '@/services/api/logs'
+import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
+import {copyToClipboard} from '@/utils/clipboard'
+import {MANAGEMENT_API_PREFIX} from '@/utils/constants'
+import {downloadBlob} from '@/utils/download'
+import {formatFileSize, formatLogTimestamp, formatUnixTimestamp} from '@/utils/format'
+import type {PointerEvent as ReactPointerEvent} from 'react'
+import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {parseLogLine} from './hooks/logParsing'
 import {
     HTTP_METHODS,
     type LogState,
@@ -40,8 +40,8 @@ import {
     resolveStatusGroup,
     STATUS_GROUPS,
 } from './hooks/logTypes'
-import { useLogFilters } from './hooks/useLogFilters'
-import { isTraceableRequestPath, useTraceResolver } from './hooks/useTraceResolver'
+import {useLogFilters} from './hooks/useLogFilters'
+import {isTraceableRequestPath, useTraceResolver} from './hooks/useTraceResolver'
 import styles from './LogsPage.module.scss'
 
 interface ErrorLogItem {
@@ -51,16 +51,26 @@ interface ErrorLogItem {
 }
 
 // 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
-const MAX_BUFFER_LINES = 10000
-const DEFAULT_LOG_PAGE_SIZE = 50
-const LONG_PRESS_MS = 650
+const MAX_BUFFER_LINES          = 10000
+const DEFAULT_LOG_PAGE_SIZE     = 50
+const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
 
 const REFRESH_INTERVAL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = AUTO_REFRESH_INTERVALS
-const DEFAULT_PERSISTED_LOG_FILTERS: PersistedLogFilters = {
+const DEFAULT_PERSISTED_LOG_FILTERS: PersistedLogFilters                        = {
     methodFilters: [],
     statusFilters: [],
     pathFilters: [],
+}
+
+function formatRefreshIntervalLabel(value: number): string {
+    if (value <= 0) {
+        return '0s'
+    }
+    if (value % 1000 === 0) {
+        return `${value / 1000}s`
+    }
+    return `${value}ms`
 }
 
 const getErrorMessage = (err: unknown): string => {
@@ -84,74 +94,95 @@ const getErrorMessage = (err: unknown): string => {
 type TabType = 'logs' | 'errors'
 
 export function LogsPage() {
-    const { t } = useTranslation()
+    const { t }                                  = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
-    const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const apiBase = useAuthStore((state) => state.apiBase)
-    const managementKey = useAuthStore((state) => state.managementKey)
-    const traceScopeKey = `${apiBase}::${managementKey}`
-    const config = useConfigStore((state) => state.config)
-    const requestLogEnabled = config?.requestLog ?? false
+    const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
+    const apiBase                                = useAuthStore((state) => state.apiBase)
+    const managementKey                          = useAuthStore((state) => state.managementKey)
+    const traceScopeKey                          = `${apiBase}::${managementKey}`
+    const config                                 = useConfigStore((state) => state.config)
+    const requestLogEnabled                      = config?.requestLog ?? false
 
-    const [activeTab, setActiveTab] = useState<TabType>('logs')
-    const [logState, setLogState] = useState<LogState>({
-        buffer: [],
-    })
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState('')
-    const configRefreshMs = useMemo(
+    const [activeTab, setActiveTab]                                 = useState<TabType>('logs')
+    const [logState, setLogState]                                   = useState<LogState>({
+                                                                                             buffer: [],
+                                                                                         })
+    const [loading, setLoading]                                     = useState(true)
+    const [error, setError]                                         = useState('')
+    const configRefreshMs                                           = useMemo(
         () => resolveAutoRefreshMs(config?.autoRefreshInterval),
-        [config?.autoRefreshInterval]
+        [config?.autoRefreshInterval],
     )
-    const [autoRefreshOverride, setAutoRefreshOverride] = useLocalStorage<boolean | null>('logsPage.autoRefresh', null)
-    const [refreshIntervalOverride, setRefreshIntervalOverride] = useLocalStorage<number | null>(
+    const [autoRefreshOverride, setAutoRefreshOverride]             = useLocalStorage<boolean | null>(
+        'logsPage.autoRefresh',
+        null,
+    )
+    const [refreshIntervalOverride, setRefreshIntervalOverride]     = useLocalStorage<number | null>(
         'logsPage.refreshInterval',
-        null
+        null,
     )
-    const autoRefresh = (autoRefreshOverride ?? configRefreshMs > 0) && (refreshIntervalOverride ?? configRefreshMs) > 0
-    const refreshInterval = refreshIntervalOverride ?? configRefreshMs
-    const [searchQuery, setSearchQuery] = useState('')
-    const deferredSearchQuery = useDeferredValue(searchQuery)
-    const [hideManagementLogs, setHideManagementLogs] = useLocalStorage('logsPage.hideManagementLogs', true)
-    const [showRawLogs, setShowRawLogs] = useLocalStorage('logsPage.showRawLogs', false)
+    const autoRefresh                                               = (autoRefreshOverride ?? configRefreshMs > 0) &&
+                                                                      (refreshIntervalOverride ?? configRefreshMs) >
+                                                                      0
+    const refreshInterval                                           = refreshIntervalOverride ?? configRefreshMs
+    const refreshIntervalOptions                                    = useMemo(() => {
+        const refreshValue = String(refreshInterval)
+        if (REFRESH_INTERVAL_OPTIONS.some((option) => option.value === refreshValue)) {
+            return REFRESH_INTERVAL_OPTIONS
+        }
+        return [
+            ...REFRESH_INTERVAL_OPTIONS,
+            { value: refreshValue, label: formatRefreshIntervalLabel(refreshInterval) },
+        ]
+    }, [refreshInterval])
+    const [searchQuery, setSearchQuery]                             = useState('')
+    const deferredSearchQuery                                       = useDeferredValue(searchQuery)
+    const [hideManagementLogs, setHideManagementLogs]               = useLocalStorage(
+        'logsPage.hideManagementLogs',
+        true,
+    )
+    const [showRawLogs, setShowRawLogs]                             = useLocalStorage('logsPage.showRawLogs', false)
     const [structuredFiltersExpanded, setStructuredFiltersExpanded] = useLocalStorage(
         'logsPage.structuredFiltersExpanded',
-        true
+        true,
     )
-    const [storedFilters, setStoredFilters] = useLocalStorage<PersistedLogFilters>(
+    const [storedFilters, setStoredFilters]                         = useLocalStorage<PersistedLogFilters>(
         'logsPage.structuredFilters',
-        DEFAULT_PERSISTED_LOG_FILTERS
+        DEFAULT_PERSISTED_LOG_FILTERS,
     )
-    const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([])
-    const [loadingErrors, setLoadingErrors] = useState(false)
-    const [errorLogsError, setErrorLogsError] = useState('')
-    const [requestLogId, setRequestLogId] = useState<string | null>(null)
-    const [requestLogUpdating, setRequestLogUpdating] = useState(false)
-    const [logDiskSize, setLogDiskSize] = useState<{ totalBytes: number; fileCount: number } | null>(null)
-    const [totalLogLines, setTotalLogLines] = useState(0)
+    const [errorLogs, setErrorLogs]                                 = useState<ErrorLogItem[]>([])
+    const [loadingErrors, setLoadingErrors]                         = useState(false)
+    const [errorLogsError, setErrorLogsError]                       = useState('')
+    const [requestLogId, setRequestLogId]                           = useState<string | null>(null)
+    const [requestLogUpdating, setRequestLogUpdating]               = useState(false)
+    const [logDiskSize, setLogDiskSize]                             = useState<{
+                                                                                   totalBytes: number;
+                                                                                   fileCount: number
+                                                                               } | null>(null)
+    const [totalLogLines, setTotalLogLines]                         = useState(0)
 
     // 错误日志预览
-    const [previewName, setPreviewName] = useState<string | null>(null)
-    const [previewContent, setPreviewContent] = useState('')
-    const [previewLoading, setPreviewLoading] = useState(false)
+    const [previewName, setPreviewName]                     = useState<string | null>(null)
+    const [previewContent, setPreviewContent]               = useState('')
+    const [previewLoading, setPreviewLoading]               = useState(false)
     const [requestLogDownloading, setRequestLogDownloading] = useState(false)
 
     const trace = useTraceResolver({
-        traceScopeKey,
-        connectionStatus,
-        config,
-        requestLogDownloading,
-    })
+                                       traceScopeKey,
+                                       connectionStatus,
+                                       config,
+                                       requestLogDownloading,
+                                   })
 
-    const logScrollerRef = useRef<HTMLDivElement | null>(null)
-    const longPressRef = useRef<{
-        timer: number | null
-        startX: number
-        startY: number
-        fired: boolean
-    } | null>(null)
+    const logScrollerRef        = useRef<HTMLDivElement | null>(null)
+    const longPressRef          = useRef<{
+                                             timer: number | null
+                                             startX: number
+                                             startY: number
+                                             fired: boolean
+                                         } | null>(null)
     const logRequestInFlightRef = useRef(false)
-    const pendingFullReloadRef = useRef(false)
+    const pendingFullReloadRef  = useRef(false)
 
     // 保存最新时间戳用于增量获取
     const latestTimestampRef = useRef<number>(0)
@@ -159,7 +190,7 @@ export function LogsPage() {
     const disableControls = connectionStatus !== 'connected'
 
     // 分页状态
-    const [logPage, setLogPage] = useState(1)
+    const [logPage, setLogPage]         = useState(1)
     const [logPageSize, setLogPageSize] = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
 
     const loadLogs = async (incremental = false) => {
@@ -184,22 +215,25 @@ export function LogsPage() {
 
         try {
             const params =
-                incremental && latestTimestampRef.current > 0
-                    ? { after: latestTimestampRef.current }
-                    : { limit: MAX_BUFFER_LINES }
+                      incremental && latestTimestampRef.current > 0
+                      ? { after: latestTimestampRef.current }
+                      : { limit: MAX_BUFFER_LINES }
             const [data] = await Promise.all([
-                logsApi.fetchLogs(params),
-                // 非增量加载时同步刷新磁盘占用
-                incremental
-                    ? Promise.resolve(null)
-                    : logsApi
-                          .fetchLogSize()
-                          .then((res) => {
-                              setLogDiskSize({ totalBytes: res.total_bytes, fileCount: res.file_count })
-                              return res
-                          })
-                          .catch(() => null),
-            ])
+                                                 logsApi.fetchLogs(params),
+                                                 // 非增量加载时同步刷新磁盘占用
+                                                 incremental
+                                                 ? Promise.resolve(null)
+                                                 : logsApi
+                                                     .fetchLogSize()
+                                                     .then((res) => {
+                                                         setLogDiskSize({
+                                                                            totalBytes: res.total_bytes,
+                                                                            fileCount: res.file_count,
+                                                                        })
+                                                         return res
+                                                     })
+                                                     .catch(() => null),
+                                             ])
 
             // 更新时间戳
             if (data['latest-timestamp']) {
@@ -212,9 +246,9 @@ export function LogsPage() {
             if (incremental && newLines.length > 0) {
                 // 增量更新：追加新日志并限制缓冲区大小
                 setLogState((prev) => {
-                    const combined = [...prev.buffer, ...newLines]
+                    const combined  = [...prev.buffer, ...newLines]
                     const dropCount = Math.max(combined.length - MAX_BUFFER_LINES, 0)
-                    const buffer = dropCount > 0 ? combined.slice(dropCount) : combined
+                    const buffer    = dropCount > 0 ? combined.slice(dropCount) : combined
                     return { buffer }
                 })
             } else if (!incremental) {
@@ -224,10 +258,7 @@ export function LogsPage() {
                 setLogPage(1)
             }
         } catch (err: unknown) {
-            console.error('Failed to load logs:', err)
-            if (!incremental) {
-                setError(getErrorMessage(err) || t('logs.load_error'))
-            }
+            setError(getErrorMessage(err) || t('logs.load_error'))
         } finally {
             if (!incremental) {
                 setLoading(false)
@@ -244,31 +275,33 @@ export function LogsPage() {
 
     const clearLogs = async () => {
         showConfirmation({
-            title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
-            message: t('logs.clear_confirm'),
-            variant: 'danger',
-            confirmText: t('common.confirm'),
-            onConfirm: async () => {
-                try {
-                    await logsApi.clearLogs()
-                    setLogState({ buffer: [] })
-                    latestTimestampRef.current = 0
-                    setLogPage(1)
-                    showNotification(t('logs.clear_success'), 'success')
-                    logsApi
-                        .fetchLogSize()
-                        .then((res) => {
-                            setLogDiskSize({ totalBytes: res.total_bytes, fileCount: res.file_count })
-                        })
-                        .catch((e) => {
-                            console.warn('[LogsPage] fetchLogSize failed', e)
-                        })
-                } catch (err: unknown) {
-                    const message = getErrorMessage(err)
-                    showNotification(`${t('notification.delete_failed')}${message ? `: ${message}` : ''}`, 'error')
-                }
-            },
-        })
+                             title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
+                             message: t('logs.clear_confirm'),
+                             variant: 'danger',
+                             confirmText: t('common.confirm'),
+                             onConfirm: async () => {
+                                 try {
+                                     await logsApi.clearLogs()
+                                     setLogState({ buffer: [] })
+                                     latestTimestampRef.current = 0
+                                     setLogPage(1)
+                                     showNotification(t('logs.clear_success'), 'success')
+                                     logsApi
+                                         .fetchLogSize()
+                                         .then((res) => {
+                                             setLogDiskSize({ totalBytes: res.total_bytes, fileCount: res.file_count })
+                                         })
+                                         .catch((e) => {
+                                             console.warn('[LogsPage] fetchLogSize failed', e)
+                                         })
+                                 } catch (err: unknown) {
+                                     const message = getErrorMessage(err)
+                                     showNotification(`${t('notification.delete_failed')}${message ?
+                                                                                           `: ${message}` :
+                                                                                           ''}`, 'error')
+                                 }
+                             },
+                         })
     }
 
     const downloadLogs = () => {
@@ -294,7 +327,7 @@ export function LogsPage() {
             setErrorLogs([])
             const message = getErrorMessage(err)
             setErrorLogsError(
-                message ? `${t('logs.error_logs_load_error')}: ${message}` : t('logs.error_logs_load_error')
+                message ? `${t('logs.error_logs_load_error')}: ${message}` : t('logs.error_logs_load_error'),
             )
         } finally {
             setLoadingErrors(false)
@@ -359,7 +392,7 @@ export function LogsPage() {
     }, [autoRefresh, connectionStatus, refreshInterval])
 
     const trimmedSearchQuery = deferredSearchQuery.trim()
-    const isSearching = trimmedSearchQuery.length > 0
+    const isSearching        = trimmedSearchQuery.length > 0
 
     const parsedSearchLines = useMemo(() => {
         let working = logState.buffer
@@ -370,20 +403,20 @@ export function LogsPage() {
 
         if (trimmedSearchQuery) {
             const queryLowered = trimmedSearchQuery.toLowerCase()
-            working = working.filter((line) => line.toLowerCase().includes(queryLowered))
+            working            = working.filter((line) => line.toLowerCase().includes(queryLowered))
         }
 
         return working.map((line) => parseLogLine(line))
     }, [logState.buffer, hideManagementLogs, trimmedSearchQuery])
 
-    const filters = useLogFilters({
-        parsedLines: parsedSearchLines,
-        initialFilters: storedFilters,
-        onFiltersChange: setStoredFilters,
-    })
+    const filters                  = useLogFilters({
+                                                       parsedLines: parsedSearchLines,
+                                                       initialFilters: storedFilters,
+                                                       onFiltersChange: setStoredFilters,
+                                                   })
     const structuredFiltersPanelId = 'logs-structured-filters'
-    const structuredFilterCount =
-        filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length
+    const structuredFilterCount    =
+              filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length
 
     const { filteredParsedLines, filteredLines, removedCount } = useMemo(() => {
         const filteredParsed = parsedSearchLines.filter((line) => {
@@ -405,16 +438,16 @@ export function LogsPage() {
             removedCount: Math.max(logState.buffer.length - filteredParsed.length, 0),
         }
     }, [
-        logState.buffer.length,
-        filters.methodFilterSet,
-        filters.pathFilterSet,
-        filters.statusFilterSet,
-        parsedSearchLines,
-    ])
+                                                                             logState.buffer.length,
+                                                                             filters.methodFilterSet,
+                                                                             filters.pathFilterSet,
+                                                                             filters.statusFilterSet,
+                                                                             parsedSearchLines,
+                                                                         ])
 
     // 日志逆序（新→旧），分页切片
     const reversedParsedLines = useMemo(() => [...filteredParsedLines].reverse(), [filteredParsedLines])
-    const totalFilteredLines = reversedParsedLines.length
+    const totalFilteredLines  = reversedParsedLines.length
 
     // 过滤/搜索条件变化时重置到第 1 页
     useEffect(() => {
@@ -422,23 +455,23 @@ export function LogsPage() {
             setLogPage(1)
         })
     }, [
-        isSearching,
-        trimmedSearchQuery,
-        filters.methodFilters,
-        filters.statusFilters,
-        filters.pathFilters,
-        hideManagementLogs,
-    ])
+                  isSearching,
+                  trimmedSearchQuery,
+                  filters.methodFilters,
+                  filters.statusFilters,
+                  filters.pathFilters,
+                  hideManagementLogs,
+              ])
 
-    const pageStart = (logPage - 1) * logPageSize
-    const pageEnd = pageStart + logPageSize
-    const pagedParsed = useMemo(
+    const pageStart      = (logPage - 1) * logPageSize
+    const pageEnd        = pageStart + logPageSize
+    const pagedParsed    = useMemo(
         () => (showRawLogs ? [] : reversedParsedLines.slice(pageStart, pageEnd)),
-        [showRawLogs, reversedParsedLines, pageStart, pageEnd]
+        [showRawLogs, reversedParsedLines, pageStart, pageEnd],
     )
     const rawVisibleText = useMemo(
         () => filteredLines.slice(pageStart, pageEnd).join('\n'),
-        [filteredLines, pageStart, pageEnd]
+        [filteredLines, pageStart, pageEnd],
     )
 
     const copyLogLine = async (raw: string) => {
@@ -511,9 +544,9 @@ export function LogsPage() {
         try {
             const response = await logsApi.downloadRequestLogById(id)
             downloadBlob({
-                filename: `request-${id}.log`,
-                blob: new Blob([response.data], { type: 'text/plain' }),
-            })
+                             filename: `request-${id}.log`,
+                             blob: new Blob([response.data], { type: 'text/plain' }),
+                         })
             showNotification(t('logs.request_log_download_success'), 'success')
             setRequestLogId(null)
         } catch (err: unknown) {
@@ -559,14 +592,14 @@ export function LogsPage() {
 
             <div className={styles.tabBar}>
                 <button
-                    type="button"
+                    type='button'
                     className={`${styles.tabItem} ${activeTab === 'logs' ? styles.tabActive : ''}`}
                     onClick={() => setActiveTab('logs')}
                 >
                     {t('logs.log_content')}
                 </button>
                 <button
-                    type="button"
+                    type='button'
                     className={`${styles.tabItem} ${activeTab === 'errors' ? styles.tabActive : ''}`}
                     onClick={() => setActiveTab('errors')}
                 >
@@ -577,7 +610,7 @@ export function LogsPage() {
             <div className={styles.content}>
                 {activeTab === 'logs' && (
                     <Card className={styles.logCard}>
-                        {error && <div className="error-box">{error}</div>}
+                        {error && <div className='error-box'>{error}</div>}
 
                         <div className={styles.filters}>
                             <div className={styles.searchWrapper}>
@@ -589,11 +622,11 @@ export function LogsPage() {
                                     rightElement={
                                         searchQuery ? (
                                             <button
-                                                type="button"
+                                                type='button'
                                                 className={styles.searchClear}
                                                 onClick={() => setSearchQuery('')}
-                                                title="Clear"
-                                                aria-label="Clear"
+                                                title='Clear'
+                                                aria-label='Clear'
                                             >
                                                 <IconX size={16} />
                                             </button>
@@ -606,17 +639,17 @@ export function LogsPage() {
 
                             <div className={styles.filterPanelHeader}>
                                 <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
+                                    type='button'
+                                    variant='secondary'
+                                    size='sm'
                                     className={styles.filterPanelToggle}
                                     onClick={() => setStructuredFiltersExpanded((prev: boolean) => !prev)}
                                     aria-expanded={structuredFiltersExpanded}
                                     aria-controls={structuredFiltersPanelId}
                                     title={
                                         structuredFiltersExpanded
-                                            ? t('logs.filter_panel_collapse')
-                                            : t('logs.filter_panel_expand')
+                                        ? t('logs.filter_panel_collapse')
+                                        : t('logs.filter_panel_expand')
                                     }
                                 >
                                     <span className={styles.filterPanelButtonContent}>
@@ -630,8 +663,8 @@ export function LogsPage() {
                                         {structuredFiltersExpanded ? (
                                             <IconChevronUp size={16} />
                                         ) : (
-                                            <IconChevronDown size={16} />
-                                        )}
+                                             <IconChevronDown size={16} />
+                                         )}
                                     </span>
                                 </Button>
                             </div>
@@ -643,11 +676,11 @@ export function LogsPage() {
                                         <div className={styles.filterChipList}>
                                             {HTTP_METHODS.map((method) => {
                                                 const active = filters.methodFilters.includes(method)
-                                                const count = filters.methodCounts[method] ?? 0
+                                                const count  = filters.methodCounts[method] ?? 0
                                                 return (
                                                     <button
                                                         key={method}
-                                                        type="button"
+                                                        type='button'
                                                         className={`${styles.filterChip} ${
                                                             active ? styles.filterChipActive : ''
                                                         }`}
@@ -667,11 +700,11 @@ export function LogsPage() {
                                         <div className={styles.filterChipList}>
                                             {STATUS_GROUPS.map((statusGroup) => {
                                                 const active = filters.statusFilters.includes(statusGroup)
-                                                const count = filters.statusCounts[statusGroup] ?? 0
+                                                const count  = filters.statusCounts[statusGroup] ?? 0
                                                 return (
                                                     <button
                                                         key={statusGroup}
-                                                        type="button"
+                                                        type='button'
                                                         className={`${styles.filterChip} ${
                                                             active ? styles.filterChipActive : ''
                                                         }`}
@@ -694,30 +727,30 @@ export function LogsPage() {
                                                     {t('logs.filter_path_empty')}
                                                 </span>
                                             ) : (
-                                                filters.pathOptions.map(({ path, count }) => {
-                                                    const active = filters.pathFilters.includes(path)
-                                                    return (
-                                                        <button
-                                                            key={path}
-                                                            type="button"
-                                                            className={`${styles.filterChip} ${
-                                                                active ? styles.filterChipActive : ''
-                                                            }`}
-                                                            onClick={() => filters.togglePathFilter(path)}
-                                                            aria-pressed={active}
-                                                            title={path}
-                                                        >
-                                                            {path} ({count})
-                                                        </button>
-                                                    )
-                                                })
-                                            )}
+                                                 filters.pathOptions.map(({ path, count }) => {
+                                                     const active = filters.pathFilters.includes(path)
+                                                     return (
+                                                         <button
+                                                             key={path}
+                                                             type='button'
+                                                             className={`${styles.filterChip} ${
+                                                                 active ? styles.filterChipActive : ''
+                                                             }`}
+                                                             onClick={() => filters.togglePathFilter(path)}
+                                                             aria-pressed={active}
+                                                             title={path}
+                                                         >
+                                                             {path} ({count})
+                                                         </button>
+                                                     )
+                                                 })
+                                             )}
                                         </div>
                                     </div>
 
                                     <Button
-                                        variant="ghost"
-                                        size="sm"
+                                        variant='ghost'
+                                        size='sm'
                                         onClick={filters.clearStructuredFilters}
                                         disabled={!filters.hasStructuredFilters}
                                     >
@@ -756,8 +789,8 @@ export function LogsPage() {
                             <div className={styles.toolbar}>
                                 <div className={styles.toolbarPrimary}>
                                     <Button
-                                        variant="secondary"
-                                        size="sm"
+                                        variant='secondary'
+                                        size='sm'
                                         onClick={() => loadLogs(false)}
                                         disabled={disableControls || loading}
                                         loading={loading}
@@ -785,7 +818,7 @@ export function LogsPage() {
                                         </span>
                                         <Select
                                             value={String(refreshInterval)}
-                                            options={REFRESH_INTERVAL_OPTIONS}
+                                            options={refreshIntervalOptions}
                                             onChange={(v) => setRefreshIntervalOverride(Number(v))}
                                             fullWidth={false}
                                             className={styles.intervalSelect}
@@ -796,7 +829,7 @@ export function LogsPage() {
                                 <div className={styles.toolbarSecondary}>
                                     <Button
                                         variant={requestLogEnabled ? 'primary' : 'secondary'}
-                                        size="sm"
+                                        size='sm'
                                         onClick={() => {
                                             void toggleRequestLog(!requestLogEnabled)
                                         }}
@@ -807,13 +840,13 @@ export function LogsPage() {
                                         <span className={styles.buttonContent}>
                                             <IconCode size={16} />
                                             {requestLogEnabled
-                                                ? t('logs.request_log_disable_button', { defaultValue: '关闭请求日志' })
-                                                : t('logs.request_log_enable_button', { defaultValue: '开启请求日志' })}
+                                             ? t('logs.request_log_disable_button', { defaultValue: '关闭请求日志' })
+                                             : t('logs.request_log_enable_button', { defaultValue: '开启请求日志' })}
                                         </span>
                                     </Button>
                                     <Button
-                                        variant="secondary"
-                                        size="sm"
+                                        variant='secondary'
+                                        size='sm'
                                         onClick={downloadLogs}
                                         disabled={logState.buffer.length === 0}
                                         className={styles.actionButton}
@@ -824,8 +857,8 @@ export function LogsPage() {
                                         </span>
                                     </Button>
                                     <Button
-                                        variant="danger"
-                                        size="sm"
+                                        variant='danger'
+                                        size='sm'
                                         onClick={clearLogs}
                                         disabled={disableControls}
                                         className={styles.actionButton}
@@ -851,7 +884,7 @@ export function LogsPage() {
                         </div>
 
                         {loading ? (
-                            <div className="hint">{t('logs.loading')}</div>
+                            <div className='hint'>{t('logs.loading')}</div>
                         ) : logState.buffer.length > 0 && totalFilteredLines > 0 ? (
                             <>
                                 <div ref={logScrollerRef} className={styles.logPanel}>
@@ -880,138 +913,148 @@ export function LogsPage() {
                                             {rawVisibleText}
                                         </pre>
                                     ) : (
-                                        <div className={styles.logList}>
-                                            {pagedParsed.map((line, index) => {
-                                                const canTraceRequest = isTraceableRequestPath(line.path)
-                                                const rowClassNames = [styles.logRow]
-                                                if (line.level === 'warn') {
-                                                    rowClassNames.push(styles.rowWarn)
-                                                }
-                                                if (line.level === 'error' || line.level === 'fatal') {
-                                                    rowClassNames.push(styles.rowError)
-                                                }
-                                                return (
-                                                    <div
-                                                        key={`${pageStart + index}-${line.raw}`}
-                                                        className={rowClassNames.join(' ')}
-                                                        onDoubleClick={() => {
-                                                            void copyLogLine(line.raw)
-                                                        }}
-                                                        onPointerDown={(event) => startLongPress(event, line.requestId)}
-                                                        onPointerUp={cancelLongPress}
-                                                        onPointerLeave={cancelLongPress}
-                                                        onPointerCancel={cancelLongPress}
-                                                        onPointerMove={handleLongPressMove}
-                                                        title={t('logs.double_click_copy_hint', {
-                                                            defaultValue: 'Double-click to copy',
-                                                        })}
-                                                    >
-                                                        <div className={styles.timestamp}>
-                                                            {formatLogTimestamp(line.timestamp)}
-                                                        </div>
-                                                        <div className={styles.rowMain}>
-                                                            {line.level && (
-                                                                <span
-                                                                    className={[
-                                                                        styles.badge,
-                                                                        line.level === 'info' ? styles.levelInfo : '',
-                                                                        line.level === 'warn' ? styles.levelWarn : '',
-                                                                        line.level === 'error' || line.level === 'fatal'
-                                                                            ? styles.levelError
-                                                                            : '',
-                                                                        line.level === 'debug' ? styles.levelDebug : '',
-                                                                        line.level === 'trace' ? styles.levelTrace : '',
-                                                                    ]
-                                                                        .filter(Boolean)
-                                                                        .join(' ')}
-                                                                >
+                                         <div className={styles.logList}>
+                                             {pagedParsed.map((line, index) => {
+                                                 const canTraceRequest = isTraceableRequestPath(line.path)
+                                                 const rowClassNames   = [styles.logRow]
+                                                 if (line.level === 'warn') {
+                                                     rowClassNames.push(styles.rowWarn)
+                                                 }
+                                                 if (line.level === 'error' || line.level === 'fatal') {
+                                                     rowClassNames.push(styles.rowError)
+                                                 }
+                                                 return (
+                                                     <div
+                                                         key={`${pageStart + index}-${line.raw}`}
+                                                         className={rowClassNames.join(' ')}
+                                                         onDoubleClick={() => {
+                                                             void copyLogLine(line.raw)
+                                                         }}
+                                                         onPointerDown={(event) => startLongPress(
+                                                             event,
+                                                             line.requestId,
+                                                         )}
+                                                         onPointerUp={cancelLongPress}
+                                                         onPointerLeave={cancelLongPress}
+                                                         onPointerCancel={cancelLongPress}
+                                                         onPointerMove={handleLongPressMove}
+                                                         title={t('logs.double_click_copy_hint', {
+                                                             defaultValue: 'Double-click to copy',
+                                                         })}
+                                                     >
+                                                         <div className={styles.timestamp}>
+                                                             {formatLogTimestamp(line.timestamp)}
+                                                         </div>
+                                                         <div className={styles.rowMain}>
+                                                             {line.level && (
+                                                                 <span
+                                                                     className={[
+                                                                         styles.badge,
+                                                                         line.level === 'info' ? styles.levelInfo : '',
+                                                                         line.level === 'warn' ? styles.levelWarn : '',
+                                                                         line.level ===
+                                                                         'error' ||
+                                                                         line.level ===
+                                                                         'fatal'
+                                                                         ? styles.levelError
+                                                                         : '',
+                                                                         line.level === 'debug' ?
+                                                                         styles.levelDebug :
+                                                                         '',
+                                                                         line.level === 'trace' ?
+                                                                         styles.levelTrace :
+                                                                         '',
+                                                                     ]
+                                                                         .filter(Boolean)
+                                                                         .join(' ')}
+                                                                 >
                                                                     {line.level.toUpperCase()}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {line.source && (
-                                                                <span className={styles.source} title={line.source}>
+                                                             {line.source && (
+                                                                 <span className={styles.source} title={line.source}>
                                                                     {line.source}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {line.requestId && (
-                                                                <span
-                                                                    className={[
-                                                                        styles.badge,
-                                                                        styles.requestIdBadge,
-                                                                    ].join(' ')}
-                                                                    title={line.requestId}
-                                                                >
+                                                             {line.requestId && (
+                                                                 <span
+                                                                     className={[
+                                                                         styles.badge,
+                                                                         styles.requestIdBadge,
+                                                                     ].join(' ')}
+                                                                     title={line.requestId}
+                                                                 >
                                                                     {line.requestId}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {typeof line.statusCode === 'number' && (
-                                                                <span
-                                                                    className={[
-                                                                        styles.badge,
-                                                                        styles.statusBadge,
-                                                                        line.statusCode >= 200 && line.statusCode < 300
-                                                                            ? styles.statusSuccess
-                                                                            : line.statusCode >= 300 &&
-                                                                                line.statusCode < 400
-                                                                              ? styles.statusInfo
-                                                                              : line.statusCode >= 400 &&
-                                                                                  line.statusCode < 500
-                                                                                ? styles.statusWarn
-                                                                                : styles.statusError,
-                                                                    ].join(' ')}
-                                                                >
+                                                             {typeof line.statusCode === 'number' && (
+                                                                 <span
+                                                                     className={[
+                                                                         styles.badge,
+                                                                         styles.statusBadge,
+                                                                         line.statusCode >= 200 && line.statusCode < 300
+                                                                         ? styles.statusSuccess
+                                                                         : line.statusCode >= 300 &&
+                                                                           line.statusCode < 400
+                                                                           ? styles.statusInfo
+                                                                           : line.statusCode >= 400 &&
+                                                                             line.statusCode < 500
+                                                                             ? styles.statusWarn
+                                                                             : styles.statusError,
+                                                                     ].join(' ')}
+                                                                 >
                                                                     {line.statusCode}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {line.latency && (
-                                                                <span className={styles.pill}>{line.latency}</span>
-                                                            )}
-                                                            {line.ip && <span className={styles.pill}>{line.ip}</span>}
+                                                             {line.latency && (
+                                                                 <span className={styles.pill}>{line.latency}</span>
+                                                             )}
+                                                             {line.ip && <span className={styles.pill}>{line.ip}</span>}
 
-                                                            {line.method && (
-                                                                <span
-                                                                    className={[styles.badge, styles.methodBadge].join(
-                                                                        ' '
-                                                                    )}
-                                                                >
+                                                             {line.method && (
+                                                                 <span
+                                                                     className={[styles.badge, styles.methodBadge].join(
+                                                                         ' ',
+                                                                     )}
+                                                                 >
                                                                     {line.method}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {line.path && (
-                                                                <span className={styles.path} title={line.path}>
+                                                             {line.path && (
+                                                                 <span className={styles.path} title={line.path}>
                                                                     {line.path}
                                                                 </span>
-                                                            )}
+                                                             )}
 
-                                                            {line.message && (
-                                                                <span className={styles.message}>{line.message}</span>
-                                                            )}
+                                                             {line.message && (
+                                                                 <span className={styles.message}>{line.message}</span>
+                                                             )}
 
-                                                            {canTraceRequest && (
-                                                                <button
-                                                                    type="button"
-                                                                    className={styles.traceButton}
-                                                                    onClick={(event) => {
-                                                                        event.stopPropagation()
-                                                                        cancelLongPress()
-                                                                        trace.openTraceModal(line)
-                                                                    }}
-                                                                    title={t('logs.trace_button')}
-                                                                >
-                                                                    {t('logs.trace_button')}
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    )}
+                                                             {canTraceRequest && (
+                                                                 <button
+                                                                     type='button'
+                                                                     className={styles.traceButton}
+                                                                     onClick={(event) => {
+                                                                         event.stopPropagation()
+                                                                         cancelLongPress()
+                                                                         trace.openTraceModal(line)
+                                                                     }}
+                                                                     title={t('logs.trace_button')}
+                                                                 >
+                                                                     {t('logs.trace_button')}
+                                                                 </button>
+                                                             )}
+                                                         </div>
+                                                     </div>
+                                                 )
+                                             })}
+                                         </div>
+                                     )}
                                 </div>
                                 <Pagination
                                     total={totalFilteredLines}
@@ -1033,8 +1076,8 @@ export function LogsPage() {
                                 description={t('logs.search_empty_desc')}
                             />
                         ) : (
-                            <EmptyState title={t('logs.empty_title')} description={t('logs.empty_desc')} />
-                        )}
+                                <EmptyState title={t('logs.empty_title')} description={t('logs.empty_desc')} />
+                            )}
                     </Card>
                 )}
 
@@ -1042,8 +1085,8 @@ export function LogsPage() {
                     <Card
                         extra={
                             <Button
-                                variant="secondary"
-                                size="sm"
+                                variant='secondary'
+                                size='sm'
                                 onClick={loadErrorLogs}
                                 loading={loadingErrors}
                                 disabled={disableControls}
@@ -1052,8 +1095,8 @@ export function LogsPage() {
                             </Button>
                         }
                     >
-                        <div className="stack">
-                            <div className="hint">
+                        <div className='stack'>
+                            <div className='hint'>
                                 {t('logs.error_logs_description')}
                                 {` `}
                                 {t('logs.error_logs_retention', { count: config?.errorLogsMaxFiles ?? 10 })}
@@ -1061,52 +1104,54 @@ export function LogsPage() {
 
                             {requestLogEnabled && (
                                 <div>
-                                    <div className="status-badge warning">
+                                    <div className='status-badge warning'>
                                         {t('logs.error_logs_request_log_enabled')}
                                     </div>
                                 </div>
                             )}
 
-                            {errorLogsError && <div className="error-box">{errorLogsError}</div>}
+                            {errorLogsError && <div className='error-box'>{errorLogsError}</div>}
 
                             <div className={styles.errorPanel}>
                                 {loadingErrors ? (
-                                    <div className="hint">{t('common.loading')}</div>
+                                    <div className='hint'>{t('common.loading')}</div>
                                 ) : errorLogs.length === 0 ? (
-                                    <div className="hint">{t('logs.error_logs_empty')}</div>
+                                    <div className='hint'>{t('logs.error_logs_empty')}</div>
                                 ) : (
-                                    <div className="item-list">
-                                        {errorLogs.map((item) => (
-                                            <div key={item.name} className="item-row">
-                                                <div className="item-meta">
-                                                    <div className="item-title">{item.name}</div>
-                                                    <div className="item-subtitle">
-                                                        {item.size ? `${(item.size / 1024).toFixed(1)} KB` : ''}{' '}
-                                                        {item.modified ? formatUnixTimestamp(item.modified) : ''}
+                                        <div className='item-list'>
+                                            {errorLogs.map((item) => (
+                                                <div key={item.name} className='item-row'>
+                                                    <div className='item-meta'>
+                                                        <div className='item-title'>{item.name}</div>
+                                                        <div className='item-subtitle'>
+                                                            {item.size ?
+                                                             `${(item.size / 1024).toFixed(1)} KB` :
+                                                             ''}{' '}
+                                                            {item.modified ? formatUnixTimestamp(item.modified) : ''}
+                                                        </div>
+                                                    </div>
+                                                    <div className='item-actions'>
+                                                        <Button
+                                                            variant='ghost'
+                                                            size='sm'
+                                                            onClick={() => previewErrorLog(item.name)}
+                                                            disabled={disableControls}
+                                                        >
+                                                            {t('logs.error_logs_preview')}
+                                                        </Button>
+                                                        <Button
+                                                            variant='secondary'
+                                                            size='sm'
+                                                            onClick={() => downloadErrorLog(item.name)}
+                                                            disabled={disableControls}
+                                                        >
+                                                            {t('logs.error_logs_download')}
+                                                        </Button>
                                                     </div>
                                                 </div>
-                                                <div className="item-actions">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => previewErrorLog(item.name)}
-                                                        disabled={disableControls}
-                                                    >
-                                                        {t('logs.error_logs_preview')}
-                                                    </Button>
-                                                    <Button
-                                                        variant="secondary"
-                                                        size="sm"
-                                                        onClick={() => downloadErrorLog(item.name)}
-                                                        disabled={disableControls}
-                                                    >
-                                                        {t('logs.error_logs_download')}
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                            ))}
+                                        </div>
+                                    )}
                             </div>
                         </div>
                     </Card>
@@ -1121,7 +1166,7 @@ export function LogsPage() {
                     <>
                         {trace.traceLogLine?.requestId && (
                             <Button
-                                variant="secondary"
+                                variant='secondary'
                                 onClick={() => {
                                     if (trace.traceLogLine?.requestId) {
                                         void downloadRequestLog(trace.traceLogLine.requestId)
@@ -1132,7 +1177,7 @@ export function LogsPage() {
                                 {t('logs.trace_download_request_log')}
                             </Button>
                         )}
-                        <Button variant="secondary" onClick={trace.closeTraceModal} disabled={requestLogDownloading}>
+                        <Button variant='secondary' onClick={trace.closeTraceModal} disabled={requestLogDownloading}>
                             {t('common.close')}
                         </Button>
                     </>
@@ -1160,8 +1205,8 @@ export function LogsPage() {
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_status_code')}</span>
                                 <span className={styles.traceInfoValue}>
                                     {typeof trace.traceLogLine.statusCode === 'number'
-                                        ? trace.traceLogLine.statusCode
-                                        : '-'}
+                                     ? trace.traceLogLine.statusCode
+                                     : '-'}
                                 </span>
                             </div>
                             <div className={styles.traceInfoItem}>
@@ -1187,10 +1232,11 @@ export function LogsPage() {
                         <div className={styles.traceCandidatesHeader}>
                             <h3 className={styles.traceSectionTitle}>{t('logs.trace_candidates_title')}</h3>
                             <Button
-                                variant="secondary"
-                                size="sm"
+                                variant='secondary'
+                                size='sm'
                                 onClick={() => {
-                                    void trace.refreshTraceUsageDetails().catch(() => {})
+                                    void trace.refreshTraceUsageDetails().catch(() => {
+                                    })
                                 }}
                                 loading={trace.traceLoading}
                                 disabled={requestLogDownloading}
@@ -1199,107 +1245,107 @@ export function LogsPage() {
                             </Button>
                         </div>
                         {trace.traceLoading ? (
-                            <div className="hint">{t('logs.trace_loading')}</div>
+                            <div className='hint'>{t('logs.trace_loading')}</div>
                         ) : trace.traceError ? (
-                            <div className="error-box">{trace.traceError}</div>
+                            <div className='error-box'>{trace.traceError}</div>
                         ) : trace.traceCandidates.length === 0 ? (
-                            <div className="hint">{t('logs.trace_no_match')}</div>
+                            <div className='hint'>{t('logs.trace_no_match')}</div>
                         ) : (
-                            <div className={styles.traceCandidates}>
-                                {trace.traceCandidates.map((candidate) => {
-                                    const sourceInfo = trace.resolveTraceSourceInfo(
-                                        String(candidate.detail.source ?? ''),
-                                        candidate.detail.auth_index
-                                    )
-                                    return (
-                                        <div
-                                            key={[
-                                                candidate.detail.__endpoint,
-                                                candidate.detail.__modelName,
-                                                candidate.detail.timestamp,
-                                                candidate.detail.source,
-                                            ].join('-')}
-                                            className={styles.traceCandidate}
-                                        >
-                                            <div className={styles.traceCandidateHeader}>
-                                                {candidate.modelMatched && (
-                                                    <span className={styles.traceModelBadge}>
+                                <div className={styles.traceCandidates}>
+                                    {trace.traceCandidates.map((candidate) => {
+                                        const sourceInfo = trace.resolveTraceSourceInfo(
+                                            String(candidate.detail.source ?? ''),
+                                            candidate.detail.auth_index,
+                                        )
+                                        return (
+                                            <div
+                                                key={[
+                                                    candidate.detail.__endpoint,
+                                                    candidate.detail.__modelName,
+                                                    candidate.detail.timestamp,
+                                                    candidate.detail.source,
+                                                ].join('-')}
+                                                className={styles.traceCandidate}
+                                            >
+                                                <div className={styles.traceCandidateHeader}>
+                                                    {candidate.modelMatched && (
+                                                        <span className={styles.traceModelBadge}>
                                                         {t('logs.trace_model_matched')}
                                                     </span>
-                                                )}
-                                                {candidate.timeDeltaMs !== null && (
-                                                    <span className={styles.traceDelta}>
+                                                    )}
+                                                    {candidate.timeDeltaMs !== null && (
+                                                        <span className={styles.traceDelta}>
                                                         {t('logs.trace_delta_seconds', {
                                                             seconds: (candidate.timeDeltaMs / 1000).toFixed(2),
                                                         })}
                                                     </span>
-                                                )}
-                                            </div>
-                                            <div className={styles.traceCandidateGrid}>
-                                                <div className={styles.traceInfoItem}>
+                                                    )}
+                                                </div>
+                                                <div className={styles.traceCandidateGrid}>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_endpoint')}
                                                     </span>
-                                                    <span className={styles.traceInfoValue}>
+                                                        <span className={styles.traceInfoValue}>
                                                         {candidate.detail.__endpoint}
                                                     </span>
-                                                </div>
-                                                <div className={styles.traceInfoItem}>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_model')}
                                                     </span>
-                                                    <span className={styles.traceInfoValue}>
+                                                        <span className={styles.traceInfoValue}>
                                                         {candidate.detail.__modelName || '-'}
                                                     </span>
-                                                </div>
-                                                <div className={styles.traceInfoItem}>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_source')}
                                                     </span>
-                                                    <span
-                                                        className={styles.traceInfoValue}
-                                                        title={String(candidate.detail.source || '-')}
-                                                    >
+                                                        <span
+                                                            className={styles.traceInfoValue}
+                                                            title={String(candidate.detail.source || '-')}
+                                                        >
                                                         <span>{sourceInfo.displayName}</span>
-                                                        {sourceInfo.type && (
-                                                            <span className={styles.traceSourceType}>
+                                                            {sourceInfo.type && (
+                                                                <span className={styles.traceSourceType}>
                                                                 {sourceInfo.type}
                                                             </span>
-                                                        )}
+                                                            )}
                                                     </span>
-                                                </div>
-                                                <div className={styles.traceInfoItem}>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_auth_index')}
                                                     </span>
-                                                    <span className={styles.traceInfoValue}>
+                                                        <span className={styles.traceInfoValue}>
                                                         {candidate.detail.auth_index ?? '-'}
                                                     </span>
-                                                </div>
-                                                <div className={styles.traceInfoItem}>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_timestamp')}
                                                     </span>
-                                                    <span className={styles.traceInfoValue}>
+                                                        <span className={styles.traceInfoValue}>
                                                         {formatLogTimestamp(candidate.detail.timestamp) || '-'}
                                                     </span>
-                                                </div>
-                                                <div className={styles.traceInfoItem}>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_result')}
                                                     </span>
-                                                    <span className={styles.traceInfoValue}>
+                                                        <span className={styles.traceInfoValue}>
                                                         {candidate.detail.failed
-                                                            ? t('stats.failure')
-                                                            : t('stats.success')}
+                                                         ? t('stats.failure')
+                                                         : t('stats.success')}
                                                     </span>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        )}
+                                        )
+                                    })}
+                                </div>
+                            )}
                     </div>
                 )}
             </Modal>
@@ -1310,7 +1356,7 @@ export function LogsPage() {
                 title={t('logs.request_log_download_title')}
                 footer={
                     <>
-                        <Button variant="secondary" onClick={closeRequestLogModal} disabled={requestLogDownloading}>
+                        <Button variant='secondary' onClick={closeRequestLogModal} disabled={requestLogDownloading}>
                             {t('common.cancel')}
                         </Button>
                         <Button
@@ -1337,7 +1383,7 @@ export function LogsPage() {
                 width={720}
                 footer={
                     <Button
-                        variant="secondary"
+                        variant='secondary'
                         onClick={() => {
                             if (previewName) {
                                 void downloadErrorLog(previewName)
@@ -1349,10 +1395,10 @@ export function LogsPage() {
                 }
             >
                 {previewLoading ? (
-                    <div className="hint">{t('common.loading')}</div>
+                    <div className='hint'>{t('common.loading')}</div>
                 ) : (
-                    <pre className={styles.previewContent}>{previewContent}</pre>
-                )}
+                     <pre className={styles.previewContent}>{previewContent}</pre>
+                 )}
             </Modal>
         </div>
     )

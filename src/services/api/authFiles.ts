@@ -2,12 +2,19 @@
  * 认证文件与 OAuth 排除模型相关 API
  */
 
-import type { OAuthModelAliasEntry } from '@/types'
-import type { AuthFileItem, AuthFilesResponse, RecentRequestBucket } from '@/types/authFile'
-import { apiClient } from './client'
+import type {OAuthModelAliasEntry} from '@/types'
+import type {AuthFileItem, AuthFilesResponse, RecentRequestBucket} from '@/types/authFile'
+import {apiClient} from './client'
 
 type StatusError = { status?: number }
 type AuthFileStatusResponse = { status: string; disabled: boolean }
+export type AuthFileFieldsPatch = {
+    prefix?: string
+    proxy_url?: string
+    headers?: Record<string, string>
+    priority?: number
+    note?: string
+}
 type AuthFileBatchFailure = { name: string; error: string }
 
 const normalizeRecentRequestBuckets = (value: unknown): RecentRequestBucket[] => {
@@ -19,20 +26,43 @@ const normalizeRecentRequestBuckets = (value: unknown): RecentRequestBucket[] =>
         if (!item || typeof item !== 'object') {
             return result
         }
-        const entry = item as Record<string, unknown>
-        const time = String(entry.time ?? '').trim()
-        const success = Number(entry.success ?? 0)
-        const failed = Number(entry.failed ?? 0)
+        const entry   = item as Record<string, unknown>
+        const time    = String(entry.time ?? '').trim()
+        const success = normalizeRequiredNumber(entry.success)
+        const failed  = normalizeRequiredNumber(entry.failed)
         if (!time) {
             return result
         }
         result.push({
-            time,
-            success: Number.isFinite(success) ? success : 0,
-            failed: Number.isFinite(failed) ? failed : 0,
-        })
+                        time,
+                        startTimeMs: normalizeNumber(entry.start_time_ms ?? entry.startTimeMs),
+                        endTimeMs: normalizeNumber(entry.end_time_ms ?? entry.endTimeMs),
+                        success: Number.isFinite(success) ? success : 0,
+                        failed: Number.isFinite(failed) ? failed : 0,
+                    })
         return result
     }, [])
+}
+
+const normalizeNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : undefined
+    }
+    return undefined
+}
+
+const normalizeRequiredNumber = (value: unknown): number => normalizeNumber(value) ?? 0
+
+const normalizeString = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') {
+        return undefined
+    }
+    const trimmed = value.trim()
+    return trimmed || undefined
 }
 
 const normalizeAuthFileItem = (value: unknown): AuthFileItem | null => {
@@ -41,56 +71,51 @@ const normalizeAuthFileItem = (value: unknown): AuthFileItem | null => {
     }
 
     const entry = value as Record<string, unknown>
-    const name = String(entry.name ?? '').trim()
+    const name  = String(entry.name ?? '').trim()
     if (!name) {
         return null
     }
 
-    const item: AuthFileItem = {
+    return {
         ...entry,
         name,
         type: typeof entry.type === 'string' ? entry.type : undefined,
         provider: typeof entry.provider === 'string' ? entry.provider : undefined,
-        size: typeof entry.size === 'number' ? entry.size : undefined,
+        size: normalizeNumber(entry.size),
         authIndex:
             typeof entry.auth_index === 'string' || typeof entry.auth_index === 'number'
-                ? (entry.auth_index as string | number)
-                : typeof entry.authIndex === 'string' || typeof entry.authIndex === 'number'
-                  ? (entry.authIndex as string | number)
-                  : undefined,
+            ? (entry.auth_index as string | number)
+            : typeof entry.authIndex === 'string' || typeof entry.authIndex === 'number'
+              ? (entry.authIndex as string | number)
+              : undefined,
         runtimeOnly:
             typeof entry.runtime_only === 'boolean' || typeof entry.runtime_only === 'string'
-                ? (entry.runtime_only as boolean | string)
-                : typeof entry.runtimeOnly === 'boolean' || typeof entry.runtimeOnly === 'string'
-                  ? (entry.runtimeOnly as boolean | string)
-                  : undefined,
+            ? (entry.runtime_only as boolean | string)
+            : typeof entry.runtimeOnly === 'boolean' || typeof entry.runtimeOnly === 'string'
+              ? (entry.runtimeOnly as boolean | string)
+              : undefined,
         disabled: typeof entry.disabled === 'boolean' ? entry.disabled : undefined,
         unavailable: typeof entry.unavailable === 'boolean' ? entry.unavailable : undefined,
         status: typeof entry.status === 'string' ? entry.status : undefined,
         statusMessage:
             typeof entry.status_message === 'string'
-                ? entry.status_message
-                : typeof entry.statusMessage === 'string'
-                  ? entry.statusMessage
-                  : undefined,
+            ? entry.status_message
+            : typeof entry.statusMessage === 'string'
+              ? entry.statusMessage
+              : undefined,
         lastRefresh:
             typeof entry.last_refresh === 'string' || typeof entry.last_refresh === 'number'
-                ? (entry.last_refresh as string | number)
-                : typeof entry.lastRefresh === 'string' || typeof entry.lastRefresh === 'number'
-                  ? (entry.lastRefresh as string | number)
-                  : undefined,
-        modified:
-            typeof entry.modtime === 'number'
-                ? entry.modtime
-                : typeof entry.modified === 'number'
-                  ? entry.modified
-                  : undefined,
-        success: typeof entry.success === 'number' ? entry.success : undefined,
-        failed: typeof entry.failed === 'number' ? entry.failed : undefined,
+            ? (entry.last_refresh as string | number)
+            : typeof entry.lastRefresh === 'string' || typeof entry.lastRefresh === 'number'
+              ? (entry.lastRefresh as string | number)
+              : undefined,
+        modified: normalizeNumber(entry.modtime ?? entry.modified),
+        priority: normalizeNumber(entry.priority),
+        note: normalizeString(entry.note ?? entry.description ?? entry.comment),
+        success: normalizeNumber(entry.success),
+        failed: normalizeNumber(entry.failed),
         recentRequests: normalizeRecentRequestBuckets(entry.recent_requests ?? entry.recentRequests),
     }
-
-    return item
 }
 type AuthFileBatchUploadResponse = {
     status?: string
@@ -128,7 +153,7 @@ const getStatusCode = (err: unknown): number | undefined => {
 }
 
 const normalizeRequestedAuthFileNames = (names: string[]): string[] => {
-    const seen = new Set<string>()
+    const seen                 = new Set<string>()
     const normalized: string[] = []
 
     names.forEach((name) => {
@@ -160,13 +185,13 @@ const normalizeBatchFailures = (value: unknown): AuthFileBatchFailure[] => {
             return result
         }
         const entry = item as Record<string, unknown>
-        const name = String(entry.name ?? '').trim()
+        const name  = String(entry.name ?? '').trim()
         const error =
-            typeof entry.error === 'string'
-                ? entry.error.trim()
-                : typeof entry.message === 'string'
-                  ? entry.message.trim()
-                  : ''
+                  typeof entry.error === 'string'
+                  ? entry.error.trim()
+                  : typeof entry.message === 'string'
+                    ? entry.message.trim()
+                    : ''
 
         if (!name && !error) {
             return result
@@ -188,18 +213,18 @@ const deriveSuccessfulFileNames = (requestedNames: string[], failed: AuthFileBat
 
 const normalizeBatchUploadResponse = (
     payload: AuthFileBatchUploadResponse | undefined,
-    requestedNames: string[]
+    requestedNames: string[],
 ): AuthFileBatchUploadResult => {
-    const failed = normalizeBatchFailures(payload?.failed)
+    const failed                   = normalizeBatchFailures(payload?.failed)
     const uploadedFilesFromPayload = normalizeBatchFileNames(payload?.files)
-    const uploaded =
-        typeof payload?.uploaded === 'number'
-            ? payload.uploaded
-            : uploadedFilesFromPayload.length > 0
-              ? uploadedFilesFromPayload.length
-              : requestedNames.length === 1 && failed.length === 0
-                ? 1
-                : 0
+    const uploaded                 =
+              typeof payload?.uploaded === 'number'
+              ? payload.uploaded
+              : uploadedFilesFromPayload.length > 0
+                ? uploadedFilesFromPayload.length
+                : requestedNames.length === 1 && failed.length === 0
+                  ? 1
+                  : 0
 
     let uploadedFiles = uploadedFilesFromPayload
     if (uploadedFiles.length === 0 && uploaded > 0) {
@@ -223,18 +248,18 @@ const normalizeBatchUploadResponse = (
 
 const normalizeBatchDeleteResponse = (
     payload: AuthFileBatchDeleteResponse | undefined,
-    requestedNames: string[]
+    requestedNames: string[],
 ): AuthFileBatchDeleteResult => {
-    const failed = normalizeBatchFailures(payload?.failed)
+    const failed                  = normalizeBatchFailures(payload?.failed)
     const deletedFilesFromPayload = normalizeBatchFileNames(payload?.files)
-    const deleted =
-        typeof payload?.deleted === 'number'
-            ? payload.deleted
-            : deletedFilesFromPayload.length > 0
-              ? deletedFilesFromPayload.length
-              : requestedNames.length === 1 && failed.length === 0
-                ? 1
-                : 0
+    const deleted                 =
+              typeof payload?.deleted === 'number'
+              ? payload.deleted
+              : deletedFilesFromPayload.length > 0
+                ? deletedFilesFromPayload.length
+                : requestedNames.length === 1 && failed.length === 0
+                  ? 1
+                  : 0
 
     let deletedFiles = deletedFilesFromPayload
     if (deletedFiles.length === 0 && deleted > 0) {
@@ -279,7 +304,7 @@ const normalizeOauthExcludedModels = (payload: unknown): Record<string, string[]
 
         const rawList = Array.isArray(models) ? models : typeof models === 'string' ? models.split(/[\n,]+/) : []
 
-        const seen = new Set<string>()
+        const seen                 = new Set<string>()
         const normalized: string[] = []
         rawList.forEach((item) => {
             const trimmed = String(item ?? '').trim()
@@ -324,14 +349,14 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
             return
         }
 
-        const seen = new Set<string>()
+        const seen       = new Set<string>()
         const normalized = mappings
             .map((item) => {
                 if (!item || typeof item !== 'object') {
                     return null
                 }
                 const entry = item as Record<string, unknown>
-                const name = String(entry.name ?? entry.id ?? entry.model ?? '').trim()
+                const name  = String(entry.name ?? entry.id ?? entry.model ?? '').trim()
                 const alias = String(entry.alias ?? '').trim()
                 if (!name || !alias) {
                     return null
@@ -342,8 +367,8 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
             .filter(Boolean)
             .filter((entry) => {
                 const aliasEntry = entry as OAuthModelAliasEntry
-                const forkFlag = aliasEntry.fork ? '1' : '0'
-                const dedupeKey = `${aliasEntry.name.toLowerCase()}::${aliasEntry.alias.toLowerCase()}::${forkFlag}`
+                const forkFlag   = aliasEntry.fork ? '1' : '0'
+                const dedupeKey  = `${aliasEntry.name.toLowerCase()}::${aliasEntry.alias.toLowerCase()}::${forkFlag}`
                 if (seen.has(dedupeKey)) {
                     return false
                 }
@@ -363,8 +388,8 @@ const OAUTH_MODEL_ALIAS_ENDPOINT = '/oauth-model-alias'
 
 export const authFilesApi = {
     list: async (): Promise<AuthFilesResponse> => {
-        const data = await apiClient.get<unknown>('/auth-files')
-        const record = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
+        const data     = await apiClient.get<unknown>('/auth-files')
+        const record   = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
         const filesRaw = Array.isArray(record?.files) ? record.files : []
         return {
             files: filesRaw.map(normalizeAuthFileItem).filter(Boolean) as AuthFileItem[],
@@ -374,6 +399,9 @@ export const authFilesApi = {
 
     setStatus: (name: string, disabled: boolean) =>
         apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),
+
+    patchFields: (name: string, fields: AuthFileFieldsPatch) =>
+        apiClient.patch('/auth-files/fields', { name, ...fields }),
 
     /**
      * Bulk enable a list of auth files. Sibling to setStatus but flips many files
@@ -420,7 +448,7 @@ export const authFilesApi = {
         const response = await apiClient.getRaw(`/auth-files/download?name=${encodeURIComponent(name)}`, {
             responseType: 'blob',
         })
-        const blob = response.data as Blob
+        const blob     = response.data as Blob
         return blob.text()
     },
 
@@ -474,7 +502,7 @@ export const authFilesApi = {
 
     // 获取指定 channel 的模型定义
     async getModelDefinitions(
-        channel: string
+        channel: string,
     ): Promise<{ id: string; display_name?: string; type?: string; owned_by?: string }[]> {
         const normalizedChannel = String(channel ?? '')
             .trim()
@@ -482,18 +510,12 @@ export const authFilesApi = {
         if (!normalizedChannel) {
             return []
         }
-        const data = await apiClient.get<Record<string, unknown>>(
-            `/model-definitions/${encodeURIComponent(normalizedChannel)}`
+        const data   = await apiClient.get<Record<string, unknown>>(
+            `/model-definitions/${encodeURIComponent(normalizedChannel)}`,
         )
         const models = data.models ?? data['models']
         return Array.isArray(models)
-            ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
-            : []
+               ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
+               : []
     },
-
-    testCredential: (type: string, identifier: string) =>
-        apiClient.post<{ success: boolean; message: string; latency?: string }>('/credentials/test', {
-            type,
-            identifier,
-        }),
 }

@@ -3,14 +3,14 @@
  * 替代原项目 src/core/api-client.js
  */
 
-import type { ApiClientConfig, ApiError } from '@/types'
-import { computeApiUrl } from '@/utils/connection'
-import { BUILD_DATE_HEADER_KEYS, REQUEST_TIMEOUT_MS, VERSION_HEADER_KEYS } from '@/utils/constants'
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import type {ApiClientConfig, ApiError} from '@/types'
+import {computeApiUrl} from '@/utils/connection'
+import {BUILD_DATE_HEADER_KEYS, REQUEST_TIMEOUT_MS, VERSION_HEADER_KEYS} from '@/utils/constants'
+import axios, {AxiosInstance, AxiosRequestConfig, AxiosResponse} from 'axios'
 
 class ApiClient {
     private instance: AxiosInstance
-    private apiBase: string = ''
+    private apiBase: string       = ''
     private managementKey: string = ''
 
     /** 标记认证已失败，阻止后续请求继续发送 */
@@ -18,11 +18,11 @@ class ApiClient {
 
     constructor() {
         this.instance = axios.create({
-            timeout: REQUEST_TIMEOUT_MS,
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
+                                         timeout: REQUEST_TIMEOUT_MS,
+                                         headers: {
+                                             'Content-Type': 'application/json',
+                                         },
+                                     })
 
         this.setupInterceptors()
     }
@@ -31,9 +31,9 @@ class ApiClient {
      * 设置 API 配置
      */
     setConfig(config: ApiClientConfig): void {
-        this.apiBase = computeApiUrl(config.apiBase)
+        this.apiBase       = computeApiUrl(config.apiBase)
         this.managementKey = config.managementKey
-        this.authFailed = false
+        this.authFailed    = false
 
         if (config.timeout) {
             this.instance.defaults.timeout = config.timeout
@@ -131,9 +131,9 @@ class ApiClient {
         }
 
         const entries =
-            typeof (headers as { entries?: () => Iterable<[string, unknown]> }).entries === 'function'
-                ? Array.from((headers as { entries: () => Iterable<[string, unknown]> }).entries())
-                : Object.entries(headers)
+                  typeof (headers as { entries?: () => Iterable<[string, unknown]> }).entries === 'function'
+                  ? Array.from((headers as { entries: () => Iterable<[string, unknown]> }).entries())
+                  : Object.entries(headers)
 
         const normalized = Object.fromEntries(entries.map(([key, value]) => [String(key).toLowerCase(), value]))
         for (const key of keys) {
@@ -171,14 +171,14 @@ class ApiClient {
 
                 return config
             },
-            (error) => Promise.reject(this.handleError(error))
+            (error) => Promise.reject(this.handleError(error)),
         )
 
         // 响应拦截器
         this.instance.interceptors.response.use(
             (response) => {
-                const headers = response.headers as Record<string, string | undefined>
-                const version = this.readHeader(headers, VERSION_HEADER_KEYS)
+                const headers   = response.headers as Record<string, string | undefined>
+                const version   = this.readHeader(headers, VERSION_HEADER_KEYS)
                 const buildDate = this.readHeader(headers, BUILD_DATE_HEADER_KEYS)
 
                 // 触发版本更新事件（后续通过 store 处理）
@@ -186,13 +186,13 @@ class ApiClient {
                     window.dispatchEvent(
                         new CustomEvent('server-version-update', {
                             detail: { version: version || null, buildDate: buildDate || null },
-                        })
+                        }),
                     )
                 }
 
                 return response
             },
-            (error) => Promise.reject(this.handleError(error))
+            (error) => Promise.reject(this.handleError(error)),
         )
     }
 
@@ -205,22 +205,22 @@ class ApiClient {
 
         if (axios.isAxiosError(error)) {
             const responseData: unknown = error.response?.data
-            const responseRecord = isRecord(responseData) ? responseData : null
-            const errorValue = responseRecord?.error
-            const message =
-                typeof errorValue === 'string'
-                    ? errorValue
-                    : isRecord(errorValue) && typeof errorValue.message === 'string'
-                      ? errorValue.message
-                      : typeof responseRecord?.message === 'string'
-                        ? responseRecord.message
-                        : error.message || 'Request failed'
-            const apiError = new Error(message) as ApiError
-            apiError.name = 'ApiError'
-            apiError.status = error.response?.status
-            apiError.code = error.code
-            apiError.details = responseData
-            apiError.data = responseData
+            const responseRecord        = isRecord(responseData) ? responseData : null
+            const errorValue            = responseRecord?.error
+            const message               =
+                      typeof errorValue === 'string'
+                      ? errorValue
+                      : isRecord(errorValue) && typeof errorValue.message === 'string'
+                        ? errorValue.message
+                        : typeof responseRecord?.message === 'string'
+                          ? responseRecord.message
+                          : error.message || 'Request failed'
+            const apiError              = new Error(message) as ApiError
+            apiError.name               = 'ApiError'
+            apiError.status             = error.response?.status
+            apiError.code               = error.code
+            apiError.details            = responseData
+            apiError.data               = responseData
 
             // 401 未授权 - 标记认证失败并通知 UI（仅首次）
             if (error.response?.status === 401 && !this.authFailed) {
@@ -232,9 +232,9 @@ class ApiClient {
         }
 
         const fallbackMessage =
-            error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
-        const fallback = new Error(fallbackMessage) as ApiError
-        fallback.name = 'ApiError'
+                  error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        const fallback        = new Error(fallbackMessage) as ApiError
+        fallback.name         = 'ApiError'
         return fallback
     }
 }

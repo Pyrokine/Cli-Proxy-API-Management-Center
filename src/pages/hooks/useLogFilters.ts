@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { HttpMethod, ParsedLogLine, PersistedLogFilters, StatusGroup } from './logTypes'
-import { resolveStatusGroup } from './logTypes'
+import {useEffect, useMemo, useState} from 'react'
+import type {HttpMethod, ParsedLogLine, PersistedLogFilters, StatusGroup} from './logTypes'
+import {resolveStatusGroup} from './logTypes'
 
 const PATH_FILTER_LIMIT = 12
+
+const areArraysEqual = <T, >(left: T[], right: T[]) =>
+    left.length === right.length && left.every((item, index) => item === right[index])
 
 interface UseLogFiltersOptions {
     parsedLines: ParsedLogLine[]
@@ -32,7 +35,7 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
 
     const [methodFilters, setMethodFilters] = useState<HttpMethod[]>(() => initialFilters?.methodFilters ?? [])
     const [statusFilters, setStatusFilters] = useState<StatusGroup[]>(() => initialFilters?.statusFilters ?? [])
-    const [pathFilters, setPathFilters] = useState<string[]>(() => initialFilters?.pathFilters ?? [])
+    const [pathFilters, setPathFilters]     = useState<string[]>(() => initialFilters?.pathFilters ?? [])
 
     const methodCounts = useMemo(() => {
         const counts: Partial<Record<HttpMethod, number>> = {}
@@ -66,31 +69,39 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
             counts.set(line.path, (counts.get(line.path) ?? 0) + 1)
         })
         return Array.from(counts.entries())
-            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-            .slice(0, PATH_FILTER_LIMIT)
-            .map(([path, count]) => ({ path, count }))
+                    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                    .slice(0, PATH_FILTER_LIMIT)
+                    .map(([path, count]) => ({ path, count }))
     }, [parsedLines])
 
-    const validPathSet = useMemo(() => new Set(pathOptions.map((item) => item.path)), [pathOptions])
-    const validPathFilters = useMemo(
+    const validPathSet         = useMemo(() => new Set(pathOptions.map((item) => item.path)), [pathOptions])
+    const validPathFilters     = useMemo(
         () => pathFilters.filter((path) => validPathSet.has(path)),
-        [pathFilters, validPathSet]
+        [pathFilters, validPathSet],
     )
-    const methodFilterSet = useMemo(() => new Set(methodFilters), [methodFilters])
-    const statusFilterSet = useMemo(() => new Set(statusFilters), [statusFilters])
-    const pathFilterSet = useMemo(() => new Set(validPathFilters), [validPathFilters])
+    const methodFilterSet      = useMemo(() => new Set(methodFilters), [methodFilters])
+    const statusFilterSet      = useMemo(() => new Set(statusFilters), [statusFilters])
+    const pathFilterSet        = useMemo(() => new Set(validPathFilters), [validPathFilters])
     const hasStructuredFilters = methodFilters.length > 0 || statusFilters.length > 0 || validPathFilters.length > 0
 
     useEffect(() => {
         if (!onFiltersChange) {
             return
         }
+        if (
+            initialFilters &&
+            areArraysEqual(initialFilters.methodFilters, methodFilters) &&
+            areArraysEqual(initialFilters.statusFilters, statusFilters) &&
+            areArraysEqual(initialFilters.pathFilters, validPathFilters)
+        ) {
+            return
+        }
         onFiltersChange({
-            methodFilters,
-            statusFilters,
-            pathFilters: validPathFilters,
-        })
-    }, [methodFilters, onFiltersChange, statusFilters, validPathFilters])
+                            methodFilters,
+                            statusFilters,
+                            pathFilters: validPathFilters,
+                        })
+    }, [initialFilters, methodFilters, onFiltersChange, statusFilters, validPathFilters])
 
     const toggleMethodFilter = (method: HttpMethod) => {
         setMethodFilters((prev) => (prev.includes(method) ? prev.filter((item) => item !== method) : [...prev, method]))

@@ -1,13 +1,13 @@
-import { authFilesApi } from '@/services/api/authFiles'
-import { USAGE_STATS_STALE_TIME_MS, useUsageStatsStore } from '@/stores'
-import type { AuthFileItem, Config } from '@/types'
-import type { CredentialInfo, SourceInfo } from '@/types/sourceInfo'
-import { getErrorMessage } from '@/utils/helpers'
-import { buildSourceInfoMap, resolveSourceDisplay } from '@/utils/sourceResolver'
-import { collectUsageDetailsWithEndpoint, normalizeAuthIndex, type UsageDetailWithEndpoint } from '@/utils/usage'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import type { ParsedLogLine } from './logTypes'
+import {authFilesApi} from '@/services/api/authFiles'
+import {USAGE_STATS_STALE_TIME_MS, useUsageStatsStore} from '@/stores'
+import type {AuthFileItem, Config} from '@/types'
+import type {CredentialInfo, SourceInfo} from '@/types/sourceInfo'
+import {getErrorMessage} from '@/utils/helpers'
+import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
+import {collectUsageDetailsWithEndpoint, normalizeAuthIndex, type UsageDetailWithEndpoint} from '@/utils/usage'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import type {ParsedLogLine} from './logTypes'
 
 type TraceCandidate = {
     detail: UsageDetailWithEndpoint
@@ -15,10 +15,10 @@ type TraceCandidate = {
     timeDeltaMs: number | null
 }
 
-const TRACE_AUTH_CACHE_MS = 60 * 1000
+const TRACE_AUTH_CACHE_MS  = 60 * 1000
 const TRACE_MAX_CANDIDATES = 5
 
-const TRACEABLE_EXACT_PATHS = new Set(['/v1/chat/completions', '/v1/messages', '/v1/responses'])
+const TRACEABLE_EXACT_PATHS  = new Set(['/v1/chat/completions', '/v1/messages', '/v1/responses'])
 const TRACEABLE_PREFIX_PATHS = ['/v1beta/models']
 
 const normalizeTracePath = (value?: string) =>
@@ -84,24 +84,24 @@ interface UseTraceResolverReturn {
 
 export function useTraceResolver(options: UseTraceResolverOptions): UseTraceResolverReturn {
     const { traceScopeKey, connectionStatus, config, requestLogDownloading } = options
-    const { t } = useTranslation()
+    const { t }                                                              = useTranslation()
 
-    const usageSnapshot = useUsageStatsStore((state) => state.usage)
-    const usageScopeKey = useUsageStatsStore((state) => state.scopeKey)
+    const usageSnapshot  = useUsageStatsStore((state) => state.usage)
+    const usageScopeKey  = useUsageStatsStore((state) => state.scopeKey)
     const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats)
 
-    const [traceLogLine, setTraceLogLine] = useState<ParsedLogLine | null>(null)
+    const [traceLogLine, setTraceLogLine]         = useState<ParsedLogLine | null>(null)
     const [traceAuthFileMap, setTraceAuthFileMap] = useState<Map<string, CredentialInfo>>(new Map())
-    const [traceLoading, setTraceLoading] = useState(false)
-    const [traceError, setTraceError] = useState('')
+    const [traceLoading, setTraceLoading]         = useState(false)
+    const [traceError, setTraceError]             = useState('')
 
     const traceAuthLoadedAtRef = useRef(0)
-    const traceScopeKeyRef = useRef('')
+    const traceScopeKeyRef     = useRef('')
 
     const scopedUsageSnapshot = usageScopeKey === traceScopeKey ? usageSnapshot : null
-    const traceUsageDetails = useMemo<UsageDetailWithEndpoint[]>(
+    const traceUsageDetails   = useMemo<UsageDetailWithEndpoint[]>(
         () => collectUsageDetailsWithEndpoint(scopedUsageSnapshot),
-        [scopedUsageSnapshot]
+        [scopedUsageSnapshot],
     )
 
     const traceSourceInfoMap = useMemo(() => buildSourceInfoMap(config ?? {}), [config])
@@ -109,7 +109,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     const loadTraceUsageDetailsInternal = useCallback(
         async (forceUsage: boolean) => {
             if (traceScopeKeyRef.current !== traceScopeKey) {
-                traceScopeKeyRef.current = traceScopeKey
+                traceScopeKeyRef.current     = traceScopeKey
                 traceAuthLoadedAtRef.current = 0
                 setTraceAuthFileMap(new Map())
                 setTraceError('')
@@ -119,25 +119,25 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                 return
             }
 
-            const now = Date.now()
+            const now       = Date.now()
             const authFresh =
-                traceAuthLoadedAtRef.current > 0 && now - traceAuthLoadedAtRef.current < TRACE_AUTH_CACHE_MS
+                      traceAuthLoadedAtRef.current > 0 && now - traceAuthLoadedAtRef.current < TRACE_AUTH_CACHE_MS
 
             setTraceLoading(true)
             setTraceError('')
             try {
-                const usagePromise = loadUsageStats({
-                    force: forceUsage,
-                    staleTimeMs: USAGE_STATS_STALE_TIME_MS,
-                })
+                const usagePromise          = loadUsageStats({
+                                                                 force: forceUsage,
+                                                                 staleTimeMs: USAGE_STATS_STALE_TIME_MS,
+                                                             })
                 // noinspection ES6MissingAwait — awaited via Promise.all below
-                const authPromise = authFresh ? Promise.resolve(null) : authFilesApi.list().catch(() => null)
+                const authPromise           = authFresh ? Promise.resolve(null) : authFilesApi.list().catch(() => null)
                 const [, authFilesResponse] = await Promise.all([usagePromise, authPromise])
 
                 if (authFilesResponse !== null) {
                     const files = Array.isArray(authFilesResponse)
-                        ? authFilesResponse
-                        : (authFilesResponse as { files?: AuthFileItem[] })?.files
+                                  ? authFilesResponse
+                                  : (authFilesResponse as { files?: AuthFileItem[] })?.files
                     if (Array.isArray(files)) {
                         const map = new Map<string, CredentialInfo>()
                         files.forEach((file) => {
@@ -160,7 +160,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                 setTraceLoading(false)
             }
         },
-        [loadUsageStats, t, traceLoading, traceScopeKey]
+        [loadUsageStats, t, traceLoading, traceScopeKey],
     )
 
     const loadTraceUsageDetails = useCallback(async () => {
@@ -176,7 +176,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             return
         }
         queueMicrotask(() => {
-            traceScopeKeyRef.current = traceScopeKey
+            traceScopeKeyRef.current     = traceScopeKey
             traceAuthLoadedAtRef.current = 0
             setTraceAuthFileMap(new Map())
             setTraceLoading(false)
@@ -198,28 +198,31 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
 
         // Step 1: filter by path match
         const pathMatched = traceUsageDetails.filter((detail) =>
-            isPathMatch(logPath, normalizeTracePath(detail.__endpointPath))
+                                                         isPathMatch(
+                                                             logPath,
+                                                             normalizeTracePath(detail.__endpointPath),
+                                                         ),
         )
         if (pathMatched.length === 0) {
             return []
         }
 
         // Step 2: try to extract model from log message, then filter by model
-        const logModel = extractModelFromMessage(traceLogLine.message)
+        const logModel     = extractModelFromMessage(traceLogLine.message)
         const modelMatched = logModel
-            ? pathMatched.filter((d) => d.__modelName?.toLowerCase() === logModel.toLowerCase())
-            : []
+                             ? pathMatched.filter((d) => d.__modelName?.toLowerCase() === logModel.toLowerCase())
+                             : []
 
         // Step 3: prefer model-matched set; fall back to path-matched
         const useModelSet = modelMatched.length > 0
-        const source = useModelSet ? modelMatched : pathMatched
+        const source      = useModelSet ? modelMatched : pathMatched
 
         return source
             .map((detail) => {
                 const timeDeltaMs =
-                    !Number.isNaN(logTimestampMs) && detail.__timestampMs > 0
-                        ? Math.abs(logTimestampMs - detail.__timestampMs)
-                        : null
+                          !Number.isNaN(logTimestampMs) && detail.__timestampMs > 0
+                          ? Math.abs(logTimestampMs - detail.__timestampMs)
+                          : null
                 return { detail, modelMatched: useModelSet, timeDeltaMs } satisfies TraceCandidate
             })
             .sort((a, b) => (b.detail.__timestampMs || 0) - (a.detail.__timestampMs || 0))
@@ -229,7 +232,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     const resolveTraceSourceInfo = useCallback(
         (sourceRaw: string, authIndex: unknown): SourceInfo =>
             resolveSourceDisplay(sourceRaw, authIndex, traceSourceInfoMap, traceAuthFileMap),
-        [traceAuthFileMap, traceSourceInfoMap]
+        [traceAuthFileMap, traceSourceInfoMap],
     )
 
     const openTraceModal = useCallback(
@@ -241,7 +244,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             setTraceLogLine(line)
             void loadTraceUsageDetails()
         },
-        [loadTraceUsageDetails]
+        [loadTraceUsageDetails],
     )
 
     const closeTraceModal = useCallback(() => {

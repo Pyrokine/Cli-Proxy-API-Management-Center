@@ -2,8 +2,8 @@
  * 日志相关 API
  */
 
-import { LOGS_TIMEOUT_MS } from '@/utils/constants'
-import { apiClient } from './client'
+import {LOGS_TIMEOUT_MS} from '@/utils/constants'
+import {apiClient} from './client'
 
 interface LogsQuery {
     after?: number

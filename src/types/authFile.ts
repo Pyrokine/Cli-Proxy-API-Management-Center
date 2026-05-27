@@ -12,6 +12,7 @@ export type AuthFileType =
     | 'claude'
     | 'codex'
     | 'antigravity'
+    | 'xai'
     | 'iflow'
     | 'vertex'
     | 'empty'
@@ -19,6 +20,8 @@ export type AuthFileType =
 
 export interface RecentRequestBucket {
     time: string
+    startTimeMs?: number
+    endTimeMs?: number
     success: number
     failed: number
 }
@@ -36,6 +39,8 @@ export interface AuthFileItem {
     statusMessage?: string
     lastRefresh?: string | number
     modified?: number
+    priority?: number
+    note?: string
     success?: number
     failed?: number
     recentRequests?: RecentRequestBucket[]

@@ -3,7 +3,7 @@
  * 用于读取后端缓存的 quota 数据（替代前端直接查询 provider API）
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 export interface QuotaEntry {
     file_name: string

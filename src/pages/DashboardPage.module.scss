@@ -8,7 +8,16 @@
 }
 
 .header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: $spacing-md;
     margin-bottom: $spacing-sm;
+    padding: $spacing-lg $spacing-md;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    flex-wrap: wrap;
 }
 
 .title {
@@ -23,6 +32,38 @@
     font-size: $font-size-sm;
     color: var(--text-secondary);
     margin: $spacing-xs 0 0 0;
+}
+
+.heroGreeting {
+    display: inline-flex;
+    margin-bottom: $spacing-xs;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--primary-color);
+}
+
+.dateTimeBlock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+
+    @media (max-width: $breakpoint-mobile) {
+        align-items: flex-start;
+    }
+}
+
+.time {
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: $line-height-tight;
+}
+
+.date {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
 }
 
 .connectionCard {

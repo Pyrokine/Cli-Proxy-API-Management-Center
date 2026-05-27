@@ -2,7 +2,7 @@
  * Formatting functions for quota display.
  */
 
-import { getEffectiveTimezone } from '@/stores/useTimezoneStore'
+import {getEffectiveTimezone} from '@/stores/useTimezoneStore'
 
 export function formatQuotaResetTime(value?: string): string {
     if (!value) {
