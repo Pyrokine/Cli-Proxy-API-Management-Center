@@ -59,6 +59,12 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
 
+    @media (max-width: #{$breakpoint-mobile}) {
+        background: var(--bg-primary);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
     &::-webkit-scrollbar {
         display: none;
     }

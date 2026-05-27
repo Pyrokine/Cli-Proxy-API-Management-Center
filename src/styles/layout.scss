@@ -82,9 +82,8 @@
         cursor: pointer;
         font-size: $font-size-base;
         font-weight: $font-weight-semibold;
-        transition:
-            background $transition-fast,
-            color $transition-fast;
+        transition: background $transition-fast,
+        color $transition-fast;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -121,10 +120,9 @@
             max-width: 320px;
             opacity: 1;
             transform: translateX(0);
-            transition:
-                max-width 0.4s ease,
-                opacity 0.4s ease,
-                transform 0.4s ease;
+            transition: max-width 0.4s ease,
+            opacity 0.4s ease,
+            transform 0.4s ease;
         }
 
         .brand-abbr {
@@ -132,9 +130,8 @@
             transform: translateX(12px);
             opacity: 0;
             pointer-events: none;
-            transition:
-                opacity 0.4s ease,
-                transform 0.4s ease;
+            transition: opacity 0.4s ease,
+            transform 0.4s ease;
         }
 
         &.collapsed {
@@ -227,10 +224,9 @@
                 background: transparent;
                 color: var(--text-primary);
                 cursor: pointer;
-                transition:
-                    border-color 0.15s ease,
-                    background-color 0.15s ease,
-                    color 0.15s ease;
+                transition: border-color 0.15s ease,
+                background-color 0.15s ease,
+                color 0.15s ease;
 
                 &:hover {
                     background: var(--bg-secondary);
@@ -332,9 +328,8 @@
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                transition:
-                    background-color $transition-fast,
-                    color $transition-fast;
+                transition: background-color $transition-fast,
+                color $transition-fast;
 
                 &:hover {
                     background: var(--bg-secondary);
@@ -460,9 +455,8 @@
     display: flex;
     flex-direction: column;
     gap: $spacing-sm;
-    transition:
-        width $transition-normal,
-        transform $transition-normal;
+    transition: width $transition-normal,
+    transform $transition-normal;
     overflow-y: auto;
     flex-shrink: 0;
     height: 100%;
@@ -494,9 +488,8 @@
         align-items: center;
         gap: $spacing-xs;
         cursor: pointer;
-        transition:
-            background $transition-fast,
-            color $transition-fast;
+        transition: background $transition-fast,
+        color $transition-fast;
 
         .nav-icon {
             width: 18px;
