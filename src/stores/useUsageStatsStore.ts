@@ -1,7 +1,7 @@
 import i18n from '@/i18n'
-import { usageApi } from '@/services/api'
-import { useAuthStore } from '@/stores/useAuthStore'
-import { create } from 'zustand'
+import {usageApi} from '@/services/api'
+import {useAuthStore} from '@/stores/useAuthStore'
+import {create} from 'zustand'
 
 export const USAGE_STATS_STALE_TIME_MS = 240_000
 
@@ -22,7 +22,7 @@ type UsageStatsState = {
     clearUsageStats: () => void
 }
 
-let usageRequestToken = 0
+let usageRequestToken                                                                     = 0
 let inFlightUsageRequest: { id: number; scopeKey: string; promise: Promise<void> } | null = null
 
 const getErrorMessage = (error: unknown) =>
@@ -36,12 +36,12 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
     scopeKey: '',
 
     loadUsageStats: async (options = {}) => {
-        const force = options.force === true
-        const staleTimeMs = options.staleTimeMs ?? USAGE_STATS_STALE_TIME_MS
+        const force                                = options.force === true
+        const staleTimeMs                          = options.staleTimeMs ?? USAGE_STATS_STALE_TIME_MS
         const { apiBase = '', managementKey = '' } = useAuthStore.getState()
-        const scopeKey = `${apiBase}::${managementKey}`
-        const state = get()
-        const scopeChanged = state.scopeKey !== scopeKey
+        const scopeKey                             = `${apiBase}::${managementKey}`
+        const state                                = get()
+        const scopeChanged                         = state.scopeKey !== scopeKey
 
         // 先复用同源 in-flight 请求，避免多个页面同时发起重复 /usage
         if (inFlightUsageRequest && inFlightUsageRequest.scopeKey === scopeKey) {
@@ -56,7 +56,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
         }
 
         const fresh =
-            !scopeChanged && state.lastRefreshedAt !== null && Date.now() - state.lastRefreshedAt < staleTimeMs
+                  !scopeChanged && state.lastRefreshedAt !== null && Date.now() - state.lastRefreshedAt < staleTimeMs
 
         if (!force && fresh) {
             return
@@ -64,11 +64,11 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
 
         if (scopeChanged) {
             set({
-                usage: null,
-                error: null,
-                lastRefreshedAt: null,
-                scopeKey,
-            })
+                    usage: null,
+                    error: null,
+                    lastRefreshedAt: null,
+                    scopeKey,
+                })
         }
 
         const requestId = (usageRequestToken += 1)
@@ -77,30 +77,30 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
         const requestPromise = (async () => {
             try {
                 const usageResponse = await usageApi.getUsage()
-                const rawUsage = usageResponse?.usage ?? usageResponse
-                const usage = rawUsage && typeof rawUsage === 'object' ? (rawUsage as UsageStatsSnapshot) : null
+                const rawUsage      = usageResponse?.usage ?? usageResponse
+                const usage         = rawUsage && typeof rawUsage === 'object' ? (rawUsage as UsageStatsSnapshot) : null
 
                 if (requestId !== usageRequestToken) {
                     return
                 }
 
                 set({
-                    usage,
-                    loading: false,
-                    error: null,
-                    lastRefreshedAt: Date.now(),
-                    scopeKey,
-                })
+                        usage,
+                        loading: false,
+                        error: null,
+                        lastRefreshedAt: Date.now(),
+                        scopeKey,
+                    })
             } catch (error: unknown) {
                 if (requestId !== usageRequestToken) {
                     return
                 }
                 const message = getErrorMessage(error)
                 set({
-                    loading: false,
-                    error: message,
-                    scopeKey,
-                })
+                        loading: false,
+                        error: message,
+                        scopeKey,
+                    })
                 throw Object.assign(new Error(message), { cause: error })
             } finally {
                 if (inFlightUsageRequest?.id === requestId) {
@@ -117,11 +117,11 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
         usageRequestToken += 1
         inFlightUsageRequest = null
         set({
-            usage: null,
-            loading: false,
-            error: null,
-            lastRefreshedAt: null,
-            scopeKey: '',
-        })
+                usage: null,
+                loading: false,
+                error: null,
+                lastRefreshedAt: null,
+                scopeKey: '',
+            })
     },
 }))

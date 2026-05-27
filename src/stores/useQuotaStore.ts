@@ -9,7 +9,7 @@ import type {
     GeminiCliQuotaState,
     KimiQuotaState,
 } from '@/types'
-import { create } from 'zustand'
+import {create} from 'zustand'
 
 type QuotaUpdater<T> = T | ((prev: T) => T)
 
@@ -62,10 +62,10 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         })),
     clearQuotaCache: () =>
         set({
-            antigravityQuota: {},
-            claudeQuota: {},
-            codexQuota: {},
-            geminiCliQuota: {},
-            kimiQuota: {},
-        }),
+                antigravityQuota: {},
+                claudeQuota: {},
+                codexQuota: {},
+                geminiCliQuota: {},
+                kimiQuota: {},
+            }),
 }))

@@ -1,6 +1,6 @@
-import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack'
-import { useCallback, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
+import {useCallback, useEffect} from 'react'
+import {useLocation, useNavigate} from 'react-router-dom'
 
 type LocationState = { fromAiProviders?: boolean } | null
 

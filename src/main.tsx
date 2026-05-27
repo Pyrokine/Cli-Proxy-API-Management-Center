@@ -1,6 +1,6 @@
-import { INLINE_LOGO_JPEG } from '@/assets/logoInline'
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
+import {StrictMode} from 'react'
+import {createRoot} from 'react-dom/client'
 import '@/styles/global.scss'
 import App from './App.tsx'
 
@@ -14,14 +14,14 @@ if (faviconEl) {
     faviconEl.type = 'image/jpeg'
 } else {
     const newFavicon = document.createElement('link')
-    newFavicon.rel = 'icon'
-    newFavicon.type = 'image/jpeg'
-    newFavicon.href = INLINE_LOGO_JPEG
+    newFavicon.rel   = 'icon'
+    newFavicon.type  = 'image/jpeg'
+    newFavicon.href  = INLINE_LOGO_JPEG
     document.head.appendChild(newFavicon)
 }
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
         <App />
-    </StrictMode>
+    </StrictMode>,
 )

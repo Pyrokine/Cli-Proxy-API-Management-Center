@@ -3,16 +3,16 @@
  * 从原项目 src/modules/login.js 和 src/core/connection.js 迁移
  */
 
-import { apiClient } from '@/services/api/client'
-import { versionApi } from '@/services/api/version'
-import { secureStorage } from '@/services/storage/secureStorage'
-import type { AuthState, ConnectionStatus, LoginCredentials } from '@/types'
-import { detectApiBaseFromLocation, normalizeApiBase } from '@/utils/connection'
-import { STORAGE_KEY_AUTH } from '@/utils/constants'
-import { create } from 'zustand'
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
-import { useConfigStore } from './useConfigStore'
-import { useUsageStatsStore } from './useUsageStatsStore'
+import {apiClient} from '@/services/api/client'
+import {versionApi} from '@/services/api/version'
+import {secureStorage} from '@/services/storage/secureStorage'
+import type {AuthState, ConnectionStatus, LoginCredentials} from '@/types'
+import {detectApiBaseFromLocation, normalizeApiBase} from '@/utils/connection'
+import {STORAGE_KEY_AUTH} from '@/utils/constants'
+import {create} from 'zustand'
+import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
+import {useConfigStore} from './useConfigStore'
+import {useUsageStatsStore} from './useUsageStatsStore'
 
 interface AuthStoreState extends AuthState {
     connectionStatus: ConnectionStatus
@@ -30,12 +30,12 @@ interface AuthStoreState extends AuthState {
         version: string | null,
         buildDate?: string | null,
         source?: 'header' | 'version',
-        minPanelVersion?: string | null
+        minPanelVersion?: string | null,
     ) => void
     updateConnectionStatus: (status: ConnectionStatus, error?: string | null) => void
 }
 
-let restoreSessionPromise: Promise<boolean> | null = null
+let restoreSessionPromise: Promise<boolean> | null    = null
 let refreshServerVersionPromise: Promise<void> | null = null
 
 export const useAuthStore = create<AuthStoreState>()(
@@ -64,30 +64,32 @@ export const useAuthStore = create<AuthStoreState>()(
                     await waitForAuthHydration()
 
                     const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
-                    const legacyBase =
-                        (await secureStorage.getItem<string>('apiBase')) ||
-                        (await secureStorage.getItem<string>('apiUrl', { encrypt: true }))
-                    const legacyKey = await secureStorage.getItem<string>('managementKey')
+                    const legacyBase  =
+                              (await secureStorage.getItem<string>('apiBase')) ||
+                              (await secureStorage.getItem<string>('apiUrl', { encrypt: true }))
+                    const legacyKey   = await secureStorage.getItem<string>('managementKey')
 
                     const { apiBase, managementKey, rememberPassword } = get()
-                    const resolvedBase = normalizeApiBase(apiBase || legacyBase || detectApiBaseFromLocation())
-                    const resolvedKey = managementKey || legacyKey || ''
-                    const resolvedRememberPassword = rememberPassword || wasLoggedIn
+                    const resolvedBase                                 = normalizeApiBase(apiBase ||
+                                                                                          legacyBase ||
+                                                                                          detectApiBaseFromLocation())
+                    const resolvedKey                                  = managementKey || legacyKey || ''
+                    const resolvedRememberPassword                     = rememberPassword || wasLoggedIn
 
                     set({
-                        apiBase: resolvedBase,
-                        managementKey: resolvedKey,
-                        rememberPassword: resolvedRememberPassword,
-                    })
+                            apiBase: resolvedBase,
+                            managementKey: resolvedKey,
+                            rememberPassword: resolvedRememberPassword,
+                        })
                     apiClient.setConfig({ apiBase: resolvedBase, managementKey: resolvedKey })
 
                     if (resolvedBase && resolvedKey && (wasLoggedIn || Boolean(managementKey) || Boolean(legacyKey))) {
                         try {
                             await get().login({
-                                apiBase: resolvedBase,
-                                managementKey: resolvedKey,
-                                rememberPassword: resolvedRememberPassword,
-                            })
+                                                  apiBase: resolvedBase,
+                                                  managementKey: resolvedKey,
+                                                  rememberPassword: resolvedRememberPassword,
+                                              })
                             return true
                         } catch (error) {
                             console.warn('Auto login failed:', error)
@@ -103,24 +105,24 @@ export const useAuthStore = create<AuthStoreState>()(
 
             // 登录
             login: async (credentials) => {
-                const apiBase = normalizeApiBase(credentials.apiBase)
-                const managementKey = credentials.managementKey.trim()
+                const apiBase          = normalizeApiBase(credentials.apiBase)
+                const managementKey    = credentials.managementKey.trim()
                 const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false
 
                 try {
                     set({
-                        connectionStatus: 'connecting',
-                        serverVersion: null,
-                        serverBuildDate: null,
-                        serverMinPanelVersion: null,
-                        serverVersionSource: null,
-                    })
+                            connectionStatus: 'connecting',
+                            serverVersion: null,
+                            serverBuildDate: null,
+                            serverMinPanelVersion: null,
+                            serverVersionSource: null,
+                        })
 
                     // 配置 API 客户端
                     apiClient.setConfig({
-                        apiBase,
-                        managementKey,
-                    })
+                                            apiBase,
+                                            managementKey,
+                                        })
 
                     // 测试连接 - 获取配置
                     await useConfigStore.getState().fetchConfig(undefined, true)
@@ -132,20 +134,24 @@ export const useAuthStore = create<AuthStoreState>()(
 
                     // 登录成功
                     set({
-                        isAuthenticated: true,
-                        apiBase,
-                        managementKey,
-                        rememberPassword,
-                        connectionStatus: 'connected',
-                        connectionError: null,
-                    })
+                            isAuthenticated: true,
+                            apiBase,
+                            managementKey,
+                            rememberPassword,
+                            connectionStatus: 'connected',
+                            connectionError: null,
+                        })
                     await Promise.all([
-                        secureStorage.setItem('apiBase', apiBase, { encrypt: true, persistent: rememberPassword }),
-                        secureStorage.setItem('managementKey', managementKey, {
-                            encrypt: true,
-                            persistent: rememberPassword,
-                        }),
-                    ])
+                                          secureStorage.setItem(
+                                              'apiBase',
+                                              apiBase,
+                                              { encrypt: true, persistent: rememberPassword },
+                                          ),
+                                          secureStorage.setItem('managementKey', managementKey, {
+                                              encrypt: true,
+                                              persistent: rememberPassword,
+                                          }),
+                                      ])
                     if (rememberPassword) {
                         localStorage.setItem('isLoggedIn', 'true')
                     } else {
@@ -153,12 +159,14 @@ export const useAuthStore = create<AuthStoreState>()(
                     }
                 } catch (error: unknown) {
                     const message =
-                        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Connection failed'
+                              error instanceof Error ?
+                              error.message :
+                              typeof error === 'string' ? error : 'Connection failed'
                     set({
-                        isAuthenticated: false,
-                        connectionStatus: 'error',
-                        connectionError: message || 'Connection failed',
-                    })
+                            isAuthenticated: false,
+                            connectionStatus: 'error',
+                            connectionError: message || 'Connection failed',
+                        })
                     throw error
                 }
             },
@@ -169,17 +177,17 @@ export const useAuthStore = create<AuthStoreState>()(
                 useConfigStore.getState().clearCache()
                 useUsageStatsStore.getState().clearUsageStats()
                 set({
-                    isAuthenticated: false,
-                    apiBase: '',
-                    managementKey: '',
-                    serverVersion: null,
-                    serverBuildDate: null,
-                    serverMinPanelVersion: null,
-                    serverVersionSource: null,
-                    connectionStatus: 'disconnected',
-                    connectionError: null,
-                    hydrated: true,
-                })
+                        isAuthenticated: false,
+                        apiBase: '',
+                        managementKey: '',
+                        serverVersion: null,
+                        serverBuildDate: null,
+                        serverMinPanelVersion: null,
+                        serverVersionSource: null,
+                        connectionStatus: 'disconnected',
+                        connectionError: null,
+                        hydrated: true,
+                    })
                 secureStorage.removeItem('apiBase', { persistent: true })
                 secureStorage.removeItem('apiBase', { persistent: false })
                 secureStorage.removeItem('apiUrl', { persistent: true })
@@ -211,16 +219,16 @@ export const useAuthStore = create<AuthStoreState>()(
                         })
 
                     set({
-                        isAuthenticated: true,
-                        connectionStatus: 'connected',
-                    })
+                            isAuthenticated: true,
+                            connectionStatus: 'connected',
+                        })
 
                     return true
                 } catch {
                     set({
-                        isAuthenticated: false,
-                        connectionStatus: 'error',
-                    })
+                            isAuthenticated: false,
+                            connectionStatus: 'error',
+                        })
                     return false
                 }
             },
@@ -237,7 +245,7 @@ export const useAuthStore = create<AuthStoreState>()(
                             info?.version || null,
                             info?.build_time || null,
                             'version',
-                            info?.min_panel_version || null
+                            info?.min_panel_version || null,
                         )
                     })
                     .catch((error: unknown) => {
@@ -270,9 +278,9 @@ export const useAuthStore = create<AuthStoreState>()(
             // 更新连接状态
             updateConnectionStatus: (status, error = null) => {
                 set({
-                    connectionStatus: status,
-                    connectionError: error,
-                })
+                        connectionStatus: status,
+                        connectionError: error,
+                    })
             },
         }),
         {
@@ -297,7 +305,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         let persistent: boolean
                         try {
                             const parsed = JSON.parse(value) as { state?: { rememberPassword?: boolean } }
-                            persistent = Boolean(parsed.state?.rememberPassword)
+                            persistent   = Boolean(parsed.state?.rememberPassword)
                         } catch {
                             persistent = false
                         }
@@ -328,8 +336,8 @@ export const useAuthStore = create<AuthStoreState>()(
             onRehydrateStorage: () => () => {
                 useAuthStore.setState({ hydrated: true })
             },
-        }
-    )
+        },
+    ),
 )
 
 function waitForAuthHydration(): Promise<void> {

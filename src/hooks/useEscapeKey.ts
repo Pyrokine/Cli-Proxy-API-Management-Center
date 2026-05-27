@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import {useEffect} from 'react'
 
 /** Calls `onEscape` whenever the user presses the Escape key. */
 export function useEscapeKey(onEscape: () => void) {

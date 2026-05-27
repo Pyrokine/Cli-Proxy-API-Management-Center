@@ -3,12 +3,12 @@
  * Toast 通知 + 确认弹窗 + 持久通知中心
  */
 
-import type { Notification, NotificationType } from '@/types'
-import { NOTIFICATION_DURATION_MS } from '@/utils/constants'
-import { generateId } from '@/utils/helpers'
-import type { NotificationSourceId } from '@/utils/notifications'
-import type { ReactNode } from 'react'
-import { create } from 'zustand'
+import type {Notification, NotificationType} from '@/types'
+import {NOTIFICATION_DURATION_MS} from '@/utils/constants'
+import {generateId} from '@/utils/helpers'
+import type {NotificationSourceId} from '@/utils/notifications'
+import type {ReactNode} from 'react'
+import {create} from 'zustand'
 
 interface ConfirmationOptions {
     title?: string
@@ -70,7 +70,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     panelOpen: false,
 
     showNotification: (message, type = 'info', duration = NOTIFICATION_DURATION_MS) => {
-        const id = generateId()
+        const id                         = generateId()
         const notification: Notification = {
             id,
             message,
@@ -100,12 +100,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
     showConfirmation: (options) => {
         set({
-            confirmation: {
-                isOpen: true,
-                isLoading: false,
-                options,
-            },
-        })
+                confirmation: {
+                    isOpen: true,
+                    isLoading: false,
+                    options,
+                },
+            })
     },
 
     hideConfirmation: () => {

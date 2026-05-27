@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import {useEffect, useRef} from 'react'
 
 type SwipeBackOptions = {
     enabled?: boolean
@@ -14,18 +14,18 @@ type ActiveGesture = {
     active: boolean
 }
 
-const DEFAULT_EDGE_SIZE = 28
-const DEFAULT_THRESHOLD = 90
+const DEFAULT_EDGE_SIZE        = 28
+const DEFAULT_THRESHOLD        = 90
 const VERTICAL_TOLERANCE_RATIO = 1.2
 
 export function useEdgeSwipeBack({
-    enabled = true,
-    edgeSize = DEFAULT_EDGE_SIZE,
-    threshold = DEFAULT_THRESHOLD,
-    onBack,
-}: SwipeBackOptions) {
+                                     enabled = true,
+                                     edgeSize = DEFAULT_EDGE_SIZE,
+                                     threshold = DEFAULT_THRESHOLD,
+                                     onBack,
+                                 }: SwipeBackOptions) {
     const containerRef = useRef<HTMLDivElement | null>(null)
-    const gestureRef = useRef<ActiveGesture | null>(null)
+    const gestureRef   = useRef<ActiveGesture | null>(null)
 
     useEffect(() => {
         if (!enabled) {
@@ -66,8 +66,8 @@ export function useEdgeSwipeBack({
                 return
             }
 
-            const dx = event.clientX - gesture.startX
-            const dy = event.clientY - gesture.startY
+            const dx           = event.clientX - gesture.startX
+            const dy           = event.clientY - gesture.startY
             const isHorizontal = Math.abs(dx) > Math.abs(dy) * VERTICAL_TOLERANCE_RATIO
 
             reset()

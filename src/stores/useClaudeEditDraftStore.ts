@@ -8,10 +8,10 @@
  * - This store makes the Claude edit draft shared across route layers keyed by provider index/new.
  */
 
-import type { ProviderFormState } from '@/components/providers/types'
-import type { SetStateAction } from 'react'
-import { create } from 'zustand'
-import { createDraftSlice, type DraftSliceState } from './createDraftSlice'
+import type {ProviderFormState} from '@/components/providers/types'
+import type {SetStateAction} from 'react'
+import {create} from 'zustand'
+import {createDraftSlice, type DraftSliceState} from './createDraftSlice'
 
 type ClaudeTestStatus = 'idle' | 'loading' | 'success' | 'error'
 

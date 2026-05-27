@@ -4,11 +4,11 @@
  */
 
 import i18n from '@/i18n'
-import type { Language } from '@/types'
-import { STORAGE_KEY_LANGUAGE } from '@/utils/constants'
-import { getInitialLanguage, isSupportedLanguage } from '@/utils/language'
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import type {Language} from '@/types'
+import {STORAGE_KEY_LANGUAGE} from '@/utils/constants'
+import {getInitialLanguage, isSupportedLanguage} from '@/utils/language'
+import {create} from 'zustand'
+import {persist} from 'zustand/middleware'
 
 interface LanguageState {
     language: Language
@@ -42,6 +42,6 @@ export const useLanguageStore = create<LanguageState>()(
                 }
                 return currentState
             },
-        }
-    )
+        },
+    ),
 )
