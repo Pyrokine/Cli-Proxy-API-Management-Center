@@ -4,6 +4,8 @@ import iconCodexDark from '@/assets/icons/codex_dark.svg'
 import iconCodexLight from '@/assets/icons/codex_light.svg'
 
 import iconGemini from '@/assets/icons/gemini.svg'
+import iconGrokDark from '@/assets/icons/grok-dark.svg'
+import iconGrok from '@/assets/icons/grok.svg'
 import iconIflow from '@/assets/icons/iflow.svg'
 import iconKimiDark from '@/assets/icons/kimi-dark.svg'
 import iconKimiLight from '@/assets/icons/kimi-light.svg'
@@ -11,22 +13,22 @@ import iconOpenaiDark from '@/assets/icons/openai-dark.svg'
 import iconOpenaiLight from '@/assets/icons/openai-light.svg'
 import iconQwen from '@/assets/icons/qwen.svg'
 import iconVertex from '@/assets/icons/vertex.svg'
-import type { VendorDefinition } from '@/components/credentials'
-import { createVendorRegistry, GlobalSettings, useCredentialsData, VendorSection } from '@/components/credentials'
-import { useBackendQuotaRegistration } from '@/components/credentials/hooks/useBackendQuotaRegistration'
-import { Button } from '@/components/ui/Button'
-import { IconSearch } from '@/components/ui/icons'
-import { Input } from '@/components/ui/Input'
-import { MultiSelect } from '@/components/ui/MultiSelect'
-import { useAutoRefresh } from '@/hooks/useAutoRefresh'
-import { apiKeyAliasApi } from '@/services/api/apiKeys'
-import { authFilesApi } from '@/services/api/authFiles'
-import { useConfigStore, useThemeStore } from '@/stores'
-import { useNotificationStore } from '@/stores/useNotificationStore'
-import { resolveAutoRefreshMs } from '@/utils/autoRefresh'
-import { formatDateTime } from '@/utils/format'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import type {VendorDefinition} from '@/components/credentials'
+import {createVendorRegistry, GlobalSettings, useCredentialsData, VendorSection} from '@/components/credentials'
+import {useBackendQuotaRegistration} from '@/components/credentials/hooks/useBackendQuotaRegistration'
+import {Button} from '@/components/ui/Button'
+import {IconSearch} from '@/components/ui/icons'
+import {Input} from '@/components/ui/Input'
+import {MultiSelect} from '@/components/ui/MultiSelect'
+import {useAutoRefresh} from '@/hooks/useAutoRefresh'
+import {apiKeyAliasApi} from '@/services/api/apiKeys'
+import {authFilesApi} from '@/services/api/authFiles'
+import {useConfigStore, useThemeStore} from '@/stores'
+import {useNotificationStore} from '@/stores/useNotificationStore'
+import {resolveAutoRefreshMs} from '@/utils/autoRefresh'
+import {formatDateTime} from '@/utils/format'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
 import styles from './CredentialsPage.module.scss'
 
@@ -41,7 +43,7 @@ function makeIconComponent(src: string, alt: string) {
 function makeThemedIconComponent(lightSrc: string, darkSrc: string, alt: string) {
     return function ThemedVendorIcon({ size = 20 }: { size?: number }) {
         const resolvedTheme = useThemeStore((s) => s.resolvedTheme)
-        const src = resolvedTheme === 'dark' ? darkSrc : lightSrc
+        const src           = resolvedTheme === 'dark' ? darkSrc : lightSrc
         return <img src={src} alt={alt} width={size} height={size} />
     }
 }
@@ -52,52 +54,96 @@ function formatTime(date: Date): string {
     return full ? (full.split(' ')[1] ?? full) : ''
 }
 
+function loadStoredArray(key: string): string[] {
+    try {
+        const raw = localStorage.getItem(key)
+        if (!raw) {
+            return []
+        }
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+    } catch {
+        return []
+    }
+}
+
+const CREDENTIALS_UI_STATE_KEY     = 'cpa-credentials-ui-state'
+const CREDENTIALS_VENDOR_ORDER_KEY = 'cpa-vendor-order'
+
+type CredentialsStatusFilter = 'all' | 'available' | 'exhausted' | 'error' | 'disabled'
+type CredentialsTypeFilter = 'all' | 'api-key' | 'auth-file'
+
+type CredentialsUIState = {
+    searchQuery?: string
+    statusFilter?: CredentialsStatusFilter
+    typeFilter?: CredentialsTypeFilter
+    selectedVendors?: string[]
+}
+
+function loadCredentialsUIState(): CredentialsUIState {
+    try {
+        const raw = localStorage.getItem(CREDENTIALS_UI_STATE_KEY)
+        if (!raw) {
+            return {}
+        }
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') {
+            return {}
+        }
+        const state = parsed as CredentialsUIState
+        return {
+            searchQuery: typeof state.searchQuery === 'string' ? state.searchQuery : undefined,
+            statusFilter: state.statusFilter,
+            typeFilter: state.typeFilter,
+            selectedVendors: Array.isArray(state.selectedVendors)
+                             ? state.selectedVendors.filter((item): item is string => typeof item === 'string')
+                             : undefined,
+        }
+    } catch {
+        return {}
+    }
+}
+
 export default function CredentialsPage() {
-    const { t } = useTranslation()
-    const config = useConfigStore((s) => s.config)
-    const showNotification = useNotificationStore((s) => s.showNotification)
-    const showConfirmation = useNotificationStore((s) => s.showConfirmation)
-    const [searchQuery, setSearchQuery] = useState('')
-    const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'exhausted' | 'error' | 'disabled'>('all')
-    const [typeFilter, setTypeFilter] = useState<'all' | 'api-key' | 'auth-file'>('all')
-    const [selectedVendors, setSelectedVendors] = useState<string[]>([])
+    const { t }                                 = useTranslation()
+    const config                                = useConfigStore((s) => s.config)
+    const showNotification                      = useNotificationStore((s) => s.showNotification)
+    const showConfirmation                      = useNotificationStore((s) => s.showConfirmation)
+    const [initialUIState]                      = useState(loadCredentialsUIState)
+    const [searchQuery, setSearchQuery]         = useState(initialUIState.searchQuery ?? '')
+    const [statusFilter, setStatusFilter]       = useState<CredentialsStatusFilter>(initialUIState.statusFilter ??
+                                                                                    'all')
+    const [typeFilter, setTypeFilter]           = useState<CredentialsTypeFilter>(initialUIState.typeFilter ?? 'all')
+    const [selectedVendors, setSelectedVendors] = useState<string[]>(initialUIState.selectedVendors ?? [])
 
     // Batch operations
-    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
-    const [batchBusy, setBatchBusy] = useState(false)
+    const [selectedItems, setSelectedItems]                       = useState<Set<string>>(new Set())
+    const [batchBusy, setBatchBusy]                               = useState(false)
+    const [visibleAuthFilesByVendor, setVisibleAuthFilesByVendor] = useState<Record<string, string[]>>({})
 
     // Vendor drag-to-reorder
-    const dragVendorRef = useRef<string | null>(null)
-    const [vendorOrder, setVendorOrder] = useState<string[]>(() => {
-        try {
-            const stored = localStorage.getItem('cpa-vendor-order')
-            if (stored) {
-                return JSON.parse(stored) as string[]
-            }
-        } catch {
-            /* ignore */
-        }
-        return []
-    })
+    const dragVendorRef                 = useRef<string | null>(null)
+    const [vendorOrder, setVendorOrder] = useState<string[]>(() => loadStoredArray(CREDENTIALS_VENDOR_ORDER_KEY))
 
     const autoRefreshMs = useMemo(
         () => resolveAutoRefreshMs(config?.autoRefreshInterval),
-        [config?.autoRefreshInterval]
+        [config?.autoRefreshInterval],
     )
 
     const vendors: VendorDefinition[] = useMemo(
         () =>
             createVendorRegistry({
-                Gemini: makeIconComponent(iconGemini, 'Gemini'),
-                Claude: makeIconComponent(iconClaude, 'Claude'),
-                Codex: makeThemedIconComponent(iconCodexLight, iconCodexDark, 'Codex'),
-                Vertex: makeIconComponent(iconVertex, 'Vertex'),
-                OpenAI: makeThemedIconComponent(iconOpenaiLight, iconOpenaiDark, 'OpenAI'),
-                Ampcode: makeIconComponent(iconAmp, 'Ampcode'),
-                Kimi: makeThemedIconComponent(iconKimiLight, iconKimiDark, 'Kimi'),
-                Qwen: makeIconComponent(iconQwen, 'Qwen'),
-                IFlow: makeIconComponent(iconIflow, 'iFlow'),
-            }).sort((a, b) => {
+                                     Gemini: makeIconComponent(iconGemini, 'Gemini'),
+                                     Claude: makeIconComponent(iconClaude, 'Claude'),
+                                     Codex: makeThemedIconComponent(iconCodexLight, iconCodexDark, 'Codex'),
+                                     Vertex: makeIconComponent(iconVertex, 'Vertex'),
+                                     OpenAI: makeThemedIconComponent(iconOpenaiLight, iconOpenaiDark, 'OpenAI'),
+                                     Ampcode: makeIconComponent(iconAmp, 'Ampcode'),
+                                     Kimi: makeThemedIconComponent(iconKimiLight, iconKimiDark, 'Kimi'),
+                                     Qwen: makeIconComponent(iconQwen, 'Qwen'),
+                                     IFlow: makeIconComponent(iconIflow, 'iFlow'),
+                                     Grok: makeThemedIconComponent(iconGrok, iconGrokDark, 'Grok'),
+                                 }).sort((a, b) => {
                 const idxA = vendorOrder.indexOf(a.id)
                 const idxB = vendorOrder.indexOf(b.id)
                 if (idxA !== -1 && idxB !== -1) {
@@ -111,14 +157,14 @@ export default function CredentialsPage() {
                 }
                 return a.label.localeCompare(b.label)
             }),
-        [vendorOrder]
+        [vendorOrder],
     )
 
     const { vendorData, authFiles, loading, error, refresh } = useCredentialsData(vendors)
-    const { lastRefreshedAt, isRefreshing, markRefreshed } = useAutoRefresh(refresh, autoRefreshMs)
-    const [aliases, setAliases] = useState<Record<string, string>>({})
-    const quotaScheduler = useBackendQuotaRegistration(authFiles)
-    const quotaStatusMap = quotaScheduler.statusMap
+    const { lastRefreshedAt, isRefreshing, markRefreshed }   = useAutoRefresh(refresh, autoRefreshMs)
+    const [aliases, setAliases]                              = useState<Record<string, string>>({})
+    const quotaScheduler                                     = useBackendQuotaRegistration(authFiles)
+    const quotaStatusMap                                     = quotaScheduler.statusMap
 
     const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v.id, label: v.label })), [vendors])
 
@@ -129,6 +175,13 @@ export default function CredentialsPage() {
         const set = new Set(selectedVendors)
         return vendors.filter((v) => set.has(v.id))
     }, [vendors, selectedVendors])
+
+    useEffect(() => {
+        localStorage.setItem(
+            CREDENTIALS_UI_STATE_KEY,
+            JSON.stringify({ searchQuery, statusFilter, typeFilter, selectedVendors }),
+        )
+    }, [searchQuery, statusFilter, typeFilter, selectedVendors])
 
     // Load API key aliases
     useEffect(() => {
@@ -165,7 +218,7 @@ export default function CredentialsPage() {
                 console.warn('Alias operation failed:', err)
             }
         },
-        [showNotification, t]
+        [showNotification, t],
     )
 
     // Batch operations
@@ -173,54 +226,23 @@ export default function CredentialsPage() {
         if (typeFilter === 'api-key') {
             return []
         }
-        const query = searchQuery.toLowerCase().trim()
-        const vendorSet = selectedVendors.length > 0 ? new Set(selectedVendors) : null
+        const vendorSet       = selectedVendors.length > 0 ? new Set(selectedVendors) : null
         const names: string[] = []
-        for (const [vendorId, data] of vendorData) {
+        for (const [vendorId, fileNames] of Object.entries(visibleAuthFilesByVendor)) {
             if (vendorSet && !vendorSet.has(vendorId)) {
                 continue
             }
-            for (const file of data.authFiles) {
-                if (query) {
-                    const searchable = [file.name, file.type].filter(Boolean).join(' ').toLowerCase()
-                    if (!searchable.includes(query)) {
-                        continue
-                    }
-                }
-                if (statusFilter !== 'all') {
-                    if (statusFilter === 'disabled') {
-                        if (!file.disabled) {
-                            continue
-                        }
-                    } else {
-                        // Exclude disabled entries from available/error/exhausted tabs.
-                        // Without this, disabled accounts leak into the "available" list
-                        // because their historical stats still show success counts.
-                        if (file.disabled) {
-                            continue
-                        }
-                        const success = Number(file.success ?? 0)
-                        const failure = Number(file.failed ?? 0)
-                        const total = success + failure
-                        if (statusFilter === 'available' && !(total === 0 || success > 0)) {
-                            continue
-                        }
-                        if (statusFilter === 'error' && !(failure > 0 && success === 0)) {
-                            continue
-                        }
-                        if (statusFilter === 'exhausted' && quotaStatusMap[file.name] !== 'quota_exceeded') {
-                            // issue 13: trust the backend scheduler's quota_exceeded signal
-                            // (set when an upstream returns HTTP 402) rather than inferring
-                            // exhaustion from request stats.
-                            continue
-                        }
-                    }
-                }
-                names.push(file.name)
-            }
+            names.push(...fileNames)
         }
         return names
-    }, [vendorData, searchQuery, statusFilter, typeFilter, selectedVendors, quotaStatusMap])
+    }, [visibleAuthFilesByVendor, typeFilter, selectedVendors])
+
+    const selectedVisibleItems = useMemo(() => {
+        const visible = new Set(visibleAuthFileNames)
+        return Array.from(selectedItems).filter((name) => visible.has(name))
+    }, [selectedItems, visibleAuthFileNames])
+
+    const selectedVisibleCount = selectedVisibleItems.length
 
     const handleToggleSelect = useCallback((id: string) => {
         setSelectedItems((prev) => {
@@ -256,64 +278,75 @@ export default function CredentialsPage() {
         })
     }, [])
 
+    const handleVisibleAuthFilesChange = useCallback((vendorId: string, fileNames: string[]) => {
+        setVisibleAuthFilesByVendor((prev) => {
+            const previous = prev[vendorId] ?? []
+            if (previous.length === fileNames.length && previous.every((name, index) => name === fileNames[index])) {
+                return prev
+            }
+            return { ...prev, [vendorId]: fileNames }
+        })
+    }, [])
+
     const handleBatchDelete = useCallback(() => {
-        if (selectedItems.size === 0) {
+        if (selectedVisibleItems.length === 0) {
             return
         }
-        const names = Array.from(selectedItems)
+        const names = selectedVisibleItems
         showConfirmation({
-            title: t('credentials.batch_delete_title'),
-            message: t('credentials.batch_delete_confirm', { count: names.length }),
-            confirmText: t('common.delete'),
-            onConfirm: async () => {
-                setBatchBusy(true)
-                try {
-                    const result = await authFilesApi.deleteFiles(names)
-                    if (result.files.length > 0) {
-                        setSelectedItems(new Set())
-                        await refresh()
-                        markRefreshed()
-                    }
-                    if (result.failed.length === 0) {
-                        showNotification(t('auth_files.delete_success'), 'success')
-                    } else {
-                        const details = result.failed.map((item) => `${item.name}: ${item.error}`).join('; ')
-                        showNotification(
-                            `${t('auth_files.delete_filtered_partial', {
-                                type: t('credentials.auth_files'),
-                                success: result.deleted,
-                                failed: result.failed.length,
-                            })}: ${details}`,
-                            'warning'
-                        )
-                    }
-                } finally {
-                    setBatchBusy(false)
-                }
-            },
-        })
-    }, [selectedItems, showConfirmation, showNotification, t, refresh, markRefreshed])
+                             title: t('credentials.batch_delete_title'),
+                             message: t('credentials.batch_delete_confirm', { count: names.length }),
+                             confirmText: t('common.delete'),
+                             onConfirm: async () => {
+                                 setBatchBusy(true)
+                                 try {
+                                     const result = await authFilesApi.deleteFiles(names)
+                                     if (result.files.length > 0) {
+                                         setSelectedItems(new Set())
+                                         await refresh()
+                                         markRefreshed()
+                                     }
+                                     if (result.failed.length === 0) {
+                                         showNotification(t('auth_files.delete_success'), 'success')
+                                     } else {
+                                         const details = result.failed.map((item) => `${item.name}: ${item.error}`)
+                                                               .join('; ')
+                                         showNotification(
+                                             `${t('auth_files.delete_filtered_partial', {
+                                                 type: t('credentials.auth_files'),
+                                                 success: result.deleted,
+                                                 failed: result.failed.length,
+                                             })}: ${details}`,
+                                             'warning',
+                                         )
+                                     }
+                                 } finally {
+                                     setBatchBusy(false)
+                                 }
+                             },
+                         })
+    }, [selectedVisibleItems, showConfirmation, showNotification, t, refresh, markRefreshed])
 
     const handleBatchRefresh = useCallback(async () => {
-        if (selectedItems.size === 0) {
+        if (selectedVisibleItems.length === 0) {
             return
         }
         setBatchBusy(true)
         try {
-            await quotaScheduler.refreshMany(Array.from(selectedItems))
+            await quotaScheduler.refreshMany(selectedVisibleItems)
             await refresh()
             markRefreshed()
         } finally {
             setBatchBusy(false)
         }
-    }, [selectedItems, quotaScheduler, refresh, markRefreshed])
+    }, [selectedVisibleItems, quotaScheduler, refresh, markRefreshed])
 
     const handleBatchSetDisabled = useCallback(
         async (disabled: boolean) => {
-            if (selectedItems.size === 0) {
+            if (selectedVisibleItems.length === 0) {
                 return
             }
-            const names = Array.from(selectedItems)
+            const names = selectedVisibleItems
             setBatchBusy(true)
             try {
                 const result = disabled ? await authFilesApi.bulkDisable(names) : await authFilesApi.bulkEnable(names)
@@ -326,14 +359,14 @@ export default function CredentialsPage() {
                     const details = failed.map(([name, message]) => `${name}: ${message}`).join('; ')
                     showNotification(
                         `${t('common.success')} (${result.updated.length}/${names.length}): ${details}`,
-                        'warning'
+                        'warning',
                     )
                 }
             } finally {
                 setBatchBusy(false)
             }
         },
-        [selectedItems, refresh, markRefreshed, showNotification, t]
+        [selectedVisibleItems, refresh, markRefreshed, showNotification, t],
     )
 
     return (
@@ -346,7 +379,7 @@ export default function CredentialsPage() {
                             {t('credentials.last_updated')} {formatTime(lastRefreshedAt)}
                         </span>
                     )}
-                    {(loading || isRefreshing) && <span className="loading-spinner" aria-hidden="true" />}
+                    {(loading || isRefreshing) && <span className='loading-spinner' aria-hidden='true' />}
                 </div>
             </div>
 
@@ -371,7 +404,7 @@ export default function CredentialsPage() {
                         <Button
                             key={status}
                             variant={statusFilter === status ? 'primary' : 'ghost'}
-                            size="sm"
+                            size='sm'
                             onClick={() => setStatusFilter(status)}
                         >
                             {t(`credentials.filter_${status}`)}
@@ -383,7 +416,7 @@ export default function CredentialsPage() {
                         <Button
                             key={type}
                             variant={typeFilter === type ? 'primary' : 'ghost'}
-                            size="sm"
+                            size='sm'
                             onClick={() => setTypeFilter(type)}
                         >
                             {t(`credentials.filter_type_${type.replace('-', '_')}`)}
@@ -395,45 +428,45 @@ export default function CredentialsPage() {
             <div className={styles.batchBar}>
                 <span className={styles.batchCount}>
                     {t('credentials.batch_selected', {
-                        selected: selectedItems.size,
+                        selected: selectedVisibleCount,
                         total: visibleAuthFileNames.length,
                     })}
                 </span>
-                <Button variant="ghost" size="sm" onClick={handleSelectAll}>
+                <Button variant='ghost' size='sm' onClick={handleSelectAll}>
                     {t('credentials.batch_select_all')}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={handleDeselectAll} disabled={selectedItems.size === 0}>
+                <Button variant='ghost' size='sm' onClick={handleDeselectAll} disabled={selectedItems.size === 0}>
                     {t('credentials.batch_deselect_all')}
                 </Button>
                 <Button
-                    variant="secondary"
-                    size="sm"
+                    variant='secondary'
+                    size='sm'
                     onClick={() => void handleBatchRefresh()}
-                    disabled={selectedItems.size === 0 || batchBusy}
+                    disabled={selectedVisibleCount === 0 || batchBusy}
                 >
                     {t('credentials.batch_refresh', { defaultValue: 'Refresh Selected' })}
                 </Button>
                 <Button
-                    variant="ghost"
-                    size="sm"
+                    variant='ghost'
+                    size='sm'
                     onClick={() => void handleBatchSetDisabled(false)}
-                    disabled={selectedItems.size === 0 || batchBusy}
+                    disabled={selectedVisibleCount === 0 || batchBusy}
                 >
                     {t('credentials.batch_enable_selected', { defaultValue: 'Enable Selected' })}
                 </Button>
                 <Button
-                    variant="ghost"
-                    size="sm"
+                    variant='ghost'
+                    size='sm'
                     onClick={() => void handleBatchSetDisabled(true)}
-                    disabled={selectedItems.size === 0 || batchBusy}
+                    disabled={selectedVisibleCount === 0 || batchBusy}
                 >
                     {t('credentials.batch_disable_selected', { defaultValue: 'Disable Selected' })}
                 </Button>
                 <Button
-                    variant="danger"
-                    size="sm"
+                    variant='danger'
+                    size='sm'
                     onClick={handleBatchDelete}
-                    disabled={selectedItems.size === 0 || batchBusy}
+                    disabled={selectedVisibleCount === 0 || batchBusy}
                     loading={batchBusy}
                 >
                     {t('credentials.batch_delete')}
@@ -458,15 +491,15 @@ export default function CredentialsPage() {
                             if (!from || from === vendor.id) {
                                 return
                             }
-                            const order = vendors.map((v) => v.id)
+                            const order   = vendors.map((v) => v.id)
                             const fromIdx = order.indexOf(from)
-                            const toIdx = order.indexOf(vendor.id)
+                            const toIdx   = order.indexOf(vendor.id)
                             if (fromIdx === -1 || toIdx === -1) {
                                 return
                             }
                             order.splice(fromIdx, 1)
                             order.splice(toIdx, 0, from)
-                            localStorage.setItem('cpa-vendor-order', JSON.stringify(order))
+                            localStorage.setItem(CREDENTIALS_VENDOR_ORDER_KEY, JSON.stringify(order))
                             setVendorOrder(order)
                         }}
                     >
@@ -483,6 +516,7 @@ export default function CredentialsPage() {
                             selectedItems={selectedItems}
                             onToggleSelect={handleToggleSelect}
                             onSelectVendorFiles={handleSelectVendorFiles}
+                            onVisibleAuthFilesChange={handleVisibleAuthFilesChange}
                             quotaStatusMap={quotaStatusMap}
                             scheduler={quotaScheduler}
                         />

@@ -1,19 +1,100 @@
-import { Button } from '@/components/ui/Button'
-import { IconCheck, IconCopy, IconExternalLink, IconX } from '@/components/ui/icons'
-import { Input } from '@/components/ui/Input'
-import { oauthApi, type OAuthProvider } from '@/services/api/oauth'
-import { copyToClipboard } from '@/utils/clipboard'
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {Button} from '@/components/ui/Button'
+import {IconCheck, IconCopy, IconExternalLink, IconX} from '@/components/ui/icons'
+import {Input} from '@/components/ui/Input'
+import {oauthApi, type OAuthProvider} from '@/services/api/oauth'
+import {copyToClipboard} from '@/utils/clipboard'
+import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './OAuthLoginAction.module.scss'
 
-const POLL_INTERVAL = 3000
-const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli']
+const POLL_INTERVAL                       = 3000
+const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli', 'xai']
+const XAI_CALLBACK_URL                    = 'http://127.0.0.1:56121/callback'
 
 function generateNonce(): string {
     const bytes = new Uint8Array(16)
     crypto.getRandomValues(bytes)
     return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function isAbsoluteUrl(value: string): boolean {
+    try {
+        new URL(value)
+        return true
+    } catch {
+        return false
+    }
+}
+
+function readQueryLikeCallbackInput(value: string): URLSearchParams | null {
+    const trimmed    = value.trim()
+    const queryStart = trimmed.indexOf('?')
+    const hashStart  = trimmed.indexOf('#')
+    const start      = queryStart >= 0 ?
+                       queryStart + 1 :
+                       hashStart >= 0 ? hashStart + 1 : trimmed.includes('=') ? 0 : -1
+    if (start < 0) {
+        return null
+    }
+    return new URLSearchParams(trimmed.slice(start))
+}
+
+function extractDisplayedXaiCode(value: string): string {
+    const trimmed   = value.trim()
+    const codeMatch = trimmed.match(/\bcode\s*[:=]\s*(?<code>[^\s&]+)/i)
+    return (codeMatch?.groups?.code ?? trimmed).trim()
+}
+
+function buildXaiCallbackUrl(input: string, state?: string): string | null {
+    const trimmed = input.trim()
+    if (!trimmed) {
+        return null
+    }
+    if (isAbsoluteUrl(trimmed)) {
+        return trimmed
+    }
+
+    const params = readQueryLikeCallbackInput(trimmed)
+    if (params) {
+        const code             = params.get('code')?.trim()
+        const error            = params.get('error')?.trim()
+        const errorDescription = params.get('error_description')?.trim()
+        const callbackState    = params.get('state')?.trim() || state?.trim()
+        if (!callbackState) {
+            return null
+        }
+
+        const callbackUrl = new URL(XAI_CALLBACK_URL)
+        callbackUrl.searchParams.set('state', callbackState)
+        if (code) {
+            callbackUrl.searchParams.set('code', code)
+        }
+        if (error) {
+            callbackUrl.searchParams.set('error', error)
+        }
+        if (errorDescription) {
+            callbackUrl.searchParams.set('error_description', errorDescription)
+        }
+        return callbackUrl.toString()
+    }
+
+    const code          = extractDisplayedXaiCode(trimmed)
+    const callbackState = state?.trim()
+    if (!code || !callbackState) {
+        return null
+    }
+
+    const callbackUrl = new URL(XAI_CALLBACK_URL)
+    callbackUrl.searchParams.set('code', code)
+    callbackUrl.searchParams.set('state', callbackState)
+    return callbackUrl.toString()
+}
+
+function resolveCallbackUrl(provider: OAuthProvider, input: string, state?: string): string | null {
+    if (provider !== 'xai') {
+        return input.trim()
+    }
+    return buildXaiCallbackUrl(input, state)
 }
 
 interface OAuthLoginActionProps {
@@ -24,16 +105,18 @@ interface OAuthLoginActionProps {
 }
 
 export function OAuthLoginAction({ provider, disableControls, onSuccess, onCancel }: OAuthLoginActionProps) {
-    const { t } = useTranslation()
-    const [url, setUrl] = useState('')
-    const [status, setStatus] = useState<'idle' | 'starting' | 'waiting' | 'success' | 'error'>('idle')
-    const [error, setError] = useState('')
-    const [projectId, setProjectId] = useState('')
-    const [callbackUrl, setCallbackUrl] = useState('')
+    const { t }                                       = useTranslation()
+    const [url, setUrl]                               = useState('')
+    const [status, setStatus]                         = useState<'idle' | 'starting' | 'waiting' | 'success' | 'error'>(
+        'idle')
+    const [error, setError]                           = useState('')
+    const [projectId, setProjectId]                   = useState('')
+    const [callbackUrl, setCallbackUrl]               = useState('')
     const [callbackSubmitting, setCallbackSubmitting] = useState(false)
-    const pollRef = useRef<number | null>(null)
+    const [oauthState, setOauthState]                 = useState('')
+    const pollRef                                     = useRef<number | null>(null)
 
-    const needsProjectId = provider === 'gemini-cli'
+    const needsProjectId   = provider === 'gemini-cli'
     const supportsCallback = CALLBACK_SUPPORTED.includes(provider)
 
     const stopPolling = useCallback(() => {
@@ -51,8 +134,8 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
         try {
             // Generate a per-flow nonce bound to the polling loop so a third party who only
             // learns the state (e.g. via referrer leak) cannot read the result.
-            const nonce = generateNonce()
-            const options = {
+            const nonce    = generateNonce()
+            const options  = {
                 ...(needsProjectId && projectId ? { projectId } : {}),
                 nonce,
             }
@@ -61,20 +144,24 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             setStatus('waiting')
 
             // Validate URL scheme to prevent javascript: URI injection (XSS-VULN-01)
+            let parsedUrl: URL | undefined
             try {
-                const parsed = new URL(response.url)
-                if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-                    throw new Error('Invalid URL scheme')
-                }
-                window.open(response.url, '_blank', 'noopener,noreferrer')
+                parsedUrl = new URL(response.url)
             } catch {
                 setError('Invalid OAuth URL received from server')
                 setStatus('error')
                 return
             }
+            if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+                setError('Invalid OAuth URL received from server')
+                setStatus('error')
+                return
+            }
+            window.open(response.url, '_blank', 'noopener,noreferrer')
 
             if (response.state) {
                 const stateValue = response.state
+                setOauthState(stateValue)
                 pollRef.current = window.setInterval(async () => {
                     try {
                         const result = await oauthApi.getAuthStatus(stateValue, nonce)
@@ -100,11 +187,17 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
 
     const submitCallback = useCallback(async () => {
         if (!callbackUrl.trim()) {
+            setError(t(provider === 'xai' ? 'auth_login.xai_callback_required' : 'auth_login.oauth_callback_required'))
+            return
+        }
+        const redirectUrl = resolveCallbackUrl(provider, callbackUrl, oauthState)
+        if (!redirectUrl) {
+            setError(t(provider === 'xai' ? 'auth_login.xai_callback_state_missing' : 'auth_login.missing_state'))
             return
         }
         setCallbackSubmitting(true)
         try {
-            await oauthApi.submitCallback(provider, callbackUrl.trim())
+            await oauthApi.submitCallback(provider, redirectUrl)
             stopPolling()
             setStatus('success')
             onSuccess()
@@ -113,7 +206,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
         } finally {
             setCallbackSubmitting(false)
         }
-    }, [provider, callbackUrl, stopPolling, onSuccess, t])
+    }, [provider, callbackUrl, oauthState, stopPolling, onSuccess, t])
 
     const handleCancel = useCallback(() => {
         stopPolling()
@@ -130,19 +223,20 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                     </div>
                     <div className={styles.flowButtons}>
                         <Button
-                            variant="secondary"
-                            size="sm"
+                            variant='secondary'
+                            size='sm'
                             onClick={() => {
                                 stopPolling()
                                 setStatus('idle')
                                 setUrl('')
                                 setError('')
                                 setCallbackUrl('')
+                                setOauthState('')
                             }}
                         >
                             {t('auth_login.login_another_account', { defaultValue: '登录另一个账号' })}
                         </Button>
-                        <Button variant="secondary" size="sm" onClick={onCancel}>
+                        <Button variant='secondary' size='sm' onClick={onCancel}>
                             {t('auth_login.view_auth_files', { defaultValue: '查看认证文件' })}
                         </Button>
                     </div>
@@ -158,10 +252,10 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                     <IconX size={16} />
                     <span>{error || t('credentials.oauth_error')}</span>
                     <div className={styles.flowButtons}>
-                        <Button variant="secondary" size="sm" onClick={() => setStatus('idle')}>
+                        <Button variant='secondary' size='sm' onClick={() => setStatus('idle')}>
                             {t('common.refresh')}
                         </Button>
-                        <Button variant="secondary" size="sm" onClick={handleCancel}>
+                        <Button variant='secondary' size='sm' onClick={handleCancel}>
                             {t('common.cancel')}
                         </Button>
                     </div>
@@ -175,7 +269,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             <div className={styles.flow}>
                 <div className={styles.waitingArea}>
                     <div className={styles.statusLine}>
-                        <span className="loading-spinner" aria-hidden="true" />
+                        <span className='loading-spinner' aria-hidden='true' />
                         <span>{t('credentials.oauth_waiting')}</span>
                     </div>
 
@@ -184,16 +278,16 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                             <code className={styles.url}>{url}</code>
                             <div className={styles.urlActions}>
                                 <Button
-                                    variant="secondary"
-                                    size="sm"
+                                    variant='secondary'
+                                    size='sm'
                                     onClick={() => copyToClipboard(url)}
                                     title={t('credentials.oauth_copy_url')}
                                 >
                                     <IconCopy size={14} />
                                 </Button>
                                 <Button
-                                    variant="secondary"
-                                    size="sm"
+                                    variant='secondary'
+                                    size='sm'
                                     onClick={() => {
                                         try {
                                             const parsed = new URL(url)
@@ -215,15 +309,28 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                     {supportsCallback && (
                         <div className={styles.callbackArea}>
                             <Input
-                                label={t('credentials.oauth_callback_hint')}
-                                placeholder="https://..."
+                                label={t(
+                                    provider === 'xai'
+                                    ? 'auth_login.xai_callback_label'
+                                    : 'credentials.oauth_callback_hint',
+                                )}
+                                placeholder={t(
+                                    provider === 'xai'
+                                    ? 'auth_login.xai_callback_placeholder'
+                                    : 'auth_login.oauth_callback_placeholder',
+                                )}
+                                hint={
+                                    provider === 'xai'
+                                    ? t('auth_login.xai_callback_hint')
+                                    : t('auth_login.oauth_callback_hint')
+                                }
                                 value={callbackUrl}
                                 onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
                                 disabled={callbackSubmitting}
                             />
                             <Button
-                                variant="primary"
-                                size="sm"
+                                variant='primary'
+                                size='sm'
                                 onClick={submitCallback}
                                 loading={callbackSubmitting}
                                 disabled={!callbackUrl.trim()}
@@ -233,7 +340,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                         </div>
                     )}
 
-                    <Button variant="secondary" size="sm" onClick={handleCancel}>
+                    <Button variant='secondary' size='sm' onClick={handleCancel}>
                         {t('common.cancel')}
                     </Button>
                 </div>
@@ -248,7 +355,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 {needsProjectId && (
                     <Input
                         label={t('credentials.project_id')}
-                        placeholder="my-gcp-project"
+                        placeholder='my-gcp-project'
                         value={projectId}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => setProjectId(e.target.value)}
                         disabled={disableControls || status === 'starting'}
@@ -256,15 +363,15 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 )}
                 <div className={styles.flowButtons}>
                     <Button
-                        variant="primary"
-                        size="sm"
+                        variant='primary'
+                        size='sm'
                         onClick={startAuth}
                         loading={status === 'starting'}
                         disabled={disableControls}
                     >
                         {t('auth_login.login_button')}
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={onCancel}>
+                    <Button variant='secondary' size='sm' onClick={onCancel}>
                         {t('common.cancel')}
                     </Button>
                 </div>

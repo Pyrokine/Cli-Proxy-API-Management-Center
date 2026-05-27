@@ -1,9 +1,9 @@
-import { authFilesApi } from '@/services/api/authFiles'
-import { useConfigStore } from '@/stores'
-import type { Config } from '@/types'
-import type { AuthFileItem } from '@/types/authFile'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AnyKeyConfig, VendorDefinition } from './useVendorRegistry'
+import {authFilesApi} from '@/services/api/authFiles'
+import {useConfigStore} from '@/stores'
+import type {Config} from '@/types'
+import type {AuthFileItem} from '@/types/authFile'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import type {AnyKeyConfig, VendorDefinition} from './useVendorRegistry'
 
 export interface VendorData {
     /** API key configs from server config */
@@ -31,13 +31,13 @@ const createEmptyVendorData = (): VendorData => ({
  * Groups everything by vendor.
  */
 export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsDataReturn {
-    const config = useConfigStore((state) => state.config)
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
+    const config        = useConfigStore((state) => state.config)
+    const fetchConfig   = useConfigStore((state) => state.fetchConfig)
     const configLoading = useConfigStore((state) => state.loading)
 
-    const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([])
+    const [authFiles, setAuthFiles]               = useState<AuthFileItem[]>([])
     const [authFilesLoading, setAuthFilesLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    const [error, setError]                       = useState<string | null>(null)
 
     const loadingRef = useRef(false)
 
@@ -50,7 +50,7 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
 
         try {
             const configPromise = fetchConfig(undefined, true)
-            const authPromise = authFilesApi.list()
+            const authPromise   = authFilesApi.list()
 
             const [, authFilesResponse] = await Promise.all([configPromise, authPromise])
             setAuthFiles(authFilesResponse.files || [])

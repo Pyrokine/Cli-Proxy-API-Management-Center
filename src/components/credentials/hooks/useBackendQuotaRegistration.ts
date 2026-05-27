@@ -5,9 +5,9 @@
  * so downstream components (CredentialCard, useCredentialQuota) work without changes.
  */
 
-import { quotaApi } from '@/services/api/quota'
-import { useNotificationStore } from '@/stores/useNotificationStore'
-import { useQuotaStore } from '@/stores/useQuotaStore'
+import {quotaApi} from '@/services/api/quota'
+import {useNotificationStore} from '@/stores/useNotificationStore'
+import {useQuotaStore} from '@/stores/useQuotaStore'
 import type {
     AntigravityQuotaState,
     ClaudeExtraUsage,
@@ -19,12 +19,12 @@ import type {
     GeminiCliQuotaState,
     KimiQuotaState,
 } from '@/types'
-import type { AuthFileItem } from '@/types/authFile'
-import { formatDateTime } from '@/utils/format'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {AuthFileItem} from '@/types/authFile'
+import {formatDateTime} from '@/utils/format'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 
 const refreshPollIntervalMs = 1000
-const refreshPollTimeoutMs = 30000
+const refreshPollTimeoutMs  = 10 * 60 * 1000
 
 interface EntryMeta {
     lastRefresh: Date | null
@@ -39,19 +39,19 @@ interface RefreshBaseline {
 }
 
 export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
-    const mounted = useRef(true)
-    const timeoutRef = useRef<number | null>(null)
-    const pendingRefreshRef = useRef<Record<string, RefreshBaseline>>({})
-    const metaRef = useRef<Record<string, EntryMeta>>({})
-    const [meta, setMeta] = useState<Record<string, EntryMeta>>({})
-    const [quotaEnabled, setQuotaEnabled] = useState(false)
+    const mounted                             = useRef(true)
+    const timeoutRef                          = useRef<number | null>(null)
+    const pendingRefreshRef                   = useRef<Record<string, RefreshBaseline>>({})
+    const metaRef                             = useRef<Record<string, EntryMeta>>({})
+    const [meta, setMeta]                     = useState<Record<string, EntryMeta>>({})
+    const [quotaEnabled, setQuotaEnabled]     = useState(false)
     const [pollIntervalMs, setPollIntervalMs] = useState(0)
 
     const setAntigravityQuota = useQuotaStore((s) => s.setAntigravityQuota)
-    const setClaudeQuota = useQuotaStore((s) => s.setClaudeQuota)
-    const setCodexQuota = useQuotaStore((s) => s.setCodexQuota)
-    const setGeminiCliQuota = useQuotaStore((s) => s.setGeminiCliQuota)
-    const setKimiQuota = useQuotaStore((s) => s.setKimiQuota)
+    const setClaudeQuota      = useQuotaStore((s) => s.setClaudeQuota)
+    const setCodexQuota       = useQuotaStore((s) => s.setCodexQuota)
+    const setGeminiCliQuota   = useQuotaStore((s) => s.setGeminiCliQuota)
+    const setKimiQuota        = useQuotaStore((s) => s.setKimiQuota)
 
     const poll = useCallback(async () => {
         try {
@@ -103,14 +103,14 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
             }
 
             const nextPending: Record<string, RefreshBaseline> = {}
-            const timedOutNames: string[] = []
-            const now = Date.now()
+            const timedOutNames: string[]                      = []
+            const now                                          = Date.now()
             for (const [fileName, baseline] of Object.entries(pendingRefreshRef.current)) {
-                const currentMeta = newMeta[fileName]
+                const currentMeta          = newMeta[fileName]
                 const currentLastRefreshMs = currentMeta?.lastRefresh?.getTime() ?? null
-                const completed =
-                    currentLastRefreshMs !== null &&
-                    (baseline.lastRefreshMs === null || currentLastRefreshMs > baseline.lastRefreshMs)
+                const completed            =
+                          currentLastRefreshMs !== null &&
+                          (baseline.lastRefreshMs === null || currentLastRefreshMs > baseline.lastRefreshMs)
                 if (completed) {
                     continue
                 }
@@ -145,9 +145,9 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
         const initialId = window.setTimeout(() => {
             void poll()
         }, 0)
-        const id = pollIntervalMs > 0 ? window.setInterval(() => void poll(), pollIntervalMs) : null
+        const id        = pollIntervalMs > 0 ? window.setInterval(() => void poll(), pollIntervalMs) : null
         return () => {
-            mounted.current = false
+            mounted.current           = false
             pendingRefreshRef.current = {}
             window.clearTimeout(initialId)
             if (timeoutRef.current !== null) {
@@ -193,8 +193,8 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
                 return
             }
 
-            const requestedAtMs = Date.now()
-            const baselines = Object.fromEntries(
+            const requestedAtMs       = Date.now()
+            const baselines           = Object.fromEntries(
                 uniqueNames.map((name) => {
                     const currentMeta = metaRef.current[name]
                     return [
@@ -205,7 +205,7 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
                             requestedAtMs,
                         } satisfies RefreshBaseline,
                     ]
-                })
+                }),
             )
             pendingRefreshRef.current = {
                 ...pendingRefreshRef.current,
@@ -235,7 +235,7 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
                     const next = { ...prev }
                     for (const name of uniqueNames) {
                         const baseline = baselines[name]
-                        next[name] = {
+                        next[name]     = {
                             lastRefresh: prev[name]?.lastRefresh ?? null,
                             nextRefresh: quotaEnabled ? (prev[name]?.nextRefresh ?? null) : null,
                             status: baseline?.previousStatus || 'error',
@@ -249,14 +249,14 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
                     .getState()
                     .showNotification(
                         `Failed to refresh quota for ${uniqueNames.join(', ')}${message ? `: ${message}` : ''}`,
-                        'error'
+                        'error',
                     )
                 return
             }
 
             await waitForPendingRefreshes()
         },
-        [quotaEnabled, waitForPendingRefreshes]
+        [quotaEnabled, waitForPendingRefreshes],
     )
 
     return {
@@ -340,14 +340,16 @@ function mapQuotaError(fileName: string, type: string, error: string, s: Setters
 }
 
 function isCodexQuotaExceeded(data: unknown): boolean {
-    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    const d            = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     const rateLimitRaw = d?.rate_limit ?? d?.rateLimit
-    const rateLimit =
-        rateLimitRaw !== null && typeof rateLimitRaw === 'object' ? (rateLimitRaw as Record<string, unknown>) : null
+    const rateLimit    =
+              rateLimitRaw !== null && typeof rateLimitRaw === 'object' ?
+              (rateLimitRaw as Record<string, unknown>) :
+              null
     if (!rateLimit) {
         return false
     }
-    const allowed = rateLimit.allowed
+    const allowed      = rateLimit.allowed
     const limitReached = rateLimit.limit_reached ?? rateLimit.limitReached
     return allowed === false || limitReached === true
 }
@@ -371,9 +373,15 @@ function parseFraction(value: unknown): number | null {
 }
 
 function extractCloudCodeBuckets(data: unknown): GeminiCliQuotaBucketState[] {
-    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
-    const quotaRaw = d ? (typeof d.quota === 'string' ? JSON.parse(d.quota) : d.quota) : null
-    const quota = quotaRaw !== null && typeof quotaRaw === 'object' ? (quotaRaw as Record<string, unknown>) : null
+    const d                                    = data !== null && typeof data === 'object' ?
+                                                 (data as Record<string, unknown>) :
+                                                 null
+    const quotaRaw                             = d ?
+                                                 (typeof d.quota === 'string' ? JSON.parse(d.quota) : d.quota) :
+                                                 null
+    const quota                                = quotaRaw !== null && typeof quotaRaw === 'object' ?
+                                                 (quotaRaw as Record<string, unknown>) :
+                                                 null
     const buckets: GeminiCliQuotaBucketState[] = []
 
     if (!quota) {
@@ -391,32 +399,32 @@ function extractCloudCodeBuckets(data: unknown): GeminiCliQuotaBucketState[] {
             continue
         }
         const remainingFraction = parseFraction(bucketRecord.remainingFraction ?? bucketRecord.remaining_fraction)
-        const modelId =
-            typeof bucketRecord.modelId === 'string'
-                ? bucketRecord.modelId
-                : typeof bucketRecord.model_id === 'string'
-                  ? bucketRecord.model_id
-                  : null
-        const tokenType =
-            typeof bucketRecord.tokenType === 'string'
-                ? bucketRecord.tokenType
-                : typeof bucketRecord.token_type === 'string'
-                  ? bucketRecord.token_type
-                  : null
+        const modelId           =
+                  typeof bucketRecord.modelId === 'string'
+                  ? bucketRecord.modelId
+                  : typeof bucketRecord.model_id === 'string'
+                    ? bucketRecord.model_id
+                    : null
+        const tokenType         =
+                  typeof bucketRecord.tokenType === 'string'
+                  ? bucketRecord.tokenType
+                  : typeof bucketRecord.token_type === 'string'
+                    ? bucketRecord.token_type
+                    : null
         buckets.push({
-            id: `${modelId ?? 'unknown'}-${tokenType ?? 'unknown'}`,
-            label: modelId ?? tokenType ?? 'Quota',
-            remainingFraction,
-            remainingAmount: null,
-            resetTime:
-                typeof bucketRecord.resetTime === 'string'
-                    ? bucketRecord.resetTime
-                    : typeof bucketRecord.reset_time === 'string'
-                      ? bucketRecord.reset_time
-                      : undefined,
-            tokenType,
-            modelIds: modelId ? [modelId] : undefined,
-        })
+                         id: `${modelId ?? 'unknown'}-${tokenType ?? 'unknown'}`,
+                         label: modelId ?? tokenType ?? 'Quota',
+                         remainingFraction,
+                         remainingAmount: null,
+                         resetTime:
+                             typeof bucketRecord.resetTime === 'string'
+                             ? bucketRecord.resetTime
+                             : typeof bucketRecord.reset_time === 'string'
+                               ? bucketRecord.reset_time
+                               : undefined,
+                         tokenType,
+                         modelIds: modelId ? [modelId] : undefined,
+                     })
     }
 
     return buckets
@@ -447,13 +455,13 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
         return
     }
     const usageRaw = typeof d.usage === 'string' ? JSON.parse(d.usage) : d.usage
-    const usage = usageRaw !== null && typeof usageRaw === 'object' ? (usageRaw as Record<string, unknown>) : null
+    const usage    = usageRaw !== null && typeof usageRaw === 'object' ? (usageRaw as Record<string, unknown>) : null
     if (!usage) {
         return
     }
 
     const windows: ClaudeQuotaWindow[] = []
-    const windowDefs = [
+    const windowDefs                   = [
         { key: 'five_hour', id: 'five-hour', label: '5 小时限额' },
         { key: 'seven_day', id: 'seven-day', label: '7 天限额' },
         { key: 'seven_day_oauth_apps', id: 'seven-day-oauth-apps', label: '7 天 OAuth 应用' },
@@ -464,35 +472,37 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
     ]
 
     for (const def of windowDefs) {
-        const w = usage[def.key]
+        const w       = usage[def.key]
         const wRecord = w !== null && typeof w === 'object' ? (w as Record<string, unknown>) : null
         if (wRecord && typeof wRecord.utilization === 'number') {
             const resetLabel = typeof wRecord.resets_at === 'string' ? formatDateTime(new Date(wRecord.resets_at)) : ''
             windows.push({
-                id: def.id,
-                label: def.label,
-                labelKey: `claude_quota.${def.key}`,
-                usedPercent: wRecord.utilization,
-                resetLabel,
-            })
+                             id: def.id,
+                             label: def.label,
+                             labelKey: `claude_quota.${def.key}`,
+                             usedPercent: wRecord.utilization,
+                             resetLabel,
+                         })
         }
     }
 
     // Extract plan type from profile
-    const profileRaw = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
-    const profile =
-        profileRaw !== null && typeof profileRaw === 'object' ? (profileRaw as Record<string, unknown>) : null
-    const account =
-        profile?.account !== null && typeof profile?.account === 'object'
-            ? (profile?.account as Record<string, unknown>)
-            : null
+    const profileRaw            = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
+    const profile               =
+              profileRaw !== null && typeof profileRaw === 'object' ? (profileRaw as Record<string, unknown>) : null
+    const account               =
+              profile?.account !== null && typeof profile?.account === 'object'
+              ? (profile?.account as Record<string, unknown>)
+              : null
     let planType: string | null = null
-    const organization =
-        profile?.organization !== null && typeof profile?.organization === 'object'
-            ? (profile.organization as Record<string, unknown>)
-            : null
-    const organizationType =
-        typeof organization?.organization_type === 'string' ? organization.organization_type.trim().toLowerCase() : ''
+    const organization          =
+              profile?.organization !== null && typeof profile?.organization === 'object'
+              ? (profile.organization as Record<string, unknown>)
+              : null
+    const organizationType      =
+              typeof organization?.organization_type === 'string' ?
+              organization.organization_type.trim().toLowerCase() :
+              ''
     if (account?.has_claude_max) {
         planType = 'Max'
     } else if (account?.has_claude_pro) {
@@ -512,9 +522,11 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
 }
 
 function mapCodex(fileName: string, data: unknown, setter: Setter) {
-    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    const d                           = data !== null && typeof data === 'object' ?
+                                        (data as Record<string, unknown>) :
+                                        null
     const windows: CodexQuotaWindow[] = []
-    const planType = (d?.plan_type ?? d?.planType ?? null) as string | null
+    const planType                    = (d?.plan_type ?? d?.planType ?? null) as string | null
 
     type RateLimitInfo = Record<string, unknown>
 
@@ -542,7 +554,7 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
             { key: 'secondary_window', idSuffix: 'secondary' },
         ]
         for (const def of defs) {
-            const w = rl[def.key]
+            const w       = rl[def.key]
             const wRecord = w !== null && typeof w === 'object' ? (w as Record<string, unknown>) : null
             if (wRecord && typeof wRecord.used_percent === 'number') {
                 let resetLabel = ''
@@ -550,16 +562,18 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
                     resetLabel = formatDateTime(new Date(wRecord.reset_at * 1000))
                 } else if (typeof wRecord.reset_after_seconds === 'number') {
                     const hours = Math.round(wRecord.reset_after_seconds / 3600)
-                    resetLabel = `${hours}h`
+                    resetLabel  = `${hours}h`
                 }
-                const span = typeof wRecord.limit_window_seconds === 'number' ? wRecord.limit_window_seconds : undefined
+                const span      = typeof wRecord.limit_window_seconds === 'number' ?
+                                  wRecord.limit_window_seconds :
+                                  undefined
                 const spanLabel = formatWindowSpan(span)
                 windows.push({
-                    id: `${idPrefix}-${def.idSuffix}`,
-                    label: namePrefix ? `${namePrefix} ${spanLabel}` : spanLabel,
-                    usedPercent: wRecord.used_percent,
-                    resetLabel,
-                })
+                                 id: `${idPrefix}-${def.idSuffix}`,
+                                 label: namePrefix ? `${namePrefix} ${spanLabel}` : spanLabel,
+                                 usedPercent: wRecord.used_percent,
+                                 resetLabel,
+                             })
             }
         }
     }
@@ -584,7 +598,7 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
             if (!e) {
                 return
             }
-            const name = (e.limit_name ?? e.limitName ?? e.metered_feature ?? e.meteredFeature) as string | undefined
+            const name  = (e.limit_name ?? e.limitName ?? e.metered_feature ?? e.meteredFeature) as string | undefined
             const subRl = e.rate_limit ?? e.rateLimit
             if (subRl !== null && typeof subRl === 'object' && name) {
                 pushFromRateLimit(subRl as RateLimitInfo, `add-${idx}`, name)
@@ -595,21 +609,21 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
     // Legacy fallback: completions_usage with limit/usage counts
     if (windows.length === 0) {
         const cuRaw = d?.completions_usage
-        const cu =
-            cuRaw !== null && cuRaw !== undefined && typeof cuRaw === 'object'
-                ? (cuRaw as Record<string, unknown>)
-                : null
+        const cu    =
+                  cuRaw !== null && cuRaw !== undefined && typeof cuRaw === 'object'
+                  ? (cuRaw as Record<string, unknown>)
+                  : null
         if (cu) {
-            const used = Number(cu.premium_completions_used ?? cu.completions_used ?? 0)
-            const limit = Number(cu.premium_completions_limit ?? cu.completions_limit ?? 0)
-            const percent = limit > 0 ? (used / limit) * 100 : 0
+            const used       = Number(cu.premium_completions_used ?? cu.completions_used ?? 0)
+            const limit      = Number(cu.premium_completions_limit ?? cu.completions_limit ?? 0)
+            const percent    = limit > 0 ? (used / limit) * 100 : 0
             const resetLabel = typeof cu.reset_date === 'string' ? formatDateTime(new Date(cu.reset_date)) : ''
             windows.push({
-                id: 'completions',
-                label: 'Completions',
-                usedPercent: percent,
-                resetLabel,
-            })
+                             id: 'completions',
+                             label: 'Completions',
+                             usedPercent: percent,
+                             resetLabel,
+                         })
         }
     }
 
@@ -623,42 +637,44 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
 }
 
 function mapGemini(fileName: string, data: unknown, setter: Setter) {
-    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    const d        = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     const quotaRaw = d ? (typeof d.quota === 'string' ? JSON.parse(d.quota) : d.quota) : null
-    const quota = quotaRaw !== null && typeof quotaRaw === 'object' ? (quotaRaw as Record<string, unknown>) : null
-    const buckets = extractCloudCodeBuckets(data)
+    const quota    = quotaRaw !== null && typeof quotaRaw === 'object' ? (quotaRaw as Record<string, unknown>) : null
+    const buckets  = extractCloudCodeBuckets(data)
 
     if (quota && buckets.length === 0) {
         const creditsRaw = quota.userCredits ?? quota.user_credits
-        const credits = Array.isArray(creditsRaw) ? creditsRaw : []
+        const credits    = Array.isArray(creditsRaw) ? creditsRaw : []
         for (const credit of credits) {
             const c = credit !== null && typeof credit === 'object' ? (credit as Record<string, unknown>) : null
             if (!c) {
                 continue
             }
             const remaining = Number(c.remainingValue ?? c.remaining_value ?? 0)
-            const total = Number(c.totalValue ?? c.total_value ?? 1)
+            const total     = Number(c.totalValue ?? c.total_value ?? 1)
             buckets.push({
-                id: String(c.metricName ?? c.metric_name ?? 'unknown'),
-                label: String(c.metricName ?? 'Quota'),
-                remainingFraction: total > 0 ? remaining / total : 0,
-                remainingAmount: remaining,
-                resetTime:
-                    typeof (c.resetTime ?? c.reset_time) === 'string'
-                        ? ((c.resetTime ?? c.reset_time) as string)
-                        : undefined,
-                tokenType: null,
-            })
+                             id: String(c.metricName ?? c.metric_name ?? 'unknown'),
+                             label: String(c.metricName ?? 'Quota'),
+                             remainingFraction: total > 0 ? remaining / total : 0,
+                             remainingAmount: remaining,
+                             resetTime:
+                                 typeof (c.resetTime ?? c.reset_time) === 'string'
+                                 ? ((c.resetTime ?? c.reset_time) as string)
+                                 : undefined,
+                             tokenType: null,
+                         })
         }
     }
 
     const codeAssistRaw = d ? (typeof d.codeAssist === 'string' ? JSON.parse(d.codeAssist) : d.codeAssist) : null
-    const codeAssist =
-        codeAssistRaw !== null && typeof codeAssistRaw === 'object' ? (codeAssistRaw as Record<string, unknown>) : null
-    const currentTier = codeAssist?.currentTier ?? codeAssist?.current_tier
-    const tierRecord =
-        currentTier !== null && typeof currentTier === 'object' ? (currentTier as Record<string, unknown>) : null
-    const tierLabel = typeof tierRecord?.id === 'string' ? tierRecord.id : null
+    const codeAssist    =
+              codeAssistRaw !== null && typeof codeAssistRaw === 'object' ?
+              (codeAssistRaw as Record<string, unknown>) :
+              null
+    const currentTier   = codeAssist?.currentTier ?? codeAssist?.current_tier
+    const tierRecord    =
+              currentTier !== null && typeof currentTier === 'object' ? (currentTier as Record<string, unknown>) : null
+    const tierLabel     = typeof tierRecord?.id === 'string' ? tierRecord.id : null
 
     const state: GeminiCliQuotaState = {
         status: 'success',
@@ -680,10 +696,10 @@ interface KimiUsageRow {
 }
 
 function mapKimi(fileName: string, data: unknown, setter: Setter) {
-    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    const d       = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     const rowsRaw = Array.isArray(data) ? data : (d?.usages ?? [])
-    const rows = Array.isArray(rowsRaw) ? (rowsRaw as KimiUsageRow[]) : []
-    const mapped = rows.map((r) => ({
+    const rows    = Array.isArray(rowsRaw) ? (rowsRaw as KimiUsageRow[]) : []
+    const mapped  = rows.map((r) => ({
         id: r.id ?? r.name ?? 'unknown',
         label: r.label ?? r.name ?? r.id ?? 'Unknown',
         used: r.used ?? 0,

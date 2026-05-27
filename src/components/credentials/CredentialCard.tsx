@@ -1,13 +1,13 @@
-import { Button } from '@/components/ui/Button'
-import { IconDownload, IconPencil, IconRefreshCw, IconTrash2 } from '@/components/ui/icons'
-import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox'
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
-import { formatDateTime } from '@/utils/format'
-import type { StatusBarData, StatusBlockDetail } from '@/utils/usage'
-import { rateToColor } from '@/utils/usage'
+import {Button} from '@/components/ui/Button'
+import {IconDownload, IconPencil, IconRefreshCw, IconTrash2} from '@/components/ui/icons'
+import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {formatDateTime} from '@/utils/format'
+import type {StatusBarData, StatusBlockDetail} from '@/utils/usage'
+import {rateToColor} from '@/utils/usage'
 import type React from 'react'
-import { useCallback, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {useCallback, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './CredentialCard.module.scss'
 
 export interface QuotaItem {
@@ -46,7 +46,7 @@ interface CredentialCardProps {
     /** Callback to set/update alias */
     onAliasChange?: (alias: string) => void
     /** Colored badge (e.g. "API Key", "gemini-cli") */
-    badge?: { label: string; color?: string; bgColor?: string }
+    badge?: { label: string; color?: string; bgColor?: string; premium?: boolean }
     /** Key-value metadata */
     fields?: { label: string; value: string }[]
     /** Tags (model count, headers, etc.) */
@@ -103,31 +103,31 @@ function statusRateClass(rate: number): string {
 }
 
 export function CredentialCard({
-    title,
-    highlightTitle,
-    alias,
-    onAliasChange,
-    badge,
-    fields,
-    tags,
-    disabled,
-    selected,
-    onSelect,
-    disableControls,
-    onEdit,
-    onDelete,
-    onToggle,
-    onDownload,
-    quotaItems,
-    quotaError,
-    quotaLoading,
-    stats,
-    statusBar,
-    refreshState,
-}: CredentialCardProps) {
-    const { t, i18n } = useTranslation()
+                                   title,
+                                   highlightTitle,
+                                   alias,
+                                   onAliasChange,
+                                   badge,
+                                   fields,
+                                   tags,
+                                   disabled,
+                                   selected,
+                                   onSelect,
+                                   disableControls,
+                                   onEdit,
+                                   onDelete,
+                                   onToggle,
+                                   onDownload,
+                                   quotaItems,
+                                   quotaError,
+                                   quotaLoading,
+                                   stats,
+                                   statusBar,
+                                   refreshState,
+                               }: CredentialCardProps) {
+    const { t, i18n }                     = useTranslation()
     const [editingAlias, setEditingAlias] = useState(false)
-    const [aliasInput, setAliasInput] = useState('')
+    const [aliasInput, setAliasInput]     = useState('')
 
     const handleAliasEditStart = useCallback(() => {
         setAliasInput(alias || '')
@@ -148,7 +148,7 @@ export function CredentialCard({
                 setEditingAlias(false)
             }
         },
-        [handleAliasEditConfirm]
+        [handleAliasEditConfirm],
     )
 
     return (
@@ -158,7 +158,10 @@ export function CredentialCard({
             <div className={styles.header}>
                 {onSelect && <SelectionCheckbox checked={selected ?? false} onChange={onSelect} />}
                 {badge && (
-                    <span className={styles.badge} style={{ color: badge.color, backgroundColor: badge.bgColor }}>
+                    <span
+                        className={`${styles.badge} ${badge.premium ? styles.badgePremium : ''}`}
+                        style={{ color: badge.color, backgroundColor: badge.bgColor }}
+                    >
                         {badge.label}
                     </span>
                 )}
@@ -166,8 +169,8 @@ export function CredentialCard({
                     {highlightTitle ?? title}
                 </span>
                 {onAliasChange &&
-                    (editingAlias ? (
-                        <span className={styles.aliasEdit}>
+                 (editingAlias ? (
+                     <span className={styles.aliasEdit}>
                             <input
                                 className={styles.aliasInput}
                                 value={aliasInput}
@@ -176,22 +179,22 @@ export function CredentialCard({
                                 onBlur={handleAliasEditConfirm}
                                 placeholder={t('credentials.alias_placeholder', { defaultValue: 'alias' })}
                                 maxLength={20}
-                                pattern="[a-zA-Z0-9_-]+"
+                                pattern='[a-zA-Z0-9_-]+'
                                 autoFocus
                             />
                         </span>
-                    ) : (
-                        <button
-                            type="button"
-                            className={styles.aliasButton}
-                            onClick={handleAliasEditStart}
-                            disabled={disableControls}
-                            title={t('credentials.edit_alias', { defaultValue: 'Edit alias' })}
-                        >
-                            <IconPencil size={10} />
-                            <span>{alias || t('credentials.set_alias', { defaultValue: 'Set alias' })}</span>
-                        </button>
-                    ))}
+                 ) : (
+                      <button
+                          type='button'
+                          className={styles.aliasButton}
+                          onClick={handleAliasEditStart}
+                          disabled={disableControls}
+                          title={t('credentials.edit_alias', { defaultValue: 'Edit alias' })}
+                      >
+                          <IconPencil size={10} />
+                          <span>{alias || t('credentials.set_alias', { defaultValue: 'Set alias' })}</span>
+                      </button>
+                  ))}
             </div>
 
             {/* Metadata fields */}
@@ -221,9 +224,9 @@ export function CredentialCard({
             {(stats || statusBar) && (
                 <div className={styles.statsSection}>
                     {/* Badges read from statusBar so the left counts share the same
-                        4h rolling window as the right-side success rate %. Previously
-                        the left badges were cumulative while the right was windowed,
-                        which made operators second-guess which number was current. */}
+                     4h rolling window as the right-side success rate %. Previously
+                     the left badges were cumulative while the right was windowed,
+                     which made operators second-guess which number was current. */}
                     {statusBar && statusBar.totalSuccess + statusBar.totalFailure > 0 && (
                         <div className={styles.statsBadges}>
                             <span className={styles.statsBadgeSuccess}>
@@ -242,10 +245,22 @@ export function CredentialCard({
                                     // R-485:与 ServiceHealthCard 热力图保持一致的 hover 信息——
                                     // 时段 + 成功/失败计数 + 该格 token 量,无请求时只显示
                                     // 时段,避免 "0/0 100%" 之类视觉噪声
-                                    const rangeStr = `${formatDateTime(new Date(detail.startTime), i18n.language)} – ${formatDateTime(new Date(detail.endTime), i18n.language)}`
-                                    const tooltip = isIdle
-                                        ? `${rangeStr}\n${t('credentials.status_block_idle', { defaultValue: 'No requests' })}`
-                                        : `${rangeStr}\n${t('common.success')}: ${detail.success}  ${t('common.failure')}: ${detail.failure}\n${t('credentials.status_block_tokens', { defaultValue: 'Tokens' })}: ${detail.totalTokens}`
+                                    const rangeStr = `${formatDateTime(
+                                        new Date(detail.startTime),
+                                        i18n.language,
+                                    )} – ${formatDateTime(new Date(detail.endTime), i18n.language)}`
+                                    const tooltip  = isIdle
+                                                     ?
+                                                     `${rangeStr}\n${t(
+                                                         'credentials.status_block_idle',
+                                                         { defaultValue: 'No requests' },
+                                                     )}`
+                                                     :
+                                                     `${rangeStr}\n${t('common.success')}: ${detail.success}  ${t(
+                                                         'common.failure')}: ${detail.failure}\n${t(
+                                                         'credentials.status_block_tokens',
+                                                         { defaultValue: 'Tokens' },
+                                                     )}: ${detail.totalTokens}`
                                     return (
                                         <div key={idx} className={styles.statusBlockWrapper} title={tooltip}>
                                             <div
@@ -262,8 +277,8 @@ export function CredentialCard({
                             </div>
                             <span className={`${styles.statusRate} ${statusRateClass(statusBar.successRate)}`}>
                                 {statusBar.totalSuccess > 0 || statusBar.totalFailure > 0
-                                    ? `${statusBar.successRate.toFixed(1)}%`
-                                    : '--'}
+                                 ? `${statusBar.successRate.toFixed(1)}%`
+                                 : '--'}
                             </span>
                         </div>
                     )}
@@ -303,7 +318,7 @@ export function CredentialCard({
                                 <span className={styles.quotaMeta}>
                                     <span className={styles.quotaPercent}>{Math.round(item.percent)}%</span>
                                     {/* resetLabel 缺失时也保留占位,这样所有 quota 行视觉对齐
-                                            (issue 12: 同一张卡里有的 reset 显示有的不显示,看起来像数据残缺). */}
+                                     (issue 12: 同一张卡里有的 reset 显示有的不显示,看起来像数据残缺). */}
                                     <span className={styles.quotaReset}>{item.resetLabel || '—'}</span>
                                 </span>
                             </div>
@@ -317,14 +332,18 @@ export function CredentialCard({
                     ))
                 ) : refreshState && !refreshState.lastRefreshTime ? (
                     <div className={styles.quotaLoading}>{t('credentials.quota_click_refresh')}</div>
+                ) : quotaItems && quotaItems.length === 0 ? (
+                    <div className={styles.quotaLoading}>
+                        {t('credentials.quota_empty', { defaultValue: 'No quota data returned' })}
+                    </div>
                 ) : (
-                    <div className={styles.quotaLoading}>{t('credentials.quota_pending')}</div>
-                )}
+                        <div className={styles.quotaLoading}>{t('credentials.quota_pending')}</div>
+                    )}
             </div>
 
             {/* Refresh timestamps: full datetime ("上次刷新 X · 下次刷新 Y") rather than
-                relative shorthand, so operators can diff against server clock at a glance.
-                Refresh button moved to the actions row below for a consistent button group. */}
+             relative shorthand, so operators can diff against server clock at a glance.
+             Refresh button moved to the actions row below for a consistent button group. */}
             {refreshState && (
                 <div className={styles.refreshSection}>
                     <div className={styles.refreshTimes}>
@@ -334,8 +353,8 @@ export function CredentialCard({
                                 {formatDateTime(refreshState.lastRefreshTime, i18n.language)}
                             </span>
                         ) : (
-                            <span className={styles.refreshHint}>{t('credentials.quota_click_refresh')}</span>
-                        )}
+                             <span className={styles.refreshHint}>{t('credentials.quota_click_refresh')}</span>
+                         )}
                         {refreshState.isRefreshing ? (
                             <span className={styles.refreshingHint}>
                                 {t('credentials.refreshing', { defaultValue: 'Refreshing...' })}
@@ -367,8 +386,8 @@ export function CredentialCard({
                 <div className={styles.buttons}>
                     {onEdit && (
                         <Button
-                            variant="secondary"
-                            size="sm"
+                            variant='secondary'
+                            size='sm'
                             onClick={onEdit}
                             disabled={disableControls}
                             title={t('common.edit')}
@@ -378,14 +397,14 @@ export function CredentialCard({
                     )}
                     {refreshState && (
                         <Button
-                            variant="secondary"
-                            size="sm"
+                            variant='secondary'
+                            size='sm'
                             onClick={refreshState.onRefresh}
                             disabled={refreshState.isRefreshing}
                             title={
                                 refreshState.isRefreshing
-                                    ? t('credentials.refreshing', { defaultValue: 'Refreshing...' })
-                                    : t('common.refresh')
+                                ? t('credentials.refreshing', { defaultValue: 'Refreshing...' })
+                                : t('common.refresh')
                             }
                             className={refreshState.isRefreshing ? styles.spinning : ''}
                         >
@@ -399,8 +418,8 @@ export function CredentialCard({
                     )}
                     {onDownload && (
                         <Button
-                            variant="secondary"
-                            size="sm"
+                            variant='secondary'
+                            size='sm'
                             onClick={onDownload}
                             title={t('auth_files.download_button')}
                         >
@@ -408,7 +427,7 @@ export function CredentialCard({
                         </Button>
                     )}
                     {onDelete && (
-                        <Button variant="danger" size="sm" onClick={onDelete} title={t('common.delete')}>
+                        <Button variant='danger' size='sm' onClick={onDelete} title={t('common.delete')}>
                             <IconTrash2 size={14} />
                         </Button>
                     )}

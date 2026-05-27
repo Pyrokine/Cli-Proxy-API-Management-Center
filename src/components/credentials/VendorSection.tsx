@@ -1,26 +1,28 @@
-import { Button } from '@/components/ui/Button'
-import { IconChevronDown, IconChevronUp, IconKey, IconLogIn, IconPlus, IconUpload } from '@/components/ui/icons'
-import { Pagination } from '@/components/ui/Pagination'
-import { formatModified } from '@/features/authFiles/constants'
-import { useCredentialQuota } from '@/hooks/useCredentialQuota'
-import type { OAuthProvider } from '@/services/api/oauth'
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { AuthFileItem } from '@/types/authFile'
-import { maskApiKey } from '@/utils/format'
-import { normalizePlanType } from '@/utils/quota/parsers'
-import { resolveCodexPlanType } from '@/utils/quota/resolvers'
-import { calculateStatusBarDataFromRecentRequests } from '@/utils/usage'
-import React, { useCallback, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
-import { CookieAuthFlow } from './CookieAuthFlow'
-import { CredentialCard } from './CredentialCard'
-import type { VendorData } from './hooks/useCredentialsData'
-import { useVendorActions } from './hooks/useVendorActions'
-import type { VendorDefinition } from './hooks/useVendorRegistry'
-import { OAuthLoginAction } from './OAuthLoginAction'
+import {Button} from '@/components/ui/Button'
+import {IconChevronDown, IconChevronUp, IconKey, IconLogIn, IconPlus, IconUpload} from '@/components/ui/icons'
+import {Pagination} from '@/components/ui/Pagination'
+import {AuthFilesPrefixProxyEditorModal} from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal'
+import {formatAuthFileDisplayName, formatModified} from '@/features/authFiles/constants'
+import {useAuthFilesPrefixProxyEditor} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
+import {useCredentialQuota} from '@/hooks/useCredentialQuota'
+import type {OAuthProvider} from '@/services/api/oauth'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {AuthFileItem} from '@/types/authFile'
+import {maskApiKey} from '@/utils/format'
+import {normalizePlanType} from '@/utils/quota/parsers'
+import {resolveCodexPlanType} from '@/utils/quota/resolvers'
+import {calculateStatusBarDataFromRecentRequests} from '@/utils/usage'
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {useNavigate} from 'react-router-dom'
+import {CookieAuthFlow} from './CookieAuthFlow'
+import {CredentialCard} from './CredentialCard'
+import type {VendorData} from './hooks/useCredentialsData'
+import {useVendorActions} from './hooks/useVendorActions'
+import type {VendorDefinition} from './hooks/useVendorRegistry'
+import {OAuthLoginAction} from './OAuthLoginAction'
 import styles from './VendorSection.module.scss'
-import { VertexImportFlow } from './VertexImportFlow'
+import {VertexImportFlow} from './VertexImportFlow'
 
 interface QuotaSchedulerLike {
     getLastRefreshTime: (name: string) => Date | null
@@ -45,11 +47,28 @@ interface VendorSectionProps {
     selectedItems?: Set<string>
     onToggleSelect?: (id: string) => void
     onSelectVendorFiles?: (fileNames: string[], selected: boolean) => void
+    onVisibleAuthFilesChange?: (vendorId: string, fileNames: string[]) => void
     quotaStatusMap?: Record<string, string>
     scheduler: QuotaSchedulerLike
 }
 
 type ActiveFlow = { type: 'oauth'; provider: OAuthProvider } | { type: 'cookie' } | { type: 'json-import' } | null
+
+const wildcardToRegExp = (pattern: string): RegExp | null => {
+    const normalized = pattern.trim()
+    if (!normalized) {
+        return null
+    }
+    const escaped = normalized.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+    return new RegExp(escaped, 'i')
+}
+
+const matchesSearchQuery = (value: string, query: string, wildcard: RegExp | null): boolean => {
+    if (!query) {
+        return true
+    }
+    return wildcard ? wildcard.test(value) : value.toLowerCase().includes(query)
+}
 
 const formatSize = (bytes: number): string => {
     if (bytes < 1024) {
@@ -90,8 +109,8 @@ function comparePlanRank(current: string, next: string): 'upgrade' | 'downgrade'
         max: 5,
         ultra: 6,
     }
-    const currentRank = ranks[current]
-    const nextRank = ranks[next]
+    const currentRank                   = ranks[current]
+    const nextRank                      = ranks[next]
     if (currentRank === undefined || nextRank === undefined || currentRank === nextRank) {
         return null
     }
@@ -99,62 +118,72 @@ function comparePlanRank(current: string, next: string): 'upgrade' | 'downgrade'
 }
 
 export function VendorSection({
-    vendor,
-    data,
-    aliases = {},
-    onAliasChange,
-    disableControls,
-    onRefresh,
-    searchQuery = '',
-    statusFilter = 'all',
-    typeFilter = 'all',
-    selectedItems,
-    onToggleSelect,
-    onSelectVendorFiles,
-    quotaStatusMap = {},
-    scheduler,
-}: VendorSectionProps) {
-    const { t } = useTranslation()
-    const navigate = useNavigate()
-    const [expanded, setExpanded] = useState(false)
+                                  vendor,
+                                  data,
+                                  aliases = {},
+                                  onAliasChange,
+                                  disableControls,
+                                  onRefresh,
+                                  searchQuery = '',
+                                  statusFilter = 'all',
+                                  typeFilter = 'all',
+                                  selectedItems,
+                                  onToggleSelect,
+                                  onSelectVendorFiles,
+                                  onVisibleAuthFilesChange,
+                                  quotaStatusMap = {},
+                                  scheduler,
+                              }: VendorSectionProps) {
+    const { t }                         = useTranslation()
+    const navigate                      = useNavigate()
+    const [expanded, setExpanded]       = useState(false)
     const [userToggled, setUserToggled] = useState(false)
-    const [activeFlow, setActiveFlow] = useState<ActiveFlow>(null)
-    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [activeFlow, setActiveFlow]   = useState<ActiveFlow>(null)
+    const fileInputRef                  = useRef<HTMLInputElement>(null)
 
-    type SortField = 'name' | 'type' | 'status' | 'requests'
+    type SortField = 'name' | 'type' | 'status' | 'requests' | 'priority'
     type SortDir = 'asc' | 'desc'
     const [sortField, setSortField] = useState<SortField>('name')
-    const [sortDir, setSortDir] = useState<SortDir>('asc')
+    const [sortDir, setSortDir]     = useState<SortDir>('asc')
 
     const { deleteApiKey, toggleAuthFile, deleteAuthFile, downloadAuthFile, uploadAuthFile } = useVendorActions(
         vendor.id,
-        onRefresh
+        onRefresh,
     )
+    const {
+              prefixProxyEditor,
+              prefixProxyUpdatedText,
+              prefixProxyDirty,
+              openPrefixProxyEditor,
+              closePrefixProxyEditor,
+              handlePrefixProxyChange,
+              handlePrefixProxySave,
+          }                                                                                  = useAuthFilesPrefixProxyEditor(
+        { disableControls, loadFiles: onRefresh })
 
-    const VendorIcon = vendor.icon
-    const apiKeyCount = data.apiKeys.length
+    const VendorIcon    = vendor.icon
+    const apiKeyCount   = data.apiKeys.length
     const authFileCount = data.authFiles.length
-    const totalCount = apiKeyCount + authFileCount
+    const totalCount    = apiKeyCount + authFileCount
 
     // Search filtering
-    const query = searchQuery.toLowerCase().trim()
+    const rawQuery        = searchQuery.trim()
+    const query           = rawQuery.toLowerCase()
+    const wildcardQuery   = useMemo(() => wildcardToRegExp(rawQuery), [rawQuery])
     const filteredApiKeys = useMemo(() => {
-        if (typeFilter === 'auth-file') {
+        if (typeFilter === 'auth-file' || statusFilter !== 'all') {
             return []
         }
         if (!query) {
             return data.apiKeys
         }
         return data.apiKeys.filter((key) => {
-            const pk = key as GeminiKeyConfig & ProviderKeyConfig & OpenAIProviderConfig
-            const alias = pk.apiKey ? aliases[pk.apiKey] : undefined
-            const searchable = [pk.apiKey, pk.name, pk.baseUrl, pk.prefix, alias]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase()
-            return searchable.includes(query)
+            const pk         = key as GeminiKeyConfig & ProviderKeyConfig & OpenAIProviderConfig
+            const alias      = pk.apiKey ? aliases[pk.apiKey] : undefined
+            const searchable = [pk.apiKey, pk.name, pk.baseUrl, pk.prefix, alias].filter(Boolean).join(' ')
+            return matchesSearchQuery(searchable, query, wildcardQuery)
         })
-    }, [data.apiKeys, query, typeFilter, aliases])
+    }, [data.apiKeys, query, statusFilter, typeFilter, aliases, wildcardQuery])
 
     const filteredAuthFiles = useMemo(() => {
         if (typeFilter === 'api-key') {
@@ -163,8 +192,9 @@ export function VendorSection({
         let files = data.authFiles
         if (query) {
             files = files.filter((file) => {
-                const searchable = [file.name, file.type].filter(Boolean).join(' ').toLowerCase()
-                return searchable.includes(query)
+                const searchable = [file.name, file.type, file.provider, file.note, file.priority].filter(Boolean).join(
+                    ' ')
+                return matchesSearchQuery(searchable, query, wildcardQuery)
             })
         }
         if (statusFilter !== 'all') {
@@ -177,7 +207,7 @@ export function VendorSection({
                 }
                 const success = Number(file.success ?? 0)
                 const failure = Number(file.failed ?? 0)
-                const total = success + failure
+                const total   = success + failure
                 if (statusFilter === 'available') {
                     return total === 0 || success > 0
                 }
@@ -185,20 +215,20 @@ export function VendorSection({
                     return failure > 0 && success === 0
                 }
                 if (statusFilter === 'exhausted') {
-                    return quotaStatusMap[file.name] === 'quota_exceeded'
+                    return file.status === 'quota_exceeded' || quotaStatusMap[file.name] === 'quota_exceeded'
                 }
                 return true
             })
         }
         return files
-    }, [data.authFiles, query, statusFilter, typeFilter, quotaStatusMap])
+    }, [data.authFiles, query, statusFilter, typeFilter, quotaStatusMap, wildcardQuery])
 
     const filteredTotal = filteredApiKeys.length + filteredAuthFiles.length
 
     // Sort auth files
     const sortedAuthFiles = useMemo(() => {
         const files = [...filteredAuthFiles]
-        const dir = sortDir === 'asc' ? 1 : -1
+        const dir   = sortDir === 'asc' ? 1 : -1
         files.sort((a, b) => {
             switch (sortField) {
                 case 'name':
@@ -215,6 +245,8 @@ export function VendorSection({
                     const rb = Number(b.success ?? 0) + Number(b.failed ?? 0)
                     return dir * (ra - rb)
                 }
+                case 'priority':
+                    return dir * (Number(a.priority ?? 0) - Number(b.priority ?? 0))
                 default:
                     return 0
             }
@@ -223,11 +255,11 @@ export function VendorSection({
     }, [filteredAuthFiles, sortField, sortDir])
 
     // Pagination state (auth files only — API keys are typically few)
-    const PAGE_SIZE_OPTIONS = [24, 48, 96]
-    const [authFilePage, setAuthFilePage] = useState(1)
+    const PAGE_SIZE_OPTIONS                       = [24, 48, 96]
+    const [authFilePage, setAuthFilePage]         = useState(1)
     const [authFilePageSize, setAuthFilePageSize] = useState(PAGE_SIZE_OPTIONS[0])
-    const [apiKeyPage, setApiKeyPage] = useState(1)
-    const [apiKeyPageSize, setApiKeyPageSize] = useState(PAGE_SIZE_OPTIONS[0])
+    const [apiKeyPage, setApiKeyPage]             = useState(1)
+    const [apiKeyPageSize, setApiKeyPageSize]     = useState(PAGE_SIZE_OPTIONS[0])
 
     // Reset page when search query changes
     const [prevQuery, setPrevQuery] = useState(query)
@@ -237,25 +269,31 @@ export function VendorSection({
         setApiKeyPage(1)
     }
 
-    // Vendor-level selection (based on filtered/visible files)
-    const vendorFileNames = useMemo(() => filteredAuthFiles.map((f) => f.name), [filteredAuthFiles])
-    const vendorAllSelected = useMemo(() => {
-        if (!selectedItems || vendorFileNames.length === 0) {
-            return false
-        }
-        return vendorFileNames.every((n) => selectedItems.has(n))
-    }, [selectedItems, vendorFileNames])
-    const handleVendorSelectToggle = useCallback(() => {
-        if (!onSelectVendorFiles) {
-            return
-        }
-        onSelectVendorFiles(vendorFileNames, !vendorAllSelected)
-    }, [onSelectVendorFiles, vendorFileNames, vendorAllSelected])
-
     const paginatedAuthFiles = useMemo(() => {
         const start = (authFilePage - 1) * authFilePageSize
         return sortedAuthFiles.slice(start, start + authFilePageSize)
     }, [sortedAuthFiles, authFilePage, authFilePageSize])
+
+    const filteredAuthFileNames = useMemo(() => sortedAuthFiles.map((file) => file.name), [sortedAuthFiles])
+
+    useEffect(() => {
+        onVisibleAuthFilesChange?.(vendor.id, filteredAuthFileNames)
+        return () => onVisibleAuthFilesChange?.(vendor.id, [])
+    }, [onVisibleAuthFilesChange, vendor.id, filteredAuthFileNames])
+
+    const vendorAllSelected = useMemo(() => {
+        if (!selectedItems || filteredAuthFileNames.length === 0) {
+            return false
+        }
+        return filteredAuthFileNames.every((name) => selectedItems.has(name))
+    }, [selectedItems, filteredAuthFileNames])
+
+    const handleVendorSelectToggle = useCallback(() => {
+        if (!onSelectVendorFiles) {
+            return
+        }
+        onSelectVendorFiles(filteredAuthFileNames, !vendorAllSelected)
+    }, [onSelectVendorFiles, filteredAuthFileNames, vendorAllSelected])
 
     const paginatedApiKeys = useMemo(() => {
         const start = (apiKeyPage - 1) * apiKeyPageSize
@@ -263,7 +301,7 @@ export function VendorSection({
     }, [filteredApiKeys, apiKeyPage, apiKeyPageSize])
 
     const showAuthFilePagination = sortedAuthFiles.length > PAGE_SIZE_OPTIONS[0]
-    const showApiKeyPagination = filteredApiKeys.length > PAGE_SIZE_OPTIONS[0]
+    const showApiKeyPagination   = filteredApiKeys.length > PAGE_SIZE_OPTIONS[0]
 
     // Auto-expand vendors with credentials, collapse empty ones (until user manually toggles)
     const [prevTotalCount, setPrevTotalCount] = useState(totalCount)
@@ -275,11 +313,11 @@ export function VendorSection({
     }
 
     const hasAnyAction =
-        Boolean(vendor.editRoute) ||
-        vendor.oauthProviders.length > 0 ||
-        vendor.supportsFileUpload ||
-        vendor.supportsJsonImport ||
-        vendor.supportsCookieAuth
+              Boolean(vendor.editRoute) ||
+              vendor.oauthProviders.length > 0 ||
+              vendor.supportsFileUpload ||
+              vendor.supportsJsonImport ||
+              vendor.supportsCookieAuth
 
     const toggleFlow = useCallback(
         (flow: ActiveFlow) => {
@@ -295,7 +333,7 @@ export function VendorSection({
             }
             setActiveFlow(flow)
         },
-        [activeFlow]
+        [activeFlow],
     )
 
     const handleOAuthSuccess = useCallback(() => {
@@ -313,7 +351,7 @@ export function VendorSection({
 
     const highlightMatch = useCallback(
         (text: string): React.ReactNode => {
-            if (!query || !text) {
+            if (!query || !text || wildcardQuery) {
                 return text
             }
             const idx = text.toLowerCase().indexOf(query)
@@ -328,7 +366,7 @@ export function VendorSection({
                 </>
             )
         },
-        [query]
+        [query, wildcardQuery],
     )
 
     // --- Resolve display name for API key (alias > masked key) ---
@@ -341,7 +379,7 @@ export function VendorSection({
             const alias = aliases[apiKey]
             return alias || maskApiKey(apiKey)
         },
-        [aliases]
+        [aliases],
     )
 
     // --- Render API key card ---
@@ -353,18 +391,18 @@ export function VendorSection({
             return (
                 <CredentialCard
                     key={`api-${index}`}
-                    category="api-key"
+                    category='api-key'
                     title={oai.name || `Provider ${index + 1}`}
                     badge={{ label: 'API', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
                     fields={[
                         ...(oai.baseUrl ? [{ label: t('common.base_url'), value: oai.baseUrl }] : []),
                         ...(oai.apiKeyEntries?.length
                             ? [
-                                  {
-                                      label: t('common.api_key'),
-                                      value: `${oai.apiKeyEntries.length} ${t('credentials.api_key_entries')}`,
-                                  },
-                              ]
+                                {
+                                    label: t('common.api_key'),
+                                    value: `${oai.apiKeyEntries.length} ${t('credentials.api_key_entries')}`,
+                                },
+                            ]
                             : []),
                     ]}
                     tags={oai.models?.length ? [`${oai.models.length} ${t('credentials.models')}`] : []}
@@ -381,8 +419,8 @@ export function VendorSection({
             return (
                 <CredentialCard
                     key={`api-${index}`}
-                    category="api-key"
-                    title="Ampcode"
+                    category='api-key'
+                    title='Ampcode'
                     badge={{ label: 'Config', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
                     fields={[
                         ...(amp.upstreamUrl ? [{ label: 'URL', value: amp.upstreamUrl }] : []),
@@ -397,7 +435,7 @@ export function VendorSection({
         }
 
         // Generic (Gemini, Claude, Codex, Vertex)
-        const pk = key as GeminiKeyConfig & ProviderKeyConfig
+        const pk             = key as GeminiKeyConfig & ProviderKeyConfig
         const tags: string[] = []
         if (pk.models?.length) {
             tags.push(`${pk.models.length} ${t('credentials.models')}`)
@@ -412,7 +450,7 @@ export function VendorSection({
         return (
             <CredentialCard
                 key={`api-${index}`}
-                category="api-key"
+                category='api-key'
                 title={resolveApiKeyTitle(pk.apiKey)}
                 highlightTitle={highlightMatch(resolveApiKeyTitle(pk.apiKey))}
                 alias={aliases[pk.apiKey || '']}
@@ -456,25 +494,25 @@ export function VendorSection({
 
                 {hasAnyAction && (
                     <div className={styles.headerActions} onClick={(e) => e.stopPropagation()}>
-                        {onSelectVendorFiles && vendorFileNames.length > 0 && (
+                        {onSelectVendorFiles && filteredAuthFileNames.length > 0 && (
                             <label className={styles.vendorSelectAll} title={t('credentials.batch_select_vendor')}>
                                 <input
-                                    type="checkbox"
+                                    type='checkbox'
                                     checked={vendorAllSelected}
                                     onChange={handleVendorSelectToggle}
                                 />
                                 <span>
                                     {vendorAllSelected
-                                        ? t('credentials.batch_deselect_all')
-                                        : t('credentials.batch_select_all')}
+                                     ? t('credentials.batch_deselect_all')
+                                     : t('credentials.batch_select_all')}
                                 </span>
                             </label>
                         )}
-                        {vendor.editRoute && (
+                        {vendor.createRoute && (
                             <Button
-                                variant="secondary"
-                                size="xs"
-                                onClick={() => navigate(`${vendor.editRoute}/new`)}
+                                variant='secondary'
+                                size='xs'
+                                onClick={() => navigate(vendor.createRoute!)}
                                 disabled={disableControls}
                             >
                                 <IconPlus size={11} />
@@ -484,8 +522,8 @@ export function VendorSection({
                         {vendor.oauthProviders.map((provider) => (
                             <Button
                                 key={provider}
-                                variant="secondary"
-                                size="xs"
+                                variant='secondary'
+                                size='xs'
                                 onClick={() => toggleFlow({ type: 'oauth', provider })}
                                 disabled={disableControls}
                             >
@@ -495,8 +533,8 @@ export function VendorSection({
                         ))}
                         {vendor.supportsFileUpload && (
                             <Button
-                                variant="secondary"
-                                size="xs"
+                                variant='secondary'
+                                size='xs'
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={disableControls}
                             >
@@ -506,8 +544,8 @@ export function VendorSection({
                         )}
                         {vendor.supportsJsonImport && (
                             <Button
-                                variant="secondary"
-                                size="xs"
+                                variant='secondary'
+                                size='xs'
                                 onClick={() => toggleFlow({ type: 'json-import' })}
                                 disabled={disableControls}
                             >
@@ -517,8 +555,8 @@ export function VendorSection({
                         )}
                         {vendor.supportsCookieAuth && (
                             <Button
-                                variant="secondary"
-                                size="xs"
+                                variant='secondary'
+                                size='xs'
                                 onClick={() => toggleFlow({ type: 'cookie' })}
                                 disabled={disableControls}
                             >
@@ -562,7 +600,7 @@ export function VendorSection({
             {vendor.supportsFileUpload && (
                 <input
                     ref={fileInputRef}
-                    type="file"
+                    type='file'
                     hidden
                     onChange={(e) => {
                         const file = e.target.files?.[0]
@@ -579,17 +617,26 @@ export function VendorSection({
 
             {/* No search results */}
             {expanded &&
-                totalCount > 0 &&
-                filteredTotal === 0 &&
-                (query || statusFilter !== 'all' || typeFilter !== 'all') && (
-                    <div className={styles.emptyBody}>
-                        {query
-                            ? t('credentials.no_search_results', { query: searchQuery })
-                            : t('credentials.no_filter_results')}
-                    </div>
-                )}
+             totalCount > 0 &&
+             filteredTotal === 0 &&
+             (query || statusFilter !== 'all' || typeFilter !== 'all') && (
+                 <div className={styles.emptyBody}>
+                     {query
+                      ? t('credentials.no_search_results', { query: searchQuery })
+                      : t('credentials.no_filter_results')}
+                 </div>
+             )}
 
             {/* Credential cards */}
+            <AuthFilesPrefixProxyEditorModal
+                editor={prefixProxyEditor}
+                updatedText={prefixProxyUpdatedText}
+                dirty={prefixProxyDirty}
+                onClose={closePrefixProxyEditor}
+                onChange={handlePrefixProxyChange}
+                onSave={handlePrefixProxySave}
+            />
+
             {expanded && filteredTotal > 0 && (
                 <div className={styles.body}>
                     {filteredApiKeys.length > 0 && (
@@ -600,7 +647,10 @@ export function VendorSection({
                             </div>
                             <div className={styles.grid}>
                                 {paginatedApiKeys.map((key, index) =>
-                                    renderApiKeyCard(key, (apiKeyPage - 1) * apiKeyPageSize + index)
+                                                          renderApiKeyCard(
+                                                              key,
+                                                              (apiKeyPage - 1) * apiKeyPageSize + index,
+                                                          ),
                                 )}
                             </div>
                             {showApiKeyPagination && (
@@ -625,10 +675,16 @@ export function VendorSection({
                                 {t('credentials.auth_files')}
                                 <span className={styles.groupCount}>{filteredAuthFiles.length}</span>
                                 <div className={styles.sortControls}>
-                                    {(['name', 'type', 'status', 'requests'] as SortField[]).map((field) => (
+                                    {([
+                                        'name',
+                                        'type',
+                                        'status',
+                                        'requests',
+                                        'priority',
+                                    ] as SortField[]).map((field) => (
                                         <button
                                             key={field}
-                                            type="button"
+                                            type='button'
                                             className={`${styles.sortButton} ${
                                                 sortField === field ? styles.sortActive : ''
                                             }`}
@@ -658,6 +714,7 @@ export function VendorSection({
                                             onToggle={toggleAuthFile}
                                             selected={selectedItems?.has(file.name)}
                                             onSelect={onToggleSelect ? () => onToggleSelect(file.name) : undefined}
+                                            onEdit={openPrefixProxyEditor}
                                             onDelete={deleteAuthFile}
                                             onDownload={downloadAuthFile}
                                         />
@@ -692,53 +749,43 @@ interface AuthFileCardWithQuotaProps {
     scheduler: QuotaSchedulerLike
     disableControls: boolean
     onToggle: (name: string, disabled: boolean) => Promise<void>
+    onEdit: (file: AuthFileItem) => void | Promise<void>
     onDelete: (name: string) => void
     onDownload: (name: string) => Promise<void>
     selected?: boolean
     onSelect?: () => void
 }
 
-const VENDOR_FILE_PREFIXES = ['claude-', 'codex-', 'gemini-', 'kimi-', 'qwen-', 'anthropic-', 'antigravity-']
-
-function stripVendorPrefix(name: string): string {
-    const lower = name.toLowerCase()
-    for (const prefix of VENDOR_FILE_PREFIXES) {
-        if (lower.startsWith(prefix)) {
-            return name.slice(prefix.length)
-        }
-    }
-    return name
-}
-
 function AuthFileCardWithQuota({
-    file,
-    scheduler,
-    disableControls,
-    onToggle,
-    onDelete,
-    onDownload,
-    selected,
-    onSelect,
-}: AuthFileCardWithQuotaProps) {
-    const { t } = useTranslation()
+                                   file,
+                                   scheduler,
+                                   disableControls,
+                                   onToggle,
+                                   onEdit,
+                                   onDelete,
+                                   onDownload,
+                                   selected,
+                                   onSelect,
+                               }: AuthFileCardWithQuotaProps) {
+    const { t }           = useTranslation()
     const {
-        items: quotaItems,
-        error: quotaError,
-        loading: quotaLoading,
-        planType: quotaPlanType,
-    } = useCredentialQuota(file.name)
+              items: quotaItems,
+              error: quotaError,
+              loading: quotaLoading,
+              planType: quotaPlanType,
+          }               = useCredentialQuota(file.name)
     const recentStatusBar = useMemo(
         () => calculateStatusBarDataFromRecentRequests(file.recentRequests ?? []),
-        [file.recentRequests]
+        [file.recentRequests],
     )
-    const success = Number(file.success ?? 0)
-    const failure = Number(file.failed ?? 0)
-    const stats = success > 0 || failure > 0 ? { success, failure } : undefined
-    const statusBar = recentStatusBar
+    const success         = Number(file.success ?? 0)
+    const failure         = Number(file.failed ?? 0)
+    const stats           = success > 0 || failure > 0 ? { success, failure } : undefined
+    const statusBar       = recentStatusBar
 
     const lastRefreshTime = scheduler.getLastRefreshTime(file.name)
     const nextRefreshTime = scheduler.getNextRefreshTime(file.name)
-    const isRefreshing = scheduler.isRefreshing(file.name)
+    const isRefreshing    = scheduler.isRefreshing(file.name)
     const schedulerStatus = scheduler.getStatus(file.name)
 
     const refreshState = {
@@ -750,8 +797,14 @@ function AuthFileCardWithQuota({
         onRefresh: () => void scheduler.refreshNow(file.name),
     }
 
-    const modifiedStr = formatModified(file)
+    const modifiedStr                                = formatModified(file)
     const fields: { label: string; value: string }[] = []
+    if (file.priority !== undefined) {
+        fields.push({ label: t('auth_files.priority_display'), value: String(file.priority) })
+    }
+    if (file.note) {
+        fields.push({ label: t('auth_files.note_display'), value: file.note })
+    }
     if (file.size) {
         fields.push({ label: t('common.size'), value: formatSize(file.size) })
     }
@@ -759,22 +812,28 @@ function AuthFileCardWithQuota({
         fields.push({ label: t('auth_files.file_modified'), value: modifiedStr })
     }
 
-    const resolvedPlan = resolveCodexPlanType(file)
+    const resolvedPlan           = resolveCodexPlanType(file)
     const normalizedResolvedPlan = resolvedPlan ? normalizePlanType(resolvedPlan) : null
-    const normalizedQuotaPlan = quotaPlanType ? normalizePlanType(quotaPlanType) : null
-    const planChangeDirection =
-        normalizedResolvedPlan && normalizedQuotaPlan
-            ? comparePlanRank(normalizedResolvedPlan, normalizedQuotaPlan)
-            : null
-    const planChangeTag =
-        resolvedPlan && quotaPlanType && planChangeDirection
-            ? `${t(`version_history.${planChangeDirection}`)}: ${formatPlanLabel(resolvedPlan, t, 'codex')} → ${formatPlanLabel(quotaPlanType, t, 'codex')}`
-            : null
+    const normalizedQuotaPlan    = quotaPlanType ? normalizePlanType(quotaPlanType) : null
+    const planChangeDirection    =
+              normalizedResolvedPlan && normalizedQuotaPlan
+              ? comparePlanRank(normalizedResolvedPlan, normalizedQuotaPlan)
+              : null
+    const planChangeTag          =
+              resolvedPlan && quotaPlanType && planChangeDirection
+              ?
+              `${t(`version_history.${planChangeDirection}`)}: ${formatPlanLabel(
+                  resolvedPlan,
+                  t,
+                  'codex',
+              )} → ${formatPlanLabel(quotaPlanType, t, 'codex')}`
+              :
+              null
 
     return (
         <CredentialCard
-            category="auth-file"
-            title={stripVendorPrefix(file.name)}
+            category='auth-file'
+            title={formatAuthFileDisplayName(file.name)}
             badge={(() => {
                 const tierColors: Record<string, { color: string; bg: string }> = {
                     pro: { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' },
@@ -785,26 +844,32 @@ function AuthFileCardWithQuota({
                 }
                 // Priority 0: use plan/tier from quota query
                 if (quotaPlanType) {
-                    const key = normalizePlanType(quotaPlanType) ?? quotaPlanType.toLowerCase()
-                    const colors = tierColors[key] ?? { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
+                    const key                = normalizePlanType(quotaPlanType) ?? quotaPlanType.toLowerCase()
+                    const colors             = tierColors[key] ??
+                        { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
                     const isPremiumCodexPlan = PREMIUM_CODEX_PLAN_TYPES.has(key)
                     return {
                         label: formatPlanLabel(quotaPlanType, t, 'codex'),
                         color: colors.color,
                         bgColor: colors.bg,
-                        ...(isPremiumCodexPlan ? { color: '#a855f7', bgColor: 'rgba(168, 85, 247, 0.15)' } : {}),
+                        ...(isPremiumCodexPlan
+                            ? { color: '#a855f7', bgColor: 'rgba(168, 85, 247, 0.15)', premium: true }
+                            : {}),
                     }
                 }
                 // Priority 1: resolve from auth file content (JWT token)
                 if (resolvedPlan) {
-                    const key = normalizePlanType(resolvedPlan) ?? resolvedPlan.toLowerCase()
-                    const colors = tierColors[key] ?? { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
+                    const key                = normalizePlanType(resolvedPlan) ?? resolvedPlan.toLowerCase()
+                    const colors             = tierColors[key] ??
+                        { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
                     const isPremiumCodexPlan = PREMIUM_CODEX_PLAN_TYPES.has(key)
                     return {
                         label: formatPlanLabel(resolvedPlan, t, 'codex'),
                         color: colors.color,
                         bgColor: colors.bg,
-                        ...(isPremiumCodexPlan ? { color: '#a855f7', bgColor: 'rgba(168, 85, 247, 0.15)' } : {}),
+                        ...(isPremiumCodexPlan
+                            ? { color: '#a855f7', bgColor: 'rgba(168, 85, 247, 0.15)', premium: true }
+                            : {}),
                     }
                 }
                 // Priority 2: infer from file name
@@ -832,6 +897,7 @@ function AuthFileCardWithQuota({
             statusBar={statusBar}
             refreshState={refreshState}
             onToggle={(enabled) => void onToggle(file.name, !enabled)}
+            onEdit={() => void onEdit(file)}
             onDelete={() => void onDelete(file.name)}
             onDownload={() => void onDownload(file.name)}
             selected={selected}

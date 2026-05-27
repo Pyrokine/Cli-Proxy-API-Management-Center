@@ -1,6 +1,6 @@
-import type { OAuthProvider } from '@/services/api/oauth'
-import type { Config, GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { ComponentType } from 'react'
+import type {OAuthProvider} from '@/services/api/oauth'
+import type {Config, GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {ComponentType} from 'react'
 
 export type AnyKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig
 
@@ -21,6 +21,7 @@ export interface VendorDefinition {
     oauthProviders: OAuthProvider[]
     /** Route prefix for manual key editing */
     editRoute?: string
+    createRoute?: string
     /** Supports auth file upload */
     supportsFileUpload: boolean
     /** Supports Vertex JSON import */
@@ -47,6 +48,7 @@ export function createVendorRegistry(icons: {
     Kimi: ComponentType<{ size?: number }>
     Qwen: ComponentType<{ size?: number }>
     IFlow: ComponentType<{ size?: number }>
+    Grok: ComponentType<{ size?: number }>
 }): VendorDefinition[] {
     return [
         {
@@ -57,6 +59,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: ['gemini', 'gemini-cli', 'aistudio'],
             oauthProviders: ['gemini-cli'],
             editRoute: '/credentials/gemini',
+            createRoute: '/credentials/gemini/new',
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -69,6 +72,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: ['claude', 'antigravity'],
             oauthProviders: ['anthropic', 'antigravity'],
             editRoute: '/credentials/claude',
+            createRoute: '/credentials/claude/new',
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -82,6 +86,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: ['codex'],
             oauthProviders: ['codex'],
             editRoute: '/credentials/codex',
+            createRoute: '/credentials/codex/new',
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -95,6 +100,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: ['vertex'],
             oauthProviders: [],
             editRoute: '/credentials/vertex',
+            createRoute: '/credentials/vertex/new',
             supportsFileUpload: true,
             supportsJsonImport: true,
             supportsCookieAuth: false,
@@ -107,6 +113,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: [],
             oauthProviders: [],
             editRoute: '/credentials/openai',
+            createRoute: '/credentials/openai/new',
             supportsFileUpload: false,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -124,6 +131,7 @@ export function createVendorRegistry(icons: {
             authFileTypes: [],
             oauthProviders: [],
             editRoute: '/credentials/ampcode',
+            createRoute: '/credentials/ampcode',
             supportsFileUpload: false,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -158,6 +166,16 @@ export function createVendorRegistry(icons: {
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: true,
+        },
+        {
+            id: 'xai',
+            label: 'xAI',
+            icon: icons.Grok,
+            authFileTypes: ['xai', 'x-ai', 'grok'],
+            oauthProviders: ['xai'],
+            supportsFileUpload: true,
+            supportsJsonImport: false,
+            supportsCookieAuth: false,
         },
     ]
 }

@@ -2,9 +2,9 @@
  * OAuth 与设备码登录相关 API
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
-export type OAuthProvider = 'codex' | 'anthropic' | 'antigravity' | 'gemini-cli' | 'kimi' | 'qwen'
+export type OAuthProvider = 'codex' | 'anthropic' | 'antigravity' | 'gemini-cli' | 'kimi' | 'qwen' | 'xai'
 
 interface OAuthStartResponse {
     url: string
@@ -24,7 +24,13 @@ interface IFlowCookieAuthResponse {
     type?: string
 }
 
-const WEBUI_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli']
+const WEBUI_SUPPORTED: OAuthProvider[]                              = [
+    'codex',
+    'anthropic',
+    'antigravity',
+    'gemini-cli',
+    'xai',
+]
 const CALLBACK_PROVIDER_MAP: Partial<Record<OAuthProvider, string>> = {
     'gemini-cli': 'gemini',
 }

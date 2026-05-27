@@ -2,7 +2,7 @@
  * Vertex credential import API
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 interface VertexImportResponse {
     status: 'ok'
