@@ -1,6 +1,6 @@
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { CredentialInfo, SourceInfo } from '@/types/sourceInfo'
-import { buildCandidateUsageSourceIds, normalizeAuthIndex } from '@/utils/usage'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {CredentialInfo, SourceInfo} from '@/types/sourceInfo'
+import {buildCandidateUsageSourceIds, normalizeAuthIndex} from '@/utils/usage'
 
 interface SourceInfoMapInput {
     geminiApiKeys?: GeminiKeyConfig[]
@@ -41,7 +41,7 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
             registerCandidates(
                 displayName,
                 type,
-                buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
+                buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix }),
             )
         })
     })
@@ -49,7 +49,7 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
     // OpenAI 特殊处理：多 apiKeyEntries
     ;(input.openaiCompatibility || []).forEach((provider, providerIndex) => {
         const displayName = provider.prefix?.trim() || provider.name || `OpenAI #${providerIndex + 1}`
-        const candidates = new Set<string>()
+        const candidates  = new Set<string>()
         buildCandidateUsageSourceIds({ prefix: provider.prefix }).forEach((id) => candidates.add(id))
         ;(provider.apiKeyEntries || []).forEach((entry) => {
             buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id))
@@ -64,9 +64,9 @@ export function resolveSourceDisplay(
     sourceRaw: string,
     authIndex: unknown,
     sourceInfoMap: Map<string, SourceInfo>,
-    authFileMap: Map<string, CredentialInfo>
+    authFileMap: Map<string, CredentialInfo>,
 ): SourceInfo {
-    const source = sourceRaw.trim()
+    const source  = sourceRaw.trim()
     const matched = sourceInfoMap.get(source)
     if (matched) {
         return matched

@@ -1,21 +1,21 @@
-import { Sheet, type SheetColumn } from '@/components/common/Sheet'
-import { Card } from '@/components/ui/Card'
-import { formatAuthFileDisplayName, inferProviderFromAuthFileName } from '@/features/authFiles/constants'
-import { useDataStatus } from '@/hooks/useDataStatus'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
+import {Card} from '@/components/ui/Card'
+import {formatAuthFileDisplayName, inferProviderFromAuthFileName} from '@/features/authFiles/constants'
+import {useDataStatus} from '@/hooks/useDataStatus'
 import styles from '@/pages/UsagePage.module.scss'
-import type { UsageSummary } from '@/services/api/usage'
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { CredentialInfo } from '@/types/sourceInfo'
+import type {UsageSummary} from '@/services/api/usage'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {CredentialInfo} from '@/types/sourceInfo'
 import {
     buildCandidateUsageSourceIds,
     collectUsageDetails,
     formatCompactNumber,
     normalizeAuthIndex,
 } from '@/utils/usage'
-import { type SummaryCredentialEntry, summaryToCredentialEntries } from '@/utils/usage/summaryHelpers'
-import { useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
-import type { UsagePayload } from './hooks/useUsageData'
+import {type SummaryCredentialEntry, summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
+import {useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
+import type {UsagePayload} from './hooks/useUsageData'
 
 interface CredentialStatsCardProps {
     usage: UsagePayload | null
@@ -57,14 +57,14 @@ function formatCredentialDisplay(provider: string, source: string, aliases?: Rec
 function formatCredentialDisplayFromAuthFile(
     file: CredentialInfo | undefined,
     fallbackSource: string,
-    aliases?: Record<string, string>
+    aliases?: Record<string, string>,
 ): string {
     if (!file) {
         return formatCredentialDisplay('', fallbackSource, aliases)
     }
 
     const provider = file.type || inferProviderFromAuthFileName(file.name)
-    const source = formatAuthFileDisplayName(file.name) || fallbackSource
+    const source   = formatAuthFileDisplayName(file.name) || fallbackSource
     return formatCredentialDisplay(provider, source, aliases)
 }
 
@@ -86,17 +86,17 @@ interface CredentialBucket {
 }
 
 export function CredentialStatsCard({
-    usage,
-    loading,
-    geminiKeys,
-    claudeConfigs,
-    codexConfigs,
-    vertexConfigs,
-    openaiProviders,
-    authFileMap,
-    summary,
-    aliases,
-}: CredentialStatsCardProps) {
+                                        usage,
+                                        loading,
+                                        geminiKeys,
+                                        claudeConfigs,
+                                        codexConfigs,
+                                        vertexConfigs,
+                                        openaiProviders,
+                                        authFileMap,
+                                        summary,
+                                        aliases,
+                                    }: CredentialStatsCardProps) {
     const { t } = useTranslation()
 
     // Aggregate rows: all from bySource only (no separate byAuthIndex rows to avoid duplicates).
@@ -104,38 +104,39 @@ export function CredentialStatsCard({
     const rows = useMemo((): CredentialRow[] => {
         // Build bySource map: prefer summary.by_credential (covers all history),
         // fall back to collectUsageDetails(usage) (today only)
-        const bySource: Record<string, CredentialBucket> = {}
+        const bySource: Record<string, CredentialBucket>             = {}
         const summarySourceBuckets: Record<string, CredentialBucket> = {}
-        const summaryEntriesBySourceId = new Map<string, SummaryCredentialEntry[]>()
-        const result: CredentialRow[] = []
-        const consumedSourceIds = new Set<string>()
-        const consumedSummaryFilterKeys = new Set<string>()
-        const authIndexToRowIndex = new Map<string, number>()
-        const sourceToAuthIndex = new Map<string, string>()
-        const sourceToAuthFile = new Map<string, CredentialInfo>()
-        const fallbackByAuthIndex = new Map<string, CredentialBucket>()
+        const summaryEntriesByMatchKey                               = new Map<string, SummaryCredentialEntry[]>()
+        const result: CredentialRow[]                                = []
+        const consumedSourceIds                                      = new Set<string>()
+        const consumedSummaryFilterKeys                              = new Set<string>()
+        const authIndexToRowIndex                                    = new Map<string, number>()
+        const sourceToAuthIndex                                      = new Map<string, string>()
+        const sourceToAuthFile                                       = new Map<string, CredentialInfo>()
+        const fallbackByAuthIndex                                    = new Map<string, CredentialBucket>()
 
         const summaryCredentials: SummaryCredentialEntry[] = summary?.by_credential
-            ? summaryToCredentialEntries(summary.by_credential)
-            : []
+                                                             ? summaryToCredentialEntries(summary.by_credential)
+                                                             : []
 
         if (summaryCredentials.length > 0) {
             summaryCredentials.forEach((entry) => {
-                const bucket = summarySourceBuckets[entry.normalizedSourceId] ?? { success: 0, failure: 0 }
+                const matchKey                 = entry.provider ? entry.filterKey : entry.normalizedSourceId
+                const bucket                   = summarySourceBuckets[matchKey] ?? { success: 0, failure: 0 }
                 bucket.success += entry.success
                 bucket.failure += entry.failure
-                summarySourceBuckets[entry.normalizedSourceId] = bucket
+                summarySourceBuckets[matchKey] = bucket
 
-                const entries = summaryEntriesBySourceId.get(entry.normalizedSourceId) ?? []
+                const entries = summaryEntriesByMatchKey.get(matchKey) ?? []
                 entries.push(entry)
-                summaryEntriesBySourceId.set(entry.normalizedSourceId, entries)
+                summaryEntriesByMatchKey.set(matchKey, entries)
             })
         } else if (usage) {
             // Fall back to client-side aggregation from today's data
             const details = collectUsageDetails(usage)
             details.forEach((detail) => {
-                const authIdx = normalizeAuthIndex(detail.auth_index)
-                const source = detail.source
+                const authIdx  = normalizeAuthIndex(detail.auth_index)
+                const source   = detail.source
                 const isFailed = detail.failed
 
                 if (!source) {
@@ -181,12 +182,12 @@ export function CredentialStatsCard({
             }
             target.success += bucket.success
             target.failure += bucket.failure
-            target.total = target.success + target.failure
+            target.total       = target.success + target.failure
             target.successRate = target.total > 0 ? (target.success / target.total) * 100 : 100
         }
 
         // Sum success/failure across candidate source IDs, marking each as consumed
-        const sumCandidates = (candidates: Iterable<string>): CredentialBucket => {
+        const sumCandidates = (candidates: Iterable<string>, provider?: string): CredentialBucket => {
             let success = 0
             let failure = 0
             for (const id of candidates) {
@@ -197,13 +198,17 @@ export function CredentialStatsCard({
                     consumedSourceIds.add(id)
                 }
 
-                const summaryBucket = summarySourceBuckets[id]
-                if (summaryBucket) {
+                const summaryKeys = provider ? [`${provider}:${id}`, id] : [id]
+                summaryKeys.forEach((summaryKey) => {
+                    const summaryBucket = summarySourceBuckets[summaryKey]
+                    if (!summaryBucket) {
+                        return
+                    }
                     success += summaryBucket.success
                     failure += summaryBucket.failure
-                    const entries = summaryEntriesBySourceId.get(id) ?? []
+                    const entries = summaryEntriesByMatchKey.get(summaryKey) ?? []
                     entries.forEach((entry) => consumedSummaryFilterKeys.add(entry.filterKey))
-                }
+                })
             }
             return { success, failure }
         }
@@ -212,14 +217,14 @@ export function CredentialStatsCard({
             const total = bucket.success + bucket.failure
             if (total > 0) {
                 result.push({
-                    key,
-                    displayName,
-                    type,
-                    success: bucket.success,
-                    failure: bucket.failure,
-                    total,
-                    successRate: (bucket.success / total) * 100,
-                })
+                                key,
+                                displayName,
+                                type,
+                                success: bucket.success,
+                                failure: bucket.failure,
+                                total,
+                                successRate: (bucket.success / total) * 100,
+                            })
             }
         }
 
@@ -229,21 +234,39 @@ export function CredentialStatsCard({
             prefix: string | undefined,
             name: string,
             type: string,
-            rowKey: string
+            rowKey: string,
         ) => {
-            const bucket = sumCandidates(buildCandidateUsageSourceIds({ apiKey, prefix }))
+            const bucket = sumCandidates(buildCandidateUsageSourceIds({ apiKey, prefix }), type)
             pushRowIfNonEmpty(bucket, rowKey, name, type)
         }
 
         // Provider rows — one row per config, stats merged across all its candidate source IDs
         geminiKeys.forEach((c, i) =>
-            addConfigRow(c.apiKey, c.prefix, c.prefix?.trim() || `Gemini #${i + 1}`, 'gemini', `gemini:${i}`)
+                               addConfigRow(
+                                   c.apiKey,
+                                   c.prefix,
+                                   c.prefix?.trim() || `Gemini #${i + 1}`,
+                                   'gemini',
+                                   `gemini:${i}`,
+                               ),
         )
         claudeConfigs.forEach((c, i) =>
-            addConfigRow(c.apiKey, c.prefix, c.prefix?.trim() || `Claude #${i + 1}`, 'claude', `claude:${i}`)
+                                  addConfigRow(
+                                      c.apiKey,
+                                      c.prefix,
+                                      c.prefix?.trim() || `Claude #${i + 1}`,
+                                      'claude',
+                                      `claude:${i}`,
+                                  ),
         )
         codexConfigs.forEach((c, i) =>
-            addConfigRow(c.apiKey, c.prefix, c.prefix?.trim() || `Codex #${i + 1}`, 'codex', `codex:${i}`)
+                                 addConfigRow(
+                                     c.apiKey,
+                                     c.prefix,
+                                     c.prefix?.trim() || `Codex #${i + 1}`,
+                                     'codex',
+                                     `codex:${i}`,
+                                 ),
         )
         vertexConfigs.forEach((c, i) => {
             addConfigRow(c.apiKey, c.prefix, c.prefix?.trim() || `Vertex #${i + 1}`, 'vertex', `vertex:${i}`)
@@ -251,7 +274,7 @@ export function CredentialStatsCard({
         // OpenAI compatibility providers — one row per provider,
         // merged across all apiKey entries (prefix counted once).
         openaiProviders.forEach((provider, providerIndex) => {
-            const prefix = provider.prefix
+            const prefix      = provider.prefix
             const displayName = prefix?.trim() || provider.name || `OpenAI #${providerIndex + 1}`
 
             const candidates = new Set<string>()
@@ -260,7 +283,7 @@ export function CredentialStatsCard({
                 buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id))
             })
 
-            pushRowIfNonEmpty(sumCandidates(candidates), `openai:${providerIndex}`, displayName, 'openai')
+            pushRowIfNonEmpty(sumCandidates(candidates, 'openai'), `openai:${providerIndex}`, displayName, 'openai')
         })
 
         // Remaining unmatched bySource entries — resolve name from auth files if possible
@@ -268,22 +291,22 @@ export function CredentialStatsCard({
             if (consumedSourceIds.has(key)) {
                 return
             }
-            const total = bucket.success + bucket.failure
-            const authFile = sourceToAuthFile.get(key)
+            const total         = bucket.success + bucket.failure
+            const authFile      = sourceToAuthFile.get(key)
             const displaySource = bucket.source || key
-            const row = {
+            const row           = {
                 key,
                 displayName: authFile
-                    ? formatCredentialDisplayFromAuthFile(authFile, displaySource, aliases)
-                    : formatCredentialDisplay(bucket.provider ?? '', displaySource, aliases),
+                             ? formatCredentialDisplayFromAuthFile(authFile, displaySource, aliases)
+                             : formatCredentialDisplay(bucket.provider ?? '', displaySource, aliases),
                 type: authFile?.type || '',
                 success: bucket.success,
                 failure: bucket.failure,
                 total,
                 successRate: total > 0 ? (bucket.success / total) * 100 : 100,
             }
-            const rowIndex = result.push(row) - 1
-            const authIdx = sourceToAuthIndex.get(key)
+            const rowIndex      = result.push(row) - 1
+            const authIdx       = sourceToAuthIndex.get(key)
             if (authIdx && !authIndexToRowIndex.has(authIdx)) {
                 authIndexToRowIndex.set(authIdx, rowIndex)
             }
@@ -299,17 +322,17 @@ export function CredentialStatsCard({
             }
             const inferredProvider = entry.provider || inferProviderFromAuthFileName(entry.source)
             const normalizedSource = inferredProvider
-                ? formatAuthFileDisplayName(entry.source) || entry.source
-                : entry.source
+                                     ? formatAuthFileDisplayName(entry.source) || entry.source
+                                     : entry.source
             result.push({
-                key: entry.filterKey,
-                displayName: formatCredentialDisplay(inferredProvider, normalizedSource, aliases),
-                type: '',
-                success: entry.success,
-                failure: entry.failure,
-                total,
-                successRate: (entry.success / total) * 100,
-            })
+                            key: entry.filterKey,
+                            displayName: formatCredentialDisplay(inferredProvider, normalizedSource, aliases),
+                            type: '',
+                            success: entry.success,
+                            failure: entry.failure,
+                            total,
+                            successRate: (entry.success / total) * 100,
+                        })
         })
 
         // Include requests that have auth_index but missing source.
@@ -318,11 +341,11 @@ export function CredentialStatsCard({
                 return
             }
 
-            const mapped = authFileMap.get(authIdx)
+            const mapped       = authFileMap.get(authIdx)
             let targetRowIndex = authIndexToRowIndex.get(authIdx)
             if (targetRowIndex === undefined && mapped) {
                 const matchedIndex = result.findIndex(
-                    (row) => row.displayName === mapped.name && row.type === mapped.type
+                    (row) => row.displayName === mapped.name && row.type === mapped.type,
                 )
                 if (matchedIndex >= 0) {
                     targetRowIndex = matchedIndex
@@ -335,17 +358,19 @@ export function CredentialStatsCard({
                 return
             }
 
-            const total = bucket.success + bucket.failure
+            const total    = bucket.success + bucket.failure
             const rowIndex =
-                result.push({
-                    key: `auth:${authIdx}`,
-                    displayName: mapped ? formatCredentialDisplayFromAuthFile(mapped, authIdx, aliases) : authIdx,
-                    type: mapped?.type || '',
-                    success: bucket.success,
-                    failure: bucket.failure,
-                    total,
-                    successRate: (bucket.success / total) * 100,
-                }) - 1
+                      result.push({
+                                      key: `auth:${authIdx}`,
+                                      displayName: mapped ?
+                                                   formatCredentialDisplayFromAuthFile(mapped, authIdx, aliases) :
+                                                   authIdx,
+                                      type: mapped?.type || '',
+                                      success: bucket.success,
+                                      failure: bucket.failure,
+                                      total,
+                                      successRate: (bucket.success / total) * 100,
+                                  }) - 1
             authIndexToRowIndex.set(authIdx, rowIndex)
         })
 
@@ -353,10 +378,10 @@ export function CredentialStatsCard({
     }, [usage, summary, geminiKeys, claudeConfigs, codexConfigs, vertexConfigs, openaiProviders, authFileMap, aliases])
 
     const { status } = useDataStatus({
-        loading,
-        data: rows,
-        isEmpty: (data) => data.length === 0,
-    })
+                                         loading,
+                                         data: rows,
+                                         isEmpty: (data) => data.length === 0,
+                                     })
 
     const columns = useMemo<SheetColumn<CredentialRow>[]>(
         () => [
@@ -396,10 +421,10 @@ export function CredentialStatsCard({
                     <span
                         className={
                             row.successRate >= 95
-                                ? styles.statSuccess
-                                : row.successRate >= 80
-                                  ? styles.statNeutral
-                                  : styles.statFailure
+                            ? styles.statSuccess
+                            : row.successRate >= 80
+                              ? styles.statNeutral
+                              : styles.statFailure
                         }
                     >
                         {row.successRate.toFixed(1)}%
@@ -407,7 +432,7 @@ export function CredentialStatsCard({
                 ),
             },
         ],
-        [t]
+        [t],
     )
 
     return (
@@ -419,8 +444,8 @@ export function CredentialStatsCard({
                 status={status}
                 emptyText={t('usage_stats.no_data')}
                 loadingText={t('common.loading')}
-                defaultSortKey="total"
-                defaultSortDir="desc"
+                defaultSortKey='total'
+                defaultSortDir='desc'
                 refreshing={loading && rows.length > 0}
                 refreshingText={t('common.loading')}
             />

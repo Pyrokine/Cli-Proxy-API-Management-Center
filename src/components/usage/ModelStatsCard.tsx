@@ -1,11 +1,11 @@
-import { Sheet, type SheetColumn } from '@/components/common/Sheet'
-import { Card } from '@/components/ui/Card'
-import { useDataStatus } from '@/hooks/useDataStatus'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
+import {Card} from '@/components/ui/Card'
+import {useDataStatus} from '@/hooks/useDataStatus'
 import styles from '@/pages/UsagePage.module.scss'
-import { formatCompactNumber, formatUsd } from '@/utils/usage'
-import type { ModelStat } from '@/utils/usage/summaryHelpers'
-import { useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
+import {formatCompactNumber, formatDurationMs, formatUsd, LATENCY_SOURCE_FIELD} from '@/utils/usage'
+import type {ModelStat} from '@/utils/usage/summaryHelpers'
+import {useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
 
 interface ModelStatsCardProps {
     modelStats: ModelStat[]
@@ -23,7 +23,11 @@ interface ModelStatWithRate extends ModelStat {
 }
 
 export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, cardTitle }: ModelStatsCardProps) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
+    const latencyHint = t('usage_stats.latency_unit_hint', {
+        field: LATENCY_SOURCE_FIELD,
+        unit: 'ms',
+    })
 
     const rows = useMemo(
         (): ModelStatWithRate[] =>
@@ -31,14 +35,15 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                 ...stat,
                 successRate: stat.requests > 0 ? (stat.successCount / stat.requests) * 100 : 100,
             })),
-        [modelStats]
+        [modelStats],
     )
 
-    const { status } = useDataStatus({
-        loading,
-        data: rows,
-        isEmpty: (data) => data.length === 0,
-    })
+    const { status }     = useDataStatus({
+                                             loading,
+                                             data: rows,
+                                             isEmpty: (data) => data.length === 0,
+                                         })
+    const hasLatencyData = rows.some((row) => row.latencySampleCount > 0)
 
     const columns = useMemo<SheetColumn<ModelStatWithRate>[]>(() => {
         const items: SheetColumn<ModelStatWithRate>[] = [
@@ -72,6 +77,13 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                 cell: (row) => formatCompactNumber(row.tokens),
             },
             {
+                key: 'averageLatencyMs',
+                header: <span title={latencyHint}>{t('usage_stats.avg_time')}</span>,
+                sortable: true,
+                sortValue: (row) => row.averageLatencyMs ?? -1,
+                cell: (row) => formatDurationMs(row.averageLatencyMs, { locale: i18n.language }),
+            },
+            {
                 key: 'successRate',
                 header: t('usage_stats.success_rate'),
                 sortable: true,
@@ -80,10 +92,10 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                     <span
                         className={
                             row.successRate >= 95
-                                ? styles.statSuccess
-                                : row.successRate >= 80
-                                  ? styles.statNeutral
-                                  : styles.statFailure
+                            ? styles.statSuccess
+                            : row.successRate >= 80
+                              ? styles.statNeutral
+                              : styles.statFailure
                         }
                     >
                         {row.successRate.toFixed(1)}%
@@ -93,15 +105,15 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
         ]
         if (hasPrices) {
             items.push({
-                key: 'cost',
-                header: t('usage_stats.total_cost'),
-                sortable: true,
-                sortValue: (row) => row.cost,
-                cell: (row) => (row.cost > 0 ? formatUsd(row.cost) : '--'),
-            })
+                           key: 'cost',
+                           header: t('usage_stats.total_cost'),
+                           sortable: true,
+                           sortValue: (row) => row.cost,
+                           cell: (row) => (row.cost > 0 ? formatUsd(row.cost) : '--'),
+                       })
         }
         return items
-    }, [hasPrices, nameHeader, t])
+    }, [hasPrices, i18n.language, latencyHint, nameHeader, t])
 
     return (
         <Card title={cardTitle ?? t('usage_stats.models')} className={styles.detailsFixedCard}>
@@ -112,8 +124,9 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                 status={status}
                 emptyText={t('usage_stats.no_data')}
                 loadingText={t('common.loading')}
-                defaultSortKey="requests"
-                defaultSortDir="desc"
+                defaultSortKey='requests'
+                defaultSortDir='desc'
+                summaryContent={hasLatencyData ? <span title={latencyHint}>{latencyHint}</span> : null}
                 refreshing={loading && rows.length > 0}
                 refreshingText={t('common.loading')}
             />

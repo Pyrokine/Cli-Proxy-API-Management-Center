@@ -1,8 +1,8 @@
-import { CardSkeleton } from '@/components/common/CardSkeleton'
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import {CardSkeleton} from '@/components/common/CardSkeleton'
+import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import pageStyles from '@/pages/UsagePage.module.scss'
-import type { UsageSummary } from '@/services/api/usage'
-import { formatUnixTimestamp } from '@/utils/format'
+import type {UsageSummary} from '@/services/api/usage'
+import {formatUnixTimestamp} from '@/utils/format'
 import {
     buildChartDataFromSummary,
     type ChartDimension,
@@ -10,17 +10,18 @@ import {
     formatUsd,
     getSummaryDataStart,
 } from '@/utils/usage'
-import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig'
-import type { ChartOptions } from 'chart.js'
-import { useCallback, useMemo, useState } from 'react'
-import { Line } from 'react-chartjs-2'
-import { useTranslation } from 'react-i18next'
+import {buildChartOptions, getHourChartMinWidth} from '@/utils/usage/chartConfig'
+import type {ChartOptions} from 'chart.js'
+import {useCallback, useMemo, useState} from 'react'
+import {Line} from 'react-chartjs-2'
+import {useTranslation} from 'react-i18next'
 import styles from './UnifiedTrendChart.module.scss'
 
 type Metric = 'requests' | 'tokens' | 'cost'
 
 interface UnifiedTrendChartProps {
     summary: UsageSummary | null
+    liveSummary?: UsageSummary | null
     loading: boolean
     error?: string
     chartDimension: ChartDimension
@@ -40,17 +41,18 @@ const METRIC_ACCENTS: Record<Metric, { border: string; soft: string; labelKey: s
 }
 
 export function UnifiedTrendChart({
-    summary,
-    loading,
-    error,
-    chartDimension,
-    isMobile = false,
-    metric: fixedMetric,
-}: UnifiedTrendChartProps) {
-    const { t, i18n } = useTranslation()
+                                      summary,
+                                      liveSummary,
+                                      loading,
+                                      error,
+                                      chartDimension,
+                                      isMobile = false,
+                                      metric: fixedMetric,
+                                  }: UnifiedTrendChartProps) {
+    const { t, i18n }                         = useTranslation()
     const [internalMetric, setInternalMetric] = useState<Metric>('requests')
-    const metric = fixedMetric ?? internalMetric
-    const [hiddenIndices, setHiddenIndices] = useState<Set<number>>(new Set())
+    const metric                              = fixedMetric ?? internalMetric
+    const [hiddenIndices, setHiddenIndices]   = useState<Set<number>>(new Set())
 
     const handleMetricChange = useCallback((next: Metric) => {
         setInternalMetric(next)
@@ -99,12 +101,24 @@ export function UnifiedTrendChart({
 
     const summaryValues = useMemo(() => {
         const zero = metric === 'cost' ? formatUsd(0) : formatCompactNumber(0)
-        if (!summary) {
-            return { total: zero, live: zero }
+        const fmt  = (v: number) => (metric === 'cost' ? formatUsd(v) : formatCompactNumber(v))
+
+        if (liveSummary) {
+            const totals = liveSummary.totals
+            if (metric === 'requests') {
+                return { live: fmt(totals.requests) }
+            }
+            if (metric === 'tokens') {
+                return { live: fmt(totals.tokens.total) }
+            }
+            return { live: fmt(totals.cost) }
         }
-        const totals = summary.totals
-        const ts = summary.time_series
-        const fmt = (v: number) => (metric === 'cost' ? formatUsd(v) : formatCompactNumber(v))
+
+        if (!summary) {
+            return { live: zero }
+        }
+
+        const ts  = summary.time_series
         const val = (pt: (typeof ts)[number]) => {
             if (!pt) {
                 return 0
@@ -120,8 +134,7 @@ export function UnifiedTrendChart({
 
         let liveSum = 0
         if (ts?.length) {
-            const latestTime = new Date(ts[ts.length - 1].time).getTime()
-            const oneHourAgoMs = latestTime - 3600_000
+            const oneHourAgoMs = Date.now() - 3600_000
             for (let i = ts.length - 1; i >= 0; --i) {
                 const ptTime = new Date(ts[i].time).getTime()
                 if (ptTime < oneHourAgoMs) {
@@ -131,17 +144,8 @@ export function UnifiedTrendChart({
             }
         }
 
-        let totalVal: number
-        if (metric === 'requests') {
-            totalVal = totals.requests
-        } else if (metric === 'tokens') {
-            totalVal = totals.tokens.total
-        } else {
-            totalVal = totals.cost
-        }
-
-        return { total: fmt(totalVal), live: fmt(liveSum) }
-    }, [summary, metric])
+        return { live: fmt(liveSum) }
+    }, [summary, liveSummary, metric])
 
     // "Data starts at": earliest point in the series, shown in the card header
     // so users understand why trailing gaps exist for long date ranges.
@@ -211,8 +215,8 @@ export function UnifiedTrendChart({
         { key: 'cost', label: t('usage_stats.cost_trend') },
     ]
 
-    const isEmpty = chartData.labels.length === 0
-    const accent = METRIC_ACCENTS[metric]
+    const isEmpty     = chartData.labels.length === 0
+    const accent      = METRIC_ACCENTS[metric]
     const metricLabel = t(accent.labelKey)
 
     // First-load skeleton: show only when there's no prior data — refreshes
@@ -231,7 +235,7 @@ export function UnifiedTrendChart({
                         <div className={styles.trendLoadingPrimary} />
                         <div className={styles.trendLoadingSecondary} />
                     </div>
-                    <CardSkeleton variant="chart" rowCount={1} showTitle={false} className={styles.trendLoadingChart} />
+                    <CardSkeleton variant='chart' rowCount={1} showTitle={false} className={styles.trendLoadingChart} />
                 </div>
             </div>
         )
@@ -258,7 +262,7 @@ export function UnifiedTrendChart({
                         {metricTabs.map(({ key, label }) => (
                             <button
                                 key={key}
-                                type="button"
+                                type='button'
                                 className={`${styles.metricTab} ${metric === key ? styles.metricTabActive : ''}`}
                                 onClick={() => handleMetricChange(key)}
                             >
@@ -268,21 +272,21 @@ export function UnifiedTrendChart({
                     </div>
                 </div>
             ) : (
-                <div className={styles.headerFixed}>
+                 <div className={styles.headerFixed}>
                     <span className={styles.metricTitle} style={{ color: accent.border }}>
                         {metricLabel}
                     </span>
-                    {dataStartLabel && (
-                        <span className={styles.dataStartsAt}>
+                     {dataStartLabel && (
+                         <span className={styles.dataStartsAt}>
                             {t('usage_stats.data_starts_at', { date: dataStartLabel, defaultValue: 'Starts {{date}}' })}
                         </span>
-                    )}
-                </div>
-            )}
+                     )}
+                 </div>
+             )}
 
             <div className={pageStyles.cardLoadingShell}>
                 {loading && summary && (
-                    <div className={pageStyles.cardLoadingOverlay} aria-busy="true">
+                    <div className={pageStyles.cardLoadingOverlay} aria-busy='true'>
                         <div className={pageStyles.cardLoadingPill}>
                             <LoadingSpinner size={16} className={pageStyles.cardLoadingSpinner} />
                             <span>{t('common.loading')}</span>
@@ -291,12 +295,6 @@ export function UnifiedTrendChart({
                 )}
                 <>
                     <div className={styles.summaryBar}>
-                        <span className={styles.summaryTotal}>
-                            {summaryValues.total}
-                            <span className={styles.summaryLabel}>
-                                {t('usage_stats.unified_total_label', { defaultValue: '总计' })}
-                            </span>
-                        </span>
                         <span className={styles.summaryLive}>
                             <span className={styles.liveDot} />
                             {summaryValues.live}
@@ -312,7 +310,7 @@ export function UnifiedTrendChart({
                     <div className={styles.chartBody}>
                         <div className={pageStyles.chartWrapper}>
                             {chartData.datasets.length > 1 && (
-                                <div className={pageStyles.chartLegend} aria-label="Chart legend">
+                                <div className={pageStyles.chartLegend} aria-label='Chart legend'>
                                     {chartData.datasets.map((dataset, index) => (
                                         <div
                                             key={`${dataset.label}-${index}`}
@@ -320,7 +318,7 @@ export function UnifiedTrendChart({
                                                 hiddenIndices.has(index) ? pageStyles.legendItemHidden : ''
                                             }`}
                                             title={dataset.label}
-                                            role="button"
+                                            role='button'
                                             tabIndex={0}
                                             onClick={() => toggleDataset(index)}
                                             onKeyDown={(e) => {
@@ -345,8 +343,8 @@ export function UnifiedTrendChart({
                                         className={pageStyles.chartCanvas}
                                         style={
                                             period === 'hour'
-                                                ? { minWidth: getHourChartMinWidth(chartData.labels.length, isMobile) }
-                                                : undefined
+                                            ? { minWidth: getHourChartMinWidth(chartData.labels.length, isMobile) }
+                                            : undefined
                                         }
                                     >
                                         <Line data={visibleChartData} options={chartOptions} />

@@ -3,8 +3,8 @@
  * 服务端存储模型价格配置，替代 localStorage
  */
 
-import type { ModelPrice } from '@/utils/usage'
-import { apiClient } from './client'
+import type {ModelPrice} from '@/utils/usage'
+import {apiClient} from './client'
 
 interface GetModelPricesResponse {
     prices: Record<string, ModelPrice>

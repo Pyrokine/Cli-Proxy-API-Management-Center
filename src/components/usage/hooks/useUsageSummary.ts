@@ -1,5 +1,5 @@
-import { usageApi, type UsageSummary } from '@/services/api/usage'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {usageApi, type UsageSummary} from '@/services/api/usage'
+import {useCallback, useEffect, useRef, useState} from 'react'
 
 type Granularity = 'hourly' | 'daily'
 
@@ -33,17 +33,17 @@ export function useUsageSummary(
         credential?: string
         groups?: 'none' | 'all'
     },
-    options?: UseUsageSummaryOptions
+    options?: UseUsageSummaryOptions,
 ): UseUsageSummaryReturn {
-    const enabled = options?.enabled ?? true
+    const enabled               = options?.enabled ?? true
     const [summary, setSummary] = useState<UsageSummary | null>(null)
     const [loading, setLoading] = useState(enabled)
-    const [error, setError] = useState('')
-    const inflightRef = useRef<AbortController | null>(null)
-    const visibleSummary = enabled ? summary : null
-    const visibleLoading = enabled ? loading : false
-    const visibleError = enabled ? error : ''
-    const resolved = enabled && !visibleLoading && !visibleError && visibleSummary !== null
+    const [error, setError]     = useState('')
+    const inflightRef           = useRef<AbortController | null>(null)
+    const visibleSummary        = enabled ? summary : null
+    const visibleLoading        = enabled ? loading : false
+    const visibleError          = enabled ? error : ''
+    const resolved              = enabled && !visibleLoading && !visibleError && visibleSummary !== null
 
     const reload = useCallback(
         async (overrides?: {
@@ -62,14 +62,14 @@ export function useUsageSummary(
             // 3+ concurrent /usage/summary calls and let stale data race the
             // newest one. Last writer wins is the only correct outcome.
             inflightRef.current?.abort()
-            const controller = new AbortController()
+            const controller    = new AbortController()
             inflightRef.current = controller
 
             setLoading(true)
             setError('')
             try {
                 const merged = { ...params, ...overrides }
-                const data = await usageApi.getSummary(merged, { signal: controller.signal })
+                const data   = await usageApi.getSummary(merged, { signal: controller.signal })
                 if (!controller.signal.aborted) {
                     setSummary(data)
                 }
@@ -88,7 +88,7 @@ export function useUsageSummary(
                 }
             }
         },
-        [enabled, params]
+        [enabled, params],
     )
 
     useEffect(() => {
@@ -106,7 +106,7 @@ export function useUsageSummary(
         () => () => {
             inflightRef.current?.abort()
         },
-        []
+        [],
     )
 
     return { summary: visibleSummary, loading: visibleLoading, error: visibleError, resolved, reload }

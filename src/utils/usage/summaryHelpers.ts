@@ -1,5 +1,5 @@
-import type { SummaryApiKeyStats, SummaryCredentialStats, SummaryModelStats } from '@/services/api/usage'
-import { normalizeUsageSourceId } from '@/utils/usage'
+import type {SummaryApiKeyStats, SummaryCredentialStats, SummaryModelStats} from '@/services/api/usage'
+import {normalizeUsageSourceId} from '@/utils/usage'
 
 export interface ModelStat {
     model: string
@@ -8,6 +8,8 @@ export interface ModelStat {
     failureCount: number
     tokens: number
     cost: number
+    averageLatencyMs: number | null
+    latencySampleCount: number
 }
 
 export interface SummaryCredentialEntry {
@@ -44,58 +46,21 @@ function splitCredentialKey(key: string): { provider: string; source: string } {
  * credential stats table and credentials page all consume the same contract.
  */
 export function summaryToCredentialEntries(
-    byCredential: Record<string, SummaryCredentialStats>
+    byCredential: Record<string, SummaryCredentialStats>,
 ): SummaryCredentialEntry[] {
     const merged = new Map<string, SummaryCredentialEntry>()
-    const providerSources = new Set<string>()
-    const pendingLegacy: Array<{
-        key: string
-        stats: SummaryCredentialStats
-        source: string
-        normalizedSourceId: string
-    }> = []
 
     Object.entries(byCredential).forEach(([key, stats]) => {
-        const fallback = splitCredentialKey(key)
-        const provider = (stats.provider ?? fallback.provider).trim()
-        const source = (stats.source ?? fallback.source).trim()
+        const fallback           = splitCredentialKey(key)
+        const provider           = (stats.provider ?? fallback.provider).trim()
+        const source             = (stats.source ?? fallback.source).trim()
+        const normalizedSourceId = normalizeUsageSourceId(source)
         if (!source) {
             return
         }
 
-        const normalizedSourceId = normalizeUsageSourceId(source)
-        if (provider) {
-            providerSources.add(normalizedSourceId)
-            const filterKey = `${provider}:${source}`
-            const existing = merged.get(filterKey)
-            if (existing) {
-                existing.success += stats.success
-                existing.failure += stats.failure
-                return
-            }
-
-            merged.set(filterKey, {
-                key,
-                filterKey,
-                provider,
-                source,
-                normalizedSourceId,
-                success: stats.success,
-                failure: stats.failure,
-            })
-            return
-        }
-
-        pendingLegacy.push({ key, stats, source, normalizedSourceId })
-    })
-
-    pendingLegacy.forEach(({ key, stats, source, normalizedSourceId }) => {
-        if (providerSources.has(normalizedSourceId)) {
-            return
-        }
-
-        const filterKey = source
-        const existing = merged.get(filterKey)
+        const filterKey = provider ? `${provider}:${source}` : source
+        const existing  = merged.get(filterKey)
         if (existing) {
             existing.success += stats.success
             existing.failure += stats.failure
@@ -105,7 +70,7 @@ export function summaryToCredentialEntries(
         merged.set(filterKey, {
             key,
             filterKey,
-            provider: '',
+            provider,
             source,
             normalizedSourceId,
             success: stats.success,
@@ -125,6 +90,8 @@ export function summaryToModelStats(byModel: Record<string, SummaryModelStats>):
         failureCount: stats.failure,
         tokens: stats.tokens.total,
         cost: stats.cost,
+        averageLatencyMs: stats.average_latency_ms ?? null,
+        latencySampleCount: stats.latency_sample_count ?? 0,
     }))
 }
 
@@ -135,7 +102,7 @@ export function summaryToModelStats(byModel: Record<string, SummaryModelStats>):
  *  alias is missing. */
 export function summaryToApiKeyStats(
     byApiKey: Record<string, SummaryApiKeyStats>,
-    aliases?: Record<string, string>
+    aliases?: Record<string, string>,
 ): ModelStat[] {
     return Object.entries(byApiKey).map(([key, stats]) => ({
         model: aliases?.[key] || key,
@@ -144,5 +111,7 @@ export function summaryToApiKeyStats(
         failureCount: stats.failure,
         tokens: stats.tokens.total,
         cost: stats.cost,
+        averageLatencyMs: stats.average_latency_ms ?? null,
+        latencySampleCount: stats.latency_sample_count ?? 0,
     }))
 }

@@ -190,9 +190,8 @@
     grid-column: span 4;
     position: relative;
     padding: 12px;
-    background:
-        radial-gradient(120% 140% at 12% 0%, var(--accent-soft) 0%, rgba(0, 0, 0, 0) 62%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)), var(--bg-primary);
+    background: radial-gradient(120% 140% at 12% 0%, var(--accent-soft) 0%, rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)), var(--bg-primary);
     border-radius: $radius-md;
     border: 1px solid var(--border-color);
     display: flex;
@@ -200,10 +199,9 @@
     gap: 8px;
     min-height: 120px;
     box-shadow: var(--shadow-lg);
-    transition:
-        transform $transition-fast,
-        box-shadow $transition-fast,
-        border-color $transition-fast;
+    transition: transform $transition-fast,
+    box-shadow $transition-fast,
+    border-color $transition-fast;
     overflow: hidden;
 
     &::before {
@@ -408,10 +406,9 @@
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
     cursor: pointer;
-    transition:
-        background-color 0.15s ease,
-        border-color 0.15s ease,
-        color 0.15s ease;
+    transition: background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 
     &:hover {
         background: var(--bg-tertiary);
@@ -1045,9 +1042,8 @@
 
     &:focus {
         border-color: var(--primary-color);
-        box-shadow:
-            var(--shadow),
-            0 0 0 3px rgba($primary-color, 0.18);
+        box-shadow: var(--shadow),
+        0 0 0 3px rgba($primary-color, 0.18);
     }
 }
 
@@ -1132,7 +1128,9 @@
 }
 
 .requestEventsResultSuccess,
-.requestEventsResultFailed {
+.requestEventsResultFailed,
+.requestEventsThinkingBadge,
+.requestEventsThinkingEmpty {
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
@@ -1140,6 +1138,18 @@
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
     white-space: nowrap;
+}
+
+.requestEventsThinkingBadge {
+    color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 28%, transparent);
+}
+
+.requestEventsThinkingEmpty {
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
 }
 
 // Service Health Card
@@ -1264,9 +1274,8 @@
     width: 100%;
     height: 100%;
     border-radius: 2px;
-    transition:
-        transform 0.15s ease,
-        opacity 0.15s ease;
+    transition: transform 0.15s ease,
+    opacity 0.15s ease;
 
     .healthBlockWrapper:hover &,
     .healthBlockWrapper.healthBlockActive & {
@@ -1475,9 +1484,8 @@
     border-radius: var(--radius-md);
     padding: 10px 12px;
     cursor: pointer;
-    transition:
-        border-color 0.15s,
-        background-color 0.15s;
+    transition: border-color 0.15s,
+    background-color 0.15s;
     background: var(--bg-primary);
 
     &:hover {
@@ -1588,9 +1596,8 @@
     padding: 8px 16px;
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    transition:
-        color 0.15s ease,
-        border-color 0.15s ease;
+    transition: color 0.15s ease,
+    border-color 0.15s ease;
 
     &:hover {
         color: var(--text-primary, #111827);

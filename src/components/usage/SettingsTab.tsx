@@ -1,8 +1,8 @@
 import styles from '@/pages/UsagePage.module.scss'
-import type { ModelPrice } from '@/utils/usage'
-import type { PriceSaveFeedback } from './hooks/useUsageData'
-import { PriceSettingsCard } from './PriceSettingsCard'
-import { UsageRetentionCard } from './UsageRetentionCard'
+import type {ModelPrice} from '@/utils/usage'
+import type {PriceSaveFeedback} from './hooks/useUsageData'
+import {PriceSettingsCard} from './PriceSettingsCard'
+import {UsageRetentionCard} from './UsageRetentionCard'
 
 interface SettingsTabProps {
     modelNames: string[]

@@ -76,10 +76,9 @@
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
     cursor: pointer;
-    transition:
-        background-color 0.15s ease,
-        color 0.15s ease,
-        box-shadow 0.15s ease;
+    transition: background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
     white-space: nowrap;
 
     &:hover:not(.metricTabActive) {

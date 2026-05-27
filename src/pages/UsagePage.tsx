@@ -1,16 +1,16 @@
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
-import { EventsTab, FilterBar, OverviewTab, SettingsTab, useUsageData, useUsageSummary } from '@/components/usage'
-import { useAuthFileMap } from '@/components/usage/hooks/useAuthFileMap'
-import type { UsagePayload } from '@/components/usage/hooks/useUsageData'
-import { useHeaderRefresh } from '@/hooks/useHeaderRefresh'
-import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { apiKeyAliasApi } from '@/services/api/apiKeys'
-import { providersApi } from '@/services/api/providers'
-import { usageApi } from '@/services/api/usage'
-import { useConfigStore } from '@/stores'
-import type { OpenAIProviderConfig } from '@/types'
-import { toLocalDateTimeString } from '@/utils/format'
-import { type ChartDimension, filterUsageByDateRange, filterUsageBySelections } from '@/utils/usage'
+import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
+import {EventsTab, FilterBar, OverviewTab, SettingsTab, useUsageData, useUsageSummary} from '@/components/usage'
+import {useAuthFileMap} from '@/components/usage/hooks/useAuthFileMap'
+import type {UsagePayload} from '@/components/usage/hooks/useUsageData'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {useMediaQuery} from '@/hooks/useMediaQuery'
+import {apiKeyAliasApi} from '@/services/api/apiKeys'
+import {providersApi} from '@/services/api/providers'
+import {usageApi} from '@/services/api/usage'
+import {useConfigStore} from '@/stores'
+import type {OpenAIProviderConfig} from '@/types'
+import {toLocalDateTimeString} from '@/utils/format'
+import {type ChartDimension, filterUsageByDateRange, filterUsageBySelections} from '@/utils/usage'
 import {
     CategoryScale,
     Chart as ChartJS,
@@ -22,15 +22,15 @@ import {
     Title,
     Tooltip,
 } from 'chart.js'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {useCallback, useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './UsagePage.module.scss'
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
-const DEFAULT_PRESET = '30d'
-const ACTIVE_TAB_STORAGE_KEY = 'cli-proxy-usage-active-tab-v1'
+const DEFAULT_PRESET              = '30d'
+const ACTIVE_TAB_STORAGE_KEY      = 'cli-proxy-usage-active-tab-v1'
 const ALL_PRESET_PLACEHOLDER_FROM = '2020-01-01T00:00'
 
 type UsageTab = 'overview' | 'events' | 'settings'
@@ -61,7 +61,7 @@ function initDateRange(): { from: string; to: string; preset: string } {
 /** Calculate chart hour window from the date range span. */
 function calcHourWindow(from: string, to: string): number | undefined {
     const fromMs = new Date(from).getTime()
-    const toMs = new Date(to).getTime()
+    const toMs   = new Date(to).getTime()
     if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
         return undefined
     }
@@ -73,54 +73,56 @@ function calcHourWindow(from: string, to: string): number | undefined {
 }
 
 export function UsagePage() {
-    const { t } = useTranslation()
+    const { t }    = useTranslation()
     const isMobile = useMediaQuery('(max-width: 768px)')
-    const config = useConfigStore((state) => state.config)
+    const config   = useConfigStore((state) => state.config)
 
     // Date range state
-    const [dateRange, setDateRange] = useState(() => initDateRange())
-    const [selectedModels, setSelectedModels] = useState<string[]>([])
-    const [selectedCredentials, setSelectedCredentials] = useState<string[]>([])
-    const [selectedApiKeys, setSelectedApiKeys] = useState<string[]>([])
-    const [aliases, setAliases] = useState<Record<string, string>>({})
-    const [activeTab, setActiveTabState] = useState<UsageTab>(() => initActiveTab())
-    const usageStatsTabActive = activeTab !== 'settings'
-    const { authFileMap, authFileMapLoading } = useAuthFileMap(usageStatsTabActive)
-    const [fallbackNowMs] = useState(() => Date.now())
-    const [summaryRefreshToken, setSummaryRefreshToken] = useState(0)
-    const [eventsRefreshToken, setEventsRefreshToken] = useState(0)
-    const [eventsVisibleDateRange, setEventsVisibleDateRange] = useState<{ from: string; to: string } | null>(null)
+    const [dateRange, setDateRange]                             = useState(() => initDateRange())
+    const [selectedModels, setSelectedModels]                   = useState<string[]>([])
+    const [selectedCredentials, setSelectedCredentials]         = useState<string[]>([])
+    const [selectedApiKeys, setSelectedApiKeys]                 = useState<string[]>([])
+    const [aliases, setAliases]                                 = useState<Record<string, string>>({})
+    const [activeTab, setActiveTabState]                        = useState<UsageTab>(() => initActiveTab())
+    const usageStatsTabActive                                   = activeTab !== 'settings'
+    const { authFileMap, authFileMapLoading }                   = useAuthFileMap(usageStatsTabActive)
+    const [fallbackNowMs]                                       = useState(() => Date.now())
+    const [liveWindowAnchorMs, setLiveWindowAnchorMs]           = useState(() => Date.now())
+    const [summaryRefreshToken, setSummaryRefreshToken]         = useState(0)
+    const [eventsRefreshToken, setEventsRefreshToken]           = useState(0)
+    const [eventsVisibleDateRange, setEventsVisibleDateRange]   = useState<{ from: string; to: string } | null>(null)
     const [openaiProvidersForUsage, setOpenaiProvidersForUsage] = useState<OpenAIProviderConfig[] | null>(null)
 
     const needsRawUsage = false
 
     // Data hook
     const handleUsageViewsRefresh = useCallback(async () => {
+        setLiveWindowAnchorMs(Date.now())
         setSummaryRefreshToken((prev) => prev + 1)
         setEventsRefreshToken((prev) => prev + 1)
     }, [])
 
     const {
-        usage,
-        loading,
-        error,
-        lastRefreshedAt,
-        modelPrices,
-        priceSaveFeedback,
-        setModelPrices,
-        loadUsage,
-        handleExport,
-        handleImport,
-        handleImportChange,
-        importInputRef,
-        exporting,
-        importing,
-    } = useUsageData({
-        enabled: needsRawUsage,
-        loadModelPricesEnabled: true,
-        onAfterImport: handleUsageViewsRefresh,
-        onAfterPricesSaved: handleUsageViewsRefresh,
-    })
+              usage,
+              loading,
+              error,
+              lastRefreshedAt,
+              modelPrices,
+              priceSaveFeedback,
+              setModelPrices,
+              loadUsage,
+              handleExport,
+              handleImport,
+              handleImportChange,
+              importInputRef,
+              exporting,
+              importing,
+          } = useUsageData({
+                               enabled: needsRawUsage,
+                               loadModelPricesEnabled: true,
+                               onAfterImport: handleUsageViewsRefresh,
+                               onAfterPricesSaved: handleUsageViewsRefresh,
+                           })
 
     const setActiveTab = useCallback((next: UsageTab) => {
         setActiveTabState(next)
@@ -133,13 +135,13 @@ export function UsagePage() {
 
     // Auto-derive chart dimension from filter state (priority: model > api_key > credential)
     const chartDimension: ChartDimension =
-        selectedModels.length > 0
-            ? 'model'
-            : selectedApiKeys.length > 0
-              ? 'api_key'
-              : selectedCredentials.length > 0
-                ? 'credential'
-                : 'total'
+              selectedModels.length > 0
+              ? 'model'
+              : selectedApiKeys.length > 0
+                ? 'api_key'
+                : selectedCredentials.length > 0
+                  ? 'credential'
+                  : 'total'
 
     // noinspection DuplicatedCode
     useEffect(() => {
@@ -200,11 +202,13 @@ export function UsagePage() {
     // Custom (no preset) ranges stay untouched in absolute time, but still need
     // a manual reload because the params object does not change by itself.
     const handleRefresh = useCallback(() => {
+        const refreshAnchorMs = Date.now()
+        setLiveWindowAnchorMs(refreshAnchorMs)
         let shouldReloadSummary = false
-        let shouldReloadEvents = false
+        let shouldReloadEvents  = false
 
         setDateRange((prev) => {
-            const now = new Date()
+            const now    = new Date(refreshAnchorMs)
             const nowStr = toLocalDateTimeString(now)
             switch (prev.preset) {
                 case '24h':
@@ -229,13 +233,14 @@ export function UsagePage() {
                     return { ...prev, to: nowStr }
                 default:
                     shouldReloadSummary = true
-                    shouldReloadEvents = activeTab === 'events'
+                    shouldReloadEvents  = activeTab === 'events'
                     return prev
             }
         })
 
         if (needsRawUsage) {
-            void loadUsage().catch(() => {})
+            void loadUsage().catch(() => {
+            })
         }
         if (shouldReloadSummary) {
             setSummaryRefreshToken((prev) => prev + 1)
@@ -245,45 +250,51 @@ export function UsagePage() {
         }
     }, [activeTab, loadUsage, needsRawUsage])
 
-    const isAllPreset = dateRange.preset === 'all'
-    const allSummaryResolutionKey = useMemo(
+    const isAllPreset                                     = dateRange.preset === 'all'
+    const allSummaryResolutionKey                         = useMemo(
         () =>
             [dateRange.to, selectedModels.join(','), selectedApiKeys.join(','), selectedCredentials.join(',')].join(
-                '|'
+                '|',
             ),
-        [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials]
+        [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials],
     )
-    const [allSummaryResolution, setAllSummaryResolution] = useState<{ key: string; from: string }>({
-        key: '',
-        from: '',
-    })
-    const [allSummaryResolving, setAllSummaryResolving] = useState(false)
-    const resolvedAllFrom =
-        isAllPreset && allSummaryResolution.key === allSummaryResolutionKey ? allSummaryResolution.from : ''
-    const effectiveDateFrom = isAllPreset ? resolvedAllFrom : dateRange.from
-    const effectiveDateTo = dateRange.to
-    const effectiveRangeReady = !isAllPreset || resolvedAllFrom.length > 0
-    const granularityRangeFrom = effectiveDateFrom || dateRange.from
-    const hourWindowHours = calcHourWindow(granularityRangeFrom, effectiveDateTo)
-    const summaryGranularity: 'hourly' | 'daily' = (hourWindowHours ?? 0) > 7 * 24 ? 'daily' : 'hourly'
-    const hasSelectionFilters =
-        selectedModels.length > 0 || selectedCredentials.length > 0 || selectedApiKeys.length > 0
+    const [allSummaryResolution, setAllSummaryResolution] = useState<{ key: string; from: string; resolved: boolean }>({
+                                                                                                                           key: '',
+                                                                                                                           from: '',
+                                                                                                                           resolved: false,
+                                                                                                                       })
+    const [allSummaryResolving, setAllSummaryResolving]   = useState(false)
+    const allSummaryResolved                              =
+              isAllPreset && allSummaryResolution.key === allSummaryResolutionKey && allSummaryResolution.resolved
+    const resolvedAllFrom                                 = allSummaryResolved ? allSummaryResolution.from : ''
+    const effectiveDateFrom                               = isAllPreset ?
+                                                            (resolvedAllFrom || ALL_PRESET_PLACEHOLDER_FROM) :
+                                                            dateRange.from
+    const effectiveDateTo                                 = dateRange.to
+    const effectiveRangeReady                             = !isAllPreset || allSummaryResolved
+    const granularityRangeFrom                            = effectiveDateFrom || dateRange.from
+    const hourWindowHours                                 = calcHourWindow(granularityRangeFrom, effectiveDateTo)
+    const summaryGranularity: 'hourly' | 'daily'          = (hourWindowHours ?? 0) > 7 * 24 ? 'daily' : 'hourly'
+    const hasSelectionFilters                             =
+              selectedModels.length > 0 || selectedCredentials.length > 0 || selectedApiKeys.length > 0
 
     useEffect(() => {
         if (!isAllPreset) {
             const frameId = requestAnimationFrame(() => {
-                setAllSummaryResolution((prev) => (prev.key || prev.from ? { key: '', from: '' } : prev))
+                setAllSummaryResolution((prev) => (prev.key || prev.from || prev.resolved ?
+                    { key: '', from: '', resolved: false } :
+                                                   prev))
                 setAllSummaryResolving(false)
             })
             return () => cancelAnimationFrame(frameId)
         }
-        if (resolvedAllFrom) {
+        if (allSummaryResolved) {
             return
         }
 
-        let cancelled = false
+        let cancelled    = false
         const controller = new AbortController()
-        const frameId = requestAnimationFrame(() => {
+        const frameId    = requestAnimationFrame(() => {
             setAllSummaryResolving(true)
         })
 
@@ -300,21 +311,26 @@ export function UsagePage() {
                     sort: 'timestamp',
                     order: 'asc',
                 },
-                { signal: controller.signal }
+                { signal: controller.signal },
             )
             .then((response) => {
                 if (cancelled) {
                     return
                 }
-                const timestamp = response.events[0]?.timestamp
+                const timestamp    = response.events[0]?.timestamp
                 const resolvedFrom = timestamp ? toLocalDateTimeString(new Date(timestamp)) : ''
                 setAllSummaryResolution((prev) =>
-                    prev.key === allSummaryResolutionKey && prev.from === resolvedFrom
-                        ? prev
-                        : { key: allSummaryResolutionKey, from: resolvedFrom }
+                                            prev.key ===
+                                            allSummaryResolutionKey &&
+                                            prev.from ===
+                                            resolvedFrom &&
+                                            prev.resolved
+                                            ? prev
+                                            : { key: allSummaryResolutionKey, from: resolvedFrom, resolved: true },
                 )
             })
-            .catch(() => {})
+            .catch(() => {
+            })
             .finally(() => {
                 if (!cancelled) {
                     setAllSummaryResolving(false)
@@ -327,14 +343,14 @@ export function UsagePage() {
             cancelAnimationFrame(frameId)
         }
     }, [
-        isAllPreset,
-        resolvedAllFrom,
-        allSummaryResolutionKey,
-        effectiveDateTo,
-        selectedModels,
-        selectedCredentials,
-        selectedApiKeys,
-    ])
+                  isAllPreset,
+                  allSummaryResolved,
+                  allSummaryResolutionKey,
+                  effectiveDateTo,
+                  selectedModels,
+                  selectedCredentials,
+                  selectedApiKeys,
+              ])
 
     const rangeResolutionLoading = isAllPreset && allSummaryResolving && resolvedAllFrom.length === 0
 
@@ -357,23 +373,43 @@ export function UsagePage() {
             selectedApiKeys,
             selectedCredentials,
             chartDimension,
-        ]
+        ],
     )
     const {
-        summary,
-        loading: summaryLoading,
-        error: summaryError,
-        reload: reloadSummary,
-    } = useUsageSummary(summaryParams, {
+              summary,
+              loading: summaryLoading,
+              error: summaryError,
+              reload: reloadSummary,
+          }             = useUsageSummary(summaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady,
+    })
+
+    const liveSummaryParams = useMemo(
+        () => ({
+            from: toLocalDateTimeString(new Date(liveWindowAnchorMs - 60 * 60 * 1000)),
+            to: toLocalDateTimeString(new Date(liveWindowAnchorMs)),
+            granularity: 'hourly' as const,
+            model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
+            groups: chartDimension === 'total' ? ('none' as const) : ('all' as const),
+        }),
+        [liveWindowAnchorMs, selectedModels, selectedApiKeys, selectedCredentials, chartDimension],
+    )
+    const {
+              summary: liveSummary,
+              loading: liveSummaryLoading,
+              reload: reloadLiveSummary,
+          }                 = useUsageSummary(liveSummaryParams, {
+        enabled: usageStatsTabActive,
     })
 
     // Filtered usage: date range → model/credential selection
     const timeFilteredUsage = useMemo(
         () => (usage && effectiveRangeReady ? filterUsageByDateRange(usage, effectiveDateFrom, effectiveDateTo) : null),
-        [usage, effectiveRangeReady, effectiveDateFrom, effectiveDateTo]
+        [usage, effectiveRangeReady, effectiveDateFrom, effectiveDateTo],
     )
-    const filteredUsage = useMemo(() => {
+    const filteredUsage     = useMemo(() => {
         if (!timeFilteredUsage) {
             return null
         }
@@ -381,20 +417,20 @@ export function UsagePage() {
             timeFilteredUsage,
             selectedModels,
             selectedCredentials,
-            selectedApiKeys
+            selectedApiKeys,
         ) as UsagePayload
     }, [timeFilteredUsage, selectedModels, selectedCredentials, selectedApiKeys])
 
     // Unfiltered summary used to populate the filter dropdowns so that selecting one
     // option does not cause the other options to disappear.
-    const filterOptionsParams = useMemo(
+    const filterOptionsParams                                                   = useMemo(
         () => ({
             from: effectiveDateFrom,
             to: effectiveDateTo,
             granularity: summaryGranularity,
             groups: 'none' as const,
         }),
-        [effectiveDateFrom, effectiveDateTo, summaryGranularity]
+        [effectiveDateFrom, effectiveDateTo, summaryGranularity],
     )
     const { summary: filterOptionsSummary, reload: reloadFilterOptionsSummary } = useUsageSummary(filterOptionsParams, {
         enabled: usageStatsTabActive && effectiveRangeReady && hasSelectionFilters,
@@ -413,59 +449,44 @@ export function UsagePage() {
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
             groups: 'none' as const,
         }),
-        [effectiveDateFrom, effectiveDateTo, selectedModels, selectedApiKeys, selectedCredentials]
+        [effectiveDateFrom, effectiveDateTo, selectedModels, selectedApiKeys, selectedCredentials],
     )
     const {
-        summary: heatmapSummary,
-        loading: heatmapSummaryLoading,
-        error: heatmapSummaryError,
-        reload: reloadHeatmapSummary,
-    } = useUsageSummary(heatmapSummaryParams, {
+              summary: heatmapSummary,
+              loading: heatmapSummaryLoading,
+              error: heatmapSummaryError,
+              reload: reloadHeatmapSummary,
+          }                    = useUsageSummary(heatmapSummaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady,
     })
 
     useEffect(() => {
-        if (summaryRefreshToken === 0) {
+        if (summaryRefreshToken === 0 || !effectiveRangeReady) {
             return
         }
-        if (isAllPreset) {
-            if (!effectiveRangeReady) {
-                return
-            }
-            const summaryReloads = [reloadSummary(), reloadHeatmapSummary()]
-            if (hasSelectionFilters) {
-                summaryReloads.push(reloadFilterOptionsSummary())
-            }
-            void Promise.all(summaryReloads)
-            return
-        }
-        if (!effectiveRangeReady) {
-            return
-        }
-        const reloads = [reloadSummary(), reloadHeatmapSummary()]
+
+        const token   = summaryRefreshToken
+        const reloads = [reloadSummary(), reloadHeatmapSummary(), reloadLiveSummary()]
         if (hasSelectionFilters) {
             reloads.push(reloadFilterOptionsSummary())
         }
-        void Promise.all(reloads)
-    }, [
-        summaryRefreshToken,
-        isAllPreset,
-        effectiveRangeReady,
-        reloadSummary,
-        reloadFilterOptionsSummary,
-        reloadHeatmapSummary,
-        hasSelectionFilters,
-        summary,
-        dateRange.to,
-        summaryGranularity,
-        selectedModels,
-        selectedApiKeys,
-        selectedCredentials,
-    ])
 
-    const eventsDateRange = useMemo(
+        void Promise.all(reloads).finally(() => {
+            setSummaryRefreshToken((current) => (current === token ? 0 : current))
+        })
+    }, [
+                  summaryRefreshToken,
+                  effectiveRangeReady,
+                  reloadSummary,
+                  reloadFilterOptionsSummary,
+                  reloadHeatmapSummary,
+                  reloadLiveSummary,
+                  hasSelectionFilters,
+              ])
+
+    const eventsDateRange                    = useMemo(
         () => ({ from: effectiveDateFrom, to: effectiveDateTo }),
-        [effectiveDateFrom, effectiveDateTo]
+        [effectiveDateFrom, effectiveDateTo],
     )
     const handleEventsVisibleDateRangeChange = useCallback((range: { from: string; to: string }) => {
         setEventsVisibleDateRange((prev) => {
@@ -476,17 +497,17 @@ export function UsagePage() {
         })
     }, [])
 
-    const combinedSummaryLoading = (usageStatsTabActive && rangeResolutionLoading) || summaryLoading
-    const combinedSummaryError = summaryError
-    const combinedHeatmapLoading = (usageStatsTabActive && rangeResolutionLoading) || heatmapSummaryLoading
-    const combinedHeatmapError = heatmapSummaryError
+    const combinedSummaryLoading  = (usageStatsTabActive && rangeResolutionLoading) || summaryLoading
+    const combinedSummaryError    = summaryError
+    const combinedHeatmapLoading  = (usageStatsTabActive && rangeResolutionLoading) || heatmapSummaryLoading
+    const combinedHeatmapError    = heatmapSummaryError
     const resolvedOpenaiProviders = openaiProvidersForUsage ?? config?.openaiCompatibility ?? []
 
     const dateFromMs = useMemo(() => {
         const ms = new Date(effectiveDateFrom).getTime()
         return Number.isFinite(ms) ? ms : fallbackNowMs - 24 * 60 * 60 * 1000
     }, [effectiveDateFrom, fallbackNowMs])
-    const dateToMs = useMemo(() => {
+    const dateToMs   = useMemo(() => {
         const ms = new Date(effectiveDateTo).getTime()
         return Number.isFinite(ms) ? ms : fallbackNowMs
     }, [effectiveDateTo, fallbackNowMs])
@@ -496,7 +517,7 @@ export function UsagePage() {
     return (
         <div className={styles.container}>
             {loading && !usage && (
-                <div className={styles.loadingOverlay} aria-busy="true">
+                <div className={styles.loadingOverlay} aria-busy='true'>
                     <div className={styles.loadingOverlayContent}>
                         <LoadingSpinner size={28} className={styles.loadingOverlaySpinner} />
                         <span className={styles.loadingOverlayText}>{t('common.loading')}</span>
@@ -508,12 +529,12 @@ export function UsagePage() {
                 <h1 className={styles.pageTitle}>{t('usage_stats.title')}</h1>
             </div>
 
-            <div className={styles.tabBar} role="tablist">
+            <div className={styles.tabBar} role='tablist'>
                 {(['overview', 'events', 'settings'] as const).map((tab) => (
                     <button
                         key={tab}
-                        type="button"
-                        role="tab"
+                        type='button'
+                        role='tab'
                         aria-selected={activeTab === tab}
                         className={`${styles.tabButton} ${activeTab === tab ? styles.tabButtonActive : ''}`}
                         onClick={() => setActiveTab(tab)}
@@ -544,12 +565,14 @@ export function UsagePage() {
                     authFileMap={authFileMap}
                     onExport={() =>
                         handleExport({
-                            from: effectiveDateFrom,
-                            to: effectiveDateTo,
-                            model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
-                            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
-                            credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
-                        })
+                                         from: effectiveDateFrom,
+                                         to: effectiveDateTo,
+                                         model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
+                                         api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+                                         credential: selectedCredentials.length > 0 ?
+                                                     selectedCredentials.join(',') :
+                                                     undefined,
+                                     })
                     }
                     onImport={handleImport}
                     onRefresh={handleRefresh}
@@ -562,8 +585,8 @@ export function UsagePage() {
 
             <input
                 ref={importInputRef}
-                type="file"
-                accept=".json,application/json"
+                type='file'
+                accept='.json,application/json'
                 style={{ display: 'none' }}
                 onChange={handleImportChange}
             />
@@ -578,17 +601,17 @@ export function UsagePage() {
                     summaryError={combinedSummaryError}
                     heatmapLoading={combinedHeatmapLoading}
                     heatmapError={combinedHeatmapError}
-                    heatmapReady={!combinedHeatmapLoading && !combinedHeatmapError && !!heatmapSummary}
                     isMobile={isMobile}
                     chartDimension={chartDimension}
                     summary={summary}
+                    liveSummary={liveSummary}
                     heatmapSummary={heatmapSummary}
                     fromMs={dateFromMs}
                     toMs={dateToMs}
                     modelPrices={modelPrices}
                     aliases={aliases}
                     onRefresh={handleRefresh}
-                    refreshing={summaryLoading || heatmapSummaryLoading}
+                    refreshing={summaryLoading || heatmapSummaryLoading || liveSummaryLoading}
                     credentials={{
                         loading: authFileMapLoading,
                         geminiKeys: config?.geminiApiKeys || [],

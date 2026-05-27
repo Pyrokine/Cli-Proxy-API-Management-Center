@@ -3,22 +3,11 @@
  * 迁移自基线 modules/usage.js 的纯逻辑部分
  */
 
-import type { PutModelPricesResponse } from '@/services/api/modelPrices'
-import type { SummaryTimePoint, UsageSummary as ApiUsageSummary } from '@/services/api/usage'
-import type { RecentRequestBucket } from '@/types/authFile'
-import type { ScriptableContext } from 'chart.js'
-import { formatKeyDisplay } from './format'
-
-export interface KeyStatBucket {
-    success: number
-    failure: number
-}
-
-export interface KeyStats {
-    bySource: Record<string, KeyStatBucket>
-    bySourceQualified: Record<string, KeyStatBucket>
-    byAuthIndex: Record<string, KeyStatBucket>
-}
+import type {PutModelPricesResponse} from '@/services/api/modelPrices'
+import type {SummaryTimePoint, UsageSummary as ApiUsageSummary, UsageThinking} from '@/services/api/usage'
+import type {RecentRequestBucket} from '@/types/authFile'
+import type {ScriptableContext} from 'chart.js'
+import {formatKeyDisplay} from './format'
 
 export interface ModelPrice {
     prompt: number
@@ -30,6 +19,8 @@ export interface UsageDetail {
     timestamp: string
     source: string
     auth_index: number
+    latency_ms?: number | string | null
+    thinking?: UsageThinking | null
     tokens: {
         input_tokens: number
         output_tokens: number
@@ -51,26 +42,42 @@ export interface UsageDetailWithEndpoint extends UsageDetail {
     __timestampMs: number
 }
 
-export interface ApiStats {
-    endpoint: string
-    totalRequests: number
-    successCount: number
-    failureCount: number
-    totalTokens: number
-    totalCost: number
-    models: Record<string, { requests: number; successCount: number; failureCount: number; tokens: number }>
-}
-
-const MODEL_PRICE_STORAGE_KEY = 'cli-proxy-model-prices-v2'
-const MODEL_PRICE_MIGRATED_KEY = 'cli-proxy-model-prices-migrated'
+const MODEL_PRICE_STORAGE_KEY     = 'cli-proxy-model-prices-v2'
+const MODEL_PRICE_MIGRATED_KEY    = 'cli-proxy-model-prices-migrated'
 const USAGE_ENDPOINT_METHOD_REGEX = /^(?<method>GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(?<path>\S+)/i
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
 
+const parseTimestamp = (input: unknown): number => {
+    if (input instanceof Date) {
+        return input.getTime()
+    }
+    if (typeof input === 'number') {
+        return Number.isFinite(input) ? input : Number.NaN
+    }
+    if (typeof input !== 'string') {
+        return Number.NaN
+    }
+
+    const trimmed = input.trim()
+    if (!trimmed) {
+        return Number.NaN
+    }
+    const normalized = trimmed.replace(/(?<time>T\d{2}:\d{2}:\d{2})\.(?<ms>\d{3})\d+(?<tz>[Zz]|[+-]\d{2}:?\d{2})$/, '$<time>.$<ms>$<tz>')
+    return Date.parse(normalized)
+}
+
+const timestampText = (input: unknown): string => {
+    if (input instanceof Date) {
+        return input.toISOString()
+    }
+    return typeof input === 'string' ? input : String(input ?? '')
+}
+
 const getApisRecord = (usageData: unknown): Record<string, unknown> | null => {
     const usageRecord = isRecord(usageData) ? usageData : null
-    const apisRaw = usageRecord ? usageRecord.apis : null
+    const apisRaw     = usageRecord ? usageRecord.apis : null
     return isRecord(apisRaw) ? apisRaw : null
 }
 
@@ -97,13 +104,13 @@ const toUsageSummaryFields = (summary: UsageSummary) => ({
 
 function filterUsageByTimestampRange<T>(usageData: T, windowStartMs: number, windowEndMs: number): T {
     const usageRecord = isRecord(usageData) ? usageData : null
-    const apis = getApisRecord(usageData)
+    const apis        = getApisRecord(usageData)
     if (!usageRecord || !apis) {
         return usageData
     }
 
     const filteredApis: Record<string, unknown> = {}
-    const totalSummary = createUsageSummary()
+    const totalSummary                          = createUsageSummary()
 
     Object.entries(apis).forEach(([apiName, apiEntry]) => {
         if (!isRecord(apiEntry)) {
@@ -116,24 +123,24 @@ function filterUsageByTimestampRange<T>(usageData: T, windowStartMs: number, win
         }
 
         const filteredModels: Record<string, unknown> = {}
-        const apiSummary = createUsageSummary()
-        let hasModelData = false
+        const apiSummary                              = createUsageSummary()
+        let hasModelData                              = false
 
         Object.entries(models).forEach(([modelName, modelEntry]) => {
             if (!isRecord(modelEntry)) {
                 return
             }
 
-            const detailsRaw = Array.isArray(modelEntry.details) ? modelEntry.details : []
-            const modelSummary = createUsageSummary()
+            const detailsRaw                 = Array.isArray(modelEntry.details) ? modelEntry.details : []
+            const modelSummary               = createUsageSummary()
             const filteredDetails: unknown[] = []
 
             detailsRaw.forEach((detail) => {
                 const detailRecord = isRecord(detail) ? detail : null
-                if (!detailRecord || typeof detailRecord.timestamp !== 'string') {
+                if (!detailRecord || detailRecord.timestamp === undefined || detailRecord.timestamp === null) {
                     return
                 }
-                const timestamp = Date.parse(detailRecord.timestamp)
+                const timestamp = parseTimestamp(detailRecord.timestamp)
                 if (Number.isNaN(timestamp) || timestamp < windowStartMs || timestamp > windowEndMs) {
                     return
                 }
@@ -157,7 +164,7 @@ function filterUsageByTimestampRange<T>(usageData: T, windowStartMs: number, win
                 ...toUsageSummaryFields(modelSummary),
                 details: filteredDetails,
             }
-            hasModelData = true
+            hasModelData              = true
 
             apiSummary.totalRequests += modelSummary.totalRequests
             apiSummary.successCount += modelSummary.successCount
@@ -193,8 +200,8 @@ export function filterUsageByDateRange<T>(usageData: T, from: string, to: string
     if (!from && !to) {
         return usageData
     }
-    const fromMs = from ? new Date(from).getTime() : 0
-    const toMs = to ? new Date(to).getTime() : Date.now()
+    const fromMs = from ? parseTimestamp(from) : 0
+    const toMs   = to ? parseTimestamp(to) : Date.now()
     if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
         return usageData
     }
@@ -212,22 +219,22 @@ export const normalizeAuthIndex = (value: unknown) => {
     return null
 }
 
-const USAGE_SOURCE_PREFIX_KEY = 'k:'
+const USAGE_SOURCE_PREFIX_KEY    = 'k:'
 const USAGE_SOURCE_PREFIX_MASKED = 'm:'
-const USAGE_SOURCE_PREFIX_TEXT = 't:'
+const USAGE_SOURCE_PREFIX_TEXT   = 't:'
 
-const KEY_LIKE_TOKEN_REGEX = new RegExp(
+const KEY_LIKE_TOKEN_REGEX    = new RegExp(
     '(?:' +
-        [
-            'sk-[A-Za-z0-9-_]{6,}',
-            'sk-ant-[A-Za-z0-9-_]{6,}',
-            'AIza[0-9A-Za-z-_]{8,}',
-            'AI[a-zA-Z0-9_-]{6,}',
-            'hf_[A-Za-z0-9]{6,}',
-            'pk_[A-Za-z0-9]{6,}',
-            'rk_[A-Za-z0-9]{6,}',
-        ].join('|') +
-        ')'
+    [
+        'sk-[A-Za-z0-9-_]{6,}',
+        'sk-ant-[A-Za-z0-9-_]{6,}',
+        'AIza[0-9A-Za-z-_]{8,}',
+        'AI[a-zA-Z0-9_-]{6,}',
+        'hf_[A-Za-z0-9]{6,}',
+        'pk_[A-Za-z0-9]{6,}',
+        'rk_[A-Za-z0-9]{6,}',
+    ].join('|') +
+    ')',
 )
 const MASKED_TOKEN_HINT_REGEX = /^\S{1,24}(?:\*{2,}|\.{3}|…)\S{1,24}$/
 
@@ -240,7 +247,7 @@ const fnv1a64Hex = (value: string): string => {
     }
 
     const FNV_OFFSET_BASIS = 0xcbf29ce484222325n
-    const FNV_PRIME = 0x100000001b3n
+    const FNV_PRIME        = 0x100000001b3n
 
     let hash = FNV_OFFSET_BASIS
     for (let i = 0; i < value.length; i++) {
@@ -305,7 +312,7 @@ const extractRawSecretFromText = (text: string): string | null => {
     }
 
     const headerMatch = text.match(
-        /(?<name>api[-_]?key|key|token|access[-_]?token|authorization)\s*[:=]\s*(?<value>[A-Za-z0-9._=-]+)/i
+        /(?<name>api[-_]?key|key|token|access[-_]?token|authorization)\s*[:=]\s*(?<value>[A-Za-z0-9._=-]+)/i,
     )
     const headerValue = headerMatch?.groups?.value
     if (headerValue && looksLikeRawSecret(headerValue)) {
@@ -322,7 +329,7 @@ const extractRawSecretFromText = (text: string): string | null => {
 }
 
 export function normalizeUsageSourceId(value: unknown, masker: (val: string) => string = formatKeyDisplay): string {
-    const raw = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
+    const raw     = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
     const trimmed = raw.trim()
     if (!trimmed) {
         return ''
@@ -367,7 +374,7 @@ function normalizeCredentialFilterValue(value: string): string {
     }
 
     const separator = trimmed.indexOf(':')
-    const source = separator > 0 && separator < trimmed.length - 1 ? trimmed.slice(separator + 1) : trimmed
+    const source    = separator > 0 && separator < trimmed.length - 1 ? trimmed.slice(separator + 1) : trimmed
     return normalizeUsageSourceId(source)
 }
 
@@ -405,7 +412,134 @@ export function formatUsd(value: number): string {
     return `$${parts}`
 }
 
-const usageDetailsCache = new WeakMap<object, UsageDetail[]>()
+export const LATENCY_SOURCE_FIELD = 'latency_ms'
+
+export interface DurationFormatOptions {
+    maxUnits?: number
+    invalidText?: string
+    secondDecimals?: number | 'auto'
+    locale?: string
+}
+
+export function extractLatencyMs(detail: unknown): number | null {
+    const record   = isRecord(detail) ? detail : null
+    const rawValue = record?.[LATENCY_SOURCE_FIELD]
+    if (rawValue === null || rawValue === undefined || (typeof rawValue === 'string' && rawValue.trim() === '')) {
+        return null
+    }
+
+    const parsed = Number(rawValue)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return null
+    }
+    return parsed
+}
+
+function resolveDurationLocale(locale?: string): string | undefined {
+    return locale || undefined
+}
+
+function resolveSecondDecimalPlaces(seconds: number, option?: number | 'auto'): number {
+    if (typeof option === 'number') {
+        return Math.max(0, Math.min(3, option))
+    }
+    if (seconds < 10) {
+        return 2
+    }
+    return seconds < 60 ? 1 : 0
+}
+
+function formatDurationPart(value: number, unit: string, locale?: string, options?: Intl.NumberFormatOptions): string {
+    return `${value.toLocaleString(locale, options)}${unit}`
+}
+
+export function formatDurationMs(value: number | null | undefined, options: DurationFormatOptions = {}): string {
+    const invalidText = options.invalidText ?? '--'
+    if (value === null || value === undefined) {
+        return invalidText
+    }
+
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return invalidText
+    }
+
+    const locale = resolveDurationLocale(options.locale)
+    if (parsed < 1000) {
+        return formatDurationPart(Math.round(parsed), 'ms', locale)
+    }
+
+    const seconds = parsed / 1000
+    if (seconds < 60) {
+        const digits = resolveSecondDecimalPlaces(seconds, options.secondDecimals)
+        return formatDurationPart(seconds, 's', locale, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: digits,
+        })
+    }
+
+    const units = [
+        { unit: 'd', value: Math.floor(seconds / 86400) },
+        { unit: 'h', value: Math.floor((seconds % 86400) / 3600) },
+        { unit: 'm', value: Math.floor((seconds % 3600) / 60) },
+        { unit: 's', value: Math.floor(seconds % 60) },
+    ].filter((part) => part.value > 0)
+
+    const maxUnits = Math.max(1, options.maxUnits ?? 2)
+    return units
+        .slice(0, maxUnits)
+        .map((part) => formatDurationPart(part.value, part.unit, locale))
+        .join(' ')
+}
+
+export function normalizeUsageThinking(value: unknown): UsageThinking | null {
+    if (!isRecord(value)) {
+        return null
+    }
+    const intensity = typeof value.intensity === 'string' ? value.intensity.trim() : ''
+    const mode      = typeof value.mode === 'string' ? value.mode.trim() : ''
+    const level     = typeof value.level === 'string' ? value.level.trim() : ''
+    const rawBudget = Number(value.budget)
+    const hasBudget = value.budget !== undefined && value.budget !== null && Number.isFinite(rawBudget)
+    if (!intensity && !mode && !level && !hasBudget) {
+        return null
+    }
+    return {
+        ...(intensity ? { intensity } : {}),
+        ...(mode ? { mode } : {}),
+        ...(level ? { level } : {}),
+        ...(hasBudget ? { budget: rawBudget } : {}),
+    }
+}
+
+export function formatThinkingLabel(thinking: UsageThinking | null | undefined, locale?: string): string {
+    if (!thinking) {
+        return '-'
+    }
+
+    const intensity   = typeof thinking.intensity === 'string' ? thinking.intensity.trim() : ''
+    const level       = typeof thinking.level === 'string' ? thinking.level.trim() : ''
+    const mode        = typeof thinking.mode === 'string' ? thinking.mode.trim() : ''
+    const budget      = typeof thinking.budget === 'number' && Number.isFinite(thinking.budget) ? thinking.budget : null
+    const label       = intensity || level || (budget !== null ? String(budget) : mode)
+    const budgetLabel = budget !== null ? budget.toLocaleString(locale) : null
+
+    if (!label) {
+        return '-'
+    }
+    if (budgetLabel !== null && label === String(budget)) {
+        return budgetLabel
+    }
+    if (mode === 'budget' && budget !== null && budget > 0) {
+        return `${label} (${budgetLabel})`
+    }
+    if (budget === -1 && label !== 'auto') {
+        return `${label} (-1)`
+    }
+    return label
+}
+
+const usageDetailsCache             = new WeakMap<object, UsageDetail[]>()
 const usageDetailsWithEndpointCache = new WeakMap<object, UsageDetailWithEndpoint[]>()
 
 /**
@@ -426,10 +560,10 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
     }
     const details: UsageDetail[] = []
     // noinspection DuplicatedCode
-    const sourceCache = new Map<string, string>()
+    const sourceCache            = new Map<string, string>()
 
     const normalizeSource = (value: unknown): string => {
-        const raw = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
+        const raw     = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
         const trimmed = raw.trim()
         if (!trimmed) {
             return ''
@@ -448,7 +582,7 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
             return
         }
         const modelsRaw = apiEntry.models
-        const models = isRecord(modelsRaw) ? modelsRaw : null
+        const models    = isRecord(modelsRaw) ? modelsRaw : null
         if (!models) {
             return
         }
@@ -458,25 +592,27 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
                 return
             }
             const modelDetailsRaw = modelEntry.details
-            const modelDetails = Array.isArray(modelDetailsRaw) ? modelDetailsRaw : []
+            const modelDetails    = Array.isArray(modelDetailsRaw) ? modelDetailsRaw : []
 
             modelDetails.forEach((detailRaw) => {
-                if (!isRecord(detailRaw) || typeof detailRaw.timestamp !== 'string') {
+                if (!isRecord(detailRaw) || detailRaw.timestamp === undefined || detailRaw.timestamp === null) {
                     return
                 }
-                const timestamp = detailRaw.timestamp
-                const timestampMs = Date.parse(timestamp)
-                const tokensRaw = isRecord(detailRaw.tokens) ? detailRaw.tokens : {}
+                const timestamp   = timestampText(detailRaw.timestamp)
+                const timestampMs = parseTimestamp(detailRaw.timestamp)
+                const tokensRaw   = isRecord(detailRaw.tokens) ? detailRaw.tokens : {}
                 details.push({
-                    timestamp,
-                    source: normalizeSource(detailRaw.source),
-                    auth_index: detailRaw.auth_index as unknown as number,
-                    tokens: tokensRaw as unknown as UsageDetail['tokens'],
-                    failed: detailRaw.failed === true,
-                    __modelName: modelName,
-                    __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
-                    __apiKey: apiKey,
-                })
+                                 timestamp,
+                                 source: normalizeSource(detailRaw.source),
+                                 auth_index: detailRaw.auth_index as unknown as number,
+                                 latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
+                                 thinking: normalizeUsageThinking(detailRaw.thinking),
+                                 tokens: tokensRaw as unknown as UsageDetail['tokens'],
+                                 failed: detailRaw.failed === true,
+                                 __modelName: modelName,
+                                 __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+                                 __apiKey: apiKey,
+                             })
             })
         })
     })
@@ -506,10 +642,10 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
 
     const details: UsageDetailWithEndpoint[] = []
     // noinspection DuplicatedCode
-    const sourceCache = new Map<string, string>()
+    const sourceCache                        = new Map<string, string>()
 
     const normalizeSource = (value: unknown): string => {
-        const raw = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
+        const raw     = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
         const trimmed = raw.trim()
         if (!trimmed) {
             return ''
@@ -528,41 +664,43 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
             return
         }
         const modelsRaw = apiEntry.models
-        const models = isRecord(modelsRaw) ? modelsRaw : null
+        const models    = isRecord(modelsRaw) ? modelsRaw : null
         if (!models) {
             return
         }
 
-        const endpointMatch = endpoint.match(USAGE_ENDPOINT_METHOD_REGEX)
+        const endpointMatch  = endpoint.match(USAGE_ENDPOINT_METHOD_REGEX)
         const endpointMethod = endpointMatch?.groups?.method?.toUpperCase()
-        const endpointPath = endpointMatch?.groups?.path
+        const endpointPath   = endpointMatch?.groups?.path
 
         Object.entries(models).forEach(([modelName, modelEntry]) => {
             if (!isRecord(modelEntry)) {
                 return
             }
             const modelDetailsRaw = modelEntry.details
-            const modelDetails = Array.isArray(modelDetailsRaw) ? modelDetailsRaw : []
+            const modelDetails    = Array.isArray(modelDetailsRaw) ? modelDetailsRaw : []
 
             modelDetails.forEach((detailRaw) => {
-                if (!isRecord(detailRaw) || typeof detailRaw.timestamp !== 'string') {
+                if (!isRecord(detailRaw) || detailRaw.timestamp === undefined || detailRaw.timestamp === null) {
                     return
                 }
-                const timestamp = detailRaw.timestamp
-                const timestampMs = Date.parse(timestamp)
-                const tokensRaw = isRecord(detailRaw.tokens) ? detailRaw.tokens : {}
+                const timestamp   = timestampText(detailRaw.timestamp)
+                const timestampMs = parseTimestamp(detailRaw.timestamp)
+                const tokensRaw   = isRecord(detailRaw.tokens) ? detailRaw.tokens : {}
                 details.push({
-                    timestamp,
-                    source: normalizeSource(detailRaw.source),
-                    auth_index: detailRaw.auth_index as unknown as number,
-                    tokens: tokensRaw as unknown as UsageDetail['tokens'],
-                    failed: detailRaw.failed === true,
-                    __modelName: modelName,
-                    __endpoint: endpoint,
-                    __endpointMethod: endpointMethod,
-                    __endpointPath: endpointPath,
-                    __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
-                })
+                                 timestamp,
+                                 source: normalizeSource(detailRaw.source),
+                                 auth_index: detailRaw.auth_index as unknown as number,
+                                 latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
+                                 thinking: normalizeUsageThinking(detailRaw.thinking),
+                                 tokens: tokensRaw as unknown as UsageDetail['tokens'],
+                                 failed: detailRaw.failed === true,
+                                 __modelName: modelName,
+                                 __endpoint: endpoint,
+                                 __endpointMethod: endpointMethod,
+                                 __endpointPath: endpointPath,
+                                 __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+                             })
             })
         })
     })
@@ -577,18 +715,18 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
  * 从单条明细提取总 tokens
  */
 function extractTotalTokens(detail: unknown): number {
-    const record = isRecord(detail) ? detail : null
+    const record    = isRecord(detail) ? detail : null
     const tokensRaw = record?.tokens
-    const tokens = isRecord(tokensRaw) ? tokensRaw : {}
+    const tokens    = isRecord(tokensRaw) ? tokensRaw : {}
     if (typeof tokens.total_tokens === 'number') {
         return tokens.total_tokens
     }
-    const inputTokens = typeof tokens.input_tokens === 'number' ? tokens.input_tokens : 0
-    const outputTokens = typeof tokens.output_tokens === 'number' ? tokens.output_tokens : 0
+    const inputTokens     = typeof tokens.input_tokens === 'number' ? tokens.input_tokens : 0
+    const outputTokens    = typeof tokens.output_tokens === 'number' ? tokens.output_tokens : 0
     const reasoningTokens = typeof tokens.reasoning_tokens === 'number' ? tokens.reasoning_tokens : 0
-    const cachedTokens = Math.max(
+    const cachedTokens    = Math.max(
         typeof tokens.cached_tokens === 'number' ? Math.max(tokens.cached_tokens, 0) : 0,
-        typeof tokens.cache_tokens === 'number' ? Math.max(tokens.cache_tokens, 0) : 0
+        typeof tokens.cache_tokens === 'number' ? Math.max(tokens.cache_tokens, 0) : 0,
     )
 
     return inputTokens + outputTokens + reasoningTokens + cachedTokens
@@ -608,7 +746,7 @@ export function getModelNamesFromUsage(usageData: unknown): string[] {
             return
         }
         const modelsRaw = apiEntry.models
-        const models = isRecord(modelsRaw) ? modelsRaw : null
+        const models    = isRecord(modelsRaw) ? modelsRaw : null
         if (!models) {
             return
         }
@@ -627,7 +765,7 @@ export function getModelNamesFromUsage(usageData: unknown): string[] {
 export async function loadModelPrices(): Promise<Record<string, ModelPrice>> {
     try {
         const { modelPricesApi } = await import('@/services/api/modelPrices')
-        const serverPrices = await modelPricesApi.get()
+        const serverPrices       = await modelPricesApi.get()
 
         // Migrate localStorage data to server on first load
         if (
@@ -690,23 +828,23 @@ function loadModelPricesFromLocalStorage(): Record<string, ModelPrice> {
             if (!model) {
                 return
             }
-            const priceRecord = isRecord(price) ? price : null
-            const promptRaw = Number(priceRecord?.prompt)
+            const priceRecord   = isRecord(price) ? price : null
+            const promptRaw     = Number(priceRecord?.prompt)
             const completionRaw = Number(priceRecord?.completion)
-            const cacheRaw = Number(priceRecord?.cache)
+            const cacheRaw      = Number(priceRecord?.cache)
 
             if (!Number.isFinite(promptRaw) && !Number.isFinite(completionRaw) && !Number.isFinite(cacheRaw)) {
                 return
             }
 
-            const prompt = Number.isFinite(promptRaw) && promptRaw >= 0 ? promptRaw : 0
+            const prompt     = Number.isFinite(promptRaw) && promptRaw >= 0 ? promptRaw : 0
             const completion = Number.isFinite(completionRaw) && completionRaw >= 0 ? completionRaw : 0
-            const cache =
-                Number.isFinite(cacheRaw) && cacheRaw >= 0
-                    ? cacheRaw
-                    : Number.isFinite(promptRaw) && promptRaw >= 0
-                      ? promptRaw
-                      : prompt
+            const cache      =
+                      Number.isFinite(cacheRaw) && cacheRaw >= 0
+                      ? cacheRaw
+                      : Number.isFinite(promptRaw) && promptRaw >= 0
+                        ? promptRaw
+                        : prompt
 
             normalized[model] = {
                 prompt,
@@ -739,8 +877,8 @@ function saveModelPricesToLocalStorage(prices: Record<string, ModelPrice>): void
  */
 function formatHourLabel(date: Date): string {
     const month = (date.getMonth() + 1).toString().padStart(2, '0')
-    const day = date.getDate().toString().padStart(2, '0')
-    const hour = date.getHours().toString().padStart(2, '0')
+    const day   = date.getDate().toString().padStart(2, '0')
+    const hour  = date.getHours().toString().padStart(2, '0')
     return `${month}-${day} ${hour}:00`
 }
 
@@ -748,9 +886,9 @@ function formatHourLabel(date: Date): string {
  * 格式化日期标签
  */
 function formatDayLabel(date: Date): string {
-    const year = date.getFullYear()
+    const year  = date.getFullYear()
     const month = (date.getMonth() + 1).toString().padStart(2, '0')
-    const day = date.getDate().toString().padStart(2, '0')
+    const day   = date.getDate().toString().padStart(2, '0')
     return `${year}-${month}-${day}`
 }
 
@@ -812,8 +950,8 @@ const withAlpha = (hex: string, alpha: number) => {
 
 const buildAreaGradient = (context: ScriptableContext<'line'>, baseHex: string, fallback: string) => {
     const chart = context.chart
-    const ctx = chart.ctx
-    const area = chart.chartArea
+    const ctx   = chart.ctx
+    const area  = chart.chartArea
 
     if (!area) {
         return fallback
@@ -835,7 +973,7 @@ const buildAreaGradient = (context: ScriptableContext<'line'>, baseHex: string, 
 function buildMultiGroupChartData(
     groups: Record<string, SummaryTimePoint[]>,
     extractValue: (pt: SummaryTimePoint) => number | null,
-    formatLabel: (iso: string) => string
+    formatLabel: (iso: string) => string,
 ): ChartData {
     if (Object.keys(groups).length === 0) {
         return { labels: [], datasets: [] }
@@ -848,16 +986,16 @@ function buildMultiGroupChartData(
         }
     }
     const sortedTimes = Array.from(labelSet).sort()
-    const labels = sortedTimes.map(formatLabel)
-    const timeIndex = new Map(sortedTimes.map((t, i) => [t, i]))
+    const labels      = sortedTimes.map(formatLabel)
+    const timeIndex   = new Map(sortedTimes.map((t, i) => [t, i]))
 
     const entries = Object.entries(groups)
-        .map(([name, points]) => ({
-            name,
-            total: points.reduce((s, pt) => s + (extractValue(pt) ?? 0), 0),
-            points,
-        }))
-        .sort((a, b) => b.total - a.total)
+                          .map(([name, points]) => ({
+                              name,
+                              total: points.reduce((s, pt) => s + (extractValue(pt) ?? 0), 0),
+                              points,
+                          }))
+                          .sort((a, b) => b.total - a.total)
 
     const datasets: ChartDataset[] = entries.map(({ name, points }, index) => {
         const data = new Array(sortedTimes.length).fill(0)
@@ -868,7 +1006,7 @@ function buildMultiGroupChartData(
             }
         }
         const colorIndex = index % CHART_COLORS.length
-        const style = CHART_COLORS[colorIndex]
+        const style      = CHART_COLORS[colorIndex]
         return {
             label: name,
             data,
@@ -892,9 +1030,9 @@ export function getSummaryDataStart(summary?: ApiUsageSummary | null): Date | un
     }
 
     let earliestActive = Infinity
-    let earliestAny = Infinity
+    let earliestAny    = Infinity
     for (const pt of points) {
-        const ms = new Date(pt.time).getTime()
+        const ms = parseTimestamp(pt.time)
         if (!Number.isFinite(ms)) {
             continue
         }
@@ -913,7 +1051,7 @@ export function getSummaryDataStart(summary?: ApiUsageSummary | null): Date | un
 export function buildChartDataFromSummary(
     summary: ApiUsageSummary,
     metric: 'requests' | 'tokens' | 'cost',
-    dimension: ChartDimension = 'total'
+    dimension: ChartDimension = 'total',
 ): ChartData {
     const extractValue = (pt: SummaryTimePoint): number | null => {
         if (metric === 'requests') {
@@ -926,10 +1064,11 @@ export function buildChartDataFromSummary(
     }
 
     const formatLabel = (iso: string): string => {
-        const d = new Date(iso)
-        if (Number.isNaN(d.getTime())) {
+        const parsed = parseTimestamp(iso)
+        if (!Number.isFinite(parsed)) {
             return iso
         }
+        const d       = new Date(parsed)
         // 根据时间点间隔自动选择标签格式
         const hasHour = iso.includes('T') && !iso.endsWith('T00:00:00Z')
         return hasHour ? formatHourLabel(d) : formatDayLabel(d)
@@ -953,9 +1092,9 @@ export function buildChartDataFromSummary(
         return { labels: [], datasets: [] }
     }
 
-    const labels = points.map((pt) => formatLabel(pt.time))
+    const labels                  = points.map((pt) => formatLabel(pt.time))
     const data: (number | null)[] = points.map(extractValue)
-    const style = CHART_COLORS[0]
+    const style                   = CHART_COLORS[0]
 
     return {
         labels,
@@ -1004,14 +1143,14 @@ const RATE_COLOR_STOPS = [
 
 /** Interpolate between red → yellow → green based on success rate (0–1). */
 export function rateToColor(rate: number): string {
-    const t = Math.max(0, Math.min(1, rate))
+    const t       = Math.max(0, Math.min(1, rate))
     const segment = t < 0.5 ? 0 : 1
-    const localT = segment === 0 ? t * 2 : (t - 0.5) * 2
-    const from = RATE_COLOR_STOPS[segment]
-    const to = RATE_COLOR_STOPS[segment + 1]
-    const r = Math.round(from.r + (to.r - from.r) * localT)
-    const g = Math.round(from.g + (to.g - from.g) * localT)
-    const b = Math.round(from.b + (to.b - from.b) * localT)
+    const localT  = segment === 0 ? t * 2 : (t - 0.5) * 2
+    const from    = RATE_COLOR_STOPS[segment]
+    const to      = RATE_COLOR_STOPS[segment + 1]
+    const r       = Math.round(from.r + (to.r - from.r) * localT)
+    const g       = Math.round(from.g + (to.g - from.g) * localT)
+    const b       = Math.round(from.b + (to.b - from.b) * localT)
     return `rgb(${r}, ${g}, ${b})`
 }
 
@@ -1028,12 +1167,14 @@ export interface StatusBarData {
 
 export function calculateStatusBarDataFromRecentRequests(recentRequests: RecentRequestBucket[]): StatusBarData {
     const blockDetails: StatusBlockDetail[] = recentRequests.map((bucket, index) => {
-        const success = Number(bucket.success ?? 0)
-        const failure = Number(bucket.failed ?? 0)
-        const total = success + failure
-        const now = Date.now()
-        const endTime = now - (recentRequests.length - 1 - index) * 10 * 60 * 1000
-        const startTime = endTime - 10 * 60 * 1000
+        const success           = Number(bucket.success ?? 0)
+        const failure           = Number(bucket.failed ?? 0)
+        const total             = success + failure
+        const now               = Date.now()
+        const fallbackEndTime   = now - (recentRequests.length - 1 - index) * 10 * 60 * 1000
+        const fallbackStartTime = fallbackEndTime - 10 * 60 * 1000
+        const startTime         = typeof bucket.startTimeMs === 'number' ? bucket.startTimeMs : fallbackStartTime
+        const endTime           = typeof bucket.endTimeMs === 'number' ? bucket.endTimeMs : fallbackEndTime
         return {
             success,
             failure,
@@ -1059,7 +1200,7 @@ export function calculateStatusBarDataFromRecentRequests(recentRequests: RecentR
 
     const totalSuccess = blockDetails.reduce((sum, detail) => sum + detail.success, 0)
     const totalFailure = blockDetails.reduce((sum, detail) => sum + detail.failure, 0)
-    const total = totalSuccess + totalFailure
+    const total        = totalSuccess + totalFailure
 
     return {
         blocks,
@@ -1074,105 +1215,6 @@ export function calculateStatusBarDataFromRecentRequests(recentRequests: RecentR
  * 计算状态栏数据（最近240分钟，分为24个10分钟的时间块）
  * 每个时间块代表窗口内的一个等长区间，用于展示成功/失败趋势
  */
-export function calculateStatusBarData(
-    usageDetails: UsageDetail[],
-    sourceFilter?: string,
-    authIndexFilter?: number
-): StatusBarData {
-    const BLOCK_COUNT = 24
-    const BLOCK_DURATION_MS = 10 * 60 * 1000 // 10 minutes
-    const WINDOW_MS = BLOCK_COUNT * BLOCK_DURATION_MS // 240 minutes = 4 hours
-
-    // Align window end to the next whole 10-minute boundary
-    const now = Date.now()
-    const alignedEnd = Math.ceil(now / BLOCK_DURATION_MS) * BLOCK_DURATION_MS
-    const windowStart = alignedEnd - WINDOW_MS
-
-    // Initialize blocks
-    const blockStats: Array<{ success: number; failure: number; tokens: number }> = Array.from(
-        { length: BLOCK_COUNT },
-        () => ({ success: 0, failure: 0, tokens: 0 })
-    )
-
-    let totalSuccess = 0
-    let totalFailure = 0
-
-    // Filter and bucket the usage details
-    usageDetails.forEach((detail) => {
-        const timestamp = typeof detail.__timestampMs === 'number' ? detail.__timestampMs : Date.parse(detail.timestamp)
-        if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp < windowStart || timestamp > now) {
-            return
-        }
-
-        // Apply filters if provided
-        if (sourceFilter !== undefined && detail.source !== sourceFilter) {
-            return
-        }
-        if (authIndexFilter !== undefined && detail.auth_index !== authIndexFilter) {
-            return
-        }
-
-        // Calculate which block this falls into (0 = oldest, 23 = newest)
-        // noinspection DuplicatedCode
-        const ageMs = alignedEnd - timestamp
-        const blockIndex = BLOCK_COUNT - 1 - Math.floor(ageMs / BLOCK_DURATION_MS)
-
-        if (blockIndex >= 0 && blockIndex < BLOCK_COUNT) {
-            const tokens = detail.tokens?.total_tokens ?? 0
-            blockStats[blockIndex].tokens += tokens
-            if (detail.failed) {
-                blockStats[blockIndex].failure += 1
-                totalFailure += 1
-            } else {
-                blockStats[blockIndex].success += 1
-                totalSuccess += 1
-            }
-        }
-    })
-
-    // Convert stats to block states and build details
-    // noinspection DuplicatedCode
-    const blocks: StatusBlockState[] = []
-    const blockDetails: StatusBlockDetail[] = []
-
-    blockStats.forEach((stat, idx) => {
-        const total = stat.success + stat.failure
-        if (total === 0) {
-            blocks.push('idle')
-        } else if (stat.failure === 0) {
-            blocks.push('success')
-        } else if (stat.success === 0) {
-            blocks.push('failure')
-        } else {
-            blocks.push('mixed')
-        }
-
-        const blockStartTime = windowStart + idx * BLOCK_DURATION_MS
-        blockDetails.push({
-            success: stat.success,
-            failure: stat.failure,
-            rate: total > 0 ? stat.success / total : -1,
-            startTime: blockStartTime,
-            endTime: blockStartTime + BLOCK_DURATION_MS,
-            totalTokens: stat.tokens,
-        })
-    })
-
-    // Calculate success rate. R-461:无请求时返回 -1(与 blockDetails.rate 语义
-    // 一致)而不是 100,避免"Gemini 未使用却显示 100% 成功率"这类误导;消费方
-    // 应在显示前检查 total > 0 或 successRate >= 0。
-    const total = totalSuccess + totalFailure
-    const successRate = total > 0 ? (totalSuccess / total) * 100 : -1
-
-    return {
-        blocks,
-        blockDetails,
-        successRate,
-        totalSuccess,
-        totalFailure,
-    }
-}
-
 /**
  * 服务健康监测数据（由 ServiceHealthCard 基于 summary.time_series 计算，8×96 网格，每格 1 小时，最近 32 天）
  */
@@ -1184,51 +1226,6 @@ export interface ServiceHealthData {
     totalFailure: number
     rows: number
     cols: number
-}
-
-export function computeKeyStatsFromDetails(usageDetails: UsageDetail[]): KeyStats {
-    const bySource: Record<string, KeyStatBucket> = {}
-    const bySourceQualified: Record<string, KeyStatBucket> = {}
-    const byAuthIndex: Record<string, KeyStatBucket> = {}
-
-    const ensureBucket = (bucket: Record<string, KeyStatBucket>, key: string) => {
-        if (!bucket[key]) {
-            bucket[key] = { success: 0, failure: 0 }
-        }
-        return bucket[key]
-    }
-
-    usageDetails.forEach((detail) => {
-        const source = normalizeUsageSourceId(detail.source)
-        const authIndexKey = normalizeAuthIndex(detail.auth_index)
-        const isFailed = detail.failed
-
-        if (source) {
-            const bucket = ensureBucket(bySource, source)
-            if (isFailed) {
-                bucket.failure += 1
-            } else {
-                bucket.success += 1
-            }
-            const qualifiedBucket = ensureBucket(bySourceQualified, source)
-            if (isFailed) {
-                qualifiedBucket.failure += 1
-            } else {
-                qualifiedBucket.success += 1
-            }
-        }
-
-        if (authIndexKey) {
-            const bucket = ensureBucket(byAuthIndex, authIndexKey)
-            if (isFailed) {
-                bucket.failure += 1
-            } else {
-                bucket.success += 1
-            }
-        }
-    })
-
-    return { bySource, bySourceQualified, byAuthIndex }
 }
 
 export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning'
@@ -1257,7 +1254,7 @@ export function filterUsageBySelections(
     usageData: unknown,
     selectedModels: string[],
     selectedCredentials: string[],
-    selectedApiKeys: string[] = []
+    selectedApiKeys: string[] = [],
 ): unknown {
     if (selectedModels.length === 0 && selectedCredentials.length === 0 && selectedApiKeys.length === 0) {
         return usageData
@@ -1271,18 +1268,18 @@ export function filterUsageBySelections(
         return usageData
     }
 
-    const modelSet = selectedModels.length > 0 ? new Set(selectedModels) : null
-    const credSet =
-        selectedCredentials.length > 0
-            ? new Set(selectedCredentials.map(normalizeCredentialFilterValue).filter(Boolean))
-            : null
+    const modelSet  = selectedModels.length > 0 ? new Set(selectedModels) : null
+    const credSet   =
+              selectedCredentials.length > 0
+              ? new Set(selectedCredentials.map(normalizeCredentialFilterValue).filter(Boolean))
+              : null
     const apiKeySet = selectedApiKeys.length > 0 ? new Set(selectedApiKeys) : null
 
     const filteredApis: Record<string, unknown> = {}
-    let totalRequests = 0
-    let totalTokens = 0
-    let successCount = 0
-    let failureCount = 0
+    let totalRequests                           = 0
+    let totalTokens                             = 0
+    let successCount                            = 0
+    let failureCount                            = 0
 
     Object.entries(apis).forEach(([apiName, apiEntry]) => {
         if (!isRecord(apiEntry)) {
@@ -1294,8 +1291,8 @@ export function filterUsageBySelections(
         }
 
         const filteredModels: Record<string, unknown> = {}
-        let apiRequests = 0
-        let apiTokens = 0
+        let apiRequests                               = 0
+        let apiTokens                                 = 0
 
         Object.entries(models).forEach(([modelName, modelEntry]) => {
             if (modelSet && !modelSet.has(modelName)) {
@@ -1312,7 +1309,7 @@ export function filterUsageBySelections(
                 return
             }
 
-            const details = Array.isArray(modelEntry.details) ? modelEntry.details : []
+            const details         = Array.isArray(modelEntry.details) ? modelEntry.details : []
             const filteredDetails = details.filter((d: unknown) => {
                 if (!isRecord(d)) {
                     return false
@@ -1336,7 +1333,7 @@ export function filterUsageBySelections(
                 return
             }
 
-            let mTokens = 0
+            let mTokens  = 0
             let mSuccess = 0
             let mFailure = 0
             filteredDetails.forEach((d: Record<string, unknown>) => {

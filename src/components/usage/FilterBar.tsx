@@ -1,17 +1,16 @@
-import { Button } from '@/components/ui/Button'
-import { DateRangePicker } from '@/components/ui/DateRangePicker'
-import { MultiSelect } from '@/components/ui/MultiSelect'
-import { formatAuthFileDisplayName, inferProviderFromAuthFileName } from '@/features/authFiles/constants'
-import { apiKeysApi } from '@/services/api/apiKeys'
-import type { UsageSummary } from '@/services/api/usage'
-import type { CredentialInfo } from '@/types/sourceInfo'
-import { formatDateTime } from '@/utils/format'
-import { getCredentialSourcesFromUsage, getModelNamesFromUsage, getSummaryDataStart } from '@/utils/usage'
-import { summaryToCredentialEntries } from '@/utils/usage/summaryHelpers'
-import { useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {Button} from '@/components/ui/Button'
+import {DateRangePicker} from '@/components/ui/DateRangePicker'
+import {MultiSelect} from '@/components/ui/MultiSelect'
+import {formatAuthFileDisplayName, inferProviderFromAuthFileName} from '@/features/authFiles/constants'
+import type {UsageSummary} from '@/services/api/usage'
+import type {CredentialInfo} from '@/types/sourceInfo'
+import {formatDateTime} from '@/utils/format'
+import {getCredentialSourcesFromUsage, getModelNamesFromUsage, getSummaryDataStart} from '@/utils/usage'
+import {summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
+import {useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './FilterBar.module.scss'
-import type { UsagePayload } from './hooks/useUsageData'
+import type {UsagePayload} from './hooks/useUsageData'
 
 function formatTime(date: Date): string {
     const full = formatDateTime(date)
@@ -43,7 +42,7 @@ function formatCredentialOptionLabel(provider: string, source: string, aliases?:
 
 function normalizeCredentialOption(
     entry: { filterKey: string; provider: string; source: string },
-    aliases?: Record<string, string>
+    aliases?: Record<string, string>,
 ): { value: string; label: string } {
     const inferredProvider = entry.provider || inferProviderFromAuthFileName(entry.source)
     const normalizedSource = inferredProvider ? formatAuthFileDisplayName(entry.source) || entry.source : entry.source
@@ -62,9 +61,31 @@ function buildCredentialOptionDisplayKey(provider: string, source: string, alias
     return `${normalizeCredentialProviderForDisplay(provider)}::${displaySource.toLowerCase()}`
 }
 
+function buildCredentialOptionsFromSummary(
+    sourceSummary: UsageSummary | null | undefined,
+    aliases?: Record<string, string>,
+): Array<{ value: string; label: string }> {
+    if (!sourceSummary?.by_credential) {
+        return []
+    }
+
+    const deduped = new Map<string, { value: string; label: string; sortKey: string }>()
+    summaryToCredentialEntries(sourceSummary.by_credential).forEach((entry) => {
+        const option    = normalizeCredentialOption(entry, aliases)
+        const dedupeKey = buildCredentialOptionDisplayKey(entry.provider, entry.source, aliases)
+        if (!deduped.has(dedupeKey)) {
+            deduped.set(dedupeKey, { ...option, sortKey: option.label.toLowerCase() })
+        }
+    })
+
+    return Array.from(deduped.values())
+                .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+                .map(({ value, label }) => ({ value, label }))
+}
+
 // alias 缺失时的脱敏:保留可识别前缀 + 后 8 位指纹,既不泄露完整 secret,
-// 也不让操作员只看到一团 *** 失去识别力。短串(<16)直接放过——业务里多
-// 是 OAuth 邮箱、文件名,不属于 secret 范畴。
+// 也不让操作员只看到一团 *** 失去识别力，短串(<16)直接放过——业务里多
+// 是 OAuth 邮箱、文件名,不属于 secret 范畴，
 function maskSensitiveKey(key: string): string {
     if (!key || key.length < 16) {
         return key
@@ -77,7 +98,7 @@ function maskSensitiveKey(key: string): string {
 
 // (none) sentinel 用于筛选 api_key 为空的 OAuth 行,后端在 inClause
 // 里专门支持 IS NULL 分支(internal/usage/sqlite_query.go),这里把它从
-// 排除名单挪到展示名单。
+// 排除名单挪到展示名单，
 const NONE_API_KEY_SENTINEL = '(none)'
 
 interface FilterBarProps {
@@ -108,46 +129,30 @@ interface FilterBarProps {
 }
 
 export function FilterBar({
-    usage,
-    dateFrom,
-    dateTo,
-    activePreset,
-    onDateRangeChange,
-    selectedModels,
-    onSelectedModelsChange,
-    selectedCredentials,
-    onSelectedCredentialsChange,
-    selectedApiKeys,
-    onSelectedApiKeysChange,
-    summary,
-    optionsSummary,
-    aliases,
-    authFileMap,
-    onExport,
-    onImport,
-    onRefresh,
-    loading,
-    exporting,
-    importing,
-    lastRefreshedAt,
-}: FilterBarProps) {
+                              usage,
+                              dateFrom,
+                              dateTo,
+                              activePreset,
+                              onDateRangeChange,
+                              selectedModels,
+                              onSelectedModelsChange,
+                              selectedCredentials,
+                              onSelectedCredentialsChange,
+                              selectedApiKeys,
+                              onSelectedApiKeysChange,
+                              summary,
+                              optionsSummary,
+                              aliases,
+                              authFileMap,
+                              onExport,
+                              onImport,
+                              onRefresh,
+                              loading,
+                              exporting,
+                              importing,
+                              lastRefreshedAt,
+                          }: FilterBarProps) {
     const { t } = useTranslation()
-    const [apiKeys, setApiKeys] = useState<string[]>([])
-
-    useEffect(() => {
-        let cancelled = false
-        void apiKeysApi
-            .list()
-            .then((data) => {
-                if (!cancelled) {
-                    setApiKeys(Array.isArray(data) ? data : [])
-                }
-            })
-            .catch(() => {})
-        return () => {
-            cancelled = true
-        }
-    }, [])
 
     const modelOptions = useMemo(() => {
         const sourceSummary = optionsSummary ?? summary
@@ -162,13 +167,19 @@ export function FilterBar({
     }, [usage, optionsSummary, summary])
 
     const credentialOptions = useMemo(() => {
+        const sourceSummary  = optionsSummary ?? summary
+        const summaryOptions = buildCredentialOptionsFromSummary(sourceSummary, aliases)
+        if (summaryOptions.length > 0) {
+            return summaryOptions
+        }
+
         if (authFileMap && authFileMap.size > 0) {
             const options = Array.from(authFileMap.values()).map((info) => {
-                const rawName = info.rawName || info.name
+                const rawName  = info.rawName || info.name
                 const provider = info.type || inferProviderFromAuthFileName(rawName)
-                const source = formatAuthFileDisplayName(rawName) || info.name
+                const source   = formatAuthFileDisplayName(rawName) || info.name
                 return {
-                    value: provider ? `${provider}:${source}` : source,
+                    value: rawName,
                     label: formatCredentialOptionLabel(provider, source, aliases),
                     sortKey: `${normalizeCredentialProviderForDisplay(provider)}::${source.toLowerCase()}`,
                 }
@@ -176,24 +187,6 @@ export function FilterBar({
             return options
                 .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
                 .map(({ value, label }) => ({ value, label }))
-        }
-
-        const sourceSummary = optionsSummary ?? summary
-        if (sourceSummary?.by_credential) {
-            const deduped = new Map<string, { value: string; label: string; sortKey: string }>()
-            const entries = summaryToCredentialEntries(sourceSummary.by_credential)
-            entries.forEach((entry) => {
-                const option = normalizeCredentialOption(entry, aliases)
-                const dedupeKey = buildCredentialOptionDisplayKey(entry.provider, entry.source, aliases)
-                if (!deduped.has(dedupeKey)) {
-                    deduped.set(dedupeKey, { ...option, sortKey: option.label.toLowerCase() })
-                }
-            })
-            if (deduped.size > 0) {
-                return Array.from(deduped.values())
-                    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-                    .map(({ value, label }) => ({ value, label }))
-            }
         }
 
         const sources = getCredentialSourcesFromUsage(usage)
@@ -206,19 +199,19 @@ export function FilterBar({
             return []
         }
         // "(none)" 是后端给 OAuth 行分配的 synthetic bucket,保证 by_api_key
-        // 守恒等于 totals。允许用户选它来定向看 OAuth 流量,后端 inClause
-        // 已支持 NULL 分支(IS NULL OR IN ...)。
+        // 守恒等于 totals，允许用户选它来定向看 OAuth 流量,后端 inClause
+        // 已支持 NULL 分支(IS NULL OR IN ...)，
         return Object.keys(sourceSummary.by_api_key)
-            .filter((k) => k.trim().length > 0)
-            .sort()
-            .map((k) => ({
-                value: k,
-                label:
-                    k === NONE_API_KEY_SENTINEL
-                        ? t('usage_stats.filter_api_key_none', { defaultValue: '(无 API Key / OAuth)' })
-                        : aliases?.[k] || apiKeys.find((rawKey) => rawKey === k) || maskSensitiveKey(k),
-            }))
-    }, [optionsSummary, summary, aliases, apiKeys, t])
+                     .filter((k) => k.trim().length > 0)
+                     .sort()
+                     .map((k) => ({
+                         value: k,
+                         label:
+                             k === NONE_API_KEY_SENTINEL
+                             ? t('usage_stats.filter_api_key_none', { defaultValue: '(无 API Key / OAuth)' })
+                             : aliases?.[k] || maskSensitiveKey(k),
+                     }))
+    }, [optionsSummary, summary, aliases, t])
 
     const earliestDate = useMemo(() => getSummaryDataStart(summary), [summary])
 
@@ -272,7 +265,7 @@ export function FilterBar({
                             onChange={onSelectedApiKeysChange}
                             allLabel={t('usage_stats.filter_all')}
                             fullWidth={false}
-                            ariaLabel="API Key"
+                            ariaLabel='API Key'
                             className={styles.filterSelect}
                         />
                     </div>
@@ -280,8 +273,8 @@ export function FilterBar({
             </div>
             <div className={styles.actions}>
                 <Button
-                    variant="secondary"
-                    size="sm"
+                    variant='secondary'
+                    size='sm'
                     onClick={onExport}
                     loading={exporting}
                     disabled={loading || importing}
@@ -289,8 +282,8 @@ export function FilterBar({
                     {t('usage_stats.export')}
                 </Button>
                 <Button
-                    variant="secondary"
-                    size="sm"
+                    variant='secondary'
+                    size='sm'
                     onClick={onImport}
                     loading={importing}
                     disabled={loading || exporting}
@@ -298,8 +291,8 @@ export function FilterBar({
                     {t('usage_stats.import')}
                 </Button>
                 <Button
-                    variant="secondary"
-                    size="sm"
+                    variant='secondary'
+                    size='sm'
                     onClick={onRefresh}
                     loading={loading}
                     disabled={exporting || importing}

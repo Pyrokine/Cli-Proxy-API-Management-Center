@@ -1,17 +1,17 @@
-import type { UsageSummary } from '@/services/api/usage'
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { CredentialInfo } from '@/types/sourceInfo'
-import type { ChartDimension, ModelPrice } from '@/utils/usage'
-import { summaryToApiKeyStats, summaryToModelStats } from '@/utils/usage/summaryHelpers'
-import { useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
-import { CredentialStatsCard } from './CredentialStatsCard'
-import type { UsagePayload } from './hooks/useUsageData'
-import { ModelStatsCard } from './ModelStatsCard'
+import type {UsageSummary} from '@/services/api/usage'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {CredentialInfo} from '@/types/sourceInfo'
+import type {ChartDimension, ModelPrice} from '@/utils/usage'
+import {summaryToApiKeyStats, summaryToModelStats} from '@/utils/usage/summaryHelpers'
+import {useMemo} from 'react'
+import {useTranslation} from 'react-i18next'
+import {CredentialStatsCard} from './CredentialStatsCard'
+import type {UsagePayload} from './hooks/useUsageData'
+import {ModelStatsCard} from './ModelStatsCard'
 import styles from './OverviewTab.module.scss'
-import { ServiceHealthCard } from './ServiceHealthCard'
-import { TokenBreakdownChart } from './TokenBreakdownChart'
-import { UnifiedTrendChart } from './UnifiedTrendChart'
+import {ServiceHealthCard} from './ServiceHealthCard'
+import {TokenBreakdownChart} from './TokenBreakdownChart'
+import {UnifiedTrendChart} from './UnifiedTrendChart'
 
 export interface CredentialContext {
     loading: boolean
@@ -30,10 +30,10 @@ interface OverviewTabProps {
     summaryError?: string
     heatmapLoading?: boolean
     heatmapError?: string
-    heatmapReady?: boolean
     isMobile: boolean
     chartDimension: ChartDimension
     summary?: UsageSummary | null
+    liveSummary?: UsageSummary | null
     heatmapSummary?: UsageSummary | null
     fromMs: number
     toMs: number
@@ -47,25 +47,25 @@ interface OverviewTabProps {
 }
 
 export function OverviewTab({
-    usage,
-    loading,
-    usageLoading,
-    summaryError,
-    heatmapLoading,
-    heatmapError,
-    heatmapReady,
-    isMobile,
-    chartDimension,
-    summary,
-    heatmapSummary,
-    fromMs,
-    toMs,
-    modelPrices,
-    credentials,
-    aliases,
-    onRefresh,
-    refreshing,
-}: OverviewTabProps) {
+                                usage,
+                                loading,
+                                usageLoading,
+                                summaryError,
+                                heatmapLoading,
+                                heatmapError,
+                                isMobile,
+                                chartDimension,
+                                summary,
+                                liveSummary,
+                                heatmapSummary,
+                                fromMs,
+                                toMs,
+                                modelPrices,
+                                credentials,
+                                aliases,
+                                onRefresh,
+                                refreshing,
+                            }: OverviewTabProps) {
     const { t } = useTranslation()
 
     const modelStats = useMemo(() => {
@@ -82,7 +82,7 @@ export function OverviewTab({
         return []
     }, [summary, aliases])
 
-    const hasPrices = modelPrices ? Object.keys(modelPrices).length > 0 : false
+    const hasPrices         = modelPrices ? Object.keys(modelPrices).length > 0 : false
     const hasCredentialData = !!summary?.by_credential && Object.keys(summary.by_credential).length > 0
 
     return (
@@ -91,33 +91,36 @@ export function OverviewTab({
             <div className={styles.metricsGrid}>
                 <UnifiedTrendChart
                     summary={summary ?? null}
+                    liveSummary={liveSummary ?? null}
                     loading={loading}
                     error={summaryError}
                     chartDimension={chartDimension}
                     isMobile={isMobile}
-                    metric="requests"
+                    metric='requests'
                 />
                 <UnifiedTrendChart
                     summary={summary ?? null}
+                    liveSummary={liveSummary ?? null}
                     loading={loading}
                     error={summaryError}
                     chartDimension={chartDimension}
                     isMobile={isMobile}
-                    metric="tokens"
+                    metric='tokens'
                 />
                 <UnifiedTrendChart
                     summary={summary ?? null}
+                    liveSummary={liveSummary ?? null}
                     loading={loading}
                     error={summaryError}
                     chartDimension={chartDimension}
                     isMobile={isMobile}
-                    metric="cost"
+                    metric='cost'
                 />
             </div>
 
             <ServiceHealthCard
                 loading={heatmapLoading ?? loading}
-                summary={heatmapReady ? heatmapSummary : null}
+                summary={heatmapSummary ?? null}
                 fromMs={fromMs}
                 toMs={toMs}
                 error={heatmapError}

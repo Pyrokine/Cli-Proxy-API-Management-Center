@@ -2,7 +2,7 @@
  * 使用统计相关 API
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 const USAGE_TIMEOUT_MS = 60 * 1000
 
@@ -27,7 +27,7 @@ function localToIsoUtc(value: string): string {
     }
     // datetime-local input 没有秒,补 :00 或 T00:00 让 Date 解析稳定
     const normalized = value.includes('T') ? value : `${value}T00:00`
-    const d = new Date(normalized)
+    const d          = new Date(normalized)
     if (Number.isNaN(d.getTime())) {
         return value
     }
@@ -35,7 +35,7 @@ function localToIsoUtc(value: string): string {
 }
 
 function stripFractional(iso: string): string {
-    return iso.replace(/\.\d+(Z|[+-]\d{2}:?\d{2})$/, '$1')
+    return iso.replace(/\.\d+(?<tz>Z|[+-]\d{2}:?\d{2})$/, '$<tz>')
 }
 
 interface UsageExportPayload {
@@ -96,6 +96,9 @@ export interface SummaryTotals {
     failure: number
     tokens: SummaryTokens
     cost: number
+    average_latency_ms?: number | null
+    total_latency_ms?: number | null
+    latency_sample_count?: number
 }
 
 export interface SummaryModelStats {
@@ -104,6 +107,9 @@ export interface SummaryModelStats {
     failure: number
     tokens: SummaryTokens
     cost: number
+    average_latency_ms?: number | null
+    total_latency_ms?: number | null
+    latency_sample_count?: number
 }
 
 export interface SummaryCredentialStats {
@@ -123,6 +129,9 @@ export interface SummaryApiKeyStats {
     failure: number
     tokens: SummaryTokens
     cost: number
+    average_latency_ms?: number | null
+    total_latency_ms?: number | null
+    latency_sample_count?: number
 }
 
 export interface SummaryTimePoint {
@@ -155,12 +164,22 @@ export interface EventTokens {
     total_tokens: number
 }
 
+export interface UsageThinking {
+    intensity?: string
+    mode?: string
+    level?: string
+    budget?: number
+}
+
 export interface UsageEvent {
     timestamp: string
     model: string
     source: string
     auth_index: string
     api_key: string
+    provider?: string
+    latency_ms?: number | string | null
+    thinking?: UsageThinking | null
     tokens: EventTokens
     failed: boolean
 }
@@ -213,7 +232,7 @@ export const usageApi = {
                 }
             }
         }
-        const qs = params.toString()
+        const qs  = params.toString()
         const url = qs ? `/usage/export?${qs}` : '/usage/export'
         return apiClient.get<UsageExportPayload>(url, { timeout: USAGE_TIMEOUT_MS })
     },
@@ -270,7 +289,7 @@ export const usageApi = {
             credential?: string
             groups?: 'none' | 'all'
         },
-        options?: { signal?: AbortSignal }
+        options?: { signal?: AbortSignal },
     ) => {
         const searchParams = new URLSearchParams()
         if (params?.from) {
@@ -345,14 +364,4 @@ export const usageApi = {
             signal: options?.signal,
         })
     },
-
-    /**
-     * 用当前价格表重新计算所有历史费用
-     */
-    recalculateCosts: () =>
-        apiClient.post<{ status: string; recalculated_days: number; total_cost: number }>(
-            '/usage/recalculate-costs',
-            {},
-            { timeout: USAGE_TIMEOUT_MS }
-        ),
 }

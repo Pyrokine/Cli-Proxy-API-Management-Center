@@ -1,6 +1,6 @@
-import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types'
-import type { CredentialInfo } from '@/types/sourceInfo'
-import { RequestEventsDetailsCard } from './RequestEventsDetailsCard'
+import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {CredentialInfo} from '@/types/sourceInfo'
+import {RequestEventsDetailsCard} from './RequestEventsDetailsCard'
 
 interface EventsTabProps {
     enabled?: boolean
@@ -23,24 +23,24 @@ interface EventsTabProps {
 }
 
 export function EventsTab({
-    enabled = true,
-    refreshToken,
-    geminiKeys,
-    claudeConfigs,
-    codexConfigs,
-    vertexConfigs,
-    openaiProviders,
-    drillDownSearch,
-    authFileMap,
-    dateRange,
-    activePreset,
-    aliases,
-    autoRefreshConfigSeconds,
-    onVisibleDateRangeChange,
-    selectedModels,
-    selectedCredentials,
-    selectedApiKeys,
-}: EventsTabProps) {
+                              enabled = true,
+                              refreshToken,
+                              geminiKeys,
+                              claudeConfigs,
+                              codexConfigs,
+                              vertexConfigs,
+                              openaiProviders,
+                              drillDownSearch,
+                              authFileMap,
+                              dateRange,
+                              activePreset,
+                              aliases,
+                              autoRefreshConfigSeconds,
+                              onVisibleDateRangeChange,
+                              selectedModels,
+                              selectedCredentials,
+                              selectedApiKeys,
+                          }: EventsTabProps) {
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <RequestEventsDetailsCard

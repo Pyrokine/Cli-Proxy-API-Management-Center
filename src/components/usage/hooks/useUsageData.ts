@@ -1,11 +1,11 @@
 import defaultPricesJson from '@/data/defaultModelPrices.json'
-import { usageApi } from '@/services/api/usage'
-import { USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore } from '@/stores'
-import type { NotificationType } from '@/types'
-import { downloadBlob } from '@/utils/download'
-import { formatUsd, loadModelPrices, type ModelPrice, saveModelPrices } from '@/utils/usage'
-import { type ChangeEvent, type RefObject, useCallback, useEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {usageApi} from '@/services/api/usage'
+import {USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore} from '@/stores'
+import type {NotificationType} from '@/types'
+import {downloadBlob} from '@/utils/download'
+import {formatUsd, loadModelPrices, type ModelPrice, saveModelPrices} from '@/utils/usage'
+import {type ChangeEvent, type RefObject, useCallback, useEffect, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
 export interface UsagePayload {
     total_requests?: number
@@ -56,19 +56,19 @@ interface UseUsageDataOptions {
 
 export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataReturn {
     const { enabled = true, loadModelPricesEnabled = true, onAfterImport, onAfterPricesSaved } = options
-    const { t } = useTranslation()
-    const { showNotification, showConfirmation, addPersistentNotification } = useNotificationStore()
-    const usageSnapshot = useUsageStatsStore((state) => state.usage)
-    const loading = useUsageStatsStore((state) => state.loading)
-    const storeError = useUsageStatsStore((state) => state.error)
-    const lastRefreshedAtTs = useUsageStatsStore((state) => state.lastRefreshedAt)
-    const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats)
+    const { t }                                                                                = useTranslation()
+    const { showNotification, showConfirmation, addPersistentNotification }                    = useNotificationStore()
+    const usageSnapshot                                                                        = useUsageStatsStore((state) => state.usage)
+    const loading                                                                              = useUsageStatsStore((state) => state.loading)
+    const storeError                                                                           = useUsageStatsStore((state) => state.error)
+    const lastRefreshedAtTs                                                                    = useUsageStatsStore((state) => state.lastRefreshedAt)
+    const loadUsageStats                                                                       = useUsageStatsStore((state) => state.loadUsageStats)
 
-    const [modelPrices, setModelPrices] = useState<Record<string, ModelPrice>>({})
+    const [modelPrices, setModelPrices]             = useState<Record<string, ModelPrice>>({})
     const [priceSaveFeedback, setPriceSaveFeedback] = useState<PriceSaveFeedback | null>(null)
-    const [exporting, setExporting] = useState(false)
-    const [importing, setImporting] = useState(false)
-    const importInputRef = useRef<HTMLInputElement | null>(null)
+    const [exporting, setExporting]                 = useState(false)
+    const [importing, setImporting]                 = useState(false)
+    const importInputRef                            = useRef<HTMLInputElement | null>(null)
 
     const buildPriceSaveFeedback = useCallback(
         (result: Awaited<ReturnType<typeof saveModelPrices>>): PriceSaveFeedback => {
@@ -77,12 +77,14 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
 
             if (result === null) {
                 message = t('usage_stats.model_price_saved_local')
-                type = 'warning'
+                type    = 'warning'
             } else if (result.recalculation_error) {
                 const base =
-                    result.status === 'busy' ? t('usage_stats.recalculate_busy') : t('usage_stats.recalculate_failed')
-                message = `${t('usage_stats.model_price_saved')}, ${base}: ${result.recalculation_error}`
-                type = result.status === 'busy' ? 'warning' : 'error'
+                          result.status === 'busy' ?
+                          t('usage_stats.recalculate_busy') :
+                          t('usage_stats.recalculate_failed')
+                message    = `${t('usage_stats.model_price_saved')}, ${base}: ${result.recalculation_error}`
+                type       = result.status === 'busy' ? 'warning' : 'error'
             } else if (result.recalculation) {
                 message = `${t('usage_stats.model_price_saved')}, ${t('usage_stats.recalculate_success', {
                     days: result.recalculated_days ?? 0,
@@ -94,7 +96,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
 
             return { message, type }
         },
-        [t]
+        [t],
     )
 
     const loadUsage = useCallback(async () => {
@@ -113,12 +115,13 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                 await onAfterPricesSaved()
             }
         },
-        [enabled, loadUsageStats, onAfterPricesSaved]
+        [enabled, loadUsageStats, onAfterPricesSaved],
     )
 
     useEffect(() => {
         if (enabled) {
-            void loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {})
+            void loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {
+            })
         }
         if (!loadModelPricesEnabled) {
             return
@@ -147,22 +150,23 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                     })
                 }
             })
-            .catch(() => {})
+            .catch(() => {
+            })
     }, [enabled, handleAfterPricesSaved, loadModelPricesEnabled, loadUsageStats])
 
     const handleExport = async (filters?: ExportFilters) => {
         setExporting(true)
         try {
-            const data = await usageApi.exportUsage(filters)
-            const exportedAt = typeof data?.exported_at === 'string' ? new Date(data.exported_at) : new Date()
+            const data          = await usageApi.exportUsage(filters)
+            const exportedAt    = typeof data?.exported_at === 'string' ? new Date(data.exported_at) : new Date()
             const safeTimestamp = Number.isNaN(exportedAt.getTime())
-                ? new Date().toISOString()
-                : exportedAt.toISOString()
-            const filename = `usage-export-${safeTimestamp.replace(/[:.]/g, '-')}.json`
+                                  ? new Date().toISOString()
+                                  : exportedAt.toISOString()
+            const filename      = `usage-export-${safeTimestamp.replace(/[:.]/g, '-')}.json`
             downloadBlob({
-                filename,
-                blob: new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' }),
-            })
+                             filename,
+                             blob: new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' }),
+                         })
             showNotification(t('usage_stats.export_success'), 'success')
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : ''
@@ -177,7 +181,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
     }
 
     const handleImportChange = async (event: ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0]
+        const file         = event.target.files?.[0]
         event.target.value = ''
         if (!file) {
             return
@@ -186,7 +190,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         let payload: unknown
         try {
             const text = await file.text()
-            payload = JSON.parse(text)
+            payload    = JSON.parse(text)
         } catch {
             showNotification(t('usage_stats.import_invalid'), 'error')
             return
@@ -194,8 +198,8 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
 
         // Count records for confirmation
         const exportPayload = payload as Record<string, unknown>
-        const usageData = exportPayload?.usage as Record<string, unknown> | undefined
-        let recordCount = 0
+        const usageData     = exportPayload?.usage as Record<string, unknown> | undefined
+        let recordCount     = 0
         if (usageData && typeof usageData === 'object') {
             for (const dateEntries of Object.values(usageData)) {
                 if (Array.isArray(dateEntries)) {
@@ -205,64 +209,68 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         }
 
         showConfirmation({
-            title: t('usage_stats.import_confirm_title'),
-            message: t('usage_stats.import_confirm_message', { count: recordCount }),
-            variant: 'primary',
-            confirmText: t('common.confirm'),
-            cancelText: t('common.cancel'),
-            onConfirm: async () => {
-                setImporting(true)
-                try {
-                    const result = await usageApi.importUsage(payload)
-                    showNotification(
-                        t('usage_stats.import_success', {
-                            added: result?.added ?? 0,
-                            skipped: result?.skipped ?? 0,
-                            total: result?.total_requests ?? 0,
-                            failed: result?.failed_requests ?? 0,
-                        }),
-                        'success'
-                    )
-                    addPersistentNotification(
-                        t('usage_stats.import_success', {
-                            added: result?.added ?? 0,
-                            skipped: result?.skipped ?? 0,
-                            total: result?.total_requests ?? 0,
-                            failed: result?.failed_requests ?? 0,
-                        }),
-                        'info',
-                        'import'
-                    )
-                    try {
-                        await loadUsageStats({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS })
-                        if (onAfterImport) {
-                            await onAfterImport()
-                        }
-                    } catch (err: unknown) {
-                        const message = err instanceof Error ? err.message : ''
-                        showNotification(`${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`, 'error')
-                    }
-                } catch (err: unknown) {
-                    const message = err instanceof Error ? err.message : ''
-                    showNotification(`${t('notification.upload_failed')}${message ? `: ${message}` : ''}`, 'error')
-                } finally {
-                    setImporting(false)
-                }
-            },
-        })
+                             title: t('usage_stats.import_confirm_title'),
+                             message: t('usage_stats.import_confirm_message', { count: recordCount }),
+                             variant: 'primary',
+                             confirmText: t('common.confirm'),
+                             cancelText: t('common.cancel'),
+                             onConfirm: async () => {
+                                 setImporting(true)
+                                 try {
+                                     const result = await usageApi.importUsage(payload)
+                                     showNotification(
+                                         t('usage_stats.import_success', {
+                                             added: result?.added ?? 0,
+                                             skipped: result?.skipped ?? 0,
+                                             total: result?.total_requests ?? 0,
+                                             failed: result?.failed_requests ?? 0,
+                                         }),
+                                         'success',
+                                     )
+                                     addPersistentNotification(
+                                         t('usage_stats.import_success', {
+                                             added: result?.added ?? 0,
+                                             skipped: result?.skipped ?? 0,
+                                             total: result?.total_requests ?? 0,
+                                             failed: result?.failed_requests ?? 0,
+                                         }),
+                                         'info',
+                                         'import',
+                                     )
+                                     try {
+                                         await loadUsageStats({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS })
+                                         if (onAfterImport) {
+                                             await onAfterImport()
+                                         }
+                                     } catch (err: unknown) {
+                                         const message = err instanceof Error ? err.message : ''
+                                         showNotification(`${t('notification.refresh_failed')}${message ?
+                                                                                                `: ${message}` :
+                                                                                                ''}`, 'error')
+                                     }
+                                 } catch (err: unknown) {
+                                     const message = err instanceof Error ? err.message : ''
+                                     showNotification(`${t('notification.upload_failed')}${message ?
+                                                                                           `: ${message}` :
+                                                                                           ''}`, 'error')
+                                 } finally {
+                                     setImporting(false)
+                                 }
+                             },
+                         })
     }
 
     const handleSetModelPrices = useCallback(
         async (prices: Record<string, ModelPrice>) => {
             setModelPrices(prices)
             try {
-                const result = await saveModelPrices(prices)
+                const result   = await saveModelPrices(prices)
                 const feedback = buildPriceSaveFeedback(result)
                 setPriceSaveFeedback(feedback)
                 showNotification(feedback.message, feedback.type)
                 await handleAfterPricesSaved(result)
             } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : ''
+                const message                     = err instanceof Error ? err.message : ''
                 const feedback: PriceSaveFeedback = {
                     message: `${t('notification.update_failed')}${message ? `: ${message}` : ''}`,
                     type: 'error',
@@ -271,11 +279,11 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                 showNotification(feedback.message, feedback.type)
             }
         },
-        [buildPriceSaveFeedback, handleAfterPricesSaved, showNotification, t]
+        [buildPriceSaveFeedback, handleAfterPricesSaved, showNotification, t],
     )
 
-    const usage = usageSnapshot as UsagePayload | null
-    const error = storeError || ''
+    const usage           = usageSnapshot as UsagePayload | null
+    const error           = storeError || ''
     const lastRefreshedAt = lastRefreshedAtTs ? new Date(lastRefreshedAtTs) : null
 
     return {

@@ -1,14 +1,14 @@
-import { CardSkeleton } from '@/components/common/CardSkeleton'
-import { Card } from '@/components/ui/Card'
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import {CardSkeleton} from '@/components/common/CardSkeleton'
+import {Card} from '@/components/ui/Card'
+import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import pageStyles from '@/pages/UsagePage.module.scss'
-import type { SummaryTimePoint, UsageSummary } from '@/services/api/usage'
-import { formatUnixTimestamp } from '@/utils/format'
-import type { TokenCategory } from '@/utils/usage'
-import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig'
-import { useCallback, useMemo, useState } from 'react'
-import { Line } from 'react-chartjs-2'
-import { useTranslation } from 'react-i18next'
+import type {SummaryTimePoint, UsageSummary} from '@/services/api/usage'
+import {formatUnixTimestamp} from '@/utils/format'
+import type {TokenCategory} from '@/utils/usage'
+import {buildChartOptions, getHourChartMinWidth} from '@/utils/usage/chartConfig'
+import {useCallback, useMemo, useState} from 'react'
+import {Line} from 'react-chartjs-2'
+import {useTranslation} from 'react-i18next'
 
 const TOKEN_COLORS: Record<TokenCategory, { border: string; bg: string }> = {
     input: { border: '#8b8680', bg: 'rgba(139, 134, 128, 0.25)' },
@@ -43,7 +43,7 @@ function buildTokenBreakdownFromSummary(summary: UsageSummary | null): TokenBrea
         dataByCategory: { input: [], output: [], cached: [], reasoning: [] },
         period: 'hour',
     }
-    const ts = summary?.time_series
+    const ts                          = summary?.time_series
     if (!ts?.length) {
         return empty
     }
@@ -74,7 +74,7 @@ function buildTokenBreakdownFromSummary(summary: UsageSummary | null): TokenBrea
         return timePart.slice(0, 5)
     }
 
-    const labels: string[] = ts.map((pt: SummaryTimePoint) => formatLabel(pt.time))
+    const labels: string[]                                = ts.map((pt: SummaryTimePoint) => formatLabel(pt.time))
     const dataByCategory: Record<TokenCategory, number[]> = {
         input: [],
         output: [],
@@ -83,9 +83,9 @@ function buildTokenBreakdownFromSummary(summary: UsageSummary | null): TokenBrea
     }
     for (const pt of ts) {
         const tokens =
-            typeof pt.tokens === 'object' && pt.tokens
-                ? pt.tokens
-                : { input: 0, output: 0, cached: 0, reasoning: 0, total: 0 }
+                  typeof pt.tokens === 'object' && pt.tokens
+                  ? pt.tokens
+                  : { input: 0, output: 0, cached: 0, reasoning: 0, total: 0 }
         dataByCategory.input.push(tokens.input ?? 0)
         dataByCategory.output.push(tokens.output ?? 0)
         dataByCategory.cached.push(tokens.cached ?? 0)
@@ -96,7 +96,7 @@ function buildTokenBreakdownFromSummary(summary: UsageSummary | null): TokenBrea
 }
 
 export function TokenBreakdownChart({ summary, loading, isMobile }: TokenBreakdownChartProps) {
-    const { t } = useTranslation()
+    const { t }                             = useTranslation()
     const [hiddenIndices, setHiddenIndices] = useState<Set<number>>(new Set())
 
     const toggleDataset = useCallback((index: number) => {
@@ -112,7 +112,7 @@ export function TokenBreakdownChart({ summary, loading, isMobile }: TokenBreakdo
     }, [])
 
     const { chartData, chartOptions, period, isEmpty } = useMemo(() => {
-        const series = buildTokenBreakdownFromSummary(summary)
+        const series                                        = buildTokenBreakdownFromSummary(summary)
         const categoryLabels: Record<TokenCategory, string> = {
             input: t('usage_stats.input_tokens'),
             output: t('usage_stats.output_tokens'),
@@ -137,7 +137,7 @@ export function TokenBreakdownChart({ summary, loading, isMobile }: TokenBreakdo
         }
 
         const baseOptions = buildChartOptions({ period: series.period, labels: series.labels, isMobile })
-        const options = {
+        const options     = {
             ...baseOptions,
             scales: {
                 ...baseOptions.scales,
@@ -159,69 +159,69 @@ export function TokenBreakdownChart({ summary, loading, isMobile }: TokenBreakdo
             labels: chartData.labels,
             datasets: chartData.datasets.map((ds, i) => ({ ...ds, hidden: hiddenIndices.has(i) })),
         }),
-        [chartData, hiddenIndices]
+        [chartData, hiddenIndices],
     )
 
     return (
         <Card title={t('usage_stats.token_breakdown')}>
             {loading && !summary ? (
-                <CardSkeleton variant="rows" rowCount={4} showTitle={false} />
+                <CardSkeleton variant='rows' rowCount={4} showTitle={false} />
             ) : isEmpty ? (
                 <div className={pageStyles.hint}>{t('usage_stats.no_data')}</div>
             ) : (
-                <div className={pageStyles.cardLoadingShell}>
-                    {loading && summary && (
-                        <div className={pageStyles.cardLoadingOverlay} aria-busy="true">
-                            <div className={pageStyles.cardLoadingPill}>
-                                <LoadingSpinner size={16} className={pageStyles.cardLoadingSpinner} />
-                                <span>{t('common.loading')}</span>
+                    <div className={pageStyles.cardLoadingShell}>
+                        {loading && summary && (
+                            <div className={pageStyles.cardLoadingOverlay} aria-busy='true'>
+                                <div className={pageStyles.cardLoadingPill}>
+                                    <LoadingSpinner size={16} className={pageStyles.cardLoadingSpinner} />
+                                    <span>{t('common.loading')}</span>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    <div className={pageStyles.chartWrapper}>
-                        <div className={pageStyles.chartLegend} aria-label="Chart legend">
-                            {chartData.datasets.map((dataset, index) => (
-                                <div
-                                    key={`${dataset.label}-${index}`}
-                                    className={`${pageStyles.legendItem} ${
-                                        hiddenIndices.has(index) ? pageStyles.legendItemHidden : ''
-                                    }`}
-                                    title={dataset.label}
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => toggleDataset(index)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            e.preventDefault()
-                                            toggleDataset(index)
-                                        }
-                                    }}
-                                >
+                        )}
+                        <div className={pageStyles.chartWrapper}>
+                            <div className={pageStyles.chartLegend} aria-label='Chart legend'>
+                                {chartData.datasets.map((dataset, index) => (
+                                    <div
+                                        key={`${dataset.label}-${index}`}
+                                        className={`${pageStyles.legendItem} ${
+                                            hiddenIndices.has(index) ? pageStyles.legendItemHidden : ''
+                                        }`}
+                                        title={dataset.label}
+                                        role='button'
+                                        tabIndex={0}
+                                        onClick={() => toggleDataset(index)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault()
+                                                toggleDataset(index)
+                                            }
+                                        }}
+                                    >
                                     <span
                                         className={pageStyles.legendDot}
                                         style={{ backgroundColor: dataset.borderColor }}
                                     />
-                                    <span className={pageStyles.legendLabel}>{dataset.label}</span>
-                                </div>
-                            ))}
-                        </div>
-                        <div className={pageStyles.chartArea}>
-                            <div className={pageStyles.chartScroller}>
-                                <div
-                                    className={pageStyles.chartCanvas}
-                                    style={
-                                        period === 'hour'
+                                        <span className={pageStyles.legendLabel}>{dataset.label}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className={pageStyles.chartArea}>
+                                <div className={pageStyles.chartScroller}>
+                                    <div
+                                        className={pageStyles.chartCanvas}
+                                        style={
+                                            period === 'hour'
                                             ? { minWidth: getHourChartMinWidth(chartData.labels.length, isMobile) }
                                             : undefined
-                                    }
-                                >
-                                    <Line data={visibleChartData} options={chartOptions} />
+                                        }
+                                    >
+                                        <Line data={visibleChartData} options={chartOptions} />
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
         </Card>
     )
 }

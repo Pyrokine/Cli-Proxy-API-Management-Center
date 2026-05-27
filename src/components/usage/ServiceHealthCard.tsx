@@ -1,12 +1,12 @@
-import { DataStatusCard } from '@/components/common/DataStatusCard'
-import { Button } from '@/components/ui/Button'
-import { IconRefreshCw } from '@/components/ui/icons'
+import {DataStatusCard} from '@/components/common/DataStatusCard'
+import {Button} from '@/components/ui/Button'
+import {IconRefreshCw} from '@/components/ui/icons'
 import styles from '@/pages/UsagePage.module.scss'
-import type { SummaryTimePoint, UsageSummary } from '@/services/api/usage'
-import { formatDateTime, formatUnixTimestamp } from '@/utils/format'
-import { rateToColor, type ServiceHealthData, type StatusBlockDetail } from '@/utils/usage'
-import { type PointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import type {SummaryTimePoint, UsageSummary} from '@/services/api/usage'
+import {formatDateTime, formatUnixTimestamp} from '@/utils/format'
+import {rateToColor, type ServiceHealthData, type StatusBlockDetail} from '@/utils/usage'
+import {type PointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
 /** Builds the service-health heat map from summary.time_series.
  *
@@ -19,30 +19,30 @@ import { useTranslation } from 'react-i18next'
 function calculateServiceHealthFromSummary(
     timeSeries: SummaryTimePoint[],
     fromMs: number,
-    toMs: number
+    toMs: number,
 ): ServiceHealthData {
-    const ROWS = 8
-    const HOUR_MS = 60 * 60 * 1000
+    const ROWS     = 8
+    const HOUR_MS  = 60 * 60 * 1000
     const MIN_COLS = 8
     const MAX_COLS = 200 // 8 × 200 = 1600 cells — keeps render snappy
 
     // Align edges to whole-hour boundaries so cell counts are stable.
-    const alignedEnd = Math.floor(toMs / HOUR_MS) * HOUR_MS
+    const alignedEnd   = Math.floor(toMs / HOUR_MS) * HOUR_MS
     const alignedStart = Math.floor(fromMs / HOUR_MS) * HOUR_MS
-    const span = Math.max(alignedEnd - alignedStart, HOUR_MS * MIN_COLS * ROWS)
+    const span         = Math.max(alignedEnd - alignedStart, HOUR_MS * MIN_COLS * ROWS)
 
     // Compute the ideal cell count assuming 1-hour buckets, then clamp. When
     // the window is wider than MAX_COLS × ROWS hours we widen each bucket so
     // every bucket is still rendered exactly once.
-    const idealCols = Math.ceil(span / (HOUR_MS * ROWS))
-    const cols = Math.min(MAX_COLS, Math.max(MIN_COLS, idealCols))
-    const blockCount = ROWS * cols
+    const idealCols     = Math.ceil(span / (HOUR_MS * ROWS))
+    const cols          = Math.min(MAX_COLS, Math.max(MIN_COLS, idealCols))
+    const blockCount    = ROWS * cols
     const blockDuration = idealCols > MAX_COLS ? Math.ceil(span / (blockCount * HOUR_MS)) * HOUR_MS : HOUR_MS
-    const windowStart = alignedEnd - blockCount * blockDuration
+    const windowStart   = alignedEnd - blockCount * blockDuration
 
     const blockStats: Array<{ success: number; failure: number; tokens: number }> = Array.from(
         { length: blockCount },
-        () => ({ success: 0, failure: 0, tokens: 0 })
+        () => ({ success: 0, failure: 0, tokens: 0 }),
     )
 
     let totalSuccess = 0
@@ -57,17 +57,17 @@ function calculateServiceHealthFromSummary(
             continue
         }
 
-        const ageMs = alignedEnd - timestamp - HOUR_MS
+        const ageMs      = alignedEnd - timestamp - HOUR_MS
         const blockIndex = blockCount - 1 - Math.floor(ageMs / blockDuration)
 
         if (blockIndex >= 0 && blockIndex < blockCount) {
             const failure = pt.failure ?? 0
             // Compat: old data may only have requests without success/failure breakdown
             const success =
-                failure === 0 && (pt.success ?? 0) === 0 && pt.requests > 0 ? pt.requests : (pt.success ?? 0)
+                      failure === 0 && (pt.success ?? 0) === 0 && pt.requests > 0 ? pt.requests : (pt.success ?? 0)
             blockStats[blockIndex].success += success
             blockStats[blockIndex].failure += failure
-            const tokens = typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
+            const tokens  = typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
             blockStats[blockIndex].tokens += tokens
             totalSuccess += success
             totalFailure += failure
@@ -75,10 +75,10 @@ function calculateServiceHealthFromSummary(
     }
 
     const blockDetails: StatusBlockDetail[] = blockStats.map((stats, idx) => {
-        const blockAge = (blockCount - 1 - idx) * blockDuration
+        const blockAge  = (blockCount - 1 - idx) * blockDuration
         const startTime = alignedEnd - blockAge - blockDuration
-        const endTime = alignedEnd - blockAge
-        const total = stats.success + stats.failure
+        const endTime   = alignedEnd - blockAge
+        const total     = stats.success + stats.failure
 
         if (total === 0) {
             return { success: 0, failure: 0, rate: -1, startTime, endTime, totalTokens: stats.tokens }
@@ -93,18 +93,18 @@ function calculateServiceHealthFromSummary(
         }
     })
 
-    const total = totalSuccess + totalFailure
-    // R-461:无请求时不再造一个伪 100% 成功率;消费方根据 hasData 判断显示。
+    const total       = totalSuccess + totalFailure
+    // R-461:无请求时不再造一个伪 100% 成功率;消费方根据 hasData 判断显示，
     const successRate = total > 0 ? (totalSuccess / total) * 100 : -1
 
     const blocks = blockDetails.map((d) =>
-        d.rate === -1
-            ? ('idle' as const)
-            : d.rate >= 1.0
-              ? ('success' as const)
-              : d.rate <= 0
-                ? ('failure' as const)
-                : ('mixed' as const)
+                                        d.rate === -1
+                                        ? ('idle' as const)
+                                        : d.rate >= 1.0
+                                          ? ('success' as const)
+                                          : d.rate <= 0
+                                            ? ('failure' as const)
+                                            : ('mixed' as const),
     )
 
     return { blocks, blockDetails, totalSuccess, totalFailure, successRate, rows: ROWS, cols }
@@ -127,21 +127,21 @@ interface ServiceHealthCardProps {
 }
 
 export function ServiceHealthCard({
-    loading,
-    summary,
-    fromMs,
-    toMs,
-    error,
-    onRefresh,
-    refreshing,
-}: ServiceHealthCardProps) {
-    const { t, i18n } = useTranslation()
+                                      loading,
+                                      summary,
+                                      fromMs,
+                                      toMs,
+                                      error,
+                                      onRefresh,
+                                      refreshing,
+                                  }: ServiceHealthCardProps) {
+    const { t, i18n }                       = useTranslation()
     const [activeTooltip, setActiveTooltip] = useState<number | null>(null)
     // 给点击刷新一个最少 600ms 的本地 spinner: 父级的 refreshing 绑定的是
     // useUsageStatsStore.loading,但实际触发的是 /summary 请求,两者不在同一个 loading 状态机
     // 上.直接以"刚被点过"的本地 flag 兜底,确保用户看见反馈.
     const [locallyRefreshing, setLocallyRefreshing] = useState(false)
-    const gridRef = useRef<HTMLDivElement>(null)
+    const gridRef                                   = useRef<HTMLDivElement>(null)
 
     const handleRefreshClick = useCallback(() => {
         if (!onRefresh) {
@@ -157,7 +157,7 @@ export function ServiceHealthCard({
 
     const healthData: ServiceHealthData = useMemo(
         () => calculateServiceHealthFromSummary(summary?.time_series ?? [], fromMs, toMs),
-        [summary, fromMs, toMs]
+        [summary, fromMs, toMs],
     )
 
     const hasData = healthData.totalSuccess + healthData.totalFailure > 0
@@ -232,10 +232,11 @@ export function ServiceHealthCard({
     }
 
     const renderTooltip = (detail: StatusBlockDetail, idx: number) => {
-        const total = detail.success + detail.failure
-        const posClass = getTooltipPositionClass(idx)
+        const total     = detail.success + detail.failure
+        const posClass  = getTooltipPositionClass(idx)
         const vertClass = getTooltipVerticalClass(idx)
-        const timeRange = `${formatDateTime(new Date(detail.startTime), i18n.language)} – ${formatDateTime(new Date(detail.endTime), i18n.language)}`
+        const timeRange = `${formatDateTime(new Date(detail.startTime), i18n.language)} – ${formatDateTime(new Date(
+            detail.endTime), i18n.language)}`
 
         return (
             <div className={`${styles.healthTooltip} ${posClass} ${vertClass}`}>
@@ -269,19 +270,19 @@ export function ServiceHealthCard({
                         </span>
                     </>
                 ) : (
-                    <span className={styles.healthTooltipStats}>{t('status_bar.no_requests')}</span>
-                )}
+                     <span className={styles.healthTooltipStats}>{t('status_bar.no_requests')}</span>
+                 )}
             </div>
         )
     }
 
     const rateClass = !hasData
-        ? ''
-        : healthData.successRate >= 90
-          ? styles.healthRateHigh
-          : healthData.successRate >= 50
-            ? styles.healthRateMedium
-            : styles.healthRateLow
+                      ? ''
+                      : healthData.successRate >= 90
+                        ? styles.healthRateHigh
+                        : healthData.successRate >= 50
+                          ? styles.healthRateMedium
+                          : styles.healthRateLow
 
     // Pick a date-label step that gives ~8 evenly spaced labels across whatever
     // grid width we ended up rendering, so 24h/7d/30d/全部 all stay readable.
@@ -300,7 +301,7 @@ export function ServiceHealthCard({
     // Subtle: 已有 hasData 时,refresh 不应再降级成 skeleton(否则用户点刷新
     // 后整个卡片(含刷新按钮本身)会消失 1s,视觉上像点击没生效).只在首次拉取
     // 没数据时才走 loading 状态;后续刷新由刷新按钮自己的 spinner 反馈.
-    const status = error ? 'error' : loading && !hasData ? 'loading' : !loading && !hasData ? 'empty' : 'ready'
+    const status       = error ? 'error' : loading && !hasData ? 'loading' : !loading && !hasData ? 'empty' : 'ready'
     const errorMessage = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined
 
     if (status !== 'ready') {
@@ -311,7 +312,7 @@ export function ServiceHealthCard({
                 </div>
                 <DataStatusCard
                     status={status}
-                    skeletonVariant="rows"
+                    skeletonVariant='rows'
                     skeletonRowCount={3}
                     emptyText={t('service_health.no_requests', { defaultValue: t('status_bar.no_requests') })}
                     errorMessage={errorMessage}
@@ -332,9 +333,9 @@ export function ServiceHealthCard({
                     </span>
                     {onRefresh && (
                         <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
+                            type='button'
+                            size='sm'
+                            variant='ghost'
                             onClick={handleRefreshClick}
                             loading={refreshing || locallyRefreshing}
                             aria-label={t('service_health.refresh', {
@@ -353,14 +354,14 @@ export function ServiceHealthCard({
                             return <span key={col} />
                         }
                         const blockIdx = col * healthData.rows
-                        const detail = healthData.blockDetails[blockIdx]
+                        const detail   = healthData.blockDetails[blockIdx]
                         if (!detail) {
                             return <span key={col} />
                         }
                         const labelFull = formatUnixTimestamp(detail.startTime)
                         const [datePart = labelFull] = labelFull ? labelFull.split(' ') : ['']
-                        const dateBits = datePart.split('/')
-                        const label = dateBits.length >= 3 ? `${dateBits[1]}/${dateBits[2]}` : datePart
+                        const dateBits  = datePart.split('/')
+                        const label     = dateBits.length >= 3 ? `${dateBits[1]}/${dateBits[2]}` : datePart
                         return (
                             <span key={col} className={styles.healthDateLabel}>
                                 {label}
@@ -370,9 +371,9 @@ export function ServiceHealthCard({
                 </div>
                 <div className={styles.healthGrid} ref={gridRef}>
                     {healthData.blockDetails.map((detail, idx) => {
-                        const isIdle = detail.rate === -1
+                        const isIdle     = detail.rate === -1
                         const blockStyle = isIdle ? undefined : { backgroundColor: rateToColor(detail.rate) }
-                        const isActive = activeTooltip === idx
+                        const isActive   = activeTooltip === idx
 
                         return (
                             <div
