@@ -2,7 +2,7 @@
  * 版本相关 API
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 export interface ServerVersionInfo {
     version: string

@@ -1,14 +1,14 @@
-import { Button } from '@/components/ui/Button'
-import { IconChevronLeft, IconDownload, IconExternalLink } from '@/components/ui/icons'
-import { Modal } from '@/components/ui/Modal'
-import type { Release, ReleasesTarget } from '@/services/api/releases'
-import { releasesApi } from '@/services/api/releases'
-import type { UpdateStatus } from '@/services/api/update'
-import { updateApi } from '@/services/api/update'
-import { useNotificationStore } from '@/stores'
-import { formatUnixTimestamp } from '@/utils/format'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {Button} from '@/components/ui/Button'
+import {IconChevronLeft, IconDownload, IconExternalLink} from '@/components/ui/icons'
+import {Modal} from '@/components/ui/Modal'
+import type {Release, ReleasesTarget} from '@/services/api/releases'
+import {releasesApi} from '@/services/api/releases'
+import type {UpdateStatus} from '@/services/api/update'
+import {updateApi} from '@/services/api/update'
+import {useNotificationStore} from '@/stores'
+import {formatDateTime} from '@/utils/format'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import styles from './VersionHistoryModal.module.scss'
 
 /* ---------- constants ---------- */
@@ -17,9 +17,9 @@ const OFFICIAL_REPOSITORIES: Record<ReleasesTarget, string> = {
     cpa: 'Pyrokine/CLIProxyAPI',
     panel: 'Pyrokine/Cli-Proxy-API-Management-Center',
 }
-const BREAKING_PATTERN = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
-const UPDATE_POLL_INTERVAL = 2000
-const PAGE_SIZE = 10
+const BREAKING_PATTERN                                      = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
+const UPDATE_POLL_INTERVAL                                  = 2000
+const PAGE_SIZE                                             = 10
 
 /* ---------- types ---------- */
 
@@ -44,7 +44,7 @@ function parseVersion(tag: string) {
     const major = Number(match.groups.major)
     const minor = Number(match.groups.minor)
     const patch = match.groups.patch !== undefined ? Number(match.groups.patch) : 0
-    const aug = match.groups.aug !== undefined ? Number(match.groups.aug) : 0
+    const aug   = match.groups.aug !== undefined ? Number(match.groups.aug) : 0
     return { major, minor, patch, aug, groupKey: `${major}.${minor}` }
 }
 
@@ -78,8 +78,8 @@ interface ReleaseSections {
     other: string[]
 }
 
-const FEATURE_SECTION_PATTERN = /^(?:#+\s*)?(features?|enhancements?|新增|特性|功能|added|new|what's changed|whats changed|更新内容|变更)\b/i
-const FIX_SECTION_PATTERN = /^(?:#+\s*)?(fix(?:es)?|bug\s*fix(?:es)?|修复|bugs?)\b/i
+const FEATURE_SECTION_PATTERN = /^(?:#+\s*)?(?:features?|enhancements?|新增|特性|功能|added|new|what's changed|whats changed|更新内容|变更)\b/i
+const FIX_SECTION_PATTERN     = /^(?:#+\s*)?(?:fix(?:es)?|bug\s*fix(?:es)?|修复|bugs?)\b/i
 
 function classifyReleaseBody(body: string): ReleaseSections {
     const sections: ReleaseSections = { features: [], fixes: [], other: [] }
@@ -115,7 +115,7 @@ function classifyReleaseBody(body: string): ReleaseSections {
 /** Collect breaking changes between current version and target version from all releases. */
 function collectBreakingBetween(releases: Release[], currentTag: string, targetTag: string): string[] {
     const current = parseVersion(currentTag)
-    const target = parseVersion(targetTag)
+    const target  = parseVersion(targetTag)
     if (!current || !target) {
         return []
     }
@@ -139,31 +139,27 @@ function collectBreakingBetween(releases: Release[], currentTag: string, targetT
     return hints
 }
 
-/** Format ISO date to locale short date. */
+/** Format ISO date to locale date-time. */
 function formatDate(iso: string, locale: string): string {
-    try {
-        const full = formatUnixTimestamp(new Date(iso).getTime(), locale)
-        return full ? (full.split(' ')[0] ?? full) : iso
-    } catch {
-        return iso
-    }
+    const formatted = formatDateTime(iso, locale)
+    return formatted === '-' ? iso : formatted
 }
 
 /* ---------- component ---------- */
 
 export function VersionHistoryModal({ open, onClose, currentVersion, target, repository }: VersionHistoryModalProps) {
-    const { t, i18n } = useTranslation()
+    const { t, i18n }                            = useTranslation()
     const { showConfirmation, showNotification } = useNotificationStore()
 
-    const [releases, setReleases] = useState<Release[]>([])
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState<string | null>(null)
+    const [releases, setReleases]   = useState<Release[]>([])
+    const [loading, setLoading]     = useState(false)
+    const [error, setError]         = useState<string | null>(null)
     const [pageIndex, setPageIndex] = useState(0)
 
     // Update progress
-    const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+    const [updateStatus, setUpdateStatus]       = useState<UpdateStatus | null>(null)
     const [updatingVersion, setUpdatingVersion] = useState<string | null>(null)
-    const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const pollTimerRef                          = useRef<ReturnType<typeof setInterval> | null>(null)
 
     // Fetch releases when modal opens
     const [prevOpen, setPrevOpen] = useState(false)
@@ -230,8 +226,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         return nonDraft
     }, [releases])
 
-    const totalPages = Math.max(1, Math.ceil(sortedReleases.length / PAGE_SIZE))
-    const pageReleases = sortedReleases.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE)
+    const totalPages    = Math.max(1, Math.ceil(sortedReleases.length / PAGE_SIZE))
+    const pageReleases  = sortedReleases.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE)
     const totalReleases = sortedReleases.length
 
     const currentParsed = useMemo(() => parseVersion(currentVersion), [currentVersion])
@@ -245,13 +241,9 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             if (!parsed) {
                 return false
             }
-            return (
-                parsed.major === currentParsed.major &&
-                parsed.minor === currentParsed.minor &&
-                parsed.patch === currentParsed.patch
-            )
+            return compareSemver(parsed, currentParsed) === 0
         },
-        [currentParsed]
+        [currentParsed],
     )
 
     /** Returns 'upgrade' | 'downgrade' | null */
@@ -273,7 +265,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             }
             return null
         },
-        [currentParsed]
+        [currentParsed],
     )
 
     const isNonOfficial = useMemo(() => {
@@ -289,9 +281,9 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     })
 
     const isUpdating =
-        updateStatus?.status === 'downloading' ||
-        updateStatus?.status === 'verifying' ||
-        updateStatus?.status === 'replacing'
+              updateStatus?.status === 'downloading' ||
+              updateStatus?.status === 'verifying' ||
+              updateStatus?.status === 'replacing'
 
     const startPolling = () => {
         if (pollTimerRef.current) {
@@ -327,7 +319,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             return
         }
 
-        const isDowngrade = direction === 'downgrade'
+        const isDowngrade   = direction === 'downgrade'
         const breakingHints = isDowngrade ? collectBreakingBetween(releases, currentVersion, tag) : []
 
         const messageLines = [
@@ -341,60 +333,66 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         }
 
         showConfirmation({
-            title: t(isDowngrade ? 'version_history.downgrade' : 'version_history.upgrade'),
-            message: messageLines.join('\n'),
-            variant: isDowngrade ? 'danger' : 'primary',
-            confirmText: t('common.confirm'),
-            onConfirm: async () => {
-                setUpdatingVersion(tag)
-                setUpdateStatus({
-                    status: 'downloading',
-                    message: '',
-                    target_version: tag,
-                    percent: 0,
-                    current_version: currentVersion,
-                })
-                try {
-                    if (target === 'panel') {
-                        await updateApi.panelUpdate(tag)
-                        setUpdatingVersion(null)
-                        setUpdateStatus({
-                            status: 'done',
-                            message: t('version_switcher.panel_updated', { version: tag }),
-                            target_version: tag,
-                            percent: 100,
-                            current_version: currentVersion,
-                        })
-                        showNotification(t('version_switcher.panel_updated', { version: tag }), 'success')
-                        return
-                    }
-                    const compatibility = await updateApi.compatibility(tag)
-                    if (!compatibility.compatible) {
-                        showNotification(
-                            compatibility.warnings && compatibility.warnings.length > 0
-                                ? compatibility.warnings.join(' | ')
-                                : t('version_switcher.compatibility_blocked'),
-                            'error'
-                        )
-                        setUpdatingVersion(null)
-                        setUpdateStatus(null)
-                        return
-                    }
-                    await updateApi.trigger(tag)
-                    startPolling()
-                } catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err)
-                    setUpdateStatus({
-                        status: 'error',
-                        message: msg,
-                        target_version: tag,
-                        percent: 0,
-                        current_version: currentVersion,
-                    })
-                    showNotification(msg, 'error')
-                }
-            },
-        })
+                             title: t(isDowngrade ? 'version_history.downgrade' : 'version_history.upgrade'),
+                             message: messageLines.join('\n'),
+                             variant: isDowngrade ? 'danger' : 'primary',
+                             confirmText: t('common.confirm'),
+                             onConfirm: async () => {
+                                 setUpdatingVersion(tag)
+                                 setUpdateStatus({
+                                                     status: 'downloading',
+                                                     message: '',
+                                                     target_version: tag,
+                                                     percent: 0,
+                                                     current_version: currentVersion,
+                                                 })
+                                 try {
+                                     if (target === 'panel') {
+                                         await updateApi.panelUpdate(tag)
+                                         setUpdatingVersion(null)
+                                         setUpdateStatus({
+                                                             status: 'done',
+                                                             message: t(
+                                                                 'version_switcher.panel_updated',
+                                                                 { version: tag },
+                                                             ),
+                                                             target_version: tag,
+                                                             percent: 100,
+                                                             current_version: currentVersion,
+                                                         })
+                                         showNotification(
+                                             t('version_switcher.panel_updated', { version: tag }),
+                                             'success',
+                                         )
+                                         return
+                                     }
+                                     const compatibility = await updateApi.compatibility(tag)
+                                     if (!compatibility.compatible) {
+                                         showNotification(
+                                             compatibility.warnings && compatibility.warnings.length > 0
+                                             ? compatibility.warnings.join(' | ')
+                                             : t('version_switcher.compatibility_blocked'),
+                                             'error',
+                                         )
+                                         setUpdatingVersion(null)
+                                         setUpdateStatus(null)
+                                         return
+                                     }
+                                     await updateApi.trigger(tag)
+                                     startPolling()
+                                 } catch (err) {
+                                     const msg = err instanceof Error ? err.message : String(err)
+                                     setUpdateStatus({
+                                                         status: 'error',
+                                                         message: msg,
+                                                         target_version: tag,
+                                                         percent: 0,
+                                                         current_version: currentVersion,
+                                                     })
+                                     showNotification(msg, 'error')
+                                 }
+                             },
+                         })
     }
 
     const goPage = (delta: number) => {
@@ -422,10 +420,10 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                 <div
                     className={`${styles.updateBanner} ${
                         updateStatus.status === 'error'
-                            ? styles.updateError
-                            : updateStatus.status === 'done'
-                              ? styles.updateDone
-                              : ''
+                        ? styles.updateError
+                        : updateStatus.status === 'done'
+                          ? styles.updateDone
+                          : ''
                     }`}
                 >
                     <div className={styles.updateInfo}>
@@ -457,10 +455,10 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
 
                     <div className={styles.releaseList}>
                         {pageReleases.map((release) => {
-                            const isCurrent = isCurrentVersion(release.tag_name)
-                            const breaking = extractBreakingHints(release.body)
-                            const isPrerelease = release.prerelease
-                            const direction = getUpdateDirection(release.tag_name)
+                            const isCurrent      = isCurrentVersion(release.tag_name)
+                            const breaking       = extractBreakingHints(release.body)
+                            const isPrerelease   = release.prerelease
+                            const direction      = getUpdateDirection(release.tag_name)
                             const isThisUpdating = updatingVersion === release.tag_name && isUpdating
 
                             return (
@@ -501,60 +499,65 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                     )}
 
                                     {release.body &&
-                                        (() => {
-                                            const sections = classifyReleaseBody(release.body)
-                                            const hasStructured =
-                                                sections.features.length > 0 || sections.fixes.length > 0 || sections.other.length > 0
-                                            if (hasStructured) {
-                                                return (
-                                                    <div className={styles.releaseSections}>
-                                                        {sections.features.length > 0 && (
-                                                            <div className={styles.releaseColumn}>
-                                                                <div className={styles.columnTitle}>
-                                                                    {t('version_history.section_features', {
-                                                                        defaultValue: 'Features',
-                                                                    })}
-                                                                </div>
-                                                                <ul className={styles.columnList}>
-                                                                    {sections.features.map((item, idx) => (
-                                                                        <li key={`feat-${idx}`}>{item}</li>
-                                                                    ))}
-                                                                </ul>
-                                                            </div>
-                                                        )}
-                                                        {sections.fixes.length > 0 && (
-                                                            <div className={styles.releaseColumn}>
-                                                                <div className={styles.columnTitle}>
-                                                                    {t('version_history.section_fixes', {
-                                                                        defaultValue: 'Fixes',
-                                                                    })}
-                                                                </div>
-                                                                <ul className={styles.columnList}>
-                                                                    {sections.fixes.map((item, idx) => (
-                                                                        <li key={`fix-${idx}`}>{item}</li>
-                                                                    ))}
-                                                                </ul>
-                                                            </div>
-                                                        )}
-                                                        {sections.other.length > 0 && (
-                                                            <div className={styles.releaseColumn}>
-                                                                <div className={styles.columnTitle}>
-                                                                    {t('version_history.section_other', {
-                                                                        defaultValue: 'Details',
-                                                                    })}
-                                                                </div>
-                                                                <ul className={styles.columnList}>
-                                                                    {sections.other.map((item, idx) => (
-                                                                        <li key={`other-${idx}`}>{item}</li>
-                                                                    ))}
-                                                                </ul>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )
-                                            }
-                                            return <div className={styles.releaseBody}>{release.body}</div>
-                                        })()}
+                                     (() => {
+                                         const sections      = classifyReleaseBody(release.body)
+                                         const hasStructured =
+                                                   sections.features.length >
+                                                   0 ||
+                                                   sections.fixes.length >
+                                                   0 ||
+                                                   sections.other.length >
+                                                   0
+                                         if (hasStructured) {
+                                             return (
+                                                 <div className={styles.releaseSections}>
+                                                     {sections.features.length > 0 && (
+                                                         <div className={styles.releaseColumn}>
+                                                             <div className={styles.columnTitle}>
+                                                                 {t('version_history.section_features', {
+                                                                     defaultValue: 'Features',
+                                                                 })}
+                                                             </div>
+                                                             <ul className={styles.columnList}>
+                                                                 {sections.features.map((item, idx) => (
+                                                                     <li key={`feat-${idx}`}>{item}</li>
+                                                                 ))}
+                                                             </ul>
+                                                         </div>
+                                                     )}
+                                                     {sections.fixes.length > 0 && (
+                                                         <div className={styles.releaseColumn}>
+                                                             <div className={styles.columnTitle}>
+                                                                 {t('version_history.section_fixes', {
+                                                                     defaultValue: 'Fixes',
+                                                                 })}
+                                                             </div>
+                                                             <ul className={styles.columnList}>
+                                                                 {sections.fixes.map((item, idx) => (
+                                                                     <li key={`fix-${idx}`}>{item}</li>
+                                                                 ))}
+                                                             </ul>
+                                                         </div>
+                                                     )}
+                                                     {sections.other.length > 0 && (
+                                                         <div className={styles.releaseColumn}>
+                                                             <div className={styles.columnTitle}>
+                                                                 {t('version_history.section_other', {
+                                                                     defaultValue: 'Details',
+                                                                 })}
+                                                             </div>
+                                                             <ul className={styles.columnList}>
+                                                                 {sections.other.map((item, idx) => (
+                                                                     <li key={`other-${idx}`}>{item}</li>
+                                                                 ))}
+                                                             </ul>
+                                                         </div>
+                                                     )}
+                                                 </div>
+                                             )
+                                         }
+                                         return <div className={styles.releaseBody}>{release.body}</div>
+                                     })()}
 
                                     {breaking.length > 0 && (
                                         <div className={styles.breakingSection}>
@@ -572,8 +575,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                     <div className={styles.releaseActions}>
                                         <a
                                             href={release.html_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                            target='_blank'
+                                            rel='noopener noreferrer'
                                             className={styles.ghLink}
                                         >
                                             GitHub <IconExternalLink size={12} />
@@ -581,7 +584,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                         {direction && (
                                             <Button
                                                 variant={direction === 'downgrade' ? 'danger' : 'primary'}
-                                                size="sm"
+                                                size='sm'
                                                 disabled={isUpdating}
                                                 loading={isThisUpdating}
                                                 onClick={() => handleUpdate(release.tag_name)}
@@ -589,8 +592,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                                 <IconDownload size={13} />
                                                 {t(
                                                     direction === 'downgrade'
-                                                        ? 'version_history.downgrade'
-                                                        : 'version_history.upgrade'
+                                                    ? 'version_history.downgrade'
+                                                    : 'version_history.upgrade',
                                                 )}
                                             </Button>
                                         )}
@@ -603,15 +606,15 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     {/* Pagination */}
                     {totalPages > 1 && (
                         <div className={styles.pager}>
-                            <Button variant="secondary" size="sm" disabled={pageIndex <= 0} onClick={() => goPage(-1)}>
+                            <Button variant='secondary' size='sm' disabled={pageIndex <= 0} onClick={() => goPage(-1)}>
                                 <IconChevronLeft size={14} />
                             </Button>
                             <div className={styles.pagerInfo}>
                                 {pageIndex + 1} / {totalPages}
                             </div>
                             <Button
-                                variant="secondary"
-                                size="sm"
+                                variant='secondary'
+                                size='sm'
                                 disabled={pageIndex >= totalPages - 1}
                                 onClick={() => goPage(1)}
                             >

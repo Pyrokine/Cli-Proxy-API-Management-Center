@@ -182,10 +182,9 @@
     color: inherit;
     padding: $spacing-md $spacing-lg;
     cursor: pointer;
-    transition:
-        transform 0.18s ease,
-        border-color 0.2s ease,
-        box-shadow 0.2s ease;
+    transition: transform 0.18s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 
     &:hover {
         transform: translateY(-1px);
@@ -380,11 +379,6 @@
     font-weight: $font-weight-semibold;
 }
 
-.modelAlias {
-    color: var(--text-secondary);
-    font-size: $font-size-xs;
-}
-
 .versionCheck {
     display: flex;
     flex-direction: column;
@@ -533,21 +527,6 @@
     flex-wrap: wrap;
 }
 
-.cacheSelect {
-    padding: 0;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-
-    > button[aria-expanded] {
-        border-color: transparent;
-        background: transparent;
-        height: 28px;
-        padding: 0 6px;
-        font-size: $font-size-xs;
-        box-shadow: none;
-    }
-}
 
 .cacheRefreshHint {
     font-size: $font-size-xs;
@@ -618,4 +597,55 @@
         line-height: 1.22;
         letter-spacing: -0.006em;
     }
+}
+
+.emptyStateText {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.rateLimitTable {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.rateLimitRow {
+    border-top: 1px solid var(--border-primary);
+
+    td {
+        padding: $spacing-sm $spacing-xs;
+        vertical-align: middle;
+    }
+
+    &:first-child {
+        border-top: none;
+    }
+}
+
+.rateLimitIP {
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.rateLimitExpiry {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    flex: 1;
+    text-align: left;
+    padding-left: $spacing-md;
+}
+
+.rateLimitHistory {
+    margin-top: $spacing-md;
+    padding-top: $spacing-md;
+    border-top: 1px solid var(--border-color);
+}
+
+.rateLimitHistoryTitle {
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
 }

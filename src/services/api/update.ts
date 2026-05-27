@@ -2,7 +2,7 @@
  * Update API — trigger and monitor CPA backend self-update.
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 export interface UpdateStatus {
     status: 'idle' | 'downloading' | 'verifying' | 'replacing' | 'done' | 'error'

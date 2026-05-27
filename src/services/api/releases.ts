@@ -2,7 +2,7 @@
  * Releases API — proxied GitHub releases with server-side caching.
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 export interface ReleaseAsset {
     name: string
@@ -34,6 +34,6 @@ export type ReleasesTarget = 'cpa' | 'panel'
 export const releasesApi = {
     list: (page = 1, perPage = 100, target: ReleasesTarget = 'cpa', force = false) =>
         apiClient.get<ReleasesResponse>(
-            `/releases?page=${page}&per_page=${perPage}&target=${target}${force ? '&force=1' : ''}`
+            `/releases?page=${page}&per_page=${perPage}&target=${target}${force ? '&force=1' : ''}`,
         ),
 }
