@@ -7,7 +7,7 @@ API** (config, credentials, logs, and usage).
 
 **Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: ≥ 6.8.0 (recommended ≥ 6.8.15)
+**Minimum Required Version**: ≥ 7.1.0 (recommended latest)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the
 service is running.
@@ -31,7 +31,7 @@ The address is auto-detected from the current page URL; manual override is suppo
 ### Option B: Run the dev server
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -40,7 +40,7 @@ Open `http://localhost:5173`, then connect to your CLI Proxy API backend instanc
 ### Option C: Build a single HTML file
 
 ```bash
-npm install
+npm ci
 npm run build
 ```
 
@@ -110,8 +110,8 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 
 ## Tech Stack
 
-- React 19 + TypeScript 5.9
-- Vite 7 (single-file build)
+- React 19 + TypeScript 6.0
+- Vite 8 (single-file build)
 - Zustand (state management)
 - Axios (HTTP client)
 - react-router-dom v7 (HashRouter)
@@ -122,10 +122,11 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 
 ## Internationalization
 
-Currently, supports three languages:
+Currently, supports four languages:
 
 - English (en)
 - Simplified Chinese (zh-CN)
+- Traditional Chinese (zh-TW)
 - Russian (ru)
 
 The UI language is automatically detected from browser settings and can be manually switched at the bottom of the page.
@@ -171,8 +172,6 @@ npm run build        # tsc + Vite build
 npm run preview      # serve dist locally
 npm run lint         # ESLint (fails on warnings)
 npm run lint:css     # Stylelint for CSS/SCSS
-npm run format       # Prettier write
-npm run format:check # Prettier check
 npm run type-check   # tsc --noEmit
 ```
 
