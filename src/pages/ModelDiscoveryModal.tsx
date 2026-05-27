@@ -1,9 +1,9 @@
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Modal } from '@/components/ui/Modal'
-import type { ModelInfo } from '@/utils/models'
-import { useTranslation } from 'react-i18next'
-import { ModelCheckboxList } from './ModelCheckboxList'
+import {Button} from '@/components/ui/Button'
+import {Input} from '@/components/ui/Input'
+import {Modal} from '@/components/ui/Modal'
+import type {ModelInfo} from '@/utils/models'
+import {useTranslation} from 'react-i18next'
+import {ModelCheckboxList} from './ModelCheckboxList'
 import styles from './ProviderEditForm.module.scss'
 
 interface ModelDiscoveryModalProps {
@@ -27,23 +27,23 @@ interface ModelDiscoveryModalProps {
 }
 
 export function ModelDiscoveryModal({
-    open,
-    onClose,
-    endpoint,
-    discoveredModels,
-    filteredModels,
-    fetching,
-    error,
-    search,
-    onSearchChange,
-    selected,
-    onToggleSelection,
-    onApply,
-    onRefresh,
-    canApply,
-    disabled,
-    i18nPrefix,
-}: ModelDiscoveryModalProps) {
+                                        open,
+                                        onClose,
+                                        endpoint,
+                                        discoveredModels,
+                                        filteredModels,
+                                        fetching,
+                                        error,
+                                        search,
+                                        onSearchChange,
+                                        selected,
+                                        onToggleSelection,
+                                        onApply,
+                                        onRefresh,
+                                        canApply,
+                                        disabled,
+                                        i18nPrefix,
+                                    }: ModelDiscoveryModalProps) {
     const { t } = useTranslation()
 
     return (
@@ -54,10 +54,10 @@ export function ModelDiscoveryModal({
             width={720}
             footer={
                 <>
-                    <Button variant="secondary" size="sm" onClick={onClose} disabled={fetching}>
+                    <Button variant='secondary' size='sm' onClick={onClose} disabled={fetching}>
                         {t('common.cancel')}
                     </Button>
-                    <Button size="sm" onClick={onApply} disabled={!canApply}>
+                    <Button size='sm' onClick={onApply} disabled={!canApply}>
                         {t(`ai_providers.${i18nPrefix}_models_fetch_apply`)}
                     </Button>
                 </>
@@ -72,8 +72,8 @@ export function ModelDiscoveryModal({
                     <div className={styles.openaiModelsEndpointControls}>
                         <input className={`input ${styles.openaiModelsEndpointInput}`} readOnly value={endpoint} />
                         <Button
-                            variant="secondary"
-                            size="sm"
+                            variant='secondary'
+                            size='sm'
                             onClick={onRefresh}
                             loading={fetching}
                             disabled={disabled}
@@ -89,7 +89,7 @@ export function ModelDiscoveryModal({
                     onChange={(e) => onSearchChange(e.target.value)}
                     disabled={fetching}
                 />
-                {error && <div className="error-box">{error}</div>}
+                {error && <div className='error-box'>{error}</div>}
                 {fetching ? (
                     <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_models_fetch_loading`)}</div>
                 ) : discoveredModels.length === 0 ? (
@@ -97,8 +97,8 @@ export function ModelDiscoveryModal({
                 ) : filteredModels.length === 0 ? (
                     <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_models_search_empty`)}</div>
                 ) : (
-                    <ModelCheckboxList models={filteredModels} selected={selected} onToggle={onToggleSelection} />
-                )}
+                        <ModelCheckboxList models={filteredModels} selected={selected} onToggle={onToggleSelection} />
+                    )}
             </div>
         </Modal>
     )

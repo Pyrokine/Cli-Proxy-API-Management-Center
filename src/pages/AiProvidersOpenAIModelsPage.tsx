@@ -1,18 +1,18 @@
-import { modelsApi } from '@/services/api'
-import { buildHeaderObject, hasHeader } from '@/utils/headers'
-import { useCallback, useMemo } from 'react'
-import { useOutletContext } from 'react-router-dom'
-import type { OpenAIEditOutletContext } from './AiProvidersOpenAIEditLayout'
-import { ProviderModelsPage } from './ProviderModelsPage'
+import {modelsApi} from '@/services/api'
+import {buildHeaderObject, hasHeader} from '@/utils/headers'
+import {useCallback, useMemo} from 'react'
+import {useOutletContext} from 'react-router-dom'
+import type {OpenAIEditOutletContext} from './AiProvidersOpenAIEditLayout'
+import {ProviderModelsPage} from './ProviderModelsPage'
 
 export function AiProvidersOpenAIModelsPage() {
     const {
-        disableControls,
-        loading: initialLoading,
-        saving,
-        form,
-        mergeDiscoveredModels,
-    } = useOutletContext<OpenAIEditOutletContext>()
+              disableControls,
+              loading: initialLoading,
+              saving,
+              form,
+              mergeDiscoveredModels,
+          } = useOutletContext<OpenAIEditOutletContext>()
 
     const buildEndpoint = useCallback(() => modelsApi.buildV1ModelsEndpoint(form.baseUrl), [form.baseUrl])
 
@@ -23,8 +23,8 @@ export function AiProvidersOpenAIModelsPage() {
         }
 
         const headerObject = buildHeaderObject(form.headers)
-        const firstKey = form.apiKeyEntries.find((entry) => entry.apiKey?.trim())?.apiKey?.trim()
-        const authKey = hasHeader(headerObject, 'authorization') ? undefined : firstKey
+        const firstKey     = form.apiKeyEntries.find((entry) => entry.apiKey?.trim())?.apiKey?.trim()
+        const authKey      = hasHeader(headerObject, 'authorization') ? undefined : firstKey
 
         try {
             return await modelsApi.fetchV1ModelsViaApiCall(trimmedBaseUrl, authKey, headerObject)
@@ -51,7 +51,7 @@ export function AiProvidersOpenAIModelsPage() {
 
     return (
         <ProviderModelsPage
-            i18nPrefix="openai_models"
+            i18nPrefix='openai_models'
             disableControls={disableControls}
             initialLoading={initialLoading}
             saving={saving}

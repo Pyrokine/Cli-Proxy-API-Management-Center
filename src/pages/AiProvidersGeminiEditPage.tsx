@@ -1,20 +1,20 @@
-import type { GeminiFormState } from '@/components/providers'
-import { excludedModelsToText, parseTextList } from '@/components/providers/utils'
-import { Input } from '@/components/ui/Input'
-import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils'
-import { useModelDiscovery } from '@/hooks/useModelDiscovery'
+import type {GeminiFormState} from '@/components/providers'
+import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
+import {Input} from '@/components/ui/Input'
+import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import { modelsApi, providersApi } from '@/services/api'
-import type { GeminiKeyConfig } from '@/types'
-import { buildHeaderObject, headersToEntries } from '@/utils/headers'
-import { useTranslation } from 'react-i18next'
-import { ProviderEditShell } from './ProviderEditShell'
-import { HeadersField, PrefixField, PriorityField, ProviderModelSection } from './ProviderFormFields'
+import {modelsApi, providersApi} from '@/services/api'
+import type {GeminiKeyConfig} from '@/types'
+import {buildHeaderObject, headersToEntries} from '@/utils/headers'
+import {useTranslation} from 'react-i18next'
+import {ProviderEditShell} from './ProviderEditShell'
+import {HeadersField, PrefixField, PriorityField, ProviderModelSection} from './ProviderFormFields'
 
 // ---- Gemini-specific helpers ----
 
@@ -37,12 +37,12 @@ const buildEmptyForm = (): GeminiFormState => ({
 
 const buildSignature = (form: GeminiFormState) =>
     JSON.stringify({
-        ...buildBaseSignatureFields(form),
-        models: normalizeModelEntriesForSignature(form.modelEntries, (name) =>
-            stripGeminiModelResourceName(name).trim()
-        ),
-        excludedModels: parseTextList(form.excludedText ?? ''),
-    })
+                       ...buildBaseSignatureFields(form),
+                       models: normalizeModelEntriesForSignature(form.modelEntries, (name) =>
+                           stripGeminiModelResourceName(name).trim(),
+                       ),
+                       excludedModels: parseTextList(form.excludedText ?? ''),
+                   })
 
 // ---- Page component ----
 
@@ -95,21 +95,21 @@ export function AiProvidersGeminiEditPage() {
     }
 
     const {
-        form,
-        setForm,
-        loading,
-        saving,
-        error,
-        invalidIndexParam,
-        invalidIndex,
-        disableControls,
-        canSave,
-        disabled,
-        title,
-        handleSave,
-        handleBack,
-        swipeRef,
-    } = useProviderEditForm<GeminiFormState, GeminiKeyConfig>(editOptions)
+              form,
+              setForm,
+              loading,
+              saving,
+              error,
+              invalidIndexParam,
+              invalidIndex,
+              disableControls,
+              canSave,
+              disabled,
+              title,
+              handleSave,
+              handleBack,
+              swipeRef,
+          } = useProviderEditForm<GeminiFormState, GeminiKeyConfig>(editOptions)
 
     // ---- Model discovery ----
 
@@ -126,20 +126,20 @@ export function AiProvidersGeminiEditPage() {
             canAutoFetch: (apiKey, headers) =>
                 Boolean(apiKey) || hasHeader(headers, 'x-goog-api-key') || hasHeader(headers, 'authorization'),
             buildErrorMessage: (err, { apiKey, headers }) => {
-                const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+                const message              = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
                 const hasCustomXGoogApiKey = hasHeader(headers, 'x-goog-api-key')
-                const hasAuthorization = hasHeader(headers, 'authorization')
-                const shouldAttachDiag = message.toLowerCase().includes('api key') || message.includes('401')
-                const diag = shouldAttachDiag
-                    ? ` [diag: apiKeyField=${apiKey ? 'yes' : 'no'}, customXGoogApiKey=${
-                          hasCustomXGoogApiKey ? 'yes' : 'no'
-                      }, customAuthorization=${hasAuthorization ? 'yes' : 'no'}]`
-                    : ''
+                const hasAuthorization     = hasHeader(headers, 'authorization')
+                const shouldAttachDiag     = message.toLowerCase().includes('api key') || message.includes('401')
+                const diag                 = shouldAttachDiag
+                                             ? ` [diag: apiKeyField=${apiKey ? 'yes' : 'no'}, customXGoogApiKey=${
+                        hasCustomXGoogApiKey ? 'yes' : 'no'
+                    }, customAuthorization=${hasAuthorization ? 'yes' : 'no'}]`
+                                             : ''
                 return `${t('ai_providers.gemini_models_fetch_error')}: ${message}${diag}`
             },
             normalizeName: stripGeminiModelResourceName,
             i18nPrefix: 'gemini',
-        }
+        },
     )
 
     return (
@@ -188,7 +188,7 @@ export function AiProvidersGeminiEditPage() {
                 setForm={setForm}
                 disabled={disabled}
                 discovery={discovery}
-                i18nPrefix="gemini"
+                i18nPrefix='gemini'
             />
         </ProviderEditShell>
     )

@@ -1,18 +1,18 @@
-import type { ModelEntry, OpenAIFormState } from '@/components/providers/types'
-import { buildApiKeyEntry } from '@/components/providers/utils'
-import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils'
-import { useProviderEditLayout } from '@/hooks/useProviderEditLayout'
-import { providersApi } from '@/services/api'
-import { useConfigStore, useNotificationStore, useOpenAIEditDraftStore } from '@/stores'
-import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore'
-import type { ApiKeyEntry, OpenAIProviderConfig } from '@/types'
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers'
-import { getErrorMessage } from '@/utils/helpers'
-import type { ModelInfo } from '@/utils/models'
-import type { Dispatch, SetStateAction } from 'react'
-import { useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Outlet } from 'react-router-dom'
+import type {ModelEntry, OpenAIFormState} from '@/components/providers/types'
+import {buildApiKeyEntry} from '@/components/providers/utils'
+import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
+import {providersApi} from '@/services/api'
+import {useConfigStore, useNotificationStore, useOpenAIEditDraftStore} from '@/stores'
+import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
+import type {ApiKeyEntry, OpenAIProviderConfig} from '@/types'
+import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
+import {getErrorMessage} from '@/utils/helpers'
+import type {ModelInfo} from '@/utils/models'
+import type {Dispatch, SetStateAction} from 'react'
+import {useCallback} from 'react'
+import {useTranslation} from 'react-i18next'
+import {Outlet} from 'react-router-dom'
 
 export type OpenAIEditOutletContext = {
     hasIndexParam: boolean
@@ -46,7 +46,7 @@ export type OpenAIEditOutletContext = {
 const normalizeModelEntries = (entries: ModelEntry[]) =>
     (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
         const name = String(entry?.name ?? '').trim()
-        let alias = String(entry?.alias ?? '').trim()
+        let alias  = String(entry?.alias ?? '').trim()
         if (name && (alias === '' || alias === name)) {
             alias = ''
         }
@@ -62,15 +62,15 @@ const normalizeKeyHeaders = (headers: ApiKeyEntry['headers']) => {
         return []
     }
     return Object.entries(headers)
-        .map(([key, value]) => ({ key: String(key ?? '').trim(), value: String(value ?? '').trim() }))
-        .filter((entry) => entry.key || entry.value)
-        .sort((a, b) => {
-            const byKey = a.key.toLowerCase().localeCompare(b.key.toLowerCase())
-            if (byKey !== 0) {
-                return byKey
-            }
-            return a.value.localeCompare(b.value)
-        })
+                 .map(([key, value]) => ({ key: String(key ?? '').trim(), value: String(value ?? '').trim() }))
+                 .filter((entry) => entry.key || entry.value)
+                 .sort((a, b) => {
+                     const byKey = a.key.toLowerCase().localeCompare(b.key.toLowerCase())
+                     if (byKey !== 0) {
+                         return byKey
+                     }
+                     return a.value.localeCompare(b.value)
+                 })
 }
 
 const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
@@ -81,9 +81,9 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
             headers: Array<{ key: string; value: string }>
         }>
     >((acc, entry) => {
-        const apiKey = String(entry?.apiKey ?? '').trim()
+        const apiKey   = String(entry?.apiKey ?? '').trim()
         const proxyUrl = String(entry?.proxyUrl ?? '').trim()
-        const headers = normalizeKeyHeaders(entry?.headers)
+        const headers  = normalizeKeyHeaders(entry?.headers)
         if (!apiKey && !proxyUrl && headers.length === 0) {
             return acc
         }
@@ -93,16 +93,18 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
 
 const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
     JSON.stringify({
-        name: String(form.name ?? '').trim(),
-        priority: form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
-        prefix: String(form.prefix ?? '').trim(),
-        baseUrl: String(form.baseUrl ?? '').trim(),
-        disabled: Boolean(form.disabled),
-        headers: normalizeHeaderEntries(form.headers),
-        apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
-        models: normalizeModelEntries(form.modelEntries),
-        testModel: String(testModel ?? '').trim(),
-    })
+                       name: String(form.name ?? '').trim(),
+                       priority: form.priority !== undefined && Number.isFinite(form.priority) ?
+                                 Math.trunc(form.priority) :
+                                 null,
+                       prefix: String(form.prefix ?? '').trim(),
+                       baseUrl: String(form.baseUrl ?? '').trim(),
+                       disabled: Boolean(form.disabled),
+                       headers: normalizeHeaderEntries(form.headers),
+                       apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
+                       models: normalizeModelEntries(form.modelEntries),
+                       testModel: String(testModel ?? '').trim(),
+                   })
 
 const buildEmptyForm = (): OpenAIFormState => ({
     name: '',
@@ -122,15 +124,15 @@ const buildEmptyForm = (): OpenAIFormState => ({
 /* ------------------------------------------------------------------ */
 
 export function AiProvidersOpenAIEditLayout() {
-    const { t } = useTranslation()
+    const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
-    const updateConfigValue = useConfigStore((state) => state.updateConfigValue)
+    const fetchConfig          = useConfigStore((state) => state.fetchConfig)
+    const updateConfigValue    = useConfigStore((state) => state.updateConfigValue)
 
     /* ---- OpenAI-specific draft store selectors (keyTestStatuses) ---- */
-    const draftStore = useOpenAIEditDraftStore
-    const rawDrafts = draftStore((state) => state.drafts)
-    const rawSetDraftKeyTestStatus = draftStore((state) => state.setDraftKeyTestStatus)
+    const draftStore                   = useOpenAIEditDraftStore
+    const rawDrafts                    = draftStore((state) => state.drafts)
+    const rawSetDraftKeyTestStatus     = draftStore((state) => state.setDraftKeyTestStatus)
     const rawResetDraftKeyTestStatuses = draftStore((state) => state.resetDraftKeyTestStatuses)
 
     const buildEmptyDraftInit = useCallback(
@@ -141,11 +143,11 @@ export function AiProvidersOpenAIEditLayout() {
             testMessage: '',
             keyTestStatuses: [] as KeyTestStatus[],
         }),
-        []
+        [],
     )
 
     const seedDraftInit = useCallback((data: OpenAIProviderConfig) => {
-        const modelEntries = modelsToEntries(data.models)
+        const modelEntries                = modelsToEntries(data.models)
         const seededForm: OpenAIFormState = {
             name: data.name,
             priority: data.priority,
@@ -158,9 +160,9 @@ export function AiProvidersOpenAIEditLayout() {
             disabled: data.disabled ?? false,
         }
 
-        const available = modelEntries.map((entry) => entry.name.trim()).filter(Boolean)
+        const available        = modelEntries.map((entry) => entry.name.trim()).filter(Boolean)
         const initialTestModel =
-            data.testModel && available.includes(data.testModel) ? data.testModel : available[0] || ''
+                  data.testModel && available.includes(data.testModel) ? data.testModel : available[0] || ''
 
         return {
             form: seededForm,
@@ -184,8 +186,8 @@ export function AiProvidersOpenAIEditLayout() {
             handleBack: () => void
         }) => {
             const { form, testModel, editIndex, configs, setConfigs, setSaving, handleBack } = ctx
-            const name = form.name.trim()
-            const baseUrl = form.baseUrl.trim()
+            const name                                                                       = form.name.trim()
+            const baseUrl                                                                    = form.baseUrl.trim()
 
             if (!name || !baseUrl) {
                 showNotification(t('notification.openai_provider_required'), 'error')
@@ -219,9 +221,9 @@ export function AiProvidersOpenAIEditLayout() {
                 }
 
                 const nextList =
-                    editIndex !== null
-                        ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-                        : [...configs, payload]
+                          editIndex !== null
+                          ? configs.map((item, idx) => (idx === editIndex ? payload : item))
+                          : [...configs, payload]
 
                 await providersApi.saveOpenAIProviders(nextList)
 
@@ -243,9 +245,9 @@ export function AiProvidersOpenAIEditLayout() {
                 updateConfigValue('openai-compatibility', syncedProviders)
                 showNotification(
                     editIndex !== null
-                        ? t('notification.openai_provider_updated')
-                        : t('notification.openai_provider_added'),
-                    'success'
+                    ? t('notification.openai_provider_updated')
+                    : t('notification.openai_provider_added'),
+                    'success',
                 )
                 ctx.allowNextNavigation()
                 ctx.updateBaselineSignature(buildOpenAISignature(form, testModel))
@@ -256,38 +258,38 @@ export function AiProvidersOpenAIEditLayout() {
                 setSaving(false)
             }
         },
-        [fetchConfig, showNotification, t, updateConfigValue]
+        [fetchConfig, showNotification, t, updateConfigValue],
     )
 
     const layout = useProviderEditLayout({
-        configKey: 'openai-compatibility',
-        draftKeyPrefix: 'openai',
-        routePrefix: '/ai-providers/openai',
-        useDraftStore: draftStore,
-        extractConfigs: (config) => config?.openaiCompatibility ?? [],
-        buildEmptyDraftInit,
-        buildSignature: buildOpenAISignature,
-        seedDraftInit,
-        mergeNotificationKey: 'ai_providers.openai_models_fetch_added',
-        onSave,
-    })
+                                             configKey: 'openai-compatibility',
+                                             draftKeyPrefix: 'openai',
+                                             routePrefix: '/credentials/openai',
+                                             useDraftStore: draftStore,
+                                             extractConfigs: (config) => config?.openaiCompatibility ?? [],
+                                             buildEmptyDraftInit,
+                                             buildSignature: buildOpenAISignature,
+                                             seedDraftInit,
+                                             mergeNotificationKey: 'ai_providers.openai_models_fetch_added',
+                                             onSave,
+                                         })
 
     /* ---- OpenAI-specific: keyTestStatuses bound to current draftKey ---- */
-    const { draftKey } = layout
+    const { draftKey }    = layout
     const keyTestStatuses = rawDrafts[draftKey]?.keyTestStatuses ?? []
 
     const handleSetDraftKeyTestStatus = useCallback(
         (keyIndex: number, status: KeyTestStatus) => {
             rawSetDraftKeyTestStatus(draftKey, keyIndex, status)
         },
-        [draftKey, rawSetDraftKeyTestStatus]
+        [draftKey, rawSetDraftKeyTestStatus],
     )
 
     const handleResetDraftKeyTestStatuses = useCallback(
         (count: number) => {
             rawResetDraftKeyTestStatuses(draftKey, count)
         },
-        [draftKey, rawResetDraftKeyTestStatuses]
+        [draftKey, rawResetDraftKeyTestStatuses],
     )
 
     return (

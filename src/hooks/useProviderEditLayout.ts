@@ -9,19 +9,19 @@
  * seams (form seeding, signature building, save handling) as parameters.
  */
 
-import type { ModelEntry } from '@/components/providers/types'
-import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores'
-import type { BaseDraft, DraftSliceState } from '@/stores/createDraftSlice'
-import type { Config, RawConfigSection } from '@/types/config'
-import { getErrorMessage, parseIndexParam } from '@/utils/helpers'
-import type { ModelInfo } from '@/utils/models'
-import type { Dispatch, SetStateAction } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import type { BlockerFunction } from 'react-router'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import type { StoreApi, UseBoundStore } from 'zustand'
+import type {ModelEntry} from '@/components/providers/types'
+import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
+import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import type {BaseDraft, DraftSliceState} from '@/stores/createDraftSlice'
+import type {Config, RawConfigSection} from '@/types/config'
+import {getErrorMessage, parseIndexParam} from '@/utils/helpers'
+import type {ModelInfo} from '@/utils/models'
+import type {Dispatch, SetStateAction} from 'react'
+import {useCallback, useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import type {BlockerFunction} from 'react-router'
+import {useLocation, useNavigate, useParams} from 'react-router-dom'
+import type {StoreApi, UseBoundStore} from 'zustand'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -119,44 +119,44 @@ export interface ProviderEditLayoutResult<F, C> {
 /* ------------------------------------------------------------------ */
 
 export function useProviderEditLayout<F, C, D extends BaseDraft>(
-    options: ProviderEditLayoutOptions<F, C, D>
+    options: ProviderEditLayoutOptions<F, C, D>,
 ): ProviderEditLayoutResult<F, C> {
     const {
-        configKey,
-        draftKeyPrefix,
-        routePrefix,
-        useDraftStore,
-        extractConfigs,
-        buildEmptyDraftInit,
-        buildSignature,
-        seedDraftInit,
-        mergeNotificationKey,
-        onSave,
-    } = options
+              configKey,
+              draftKeyPrefix,
+              routePrefix,
+              useDraftStore,
+              extractConfigs,
+              buildEmptyDraftInit,
+              buildSignature,
+              seedDraftInit,
+              mergeNotificationKey,
+              onSave,
+          } = options
 
-    const { t } = useTranslation()
-    const navigate = useNavigate()
-    const location = useLocation()
+    const { t }                = useTranslation()
+    const navigate             = useNavigate()
+    const location             = useLocation()
     const { showNotification } = useNotificationStore()
 
     /* ---- Index parsing ---- */
-    const params = useParams<{ index?: string }>()
-    const hasIndexParam = typeof params.index === 'string'
-    const editIndex = useMemo(() => parseIndexParam(params.index), [params.index])
+    const params            = useParams<{ index?: string }>()
+    const hasIndexParam     = typeof params.index === 'string'
+    const editIndex         = useMemo(() => parseIndexParam(params.index), [params.index])
     const invalidIndexParam = hasIndexParam && editIndex === null
 
     /* ---- Connection status ---- */
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const disableControls = connectionStatus !== 'connected'
+    const disableControls  = connectionStatus !== 'connected'
 
     /* ---- Config store ---- */
-    const config = useConfigStore((state) => state.config)
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
+    const config       = useConfigStore((state) => state.config)
+    const fetchConfig  = useConfigStore((state) => state.fetchConfig)
     const isCacheValid = useConfigStore((state) => state.isCacheValid)
 
     const [configs, setConfigs] = useState<C[]>(() => extractConfigs(config))
     const [loading, setLoading] = useState(() => !isCacheValid(configKey))
-    const [saving, setSaving] = useState(false)
+    const [saving, setSaving]   = useState(false)
 
     /* ---- Draft store binding ---- */
     const draftKey = useMemo(() => {
@@ -169,55 +169,55 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         return `${draftKeyPrefix}:${editIndex}`
     }, [draftKeyPrefix, editIndex, invalidIndexParam, params.index])
 
-    const draft = useDraftStore((state) => state.drafts[draftKey])
-    const acquireDraft = useDraftStore((state) => state.acquireDraft)
-    const releaseDraft = useDraftStore((state) => state.releaseDraft)
-    const initDraft = useDraftStore((state) => state.initDraft)
+    const draft                     = useDraftStore((state) => state.drafts[draftKey])
+    const acquireDraft              = useDraftStore((state) => state.acquireDraft)
+    const releaseDraft              = useDraftStore((state) => state.releaseDraft)
+    const initDraft                 = useDraftStore((state) => state.initDraft)
     const setDraftBaselineSignature = useDraftStore((state) => state.setDraftBaselineSignature)
-    const setDraftForm = useDraftStore((state) => state.setDraftForm)
-    const setDraftTestModel = useDraftStore((state) => state.setDraftTestModel)
-    const setDraftTestStatus = useDraftStore((state) => state.setDraftTestStatus)
-    const setDraftTestMessage = useDraftStore((state) => state.setDraftTestMessage)
+    const setDraftForm              = useDraftStore((state) => state.setDraftForm)
+    const setDraftTestModel         = useDraftStore((state) => state.setDraftTestModel)
+    const setDraftTestStatus        = useDraftStore((state) => state.setDraftTestStatus)
+    const setDraftTestMessage       = useDraftStore((state) => state.setDraftTestMessage)
 
-    const emptyInit = useMemo(() => buildEmptyDraftInit(), [buildEmptyDraftInit])
-    const form = (draft?.form as F) ?? (emptyInit.form as F)
-    const testModel = draft?.testModel ?? ''
-    const testStatus = (draft?.testStatus ?? 'idle') as TestStatus
+    const emptyInit   = useMemo(() => buildEmptyDraftInit(), [buildEmptyDraftInit])
+    const form        = (draft?.form as F) ?? (emptyInit.form as F)
+    const testModel   = draft?.testModel ?? ''
+    const testStatus  = (draft?.testStatus ?? 'idle') as TestStatus
     const testMessage = draft?.testMessage ?? ''
 
     const setForm: Dispatch<SetStateAction<F>> = useCallback(
         (action) => {
             setDraftForm(draftKey, action as SetStateAction<D['form']>)
         },
-        [draftKey, setDraftForm]
+        [draftKey, setDraftForm],
     )
 
     const setTestModel: Dispatch<SetStateAction<string>> = useCallback(
         (action) => {
             setDraftTestModel(draftKey, action)
         },
-        [draftKey, setDraftTestModel]
+        [draftKey, setDraftTestModel],
     )
 
     const setTestStatus: Dispatch<SetStateAction<TestStatus>> = useCallback(
         (action) => {
             setDraftTestStatus(draftKey, action as SetStateAction<D['testStatus']>)
         },
-        [draftKey, setDraftTestStatus]
+        [draftKey, setDraftTestStatus],
     )
 
     const setTestMessage: Dispatch<SetStateAction<string>> = useCallback(
         (action) => {
             setDraftTestMessage(draftKey, action)
         },
-        [draftKey, setDraftTestMessage]
+        [draftKey, setDraftTestMessage],
     )
 
     const updateBaselineSignature = useCallback(
         (signature: string) => {
             setDraftBaselineSignature(draftKey, signature)
         },
-        [draftKey, setDraftBaselineSignature]
+        [draftKey, setDraftBaselineSignature],
     )
 
     /* ---- Derived state ---- */
@@ -263,7 +263,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
     /* ---- Config loading ---- */
     useEffect(() => {
-        let cancelled = false
+        let cancelled       = false
         const hasValidCache = isCacheValid(configKey)
 
         queueMicrotask(() => {
@@ -311,33 +311,33 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         }
 
         if (initialData) {
-            const payload = seedDraftInit(initialData)
+            const payload           = seedDraftInit(initialData)
             const baselineSignature = buildSignature(payload.form as F, payload.testModel)
             initDraft(draftKey, { ...payload, baselineSignature } as Omit<D, 'initialized'>)
             return
         }
 
-        const payload = buildEmptyDraftInit()
+        const payload           = buildEmptyDraftInit()
         const baselineSignature = buildSignature(payload.form as F, payload.testModel)
         initDraft(draftKey, { ...payload, baselineSignature } as Omit<D, 'initialized'>)
     }, [
-        buildEmptyDraftInit,
-        buildSignature,
-        draft?.initialized,
-        draftKey,
-        initDraft,
-        initialData,
-        loading,
-        seedDraftInit,
-    ])
+                  buildEmptyDraftInit,
+                  buildSignature,
+                  draft?.initialized,
+                  draftKey,
+                  initDraft,
+                  initialData,
+                  loading,
+                  seedDraftInit,
+              ])
 
     /* ---- Resolved loading (draft not yet initialized) ---- */
     const resolvedLoading = !draft?.initialized
 
     /* ---- Dirty detection ---- */
-    const currentSignature = useMemo(() => buildSignature(form, testModel), [buildSignature, form, testModel])
+    const currentSignature  = useMemo(() => buildSignature(form, testModel), [buildSignature, form, testModel])
     const baselineSignature = draft?.baselineSignature ?? ''
-    const isDirty = Boolean(draft?.initialized) && baselineSignature !== currentSignature
+    const isDirty           = Boolean(draft?.initialized) && baselineSignature !== currentSignature
 
     /* ---- Unsaved-changes guard ---- */
     const editorRootPath = useMemo(() => {
@@ -346,12 +346,12 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         }
         return `${routePrefix}/new`
     }, [hasIndexParam, params.index, routePrefix])
-    const canGuard = !resolvedLoading && !saving && !invalidIndexParam && !invalidIndex
+    const canGuard       = isDirty && !resolvedLoading && !saving && !invalidIndexParam && !invalidIndex
 
     const guardOptions = {
         enabled: canGuard,
         shouldBlock: (({ nextLocation }) => {
-            const nextPath = nextLocation.pathname
+            const nextPath     = nextLocation.pathname
             const isWithinRoot = nextPath === editorRootPath || nextPath.startsWith(`${editorRootPath}/`)
             return isDirty && !isWithinRoot
         }) as BlockerFunction,
@@ -398,7 +398,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
             let addedCount = 0
             setForm((prev) => {
                 const prevWithEntries = prev as F & { modelEntries: ModelEntry[] }
-                const mergedMap = new Map<string, ModelEntry>()
+                const mergedMap       = new Map<string, ModelEntry>()
                 prevWithEntries.modelEntries.forEach((entry) => {
                     const name = entry.name.trim()
                     if (!name) {
@@ -427,7 +427,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
                 showNotification(t(mergeNotificationKey, { count: addedCount }), 'success')
             }
         },
-        [mergeNotificationKey, setForm, showNotification, t]
+        [mergeNotificationKey, setForm, showNotification, t],
     )
 
     /* ---- Save (delegated to provider-specific callback) ---- */
@@ -438,31 +438,31 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         }
 
         await onSave({
-            form,
-            testModel,
-            editIndex,
-            configs,
-            setConfigs,
-            setSaving,
-            allowNextNavigation,
-            updateBaselineSignature,
-            handleBack,
-        })
+                         form,
+                         testModel,
+                         editIndex,
+                         configs,
+                         setConfigs,
+                         setSaving,
+                         allowNextNavigation,
+                         updateBaselineSignature,
+                         handleBack,
+                     })
     }, [
-        allowNextNavigation,
-        configs,
-        disableControls,
-        editIndex,
-        form,
-        handleBack,
-        invalidIndex,
-        invalidIndexParam,
-        onSave,
-        resolvedLoading,
-        saving,
-        testModel,
-        updateBaselineSignature,
-    ])
+                                       allowNextNavigation,
+                                       configs,
+                                       disableControls,
+                                       editIndex,
+                                       form,
+                                       handleBack,
+                                       invalidIndex,
+                                       invalidIndexParam,
+                                       onSave,
+                                       resolvedLoading,
+                                       saving,
+                                       testModel,
+                                       updateBaselineSignature,
+                                   ])
 
     return {
         hasIndexParam,

@@ -1,5 +1,5 @@
-import type { ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig } from '@/types'
-import type { HeaderEntry } from '@/utils/headers'
+import type {ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
+import type {HeaderEntry} from '@/utils/headers'
 
 export interface ModelEntry {
     name: string

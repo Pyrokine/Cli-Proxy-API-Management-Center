@@ -56,8 +56,8 @@ export function normalizeModelList(payload: unknown, { dedupe = false } = {}): M
             return null
         }
 
-        const alias = entry.alias || entry.display_name || entry.displayName
-        const description = entry.description || entry.note || entry.comment
+        const alias            = entry.alias || entry.display_name || entry.displayName
+        const description      = entry.description || entry.note || entry.comment
         const model: ModelInfo = { name: String(name) }
         if (alias && alias !== name) {
             model.alias = String(alias)
@@ -111,8 +111,8 @@ interface ModelGroup {
 }
 
 export function classifyModels(
-    models: ModelInfo[] = [],
-    { otherLabel = 'Other', t }: { otherLabel?: string; t?: Translator } = {}
+    models: ModelInfo[]                                                  = [],
+    { otherLabel = 'Other', t }: { otherLabel?: string; t?: Translator } = {},
 ): ModelGroup[] {
     const groups: ModelGroup[] = MODEL_CATEGORIES.map((category) => ({
         id: category.id,
@@ -123,11 +123,11 @@ export function classifyModels(
     const otherGroup: ModelGroup = { id: 'other', label: otherLabel, items: [] }
 
     models.forEach((model) => {
-        const name = (model?.name || '').toString()
-        const alias = (model?.alias || '').toString()
-        const haystack = `${name} ${alias}`.toLowerCase()
+        const name      = (model?.name || '').toString()
+        const alias     = (model?.alias || '').toString()
+        const haystack  = `${name} ${alias}`.toLowerCase()
         const matchedId = matchCategory(haystack)
-        const target = matchedId ? groups.find((group) => group.id === matchedId) : null
+        const target    = matchedId ? groups.find((group) => group.id === matchedId) : null
 
         if (target) {
             target.items.push(model)

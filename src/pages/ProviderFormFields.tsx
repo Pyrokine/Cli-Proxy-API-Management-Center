@@ -1,11 +1,11 @@
-import { Button } from '@/components/ui/Button'
-import { HeaderInputList } from '@/components/ui/HeaderInputList'
-import { Input } from '@/components/ui/Input'
-import { ModelInputList } from '@/components/ui/ModelInputList'
-import type { ModelDiscoveryReturn } from '@/hooks/useModelDiscovery'
-import type { Dispatch, SetStateAction } from 'react'
-import { useTranslation } from 'react-i18next'
-import { ModelDiscoveryModal } from './ModelDiscoveryModal'
+import {Button} from '@/components/ui/Button'
+import {HeaderInputList} from '@/components/ui/HeaderInputList'
+import {Input} from '@/components/ui/Input'
+import {ModelInputList} from '@/components/ui/ModelInputList'
+import type {ModelDiscoveryReturn} from '@/hooks/useModelDiscovery'
+import type {Dispatch, SetStateAction} from 'react'
+import {useTranslation} from 'react-i18next'
+import {ModelDiscoveryModal} from './ModelDiscoveryModal'
 import styles from './ProviderEditForm.module.scss'
 
 // ---- Shared form field change helpers ----
@@ -29,16 +29,16 @@ export function PriorityField<T extends { priority?: number }>({ form, setForm, 
         <Input
             label={t('ai_providers.priority_label')}
             hint={t('ai_providers.priority_hint')}
-            type="number"
+            type='number'
             step={1}
             value={form.priority ?? ''}
             onChange={(e) => {
-                const raw = e.target.value
+                const raw    = e.target.value
                 const parsed = raw.trim() === '' ? undefined : Number(raw)
                 fieldChange(
                     setForm,
                     'priority' as keyof T,
-                    parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined
+                    parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
                 )
             }}
             disabled={disabled}
@@ -107,14 +107,14 @@ interface ModelConfigSectionProps {
 }
 
 function ModelConfigSection({
-    entries,
-    onChange,
-    onAddRow,
-    disabled,
-    i18nPrefix,
-    onDiscovery,
-    discoveryDisabled,
-}: ModelConfigSectionProps) {
+                                entries,
+                                onChange,
+                                onAddRow,
+                                disabled,
+                                i18nPrefix,
+                                onDiscovery,
+                                discoveryDisabled,
+                            }: ModelConfigSectionProps) {
     const { t } = useTranslation()
 
     return (
@@ -122,11 +122,11 @@ function ModelConfigSection({
             <div className={styles.modelConfigHeader}>
                 <label className={styles.modelConfigTitle}>{t(`ai_providers.${i18nPrefix}_models_label`)}</label>
                 <div className={styles.modelConfigToolbar}>
-                    <Button variant="secondary" size="sm" onClick={onAddRow} disabled={disabled}>
+                    <Button variant='secondary' size='sm' onClick={onAddRow} disabled={disabled}>
                         {t(`ai_providers.${i18nPrefix}_models_add_btn`)}
                     </Button>
                     {onDiscovery && (
-                        <Button variant="secondary" size="sm" onClick={onDiscovery} disabled={discoveryDisabled}>
+                        <Button variant='secondary' size='sm' onClick={onDiscovery} disabled={discoveryDisabled}>
                             {t(`ai_providers.${i18nPrefix}_models_fetch_button`)}
                         </Button>
                     )}
@@ -162,17 +162,17 @@ interface ExcludedModelsFieldProps {
 export function ExcludedModelsField({ value, onChange, disabled }: ExcludedModelsFieldProps) {
     const { t } = useTranslation()
     return (
-        <div className="form-group">
+        <div className='form-group'>
             <label>{t('ai_providers.excluded_models_label')}</label>
             <textarea
-                className="input"
+                className='input'
                 placeholder={t('ai_providers.excluded_models_placeholder')}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 rows={4}
                 disabled={disabled}
             />
-            <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
+            <div className='hint'>{t('ai_providers.excluded_models_hint')}</div>
         </div>
     )
 }

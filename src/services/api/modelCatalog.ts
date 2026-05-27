@@ -2,7 +2,7 @@
  * Model catalog refresh metadata (backend state for remote models.json pulls).
  */
 
-import { apiClient } from './client'
+import {apiClient} from './client'
 
 export interface ModelCatalogMeta {
     last_refresh_at: string

@@ -1,5 +1,5 @@
-import type { ModelEntry } from '@/components/providers/types'
-import { useMemo } from 'react'
+import type {ModelEntry} from '@/components/providers/types'
+import {useMemo} from 'react'
 
 /**
  * Derives `{ value, label }[]` options from model entries for use in <Select>.
@@ -15,10 +15,10 @@ export function useModelSelectOptions(modelEntries: ModelEntry[]) {
                 return
             }
 
-            const key = value.toLowerCase()
-            const alias = entry.alias.trim()
+            const key             = value.toLowerCase()
+            const alias           = entry.alias.trim()
             const normalizedAlias = alias && alias !== value ? alias : ''
-            const existing = entries.get(key)
+            const existing        = entries.get(key)
 
             if (!existing) {
                 entries.set(key, { value, alias: normalizedAlias })
@@ -31,10 +31,12 @@ export function useModelSelectOptions(modelEntries: ModelEntry[]) {
         })
 
         return Array.from(entries.values())
-            .sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }))
-            .map((entry) => ({
-                value: entry.value,
-                label: entry.alias && entry.alias !== entry.value ? `${entry.value} (${entry.alias})` : entry.value,
-            }))
+                    .sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }))
+                    .map((entry) => ({
+                        value: entry.value,
+                        label: entry.alias && entry.alias !== entry.value ?
+                               `${entry.value} (${entry.alias})` :
+                               entry.value,
+                    }))
     }, [modelEntries])
 }

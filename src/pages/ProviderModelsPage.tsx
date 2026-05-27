@@ -1,13 +1,13 @@
-import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell'
-import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
-import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack'
-import type { ModelInfo } from '@/utils/models'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
-import { ModelCheckboxList } from './ModelCheckboxList'
+import {SecondaryScreenShell} from '@/components/common/SecondaryScreenShell'
+import {Button} from '@/components/ui/Button'
+import {Card} from '@/components/ui/Card'
+import {Input} from '@/components/ui/Input'
+import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
+import type {ModelInfo} from '@/utils/models'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {useNavigate} from 'react-router-dom'
+import {ModelCheckboxList} from './ModelCheckboxList'
 import styles from './ProviderEditForm.module.scss'
 import layoutStyles from './ProviderEditLayout.module.scss'
 
@@ -33,28 +33,28 @@ export type ProviderModelsPageProps = {
 }
 
 export function ProviderModelsPage({
-    i18nPrefix,
-    disableControls,
-    initialLoading,
-    saving,
-    mergeDiscoveredModels,
-    buildEndpoint,
-    fetchModels,
-    fetchDeps,
-    canAutoFetch,
-    buildAutoFetchSignature,
-    buildErrorDiagnostic,
-}: ProviderModelsPageProps) {
-    const { t } = useTranslation()
+                                       i18nPrefix,
+                                       disableControls,
+                                       initialLoading,
+                                       saving,
+                                       mergeDiscoveredModels,
+                                       buildEndpoint,
+                                       fetchModels,
+                                       fetchDeps,
+                                       canAutoFetch,
+                                       buildAutoFetchSignature,
+                                       buildErrorDiagnostic,
+                                   }: ProviderModelsPageProps) {
+    const { t }    = useTranslation()
     const navigate = useNavigate()
 
     const [endpoint, setEndpoint] = useState('')
-    const [models, setModels] = useState<ModelInfo[]>([])
+    const [models, setModels]     = useState<ModelInfo[]>([])
     const [fetching, setFetching] = useState(false)
-    const [error, setError] = useState('')
-    const [search, setSearch] = useState('')
+    const [error, setError]       = useState('')
+    const [search, setSearch]     = useState('')
     const [selected, setSelected] = useState<Set<string>>(new Set())
-    const autoFetchSignatureRef = useRef('')
+    const autoFetchSignatureRef   = useRef('')
 
     const filteredModels = useMemo(() => {
         const filter = search.trim().toLowerCase()
@@ -63,9 +63,9 @@ export function ProviderModelsPage({
             return sorted
         }
         return sorted.filter((model) => {
-            const name = (model.name || '').toLowerCase()
+            const name  = (model.name || '').toLowerCase()
             const alias = (model.alias || '').toLowerCase()
-            const desc = (model.description || '').toLowerCase()
+            const desc  = (model.description || '').toLowerCase()
             return name.includes(filter) || alias.includes(filter) || desc.includes(filter)
         })
     }, [models, search])
@@ -79,7 +79,7 @@ export function ProviderModelsPage({
         } catch (err: unknown) {
             setModels([])
             const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
-            const diag = buildErrorDiagnostic?.(message) ?? ''
+            const diag    = buildErrorDiagnostic?.(message) ?? ''
             setError(`${t(`ai_providers.${i18nPrefix}_fetch_error`)}: ${message}${diag}`)
         } finally {
             setFetching(false)
@@ -167,15 +167,15 @@ export function ProviderModelsPage({
             floatingAction={
                 <div className={layoutStyles.floatingActions}>
                     <Button
-                        variant="secondary"
-                        size="sm"
+                        variant='secondary'
+                        size='sm'
                         onClick={handleBack}
                         className={layoutStyles.floatingBackButton}
                     >
                         {t('common.back')}
                     </Button>
                     <Button
-                        size="sm"
+                        size='sm'
                         onClick={handleApply}
                         disabled={!canApply}
                         className={layoutStyles.floatingSaveButton}
@@ -197,8 +197,8 @@ export function ProviderModelsPage({
                         <div className={styles.openaiModelsEndpointControls}>
                             <input className={`input ${styles.openaiModelsEndpointInput}`} readOnly value={endpoint} />
                             <Button
-                                variant="secondary"
-                                size="sm"
+                                variant='secondary'
+                                size='sm'
                                 onClick={() => void doFetch()}
                                 loading={fetching}
                                 disabled={disableControls || saving}
@@ -214,7 +214,7 @@ export function ProviderModelsPage({
                         onChange={(e) => setSearch(e.target.value)}
                         disabled={fetching}
                     />
-                    {error && <div className="error-box">{error}</div>}
+                    {error && <div className='error-box'>{error}</div>}
                     {fetching ? (
                         <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_fetch_loading`)}</div>
                     ) : models.length === 0 ? (
@@ -222,8 +222,8 @@ export function ProviderModelsPage({
                     ) : filteredModels.length === 0 ? (
                         <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_search_empty`)}</div>
                     ) : (
-                        <ModelCheckboxList models={filteredModels} selected={selected} onToggle={toggleSelection} />
-                    )}
+                            <ModelCheckboxList models={filteredModels} selected={selected} onToggle={toggleSelection} />
+                        )}
                 </div>
             </Card>
         </SecondaryScreenShell>

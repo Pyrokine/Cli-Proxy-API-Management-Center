@@ -1,12 +1,12 @@
-import { useEditPageNavigation } from '@/hooks/useEditPageNavigation'
-import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores'
-import type { RawConfigSection } from '@/types/config'
-import { normalizeHeaderEntries } from '@/utils/headers'
-import { parseIndexParam } from '@/utils/helpers'
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom'
+import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
+import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
+import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import type {RawConfigSection} from '@/types/config'
+import {normalizeHeaderEntries} from '@/utils/headers'
+import {parseIndexParam} from '@/utils/helpers'
+import {type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {useParams} from 'react-router-dom'
 
 // ---- Generic form state constraint ----
 
@@ -104,30 +104,30 @@ interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig> {
  * Encapsulates: config loading, form state, dirty tracking, unsaved-changes guard, save logic.
  */
 export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
-    config: ProviderEditFormConfig<TForm, TConfig>
+    config: ProviderEditFormConfig<TForm, TConfig>,
 ): ProviderEditFormReturn<TForm, TConfig> {
-    const { t } = useTranslation()
+    const { t }  = useTranslation()
     const params = useParams<{ index?: string }>()
 
     const { showNotification } = useNotificationStore()
-    const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const disableControls = connectionStatus !== 'connected'
+    const connectionStatus     = useAuthStore((state) => state.connectionStatus)
+    const disableControls      = connectionStatus !== 'connected'
 
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
+    const fetchConfig       = useConfigStore((state) => state.fetchConfig)
     const updateConfigValue = useConfigStore((state) => state.updateConfigValue)
-    const clearCache = useConfigStore((state) => state.clearCache)
+    const clearCache        = useConfigStore((state) => state.clearCache)
 
-    const [configs, setConfigs] = useState<TConfig[]>([])
-    const [loading, setLoading] = useState(true)
-    const [saving, setSaving] = useState(false)
-    const [error, setError] = useState('')
-    const [form, setForm] = useState<TForm>(() => config.buildEmptyForm())
+    const [configs, setConfigs]                     = useState<TConfig[]>([])
+    const [loading, setLoading]                     = useState(true)
+    const [saving, setSaving]                       = useState(false)
+    const [error, setError]                         = useState('')
+    const [form, setForm]                           = useState<TForm>(() => config.buildEmptyForm())
     const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(config.buildEmptyForm()))
 
     // ---- Index parsing ----
 
-    const hasIndexParam = typeof params.index === 'string'
-    const editIndex = useMemo(() => parseIndexParam(params.index), [params.index])
+    const hasIndexParam     = typeof params.index === 'string'
+    const editIndex         = useMemo(() => parseIndexParam(params.index), [params.index])
     const invalidIndexParam = hasIndexParam && editIndex === null
 
     const initialData = useMemo(() => {
@@ -209,25 +209,27 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
     // ---- Dirty tracking ----
 
     const currentSignature = useMemo(() => config.buildSignature(form), [config, form])
-    const isDirty = baselineSignature !== currentSignature
+    const isDirty          = baselineSignature !== currentSignature
 
     // ---- Unsaved changes guard ----
 
-    const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex
-    const canGuard = !loading && !saving && !invalidIndexParam && !invalidIndex
+    const canSave  = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex
+    const canGuard = isDirty && !loading && !saving && !invalidIndexParam && !invalidIndex
 
     const { allowNextNavigation } = useUnsavedChangesGuard({
-        enabled: canGuard,
-        shouldBlock: ({ currentLocation, nextLocation }) =>
-            isDirty && currentLocation.pathname !== nextLocation.pathname,
-        dialog: {
-            title: t('common.unsaved_changes_title'),
-            message: t('common.unsaved_changes_message'),
-            confirmText: t('common.leave'),
-            cancelText: t('common.stay'),
-            variant: 'danger',
-        },
-    })
+                                                               enabled: canGuard,
+                                                               shouldBlock: ({ currentLocation, nextLocation }) =>
+                                                                   isDirty &&
+                                                                   currentLocation.pathname !==
+                                                                   nextLocation.pathname,
+                                                               dialog: {
+                                                                   title: t('common.unsaved_changes_title'),
+                                                                   message: t('common.unsaved_changes_message'),
+                                                                   confirmText: t('common.leave'),
+                                                                   cancelText: t('common.stay'),
+                                                                   variant: 'danger',
+                                                               },
+                                                           })
 
     // ---- Save ----
 
@@ -250,16 +252,16 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
             const payload = config.formToPayload(form)
 
             const nextList =
-                editIndex !== null
-                    ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-                    : [...configs, payload]
+                      editIndex !== null
+                      ? configs.map((item, idx) => (idx === editIndex ? payload : item))
+                      : [...configs, payload]
 
             await config.saveConfigs(nextList)
             updateConfigValue(config.configKey, nextList)
             clearCache(config.configKey)
             showNotification(
                 editIndex !== null ? t(config.i18n.saveSuccessEdit) : t(config.i18n.saveSuccessAdd),
-                'success'
+                'success',
             )
             allowNextNavigation()
             setBaselineSignature(config.buildSignature(form))
@@ -272,18 +274,18 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
             setSaving(false)
         }
     }, [
-        allowNextNavigation,
-        canSave,
-        clearCache,
-        config,
-        configs,
-        editIndex,
-        form,
-        handleBack,
-        showNotification,
-        t,
-        updateConfigValue,
-    ])
+                                       allowNextNavigation,
+                                       canSave,
+                                       clearCache,
+                                       config,
+                                       configs,
+                                       editIndex,
+                                       form,
+                                       handleBack,
+                                       showNotification,
+                                       t,
+                                       updateConfigValue,
+                                   ])
 
     return {
         form,
@@ -327,11 +329,11 @@ export const buildBaseSignatureFields = (form: BaseFormState) => ({
  */
 export const normalizeModelEntriesForSignature = (
     entries: Array<{ name: string; alias: string }>,
-    normalizeName: (name: string) => string = (name) => String(name ?? '').trim()
+    normalizeName: (name: string) => string = (name) => String(name ?? '').trim(),
 ) =>
     (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
         const name = normalizeName(entry?.name ?? '')
-        let alias = String(entry?.alias ?? '').trim()
+        let alias  = String(entry?.alias ?? '').trim()
         if (name && alias === name) {
             alias = ''
         }

@@ -1,8 +1,8 @@
-import { useNotificationStore } from '@/stores'
-import { buildHeaderObject } from '@/utils/headers'
-import type { ModelInfo } from '@/utils/models'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import {useNotificationStore} from '@/stores'
+import {buildHeaderObject} from '@/utils/headers'
+import type {ModelInfo} from '@/utils/models'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
 // ---- Types ----
 
@@ -30,7 +30,7 @@ interface ModelDiscoveryConfig {
         context: {
             apiKey: string
             headers: Record<string, string>
-        }
+        },
     ) => string
 
     /** Normalize a model name (e.g. strip Gemini resource prefix) */
@@ -84,24 +84,24 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         invalidIndexParam: boolean
         invalidIndex: boolean
     },
-    discoveryConfig: ModelDiscoveryConfig
+    discoveryConfig: ModelDiscoveryConfig,
 ): ModelDiscoveryReturn {
-    const { t } = useTranslation()
+    const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
 
-    const [open, setOpen] = useState(false)
-    const [endpoint, setEndpoint] = useState('')
+    const [open, setOpen]                         = useState(false)
+    const [endpoint, setEndpoint]                 = useState('')
     const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([])
-    const [fetching, setFetching] = useState(false)
-    const [error, setError] = useState('')
-    const [search, setSearch] = useState('')
-    const [selected, setSelected] = useState<Set<string>>(new Set())
-    const autoFetchSignatureRef = useRef<string>('')
-    const requestIdRef = useRef(0)
+    const [fetching, setFetching]                 = useState(false)
+    const [error, setError]                       = useState('')
+    const [search, setSearch]                     = useState('')
+    const [selected, setSelected]                 = useState<Set<string>>(new Set())
+    const autoFetchSignatureRef                   = useRef<string>('')
+    const requestIdRef                            = useRef(0)
 
     const normalizeName = useMemo(
         () => discoveryConfig.normalizeName ?? ((n: string) => String(n ?? '').trim()),
-        [discoveryConfig.normalizeName]
+        [discoveryConfig.normalizeName],
     )
 
     // ---- Filtered models ----
@@ -112,8 +112,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             return discoveredModels
         }
         return discoveredModels.filter((model) => {
-            const name = (model.name || '').toLowerCase()
-            const alias = (model.alias || '').toLowerCase()
+            const name        = (model.name || '').toLowerCase()
+            const alias       = (model.alias || '').toLowerCase()
             const description = (model.description || '').toLowerCase()
             return name.includes(filter) || alias.includes(filter) || description.includes(filter)
         })
@@ -162,11 +162,11 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             if (addedCount > 0) {
                 showNotification(
                     t(`ai_providers.${discoveryConfig.i18nPrefix}_models_fetch_added`, { count: addedCount }),
-                    'success'
+                    'success',
                 )
             }
         },
-        [discoveryConfig.i18nPrefix, normalizeName, setForm, showNotification, t]
+        [discoveryConfig.i18nPrefix, normalizeName, setForm, showNotification, t],
     )
 
     // ---- Fetch models ----
@@ -178,8 +178,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 
         try {
             const headerObject = buildHeaderObject(formState.headers)
-            const apiKey = formState.apiKey.trim() || undefined
-            const list = await discoveryConfig.fetchModels(formState.baseUrl ?? '', apiKey, headerObject)
+            const apiKey       = formState.apiKey.trim() || undefined
+            const list         = await discoveryConfig.fetchModels(formState.baseUrl ?? '', apiKey, headerObject)
             if (requestIdRef.current !== requestId) {
                 return
             }
@@ -194,7 +194,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 discoveryConfig.buildErrorMessage(err, {
                     apiKey: formState.apiKey.trim(),
                     headers: headerObject,
-                })
+                }),
             )
         } finally {
             if (requestIdRef.current === requestId) {
@@ -231,10 +231,10 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             }
 
             const headerSignature = Object.entries(headerObject)
-                .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                .map(([key, value]) => `${key}:${value}`)
-                .join('|')
-            const signature = `${nextEndpoint}||${formState.apiKey.trim()}||${headerSignature}`
+                                          .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+                                          .map(([key, value]) => `${key}:${value}`)
+                                          .join('|')
+            const signature       = `${nextEndpoint}||${formState.apiKey.trim()}||${headerSignature}`
             if (autoFetchSignatureRef.current === signature) {
                 return
             }
@@ -271,7 +271,11 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     // ---- Derived flags ----
 
     const canOpen =
-        !flags.disableControls && !flags.saving && !flags.loading && !flags.invalidIndexParam && !flags.invalidIndex
+              !flags.disableControls &&
+              !flags.saving &&
+              !flags.loading &&
+              !flags.invalidIndexParam &&
+              !flags.invalidIndex
 
     const canApply = !flags.disableControls && !flags.saving && !fetching
 

@@ -1,25 +1,25 @@
-import { ModelConfigSection } from '@/components/common/ModelConfigSection'
-import { ModelTestPanel } from '@/components/common/ModelTestPanel'
-import { buildClaudeMessagesEndpoint, parseTextList } from '@/components/providers/utils'
-import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
-import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack'
-import { useEscapeKey } from '@/hooks/useEscapeKey'
-import { useModelSelectOptions } from '@/hooks/useModelSelectOptions'
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api'
-import { useNotificationStore } from '@/stores'
-import { buildHeaderObject, hasHeader } from '@/utils/headers'
-import { getErrorMessage } from '@/utils/helpers'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useNavigate, useOutletContext } from 'react-router-dom'
-import type { ClaudeEditOutletContext } from './AiProvidersClaudeEditLayout'
+import {ModelConfigSection} from '@/components/common/ModelConfigSection'
+import {ModelTestPanel} from '@/components/common/ModelTestPanel'
+import {buildClaudeMessagesEndpoint, parseTextList} from '@/components/providers/utils'
+import {Input} from '@/components/ui/Input'
+import {Select} from '@/components/ui/Select'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
+import {useEscapeKey} from '@/hooks/useEscapeKey'
+import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
+import {apiCallApi, getApiCallErrorMessage} from '@/services/api'
+import {useNotificationStore} from '@/stores'
+import {buildHeaderObject, hasHeader} from '@/utils/headers'
+import {getErrorMessage} from '@/utils/helpers'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
+import {useNavigate, useOutletContext} from 'react-router-dom'
+import type {ClaudeEditOutletContext} from './AiProvidersClaudeEditLayout'
 import styles from './ProviderEditForm.module.scss'
-import { ProviderEditShell } from './ProviderEditShell'
-import { ExcludedModelsField, HeadersField, PrefixField, PriorityField } from './ProviderFormFields'
+import {ProviderEditShell} from './ProviderEditShell'
+import {ExcludedModelsField, HeadersField, PrefixField, PriorityField} from './ProviderFormFields'
 
-const CLAUDE_TEST_TIMEOUT_MS = 30_000
+const CLAUDE_TEST_TIMEOUT_MS    = 30_000
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 
 const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): string => {
@@ -36,34 +36,34 @@ const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): s
 }
 
 export function AiProvidersClaudeEditPage() {
-    const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { t }                = useTranslation()
+    const navigate             = useNavigate()
     const { showNotification } = useNotificationStore()
     const {
-        hasIndexParam,
-        invalidIndexParam,
-        invalidIndex,
-        disableControls,
-        loading,
-        saving,
-        form,
-        setForm,
-        testModel,
-        setTestModel,
-        testStatus,
-        setTestStatus,
-        testMessage,
-        setTestMessage,
-        availableModels,
-        handleBack,
-        handleSave,
-    } = useOutletContext<ClaudeEditOutletContext>()
+              hasIndexParam,
+              invalidIndexParam,
+              invalidIndex,
+              disableControls,
+              loading,
+              saving,
+              form,
+              setForm,
+              testModel,
+              setTestModel,
+              testStatus,
+              setTestStatus,
+              testMessage,
+              setTestMessage,
+              availableModels,
+              handleBack,
+              handleSave,
+          }                    = useOutletContext<ClaudeEditOutletContext>()
 
     const title = hasIndexParam ? t('ai_providers.claude_edit_modal_title') : t('ai_providers.claude_add_modal_title')
 
-    const swipeRef = useEdgeSwipeBack({ onBack: handleBack })
+    const swipeRef                  = useEdgeSwipeBack({ onBack: handleBack })
     const [isTesting, setIsTesting] = useState(false)
-    const lastCloakConfigRef = useRef<typeof form.cloak>(null)
+    const lastCloakConfigRef        = useRef<typeof form.cloak>(null)
 
     useEscapeKey(handleBack)
 
@@ -77,7 +77,7 @@ export function AiProvidersClaudeEditPage() {
     const canSave = !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTesting
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
-    const controlsDisabled = saving || disableControls || isTesting
+    const controlsDisabled   = saving || disableControls || isTesting
 
     const cloakModeOptions = useMemo(
         () => [
@@ -85,7 +85,7 @@ export function AiProvidersClaudeEditPage() {
             { value: 'always', label: t('ai_providers.claude_cloak_mode_always') },
             { value: 'never', label: t('ai_providers.claude_cloak_mode_never') },
         ],
-        [t]
+        [t],
     )
 
     const resolvedCloakMode = useMemo(() => {
@@ -104,7 +104,8 @@ export function AiProvidersClaudeEditPage() {
 
     const connectivityConfigSignature = useMemo(() => {
         const headersSignature = form.headers.map((entry) => `${entry.key.trim()}:${entry.value.trim()}`).join('|')
-        const modelsSignature = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`).join('|')
+        const modelsSignature  = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
+                                     .join('|')
         return [
             form.apiKey.trim(),
             form.baseUrl?.trim() ?? '',
@@ -143,11 +144,11 @@ export function AiProvidersClaudeEditPage() {
             return
         }
 
-        const customHeaders = buildHeaderObject(form.headers)
-        const apiKey = form.apiKey.trim()
-        const hasApiKeyHeader = hasHeader(customHeaders, 'x-api-key')
+        const customHeaders           = buildHeaderObject(form.headers)
+        const apiKey                  = form.apiKey.trim()
+        const hasApiKeyHeader         = hasHeader(customHeaders, 'x-api-key')
         const apiKeyFromAuthorization = resolveBearerTokenFromAuthorization(customHeaders)
-        const resolvedApiKey = apiKey || apiKeyFromAuthorization
+        const resolvedApiKey          = apiKey || apiKeyFromAuthorization
 
         if (!resolvedApiKey && !hasApiKeyHeader) {
             const message = t('ai_providers.claude_test_key_required')
@@ -196,16 +197,16 @@ export function AiProvidersClaudeEditPage() {
                     url: endpoint,
                     header: headers,
                     data: JSON.stringify({
-                        model: modelName,
-                        max_tokens: 8,
-                        messages: [{ role: 'user', content: 'Hi' }],
-                    }),
+                                             model: modelName,
+                                             max_tokens: 8,
+                                             messages: [{ role: 'user', content: 'Hi' }],
+                                         }),
                 },
-                { timeout: CLAUDE_TEST_TIMEOUT_MS }
+                { timeout: CLAUDE_TEST_TIMEOUT_MS },
             )
 
             if (result.statusCode < 200 || result.statusCode >= 300) {
-                const detail = getApiCallErrorMessage(result) || t('common.unknown_error')
+                const detail   = getApiCallErrorMessage(result) || t('common.unknown_error')
                 const errorMsg = `${t('ai_providers.claude_test_failed')}: ${detail}`
                 setTestStatus('error')
                 setTestMessage(errorMsg)
@@ -217,13 +218,15 @@ export function AiProvidersClaudeEditPage() {
                 showNotification(message, 'success')
             }
         } catch (err: unknown) {
-            const message = getErrorMessage(err)
-            const errorCode =
-                typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: string }).code) : ''
-            const isTimeout = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
+            const message         = getErrorMessage(err)
+            const errorCode       =
+                      typeof err === 'object' && err !== null && 'code' in err ?
+                      String((err as { code?: string }).code) :
+                      ''
+            const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
             const resolvedMessage = isTimeout
-                ? t('ai_providers.claude_test_timeout', { seconds: CLAUDE_TEST_TIMEOUT_MS / 1000 })
-                : `${t('ai_providers.claude_test_failed')}: ${message || t('common.unknown_error')}`
+                                    ? t('ai_providers.claude_test_timeout', { seconds: CLAUDE_TEST_TIMEOUT_MS / 1000 })
+                                    : `${t('ai_providers.claude_test_failed')}: ${message || t('common.unknown_error')}`
             setTestStatus('error')
             setTestMessage(resolvedMessage)
             showNotification(resolvedMessage, 'error')
@@ -231,17 +234,17 @@ export function AiProvidersClaudeEditPage() {
             setIsTesting(false)
         }
     }, [
-        availableModels,
-        form.apiKey,
-        form.baseUrl,
-        form.headers,
-        isTesting,
-        setTestMessage,
-        setTestStatus,
-        showNotification,
-        t,
-        testModel,
-    ])
+                                                      availableModels,
+                                                      form.apiKey,
+                                                      form.baseUrl,
+                                                      form.headers,
+                                                      isTesting,
+                                                      setTestMessage,
+                                                      setTestStatus,
+                                                      showNotification,
+                                                      t,
+                                                      testModel,
+                                                  ])
 
     return (
         <ProviderEditShell
@@ -303,7 +306,7 @@ export function AiProvidersClaudeEditPage() {
                         availableModels={availableModels}
                         isTesting={isTesting}
                         disabled={controlsDisabled}
-                        i18nPrefix="ai_providers.claude"
+                        i18nPrefix='ai_providers.claude'
                         onTest={() => void runClaudeConnectivityTest()}
                     />
                 </ModelConfigSection>
@@ -330,12 +333,12 @@ export function AiProvidersClaudeEditPage() {
                                         }
 
                                         const restored = prev.cloak ??
-                                            lastCloakConfigRef.current ?? {
+                                                         lastCloakConfigRef.current ?? {
                                                 mode: 'auto',
                                                 strictMode: false,
                                                 sensitiveWords: [],
                                             }
-                                        const mode = String(restored.mode ?? 'auto').trim() || 'auto'
+                                        const mode     = String(restored.mode ?? 'auto').trim() || 'auto'
                                         return {
                                             ...prev,
                                             cloak: {
@@ -356,7 +359,7 @@ export function AiProvidersClaudeEditPage() {
 
                     {form.cloak ? (
                         <>
-                            <div className="form-group">
+                            <div className='form-group'>
                                 <label>{t('ai_providers.claude_cloak_mode_label')}</label>
                                 <Select
                                     value={resolvedCloakMode}
@@ -373,10 +376,10 @@ export function AiProvidersClaudeEditPage() {
                                     ariaLabel={t('ai_providers.claude_cloak_mode_label')}
                                     disabled={controlsDisabled}
                                 />
-                                <div className="hint">{t('ai_providers.claude_cloak_mode_hint')}</div>
+                                <div className='hint'>{t('ai_providers.claude_cloak_mode_hint')}</div>
                             </div>
 
-                            <div className="form-group">
+                            <div className='form-group'>
                                 <label>{t('ai_providers.claude_cloak_strict_label')}</label>
                                 <ToggleSwitch
                                     checked={Boolean(form.cloak.strictMode)}
@@ -392,13 +395,13 @@ export function AiProvidersClaudeEditPage() {
                                     disabled={controlsDisabled}
                                     ariaLabel={t('ai_providers.claude_cloak_strict_label')}
                                 />
-                                <div className="hint">{t('ai_providers.claude_cloak_strict_hint')}</div>
+                                <div className='hint'>{t('ai_providers.claude_cloak_strict_hint')}</div>
                             </div>
 
-                            <div className="form-group">
+                            <div className='form-group'>
                                 <label>{t('ai_providers.claude_cloak_sensitive_words_label')}</label>
                                 <textarea
-                                    className="input"
+                                    className='input'
                                     placeholder={t('ai_providers.claude_cloak_sensitive_words_placeholder')}
                                     value={(form.cloak.sensitiveWords ?? []).join('\n')}
                                     onChange={(e) => {
@@ -414,7 +417,7 @@ export function AiProvidersClaudeEditPage() {
                                     rows={3}
                                     disabled={controlsDisabled}
                                 />
-                                <div className="hint">{t('ai_providers.claude_cloak_sensitive_words_hint')}</div>
+                                <div className='hint'>{t('ai_providers.claude_cloak_sensitive_words_hint')}</div>
                             </div>
                         </>
                     ) : null}

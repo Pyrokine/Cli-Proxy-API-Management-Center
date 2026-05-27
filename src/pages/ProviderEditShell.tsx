@@ -1,8 +1,8 @@
-import { FloatingEditActions } from '@/components/common/FloatingEditActions'
-import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell'
-import { Card } from '@/components/ui/Card'
-import type { ReactNode, RefObject } from 'react'
-import { useTranslation } from 'react-i18next'
+import {FloatingEditActions} from '@/components/common/FloatingEditActions'
+import {SecondaryScreenShell} from '@/components/common/SecondaryScreenShell'
+import {Card} from '@/components/ui/Card'
+import type {ReactNode, RefObject} from 'react'
+import {useTranslation} from 'react-i18next'
 import layoutStyles from './ProviderEditLayout.module.scss'
 
 interface ProviderEditShellProps {
@@ -24,18 +24,18 @@ interface ProviderEditShellProps {
  * Wraps SecondaryScreenShell + FloatingEditActions + Card with error/invalid state.
  */
 export function ProviderEditShell({
-    title,
-    loading,
-    saving,
-    canSave,
-    error,
-    invalidIndexParam,
-    invalidIndex,
-    onBack,
-    onSave,
-    swipeRef,
-    children,
-}: ProviderEditShellProps) {
+                                      title,
+                                      loading,
+                                      saving,
+                                      canSave,
+                                      error,
+                                      invalidIndexParam,
+                                      invalidIndex,
+                                      onBack,
+                                      onSave,
+                                      swipeRef,
+                                      children,
+                                  }: ProviderEditShellProps) {
     const { t } = useTranslation()
 
     return (
@@ -53,12 +53,12 @@ export function ProviderEditShell({
             loadingLabel={t('common.loading')}
         >
             <Card>
-                {error && <div className="error-box">{error}</div>}
+                {error && <div className='error-box'>{error}</div>}
                 {invalidIndexParam || invalidIndex ? (
-                    <div className="hint">{t('common.invalid_provider_index')}</div>
+                    <div className='hint'>{t('common.invalid_provider_index')}</div>
                 ) : (
-                    children
-                )}
+                     children
+                 )}
             </Card>
         </SecondaryScreenShell>
     )

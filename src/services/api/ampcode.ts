@@ -2,9 +2,9 @@
  * Amp CLI Integration (ampcode) 相关 API
  */
 
-import type { AmpcodeConfig } from '@/types'
-import { apiClient } from './client'
-import { normalizeAmpcodeConfig } from './transformers'
+import type {AmpcodeConfig} from '@/types'
+import {apiClient} from './client'
+import {normalizeAmpcodeConfig} from './transformers'
 
 export const ampcodeApi = {
     async getAmpcode(): Promise<AmpcodeConfig> {

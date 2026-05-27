@@ -339,9 +339,8 @@
     border-radius: 8px;
     background: var(--bg-primary);
     cursor: pointer;
-    transition:
-        background 0.15s ease,
-        border-color 0.15s ease;
+    transition: background 0.15s ease,
+    border-color 0.15s ease;
 
     input[type='checkbox'] {
         margin-top: 2px;
@@ -423,9 +422,8 @@
     width: 100%;
     height: 8px;
     border-radius: 2px;
-    transition:
-        transform 0.15s ease,
-        opacity 0.15s ease;
+    transition: transform 0.15s ease,
+    opacity 0.15s ease;
 
     .statusBlockWrapper:hover &,
     .statusBlockWrapper.statusBlockActive & {
@@ -825,9 +823,9 @@
 // 表头
 .keyTableHeader {
     display: grid;
-    grid-template-columns: 46px 56px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+    grid-template-columns: 46px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
     gap: $spacing-sm;
-    min-width: 760px;
+    min-width: 700px;
     padding: 10px $spacing-md;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -844,9 +842,9 @@
 // 数据行
 .keyTableRow {
     display: grid;
-    grid-template-columns: 46px 56px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+    grid-template-columns: 46px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
     gap: $spacing-sm;
-    min-width: 760px;
+    min-width: 700px;
     padding: 10px $spacing-md;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -869,16 +867,6 @@
     justify-content: center;
     font-weight: $font-weight-semibold;
     color: var(--text-tertiary);
-}
-
-.keyTableColStatus {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    svg {
-        display: block;
-    }
 }
 
 .keyTableColKey,

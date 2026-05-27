@@ -1,17 +1,17 @@
-import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell'
-import { AutocompleteInput } from '@/components/ui/AutocompleteInput'
-import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { EmptyState } from '@/components/ui/EmptyState'
-import { IconX } from '@/components/ui/icons'
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
-import { useOAuthProviderEditor } from '@/features/authFiles/hooks/useOAuthProviderEditor'
-import { authFilesApi } from '@/services/api'
-import type { OAuthModelAliasEntry } from '@/types'
-import { generateId } from '@/utils/helpers'
-import { useCallback, useMemo, useState } from 'react'
+import {SecondaryScreenShell} from '@/components/common/SecondaryScreenShell'
+import {AutocompleteInput} from '@/components/ui/AutocompleteInput'
+import {Button} from '@/components/ui/Button'
+import {Card} from '@/components/ui/Card'
+import {EmptyState} from '@/components/ui/EmptyState'
+import {IconX} from '@/components/ui/icons'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {useOAuthProviderEditor} from '@/features/authFiles/hooks/useOAuthProviderEditor'
+import {authFilesApi} from '@/services/api'
+import type {OAuthModelAliasEntry} from '@/types'
+import {generateId} from '@/utils/helpers'
+import {useCallback, useMemo, useState} from 'react'
 import styles from './AuthFilesOAuthModelAliasEditPage.module.scss'
-import { OAuthProviderSelector } from './OAuthProviderSelector'
+import {OAuthProviderSelector} from './OAuthProviderSelector'
 
 type OAuthModelMappingFormEntry = OAuthModelAliasEntry & { id: string }
 
@@ -35,16 +35,16 @@ const normalizeMappingEntries = (entries?: OAuthModelAliasEntry[]): OAuthModelMa
 }
 
 export function AuthFilesOAuthModelAliasEditPage() {
-    const editor = useOAuthProviderEditor('modelAlias')
+    const editor                                                                 = useOAuthProviderEditor('modelAlias')
     const { t, provider, resolvedProviderKey, disableControls, saving, canSave } = editor
-    const { featureUnsupported, modelsList, modelsLoading, modelsError } = editor
+    const { featureUnsupported, modelsList, modelsLoading, modelsError }         = editor
 
     const [mappingsOverride, setMappingsOverride] = useState<{
-        providerKey: string
-        value: OAuthModelMappingFormEntry[]
-    } | null>(null)
+                                                                 providerKey: string
+                                                                 value: OAuthModelMappingFormEntry[]
+                                                             } | null>(null)
 
-    const title = useMemo(() => t('oauth_model_alias.add_title'), [t])
+    const title      = useMemo(() => t('oauth_model_alias.add_title'), [t])
     const headerHint = useMemo(() => {
         if (!provider.trim()) {
             return t('oauth_model_alias.provider_hint')
@@ -83,7 +83,7 @@ export function AuthFilesOAuthModelAliasEditPage() {
                 }
             })
         },
-        [baselineMappings, resolvedProviderKey]
+        [baselineMappings, resolvedProviderKey],
     )
 
     const addMappingEntry = useCallback(() => {
@@ -104,7 +104,7 @@ export function AuthFilesOAuthModelAliasEditPage() {
                 }
             })
         },
-        [baselineMappings, resolvedProviderKey]
+        [baselineMappings, resolvedProviderKey],
     )
 
     const handleSave = useCallback(async () => {
@@ -114,10 +114,10 @@ export function AuthFilesOAuthModelAliasEditPage() {
             return
         }
 
-        const seen = new Set<string>()
+        const seen       = new Set<string>()
         const normalized = effectiveMappings
             .map((entry) => {
-                const name = String(entry.name ?? '').trim()
+                const name  = String(entry.name ?? '').trim()
                 const alias = String(entry.alias ?? '').trim()
                 if (!name || !alias) {
                     return null
@@ -157,7 +157,7 @@ export function AuthFilesOAuthModelAliasEditPage() {
             backAriaLabel={t('common.back')}
             contentClassName={styles.pageContent}
             rightAction={
-                <Button size="sm" onClick={handleSave} loading={saving} disabled={!canSave}>
+                <Button size='sm' onClick={handleSave} loading={saving} disabled={!canSave}>
                     {t('oauth_model_alias.save')}
                 </Button>
             }
@@ -172,84 +172,84 @@ export function AuthFilesOAuthModelAliasEditPage() {
                     />
                 </Card>
             ) : (
-                <>
-                    <OAuthProviderSelector
-                        inputId="oauth-model-alias-provider"
-                        title={t('oauth_model_alias.title')}
-                        hint={headerHint}
-                        label={t('oauth_model_alias.provider_label')}
-                        description={t('oauth_model_alias.provider_hint')}
-                        placeholder={t('oauth_model_alias.provider_placeholder')}
-                        provider={provider}
-                        providerOptions={editor.providerOptions}
-                        disabled={disableControls || saving}
-                        getTypeLabel={editor.getTypeLabel}
-                        onProviderChange={editor.updateProvider}
-                    />
+                 <>
+                     <OAuthProviderSelector
+                         inputId='oauth-model-alias-provider'
+                         title={t('oauth_model_alias.title')}
+                         hint={headerHint}
+                         label={t('oauth_model_alias.provider_label')}
+                         description={t('oauth_model_alias.provider_hint')}
+                         placeholder={t('oauth_model_alias.provider_placeholder')}
+                         provider={provider}
+                         providerOptions={editor.providerOptions}
+                         disabled={disableControls || saving}
+                         getTypeLabel={editor.getTypeLabel}
+                         onProviderChange={editor.updateProvider}
+                     />
 
-                    <Card className={styles.settingsCard}>
-                        <div className={styles.mappingsHeader}>
-                            <div className={styles.mappingsTitle}>{t('oauth_model_alias.alias_label')}</div>
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={addMappingEntry}
-                                disabled={disableControls || saving || featureUnsupported}
-                            >
-                                {t('oauth_model_alias.add_alias')}
-                            </Button>
-                        </div>
+                     <Card className={styles.settingsCard}>
+                         <div className={styles.mappingsHeader}>
+                             <div className={styles.mappingsTitle}>{t('oauth_model_alias.alias_label')}</div>
+                             <Button
+                                 variant='secondary'
+                                 size='sm'
+                                 onClick={addMappingEntry}
+                                 disabled={disableControls || saving || featureUnsupported}
+                             >
+                                 {t('oauth_model_alias.add_alias')}
+                             </Button>
+                         </div>
 
-                        <div className={styles.mappingsBody}>
-                            {effectiveMappings.map((entry, index) => (
-                                <div key={entry.id} className={styles.mappingRow}>
-                                    <AutocompleteInput
-                                        wrapperStyle={{ flex: 1, marginBottom: 0 }}
-                                        placeholder={t('oauth_model_alias.alias_name_placeholder')}
-                                        value={entry.name}
-                                        onChange={(val) => updateMappingEntry(index, 'name', val)}
-                                        disabled={disableControls || saving}
-                                        options={modelsList.map((model) => ({
-                                            value: model.id,
-                                            label:
-                                                model.display_name && model.display_name !== model.id
-                                                    ? model.display_name
-                                                    : undefined,
-                                        }))}
-                                    />
-                                    <span className={styles.mappingSeparator}>→</span>
-                                    <input
-                                        className={`input ${styles.mappingAliasInput}`}
-                                        placeholder={t('oauth_model_alias.alias_placeholder')}
-                                        value={entry.alias}
-                                        onChange={(e) => updateMappingEntry(index, 'alias', e.target.value)}
-                                        disabled={disableControls || saving}
-                                    />
-                                    <div className={styles.mappingFork}>
-                                        <ToggleSwitch
-                                            label={t('oauth_model_alias.alias_fork_label')}
-                                            labelPosition="left"
-                                            checked={Boolean(entry.fork)}
-                                            onChange={(value) => updateMappingEntry(index, 'fork', value)}
-                                            disabled={disableControls || saving}
-                                        />
-                                    </div>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => removeMappingEntry(index)}
-                                        disabled={disableControls || saving || effectiveMappings.length <= 1}
-                                        title={t('common.delete')}
-                                        aria-label={t('common.delete')}
-                                    >
-                                        <IconX size={14} />
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-                </>
-            )}
+                         <div className={styles.mappingsBody}>
+                             {effectiveMappings.map((entry, index) => (
+                                 <div key={entry.id} className={styles.mappingRow}>
+                                     <AutocompleteInput
+                                         wrapperStyle={{ flex: 1, marginBottom: 0 }}
+                                         placeholder={t('oauth_model_alias.alias_name_placeholder')}
+                                         value={entry.name}
+                                         onChange={(val) => updateMappingEntry(index, 'name', val)}
+                                         disabled={disableControls || saving}
+                                         options={modelsList.map((model) => ({
+                                             value: model.id,
+                                             label:
+                                                 model.display_name && model.display_name !== model.id
+                                                 ? model.display_name
+                                                 : undefined,
+                                         }))}
+                                     />
+                                     <span className={styles.mappingSeparator}>→</span>
+                                     <input
+                                         className={`input ${styles.mappingAliasInput}`}
+                                         placeholder={t('oauth_model_alias.alias_placeholder')}
+                                         value={entry.alias}
+                                         onChange={(e) => updateMappingEntry(index, 'alias', e.target.value)}
+                                         disabled={disableControls || saving}
+                                     />
+                                     <div className={styles.mappingFork}>
+                                         <ToggleSwitch
+                                             label={t('oauth_model_alias.alias_fork_label')}
+                                             labelPosition='left'
+                                             checked={Boolean(entry.fork)}
+                                             onChange={(value) => updateMappingEntry(index, 'fork', value)}
+                                             disabled={disableControls || saving}
+                                         />
+                                     </div>
+                                     <Button
+                                         variant='ghost'
+                                         size='sm'
+                                         onClick={() => removeMappingEntry(index)}
+                                         disabled={disableControls || saving || effectiveMappings.length <= 1}
+                                         title={t('common.delete')}
+                                         aria-label={t('common.delete')}
+                                     >
+                                         <IconX size={14} />
+                                     </Button>
+                                 </div>
+                             ))}
+                         </div>
+                     </Card>
+                 </>
+             )}
         </SecondaryScreenShell>
     )
 }

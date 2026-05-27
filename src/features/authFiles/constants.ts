@@ -1,26 +1,10 @@
-import type { AuthFileItem } from '@/types'
-import { formatDateTime } from '@/utils/format'
-import { type KeyStatBucket, type KeyStats, normalizeAuthIndex, normalizeUsageSourceId } from '@/utils/usage'
-
-const AUTH_FILE_PROVIDER_ALIASES: Record<string, string[]> = {
-    claude: ['claude', 'anthropic', 'antigravity'],
-    antigravity: ['antigravity', 'claude', 'anthropic'],
-    codex: ['codex'],
-    gemini: ['gemini', 'gemini-cli', 'aistudio'],
-    'gemini-cli': ['gemini-cli', 'gemini', 'aistudio'],
-    aistudio: ['aistudio', 'gemini-cli', 'gemini'],
-    vertex: ['vertex'],
-    kimi: ['kimi'],
-    qwen: ['qwen'],
-    iflow: ['iflow'],
-    ampcode: ['ampcode'],
-}
+import type {AuthFileItem} from '@/types'
+import {formatDateTime} from '@/utils/format'
 
 const AUTH_FILE_PREFIX_REGEX =
-    /^(gemini-cli|claude|anthropic|antigravity|codex|gemini|aistudio|kimi|qwen|vertex|iflow|ampcode)-(.+)$/i
+          /^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow|ampcode)-(?<rest>.+)$/i
 const AUTH_FILE_SUFFIX_HINTS = new Set(['plus', 'pro', 'free', 'team', 'max', 'ultra', 'sonnet', 'opus', 'haiku'])
-
-const hasTraffic = (bucket?: KeyStatBucket) => !!bucket && (bucket.success > 0 || bucket.failure > 0)
+const INTEGER_STRING_PATTERN = /^[+-]?\d+$/
 
 const appendUnique = (items: string[], value: string) => {
     const trimmed = value.trim()
@@ -30,11 +14,6 @@ const appendUnique = (items: string[], value: string) => {
     items.push(trimmed)
 }
 
-const normalizeProviderName = (value: unknown): string =>
-    String(value ?? '')
-        .trim()
-        .toLowerCase()
-
 export function inferProviderFromAuthFileName(name: string): string {
     const trimmed = String(name ?? '').trim()
     if (!trimmed) {
@@ -42,9 +21,9 @@ export function inferProviderFromAuthFileName(name: string): string {
     }
 
     const nameWithoutExt = trimmed.replace(/\.[^/.]+$/, '')
-    const base = nameWithoutExt || trimmed
-    const prefixMatch = base.match(AUTH_FILE_PREFIX_REGEX)
-    return prefixMatch?.[1]?.toLowerCase() || ''
+    const base           = nameWithoutExt || trimmed
+    const prefixMatch    = base.match(AUTH_FILE_PREFIX_REGEX)
+    return prefixMatch?.groups?.vendor?.toLowerCase() || ''
 }
 
 export function formatAuthFileDisplayName(name: string): string {
@@ -54,36 +33,21 @@ export function formatAuthFileDisplayName(name: string): string {
     }
 
     const nameWithoutExt = trimmed.replace(/\.[^/.]+$/, '')
-    const base = nameWithoutExt || trimmed
-    const prefixMatch = base.match(AUTH_FILE_PREFIX_REGEX)
-    if (prefixMatch?.[2]) {
+    const base           = nameWithoutExt || trimmed
+    const prefixMatch    = base.match(AUTH_FILE_PREFIX_REGEX)
+    if (prefixMatch?.groups?.rest) {
         const candidates: string[] = []
-        appendRemainderCandidates(candidates, prefixMatch[2])
-        return candidates[candidates.length - 1] || prefixMatch[2]
+        appendRemainderCandidates(candidates, prefixMatch.groups.rest)
+        return candidates[candidates.length - 1] || prefixMatch.groups.rest
     }
 
     return base
 }
 
-const buildAuthFileProviderCandidates = (file: AuthFileItem): string[] => {
-    const providers: string[] = []
-    const provider = normalizeProviderName(file.provider)
-    const type = normalizeProviderName(file.type)
-
-    const appendProviderAliases = (name: string) => {
-        appendUnique(providers, name)
-        ;(AUTH_FILE_PROVIDER_ALIASES[name] || []).forEach((candidate) => appendUnique(providers, candidate))
-    }
-
-    appendProviderAliases(provider)
-    appendProviderAliases(type)
-    return providers
-}
-
 const appendRemainderCandidates = (items: string[], value: string) => {
     appendUnique(items, value)
 
-    let current = value.trim()
+    let current   = value.trim()
     const atIndex = current.indexOf('@')
     if (atIndex >= 0) {
         while (true) {
@@ -111,65 +75,19 @@ const appendRemainderCandidates = (items: string[], value: string) => {
     }
 }
 
-function buildAuthFileSourceCandidates(file: AuthFileItem): string[] {
-    const candidates: string[] = []
-    const rawFileName = String(file?.name || '').trim()
-    if (!rawFileName) {
-        return candidates
+export const parsePriorityValue = (value: unknown): number | undefined => {
+    if (typeof value === 'number') {
+        return Number.isInteger(value) ? value : undefined
     }
-
-    appendUnique(candidates, rawFileName)
-
-    const nameWithoutExt = rawFileName.replace(/\.[^/.]+$/, '')
-    if (nameWithoutExt && nameWithoutExt !== rawFileName) {
-        appendUnique(candidates, nameWithoutExt)
+    if (typeof value !== 'string') {
+        return undefined
     }
-
-    const base = nameWithoutExt || rawFileName
-    const prefixMatch = base.match(AUTH_FILE_PREFIX_REGEX)
-    if (prefixMatch?.[2]) {
-        appendRemainderCandidates(candidates, prefixMatch[2])
+    const trimmed = value.trim()
+    if (!trimmed || !INTEGER_STRING_PATTERN.test(trimmed)) {
+        return undefined
     }
-
-    return candidates
-}
-
-export function buildAuthFileUsageSourceIds(file: AuthFileItem): string[] {
-    return buildAuthFileSourceCandidates(file)
-        .map((candidate) => normalizeUsageSourceId(candidate))
-        .filter((candidate, index, array) => !!candidate && array.indexOf(candidate) === index)
-}
-
-export function resolveAuthFileStats(file: AuthFileItem, stats: KeyStats): KeyStatBucket {
-    const defaultStats: KeyStatBucket = { success: 0, failure: 0 }
-    const sourceCandidates = buildAuthFileSourceCandidates(file)
-    const providerCandidates = buildAuthFileProviderCandidates(file)
-
-    for (const source of sourceCandidates) {
-        for (const provider of providerCandidates) {
-            const qualifiedKey = normalizeUsageSourceId(`${provider}:${source}`)
-            const bucket = qualifiedKey ? stats.bySourceQualified?.[qualifiedKey] : undefined
-            if (bucket && hasTraffic(bucket)) {
-                return bucket
-            }
-        }
-    }
-
-    for (const source of sourceCandidates) {
-        const sourceKey = normalizeUsageSourceId(source)
-        const bucket = sourceKey ? stats.bySource?.[sourceKey] : undefined
-        if (bucket && hasTraffic(bucket)) {
-            return bucket
-        }
-    }
-
-    const rawAuthIndex = file['auth_index'] ?? file.authIndex
-    const authIndexKey = normalizeAuthIndex(rawAuthIndex)
-    if (authIndexKey && stats.byAuthIndex?.[authIndexKey]) {
-        return stats.byAuthIndex[authIndexKey]
-    }
-
-    return defaultStats
+    const parsed = Number.parseInt(trimmed, 10)
+    return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
 export const formatModified = (item: AuthFileItem): string => {
@@ -178,9 +96,9 @@ export const formatModified = (item: AuthFileItem): string => {
         return '-'
     }
     const asNumber = Number(raw)
-    const date =
-        Number.isFinite(asNumber) && !Number.isNaN(asNumber)
-            ? new Date(asNumber < 1e12 ? asNumber * 1000 : asNumber)
-            : new Date(String(raw))
+    const date     =
+              Number.isFinite(asNumber) && !Number.isNaN(asNumber)
+              ? new Date(asNumber < 1e12 ? asNumber * 1000 : asNumber)
+              : new Date(String(raw))
     return Number.isNaN(date.getTime()) ? '-' : formatDateTime(date)
 }
