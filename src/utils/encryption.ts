@@ -9,11 +9,11 @@
  *   - 密钥不以明文形式存在于内存中（CryptoKey 对象不可导出）
  */
 
-const ENC_V2_PREFIX = 'enc::v2::'
-const ENC_V1_PREFIX = 'enc::v1::'
+const ENC_V2_PREFIX    = 'enc::v2::'
+const ENC_V1_PREFIX    = 'enc::v1::'
 const PLAINTEXT_PREFIX = 'plain::'
-const SECRET_SALT = 'cli-proxy-api-webui::secure-storage'
-const PBKDF2_ITER = 100_000
+const SECRET_SALT      = 'cli-proxy-api-webui::secure-storage'
+const PBKDF2_ITER      = 100_000
 
 let cachedKey: CryptoKey | null = null
 
@@ -39,7 +39,7 @@ async function deriveKey(): Promise<CryptoKey> {
         return cachedKey
     }
 
-    const enc = new TextEncoder()
+    const enc      = new TextEncoder()
     const material = await crypto.subtle.importKey('raw', enc.encode(getKeyMaterial()), 'PBKDF2', false, ['deriveKey'])
 
     cachedKey = await crypto.subtle.deriveKey(
@@ -47,7 +47,7 @@ async function deriveKey(): Promise<CryptoKey> {
         material,
         { name: 'AES-GCM', length: 256 },
         false, // non-extractable
-        ['encrypt', 'decrypt']
+        ['encrypt', 'decrypt'],
     )
     return cachedKey
 }
@@ -62,7 +62,7 @@ function toBase64(bytes: Uint8Array): string {
 
 function fromBase64(base64: string): Uint8Array {
     const binary = atob(base64)
-    const bytes = new Uint8Array(binary.length)
+    const bytes  = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i)
     }
@@ -84,7 +84,7 @@ export async function encryptData(value: string): Promise<string> {
 
     try {
         const key = await deriveKey()
-        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const iv  = crypto.getRandomValues(new Uint8Array(12))
         const enc = new TextEncoder()
 
         const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(value))
@@ -116,10 +116,10 @@ export async function decryptData(payload: string): Promise<string> {
     // v2: AES-GCM
     if (payload.startsWith(ENC_V2_PREFIX)) {
         try {
-            const key = await deriveKey()
+            const key      = await deriveKey()
             const combined = fromBase64(payload.slice(ENC_V2_PREFIX.length))
-            const iv = combined.slice(0, 12)
-            const data = combined.slice(12)
+            const iv       = combined.slice(0, 12)
+            const data     = combined.slice(12)
 
             const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)
             return new TextDecoder().decode(decrypted)
@@ -131,10 +131,10 @@ export async function decryptData(payload: string): Promise<string> {
     // v1 兼容: XOR (读取旧数据后会在下次写入时升级为 v2)
     if (payload.startsWith(ENC_V1_PREFIX)) {
         try {
-            const enc = new TextEncoder()
-            const keyBytes = enc.encode(getKeyMaterial())
+            const enc       = new TextEncoder()
+            const keyBytes  = enc.encode(getKeyMaterial())
             const encrypted = fromBase64(payload.slice(ENC_V1_PREFIX.length))
-            const result = new Uint8Array(encrypted.length)
+            const result    = new Uint8Array(encrypted.length)
             for (let i = 0; i < encrypted.length; i++) {
                 result[i] = encrypted[i] ^ keyBytes[i % keyBytes.length]
             }

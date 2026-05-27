@@ -8,7 +8,7 @@ export interface HeaderEntry {
 }
 
 export function buildHeaderObject(
-    input?: HeaderEntry[] | Record<string, string | undefined | null>
+    input?: HeaderEntry[] | Record<string, string | undefined | null>,
 ): Record<string, string> {
     if (!input) {
         return {}
@@ -16,7 +16,7 @@ export function buildHeaderObject(
 
     if (Array.isArray(input)) {
         return input.reduce<Record<string, string>>((acc, item) => {
-            const key = item?.key?.trim()
+            const key   = item?.key?.trim()
             const value = item?.value?.trim()
             if (key && value !== undefined && value !== null && value !== '') {
                 acc[key] = value
@@ -26,7 +26,7 @@ export function buildHeaderObject(
     }
 
     return Object.entries(input).reduce<Record<string, string>>((acc, [rawKey, rawValue]) => {
-        const key = rawKey?.trim()
+        const key   = rawKey?.trim()
         const value = typeof rawValue === 'string' ? rawValue.trim() : rawValue
         if (key && value !== undefined && value !== null && value !== '') {
             acc[key] = String(value)
@@ -40,8 +40,8 @@ export function headersToEntries(headers?: Record<string, string | undefined | n
         return []
     }
     return Object.entries(headers)
-        .filter(([, value]) => value !== undefined && value !== null && value !== '')
-        .map(([key, value]) => ({ key, value: String(value) }))
+                 .filter(([, value]) => value !== undefined && value !== null && value !== '')
+                 .map(([key, value]) => ({ key, value: String(value) }))
 }
 
 export const hasHeader = (headers: Record<string, string>, name: string) => {

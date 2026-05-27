@@ -3,7 +3,7 @@
  * 从原项目 src/utils/string.js 迁移
  */
 
-import { getEffectiveTimezone } from '@/stores/useTimezoneStore'
+import {getEffectiveTimezone} from '@/stores/useTimezoneStore'
 
 const resolveDefaultLocale = (): string | undefined => {
     const fromDocument = typeof document !== 'undefined' ? document.documentElement?.lang?.trim() : ''
@@ -39,8 +39,8 @@ export function formatFileSize(bytes: number): string {
     }
 
     const units = ['B', 'KB', 'MB', 'GB']
-    const k = 1024
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    const k     = 1024
+    const i     = Math.floor(Math.log(bytes) / Math.log(k))
 
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${units[i]}`
 }
@@ -60,7 +60,7 @@ export function formatDateTime(date: string | Date, locale?: string): string {
     }
 
     const resolvedLocale = locale?.trim() || resolveDefaultLocale()
-    const timeZone = getEffectiveTimezone()
+    const timeZone       = getEffectiveTimezone()
     return d.toLocaleString(resolvedLocale, {
         year: 'numeric',
         month: '2-digit',
@@ -93,7 +93,7 @@ export function formatLogTimestamp(raw: string | undefined, locale?: string): st
     }
     // "YYYY-MM-DD HH:MM:SS" → treat as UTC.
     const utc = trimmed.replace(' ', 'T') + 'Z'
-    const d = new Date(utc)
+    const d   = new Date(utc)
     if (isNaN(d.getTime())) {
         return raw
     }
@@ -109,7 +109,7 @@ export function formatUnixTimestamp(value: unknown, locale?: string): string {
     }
 
     const asNumber = typeof value === 'number' ? value : Number(value)
-    const date = (() => {
+    const date     = (() => {
         if (!Number.isFinite(asNumber) || Number.isNaN(asNumber)) {
             return new Date(String(value))
         }
@@ -138,7 +138,7 @@ export function formatUnixTimestamp(value: unknown, locale?: string): string {
     if (Number.isNaN(date.getTime())) {
         return ''
     }
-    const timeZone: string | undefined = getEffectiveTimezone() || undefined
+    const timeZone: string | undefined     = getEffectiveTimezone() || undefined
     const opts: Intl.DateTimeFormatOptions = {
         year: 'numeric',
         month: '2-digit',
@@ -172,18 +172,20 @@ export function normalizeApiKeyList(input: unknown): string[] {
     if (!Array.isArray(input)) {
         return []
     }
-    const seen = new Set<string>()
+    const seen           = new Set<string>()
     const keys: string[] = []
 
     input.forEach((item) => {
-        const record =
-            item !== null && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : null
-        const value =
-            typeof item === 'string'
-                ? item
-                : record
-                  ? (record['api-key'] ?? record['apiKey'] ?? record.key ?? record.Key)
-                  : ''
+        const record  =
+                  item !== null && typeof item === 'object' && !Array.isArray(item) ?
+                  (item as Record<string, unknown>) :
+                  null
+        const value   =
+                  typeof item === 'string'
+                  ? item
+                  : record
+                    ? (record['api-key'] ?? record['apiKey'] ?? record.key ?? record.Key)
+                    : ''
         const trimmed = String(value ?? '').trim()
         if (!trimmed || seen.has(trimmed)) {
             return
@@ -199,14 +201,14 @@ export function normalizeApiKeyList(input: unknown): string[] {
  * 将 Date 转为 datetime-local 输入框所需的 "YYYY-MM-DDTHH:mm" 格式
  */
 export function toLocalDateTimeString(date: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0')
+    const pad      = (n: number) => String(n).padStart(2, '0')
     const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
     const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}`
     return `${datePart}T${timePart}`
 }
 
 export function toLocalDateTimeSecondsString(date: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0')
+    const pad      = (n: number) => String(n).padStart(2, '0')
     const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
     const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
     return `${datePart}T${timePart}`

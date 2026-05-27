@@ -1,11 +1,11 @@
-import type { Language } from '@/types'
-import { LANGUAGE_ORDER, STORAGE_KEY_LANGUAGE } from '@/utils/constants'
+import type {Language} from '@/types'
+import {LANGUAGE_ORDER, STORAGE_KEY_LANGUAGE} from '@/utils/constants'
 
 export const isSupportedLanguage = (value: string): value is Language => LANGUAGE_ORDER.includes(value as Language)
 
 const parseStoredLanguage = (value: string): Language | null => {
     try {
-        const parsed = JSON.parse(value)
+        const parsed    = JSON.parse(value)
         const candidate = parsed?.state?.language ?? parsed?.language ?? parsed
         if (typeof candidate === 'string' && isSupportedLanguage(candidate)) {
             return candidate
@@ -37,8 +37,11 @@ const getBrowserLanguage = (): Language => {
     if (typeof navigator === 'undefined') {
         return 'zh-CN'
     }
-    const raw = navigator.languages?.[0] || navigator.language || 'zh-CN'
+    const raw   = navigator.languages?.[0] || navigator.language || 'zh-CN'
     const lower = raw.toLowerCase()
+    if (lower.startsWith('zh-tw') || lower.startsWith('zh-hk') || lower.startsWith('zh-mo')) {
+        return 'zh-TW'
+    }
     if (lower.startsWith('zh')) {
         return 'zh-CN'
     }

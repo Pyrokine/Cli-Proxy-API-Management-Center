@@ -21,15 +21,15 @@ export async function copyToClipboard(text: string): Promise<boolean> {
         const textarea = document.createElement('textarea')
         textarea.value = text
         textarea.setAttribute('readonly', '')
-        textarea.style.position = 'fixed'
-        textarea.style.opacity = '0'
+        textarea.style.position      = 'fixed'
+        textarea.style.opacity       = '0'
         textarea.style.pointerEvents = 'none'
-        textarea.style.left = '-9999px'
-        textarea.style.top = '0'
-        textarea.style.width = '1px'
-        textarea.style.height = '1px'
-        textarea.style.padding = '0'
-        textarea.style.border = '0'
+        textarea.style.left          = '-9999px'
+        textarea.style.top           = '0'
+        textarea.style.width         = '1px'
+        textarea.style.height        = '1px'
+        textarea.style.padding       = '0'
+        textarea.style.border        = '0'
 
         document.body.appendChild(textarea)
         textarea.focus()
