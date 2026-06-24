@@ -6,17 +6,54 @@ export type PayloadParamValidationErrorCode =
 
 export type VisualConfigFieldPath =
     | 'port'
+    | 'tlsHttpRedirectPort'
     | 'logsMaxTotalSizeMb'
+    | 'errorLogsMaxFiles'
+    | 'redisUsageQueueRetentionSeconds'
+    | 'authAutoRefreshWorkers'
+    | 'usageRetentionDays'
+    | 'usageRetentionMaxDbSizeMb'
+    | 'usageRetentionWarningThresholdPct'
+    | 'autoRefreshInterval'
+    | 'modelRefreshInterval'
     | 'requestRetry'
     | 'maxRetryCredentials'
     | 'maxRetryInterval'
+    | 'quotaRefreshInterval'
+    | 'quotaRefreshMaxInterval'
     | 'streaming.keepaliveSeconds'
     | 'streaming.bootstrapRetries'
     | 'streaming.nonstreamKeepaliveInterval'
 
-export type VisualConfigValidationErrorCode = 'port_range' | 'non_negative_integer'
+export type VisualConfigValidationErrorCode =
+    | 'port_range'
+    | 'non_negative_integer'
+    | 'quota_refresh_interval_range'
+    | 'quota_refresh_max_interval_range'
 
 export type VisualConfigValidationErrors = Partial<Record<VisualConfigFieldPath, VisualConfigValidationErrorCode>>
+
+export type VisualConfigLogSizeInfo =
+    | { status: 'loading' }
+    | { status: 'error' }
+    | { status: 'ready'; totalBytes: number; fileCount: number }
+
+export type VisualConfigUsageDbSizeInfo =
+    | { status: 'loading' }
+    | { status: 'error' }
+    | {
+          status: 'ready'
+          sizeBytes: number
+          maxSizeBytes?: number
+          warningThresholdPct?: number
+          warning?: boolean
+          capped?: boolean
+      }
+
+export type VisualConfigRuntimeInfo = {
+    logSize: VisualConfigLogSizeInfo
+    usageDbSize: VisualConfigUsageDbSizeInfo
+}
 
 export type PayloadParamEntry = {
     id: string
@@ -49,12 +86,18 @@ export interface StreamingConfig {
     nonstreamKeepaliveInterval: string
 }
 
+export type ApiKeyModelRule = {
+    blockedModels: string[]
+}
+
 export type VisualConfigValues = {
     host: string
     port: string
     tlsEnable: boolean
     tlsCert: string
     tlsKey: string
+    tlsHttpRedirectPort: string
+    tlsRequireForAuth: boolean
     tlsTrustForwardedProto: boolean
     rmAllowRemote: boolean
     rmSecretKey: string
@@ -67,26 +110,58 @@ export type VisualConfigValues = {
     rmCpaRepo: string
     authDir: string
     usageDataDir: string
+    usageStatisticsFile: string
+    pluginsEnabled: boolean
+    pluginsDir: string
+    pluginConfigsText: string
     apiKeysText: string
+    apiKeyAliasesText: string
+    apiKeyRules: Record<string, ApiKeyModelRule>
     debug: boolean
     commercialMode: boolean
     loggingToFile: boolean
+    requestLog: boolean
+    pprofEnable: boolean
+    pprofAddr: string
     logsMaxTotalSizeMb: string
+    errorLogsMaxFiles: string
+    redisUsageQueueRetentionSeconds: string
     usageStatisticsEnabled: boolean
+    usageRetentionDays: string
+    usageRetentionMaxDbSizeMb: string
+    usageRetentionWarningThresholdPct: string
+    autoRefreshInterval: string
+    modelRefreshInterval: string
     proxyUrl: string
     forceModelPrefix: boolean
+    enableGeminiCliEndpoint: boolean
+    passthroughHeaders: boolean
+    disableImageGeneration: 'off' | 'all' | 'chat'
+    gptImage2BaseModel: string
+    authAutoRefreshWorkers: string
     requestRetry: string
     maxRetryCredentials: string
     maxRetryInterval: string
     quotaSwitchProject: boolean
     quotaSwitchPreviewModel: boolean
     quotaAntigravityCredits: boolean
+    disableCooling: boolean
+    quotaRefreshEnabled: boolean
+    quotaRefreshInterval: string
+    quotaRefreshMaxInterval: string
     routingStrategy: 'round-robin' | 'fill-first'
     routingSessionAffinity: boolean
     routingSessionAffinityTTL: string
     wsAuth: boolean
     allowQueryAuth: boolean
     corsAllowedOrigins: string
+    providerConfigText: string
+    oauthExcludedModelsText: string
+    oauthModelAliasText: string
+    codexIdentityConfuse: boolean
+    codexHeaderDefaultsText: string
+    claudeHeaderDefaultsText: string
+    ampcodeText: string
     payloadDefaultRules: PayloadRule[]
     payloadDefaultRawRules: PayloadRule[]
     payloadOverrideRules: PayloadRule[]
@@ -108,6 +183,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     tlsEnable: false,
     tlsCert: '',
     tlsKey: '',
+    tlsHttpRedirectPort: '',
+    tlsRequireForAuth: false,
     tlsTrustForwardedProto: false,
     rmAllowRemote: false,
     rmSecretKey: '',
@@ -120,26 +197,58 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     rmCpaRepo: '',
     authDir: '',
     usageDataDir: '',
+    usageStatisticsFile: '',
+    pluginsEnabled: false,
+    pluginsDir: 'plugins',
+    pluginConfigsText: '',
     apiKeysText: '',
+    apiKeyAliasesText: '',
+    apiKeyRules: {},
     debug: false,
     commercialMode: false,
     loggingToFile: false,
+    requestLog: false,
+    pprofEnable: false,
+    pprofAddr: '',
     logsMaxTotalSizeMb: '',
+    errorLogsMaxFiles: '',
+    redisUsageQueueRetentionSeconds: '',
     usageStatisticsEnabled: false,
+    usageRetentionDays: '',
+    usageRetentionMaxDbSizeMb: '',
+    usageRetentionWarningThresholdPct: '',
+    autoRefreshInterval: '',
+    modelRefreshInterval: '',
     proxyUrl: '',
     forceModelPrefix: false,
+    enableGeminiCliEndpoint: false,
+    passthroughHeaders: false,
+    disableImageGeneration: 'off',
+    gptImage2BaseModel: '',
+    authAutoRefreshWorkers: '',
     requestRetry: '',
     maxRetryCredentials: '',
     maxRetryInterval: '',
     quotaSwitchProject: true,
     quotaSwitchPreviewModel: true,
     quotaAntigravityCredits: false,
+    disableCooling: false,
+    quotaRefreshEnabled: false,
+    quotaRefreshInterval: '',
+    quotaRefreshMaxInterval: '',
     routingStrategy: 'round-robin',
     routingSessionAffinity: false,
     routingSessionAffinityTTL: '',
     wsAuth: true,
     allowQueryAuth: false,
     corsAllowedOrigins: '',
+    providerConfigText: '',
+    oauthExcludedModelsText: '',
+    oauthModelAliasText: '',
+    codexIdentityConfuse: false,
+    codexHeaderDefaultsText: '',
+    claudeHeaderDefaultsText: '',
+    ampcodeText: '',
     payloadDefaultRules: [],
     payloadDefaultRawRules: [],
     payloadOverrideRules: [],

@@ -12,69 +12,133 @@ port: 8317
 # ── TLS ─────────────────────────────
 tls:
   enable: false
-  # cert: "/path/to/cert.pem"
-  # key: "/path/to/key.pem"
+  cert: ""
+  key: ""
+  http-redirect-port: 80
+  require-for-auth: false
+  trust-forwarded-proto: false
 
 # ── 远程管理 ────────────────────────
 remote-management:
   allow-remote: false
-  # secret-key: ""
+  secret-key: ""
   disable-control-panel: false
+  auto-update-panel: true
+  auto-check-update: false
+  auto-update-cpa: false
+  check-interval: 180
   panel-github-repository: "https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
   cpa-github-repository: "https://github.com/Pyrokine/CLIProxyAPI"
 
 # ── 认证 ────────────────────────────
-# auth-dir: "~/.cli-proxy-api"
-# api-keys: []
+auth-dir: "~/.cli-proxy-api"
+api-keys: []
+api-key-aliases: {}
+api-key-rules: {}
+auth:
+  providers:
+    config-api-key:
+      api-key-entries: []
+allow-query-auth: false
 
 # ── 系统 ────────────────────────────
 debug: false
+pprof:
+  enable: false
+  addr: "127.0.0.1:8316"
 commercial-mode: false
 logging-to-file: false
-# logs-max-total-size-mb: 0
+request-log: false
+logs-max-total-size-mb: 0
+error-logs-max-files: 10
 usage-statistics-enabled: false
-# usage-retention:
-#   days: 30                   # -1 to disable
-#   max-db-size-mb: 1024       # 0 to disable
-#   warning-threshold-pct: 80  # warn when the DB reaches this percentage of max-db-size-mb
+redis-usage-queue-retention-seconds: 60
+usage-statistics-file: ""
+usage-data-dir: ""
+usage-retention:
+  days: 0
+  max-db-size-mb: 0
+  warning-threshold-pct: 80
+plugins:
+  enabled: false
+  dir: "plugins"
+  configs: {}
 
 # ── 管理面板 ────────────────────────
 auto-refresh-interval: 3     # seconds; 0 to disable
 model-refresh-interval: 3    # hours; 0 to disable
 
 # ── 网络 ────────────────────────────
-# proxy-url: ""
+proxy-url: ""
 force-model-prefix: false
+enable-gemini-cli-endpoint: false
+passthrough-headers: false
+disable-image-generation: "off"
+gpt-image-2-base-model: "gpt-5.4-mini"
 request-retry: 3
+max-retry-credentials: 0
 max-retry-interval: 30
+auth-auto-refresh-workers: 16
 ws-auth: true
-# allow-query-auth: false  # SECURITY RISK: exposes credentials in URL query strings
-# cors-allowed-origins: []  # Empty = allow all (*); set to restrict browser access
+cors-allowed-origins: []  # Empty = allow all (*); set to restrict browser access
 routing:
-  strategy: round-robin
+  strategy: round-robin  # round-robin (default), fill-first (优先填充)
+  claude-code-session-affinity: false
+  session-affinity: false
+  session-affinity-ttl: ""
 
 # ── 配额超限 ────────────────────────
 quota-exceeded:
   switch-project: true
   switch-preview-model: true
-
-# ── 配额刷新 ────────────────────────
-# quota-refresh:
-#   enabled: false
-#   interval: 600       # seconds (10 minutes)
-#   max-interval: 1800  # seconds (30 minutes)
+  antigravity-credits: false
+quota-refresh:
+  enabled: false
+  interval: 600
+  max-interval: 1800
+disable-cooling: false
 
 # ── 流式传输 ────────────────────────
+nonstream-keepalive-interval: 0
 streaming:
   keepalive-seconds: 0
   bootstrap-retries: 1
-  # nonstream-keepalive-interval: 0
+
+# ── 供应商配置 ──────────────────────
+gemini-api-key: []
+codex-api-key: []
+claude-api-key: []
+vertex-api-key: []
+openai-compatibility: []
+oauth-model-alias: {}
+oauth-excluded-models: {}
+codex:
+  identity-confuse: false
+codex-header-defaults:
+  user-agent: ""
+  beta-features: ""
+claude-header-defaults:
+  user-agent: ""
+  package-version: ""
+  runtime-version: ""
+  os: ""
+  arch: ""
+  timeout: ""
+ampcode:
+  upstream-url: ""
+  upstream-api-key: ""
+  upstream-api-keys: []
+  restrict-management-to-localhost: false
+  model-mappings: []
+  force-model-mappings: false
 
 # ── 载荷规则 ────────────────────────
-# payload:
-#   default: []
-#   override: []
-#   filter: []
+payload:
+  default: []
+  default-raw: []
+  override: []
+  override-raw: []
+  filter: []
 `
 
 /**

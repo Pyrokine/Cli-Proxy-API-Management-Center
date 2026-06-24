@@ -9,7 +9,7 @@
 }
 
 .trigger {
-    @include dropdown-trigger(32px, 0 10px);
+    @include dropdown-trigger;
 }
 
 .triggerText {

@@ -43,6 +43,7 @@ const SECTION_KEYS: RawConfigSection[] = [
     'logging-to-file',
     'logs-max-total-size-mb',
     'error-logs-max-files',
+    'usage-retention',
     'ws-auth',
     'force-model-prefix',
     'routing/strategy',
@@ -55,7 +56,10 @@ const SECTION_KEYS: RawConfigSection[] = [
     'openai-compatibility',
     'oauth-excluded-models',
     'auto-refresh-interval',
+    'model-refresh-interval',
+    'quota-refresh',
     'remote-management',
+    'plugins',
 ]
 
 const extractSectionValue = (config: Config | null, section?: RawConfigSection) => {
@@ -81,6 +85,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
             return config.logsMaxTotalSizeMb
         case 'error-logs-max-files':
             return config.errorLogsMaxFiles
+        case 'usage-retention':
+            return config.usageRetention
         case 'ws-auth':
             return config.wsAuth
         case 'force-model-prefix':
@@ -105,8 +111,14 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
             return config.oauthExcludedModels
         case 'auto-refresh-interval':
             return config.autoRefreshInterval
+        case 'model-refresh-interval':
+            return config.modelRefreshInterval
+        case 'quota-refresh':
+            return config.quotaRefresh
         case 'remote-management':
             return config.remoteManagement
+        case 'plugins':
+            return config.plugins
         default:
             if (!section) {
                 return undefined
@@ -233,6 +245,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
                 case 'error-logs-max-files':
                     nextConfig.errorLogsMaxFiles = value as Config['errorLogsMaxFiles']
                     break
+                case 'usage-retention':
+                    nextConfig.usageRetention = value as Config['usageRetention']
+                    break
                 case 'ws-auth':
                     nextConfig.wsAuth = value as Config['wsAuth']
                     break
@@ -269,8 +284,17 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
                 case 'auto-refresh-interval':
                     nextConfig.autoRefreshInterval = value as Config['autoRefreshInterval']
                     break
+                case 'model-refresh-interval':
+                    nextConfig.modelRefreshInterval = value as Config['modelRefreshInterval']
+                    break
+                case 'quota-refresh':
+                    nextConfig.quotaRefresh = value as Config['quotaRefresh']
+                    break
                 case 'remote-management':
                     nextConfig.remoteManagement = value as Config['remoteManagement']
+                    break
+                case 'plugins':
+                    nextConfig.plugins = value as Config['plugins']
                     break
                 default:
                     break

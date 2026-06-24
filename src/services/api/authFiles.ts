@@ -361,8 +361,13 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
                 if (!name || !alias) {
                     return null
                 }
-                const fork = entry.fork === true
-                return fork ? { name, alias, fork } : { name, alias }
+                if (entry.fork === false) {
+                    return { name, alias, fork: false }
+                }
+                if (entry.fork === true) {
+                    return { name, alias, fork: true }
+                }
+                return { name, alias }
             })
             .filter(Boolean)
             .filter((entry) => {
@@ -461,8 +466,15 @@ export const authFilesApi = {
     saveOauthExcludedModels: (provider: string, models: string[]) =>
         apiClient.patch('/oauth-excluded-models', { provider, models }),
 
-    deleteOauthExcludedEntry: (provider: string) =>
-        apiClient.delete(`/oauth-excluded-models?provider=${encodeURIComponent(provider)}`),
+    deleteOauthExcludedEntry: async (provider: string) => {
+        try {
+            await apiClient.delete(`/oauth-excluded-models?provider=${encodeURIComponent(provider)}`)
+        } catch (err: unknown) {
+            if (getStatusCode(err) !== 404) {
+                throw err
+            }
+        }
+    },
 
     // OAuth 模型别名
     async getOauthModelAlias(): Promise<Record<string, OAuthModelAliasEntry[]>> {

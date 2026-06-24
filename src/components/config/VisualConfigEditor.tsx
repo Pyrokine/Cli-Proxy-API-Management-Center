@@ -13,15 +13,18 @@ import {
 import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {TIMEZONE_OPTIONS, useTimezoneStore} from '@/stores/useTimezoneStore'
 import type {
     PayloadFilterRule,
     PayloadParamValidationErrorCode,
     PayloadRule,
     VisualConfigFieldPath,
+    VisualConfigRuntimeInfo,
     VisualConfigValidationErrorCode,
     VisualConfigValidationErrors,
     VisualConfigValues,
 } from '@/types/visualConfig'
+import {formatFileSize} from '@/utils/format'
 import {type ComponentType, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VisualConfigEditor.module.scss'
@@ -42,6 +45,7 @@ interface VisualConfigEditorProps {
     validationErrors?: VisualConfigValidationErrors
     hasPayloadValidationErrors?: boolean
     disabled?: boolean
+    runtimeInfo?: VisualConfigRuntimeInfo
     onChange: (values: Partial<VisualConfigValues>) => void
 }
 
@@ -60,12 +64,20 @@ type ToggleRowProps = {
     description?: string
     checked: boolean
     disabled?: boolean
+    tone?: 'default' | 'warning' | 'danger'
     onChange: (value: boolean) => void
 }
 
-function ToggleRow({ title, description, checked, disabled, onChange }: ToggleRowProps) {
+function ToggleRow({ title, description, checked, disabled, tone = 'default', onChange }: ToggleRowProps) {
+    const className =
+              tone === 'danger'
+              ? `${styles.toggleRow} ${styles.toggleRowDanger}`
+              : tone === 'warning'
+                ? `${styles.toggleRow} ${styles.toggleRowWarning}`
+                : styles.toggleRow
+
     return (
-        <div className={styles.toggleRow}>
+        <div className={className}>
             <div className={styles.toggleCopy}>
                 <div className={styles.toggleTitle}>{title}</div>
                 {description ? <div className={styles.toggleDescription}>{description}</div> : null}
@@ -85,6 +97,35 @@ function SectionStack({ children }: { children: ReactNode }) {
 
 function Divider() {
     return <div className={styles.divider} />
+}
+
+function TextAreaField({
+                           label,
+                           value,
+                           placeholder,
+                           hint,
+                           disabled,
+                           onChange,
+                       }: {
+    label: string
+    value: string
+    placeholder?: string
+    hint?: string
+    disabled?: boolean
+    onChange: (value: string) => void
+}) {
+    return (
+        <FieldShell label={label} hint={hint}>
+            <textarea
+                className={`input ${styles.yamlTextArea}`}
+                value={value}
+                placeholder={placeholder}
+                disabled={disabled}
+                spellCheck={false}
+                onChange={(event) => onChange(event.target.value)}
+            />
+        </FieldShell>
+    )
 }
 
 function SectionSubsection({
@@ -115,6 +156,7 @@ function FieldShell({
                         hintId,
                         error,
                         errorId,
+                        meta,
                         children,
                     }: {
     label: string
@@ -124,6 +166,7 @@ function FieldShell({
     hintId?: string
     error?: string
     errorId?: string
+    meta?: ReactNode
     children: ReactNode
 }) {
     return (
@@ -132,6 +175,7 @@ function FieldShell({
                 {label}
             </label>
             {children}
+            {meta}
             {error ? (
                 <div id={errorId} className='error-box'>
                     {error}
@@ -146,14 +190,35 @@ function FieldShell({
     )
 }
 
+function FieldMeta({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'warning' | 'danger' }) {
+    const className =
+              tone === 'danger'
+              ? `${styles.fieldMeta} ${styles.fieldMetaDanger}`
+              : tone === 'warning'
+                ? `${styles.fieldMeta} ${styles.fieldMetaWarning}`
+                : styles.fieldMeta
+
+    return <div className={className}>{children}</div>
+}
+
 export function VisualConfigEditor({
                                        values,
                                        validationErrors,
                                        hasPayloadValidationErrors = false,
                                        disabled = false,
+                                       runtimeInfo,
                                        onChange,
                                    }: VisualConfigEditorProps) {
     const { t }                                 = useTranslation()
+    const timezone                              = useTimezoneStore((state) => state.timezone)
+    const setTimezone                           = useTimezoneStore((state) => state.setTimezone)
+    const timezoneOptions                       = useMemo(
+        () => TIMEZONE_OPTIONS.map((tz) => ({
+            value: tz.value,
+            label: tz.value === '' ? t('system_info.timezone_system', { defaultValue: '系统（浏览器默认）' }) : tz.label,
+        })),
+        [t],
+    )
     const routingStrategyLabelId                = useId()
     const routingStrategyHintId                 = `${routingStrategyLabelId}-hint`
     const keepaliveInputId                      = useId()
@@ -165,6 +230,7 @@ export function VisualConfigEditor({
     const [activeSectionId, setActiveSectionId] = useState<VisualSectionId>('server')
     const workspaceRef                          = useRef<HTMLDivElement | null>(null)
     const sectionRefs                           = useRef<Partial<Record<VisualSectionId, HTMLElement | null>>>({})
+    const sectionJumpLockUntilRef               = useRef(0)
 
     const isKeepaliveDisabled          = values.streaming.keepaliveSeconds ===
                                          '' ||
@@ -173,17 +239,95 @@ export function VisualConfigEditor({
     const isNonstreamKeepaliveDisabled =
               values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0'
 
-    const portError                = getValidationMessage(t, validationErrors?.port)
-    const logsMaxSizeError         = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
-    const requestRetryError        = getValidationMessage(t, validationErrors?.requestRetry)
-    const maxRetryCredentialsError = getValidationMessage(t, validationErrors?.maxRetryCredentials)
-    const maxRetryIntervalError    = getValidationMessage(t, validationErrors?.maxRetryInterval)
-    const keepaliveError           = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds'])
-    const bootstrapRetriesError    = getValidationMessage(t, validationErrors?.['streaming.bootstrapRetries'])
-    const nonstreamKeepaliveError  = getValidationMessage(t, validationErrors?.['streaming.nonstreamKeepaliveInterval'])
+    const portError                           = getValidationMessage(t, validationErrors?.port)
+    const tlsHttpRedirectPortError            = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
+    const logsMaxSizeError                    = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
+    const errorLogsMaxFilesError              = getValidationMessage(t, validationErrors?.errorLogsMaxFiles)
+    const redisUsageQueueRetentionError       = getValidationMessage(
+        t,
+        validationErrors?.redisUsageQueueRetentionSeconds,
+    )
+    const authAutoRefreshWorkersError         = getValidationMessage(t, validationErrors?.authAutoRefreshWorkers)
+    const usageRetentionDaysError             = getValidationMessage(t, validationErrors?.usageRetentionDays)
+    const usageRetentionMaxDbSizeMbError      = getValidationMessage(t, validationErrors?.usageRetentionMaxDbSizeMb)
+    const usageRetentionWarningThresholdError = getValidationMessage(
+        t,
+        validationErrors?.usageRetentionWarningThresholdPct,
+    )
+    const autoRefreshIntervalError            = getValidationMessage(t, validationErrors?.autoRefreshInterval)
+    const modelRefreshIntervalError           = getValidationMessage(t, validationErrors?.modelRefreshInterval)
+    const logSizeMeta                         = (() => {
+        const logSize = runtimeInfo?.logSize
+        if (!logSize || logSize.status === 'loading') {
+            return <FieldMeta>{t('config_management.visual.sections.runtime.log_size_loading')}</FieldMeta>
+        }
+        if (logSize.status === 'error') {
+            return <FieldMeta tone='warning'>{t('config_management.visual.sections.runtime.log_size_error')}</FieldMeta>
+        }
+        return (
+            <FieldMeta>
+                {t('config_management.visual.sections.runtime.log_size_ready', {
+                    size: formatFileSize(logSize.totalBytes),
+                    count: logSize.fileCount,
+                })}
+            </FieldMeta>
+        )
+    })()
+    const usageDbSizeMeta                     = (() => {
+        const usageDbSize = runtimeInfo?.usageDbSize
+        if (!usageDbSize || usageDbSize.status === 'loading') {
+            return <FieldMeta>{t('config_management.visual.sections.runtime.db_size_loading')}</FieldMeta>
+        }
+        if (usageDbSize.status === 'error') {
+            return <FieldMeta tone='warning'>{t('config_management.visual.sections.runtime.db_size_error')}</FieldMeta>
+        }
+
+        const text       = usageDbSize.maxSizeBytes && usageDbSize.maxSizeBytes > 0
+                           ? t('config_management.visual.sections.runtime.db_size_ready_with_max', {
+                size: formatFileSize(usageDbSize.sizeBytes),
+                max: formatFileSize(usageDbSize.maxSizeBytes),
+            })
+                           : t('config_management.visual.sections.runtime.db_size_ready', {
+                size: formatFileSize(usageDbSize.sizeBytes),
+            })
+        const statusText = usageDbSize.capped
+                           ? t('config_management.visual.sections.runtime.db_size_capped')
+                           : usageDbSize.warning
+                             ? t('config_management.visual.sections.runtime.db_size_warning', {
+                    threshold: usageDbSize.warningThresholdPct ?? 80,
+                })
+                             : ''
+
+        return (
+            <FieldMeta tone={usageDbSize.capped ? 'danger' : usageDbSize.warning ? 'warning' : 'default'}>
+                {statusText ? `${text} · ${statusText}` : text}
+            </FieldMeta>
+        )
+    })()
+    const requestRetryError                   = getValidationMessage(t, validationErrors?.requestRetry)
+    const maxRetryCredentialsError            = getValidationMessage(t, validationErrors?.maxRetryCredentials)
+    const maxRetryIntervalError               = getValidationMessage(t, validationErrors?.maxRetryInterval)
+    const quotaRefreshIntervalError           = getValidationMessage(t, validationErrors?.quotaRefreshInterval)
+    const quotaRefreshMaxIntervalError        = getValidationMessage(t, validationErrors?.quotaRefreshMaxInterval)
+    const keepaliveError                      = getValidationMessage(
+        t,
+        validationErrors?.['streaming.keepaliveSeconds'],
+    )
+    const bootstrapRetriesError               = getValidationMessage(
+        t,
+        validationErrors?.['streaming.bootstrapRetries'],
+    )
+    const nonstreamKeepaliveError             = getValidationMessage(
+        t,
+        validationErrors?.['streaming.nonstreamKeepaliveInterval'],
+    )
 
     const handleApiKeysTextChange             = useCallback(
         (apiKeysText: string) => onChange({ apiKeysText }),
+        [onChange],
+    )
+    const handleApiKeyRulesChange             = useCallback(
+        (apiKeyRules: VisualConfigValues['apiKeyRules']) => onChange({ apiKeyRules }),
         [onChange],
     )
     const handlePayloadDefaultRulesChange     = useCallback(
@@ -248,7 +392,15 @@ export function VisualConfigEditor({
                 title: t('config_management.visual.sections.system.title'),
                 description: t('config_management.visual.sections.system.description'),
                 icon: IconDiamond,
-                errorCount: countErrors(['logsMaxTotalSizeMb']),
+                errorCount: countErrors([
+                                            'logsMaxTotalSizeMb',
+                                            'errorLogsMaxFiles',
+                                            'usageRetentionDays',
+                                            'usageRetentionMaxDbSizeMb',
+                                            'usageRetentionWarningThresholdPct',
+                                            'autoRefreshInterval',
+                                            'modelRefreshInterval',
+                                        ]),
             },
             {
                 id: 'network',
@@ -262,7 +414,7 @@ export function VisualConfigEditor({
                 title: t('config_management.visual.sections.quota.title'),
                 description: t('config_management.visual.sections.quota.description'),
                 icon: IconTimer,
-                errorCount: 0,
+                errorCount: countErrors(['quotaRefreshInterval', 'quotaRefreshMaxInterval']),
             },
             {
                 id: 'streaming',
@@ -286,42 +438,90 @@ export function VisualConfigEditor({
         [countErrors, hasPayloadValidationErrors, t],
     )
 
-    useEffect(() => {
-        if (typeof IntersectionObserver === 'undefined') {
-            return undefined
+    const getSectionAnchor = useCallback(() => {
+        const headerHeight = Number.parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue('--header-height'),
+        )
+        return (Number.isFinite(headerHeight) ? headerHeight : 64) + 128
+    }, [])
+
+    const updateActiveSection = useCallback(() => {
+        if (Date.now() < sectionJumpLockUntilRef.current) {
+            return
         }
 
-        const observer = new IntersectionObserver(
-            (entries) => {
-                const visibleEntries = entries
-                    .filter((entry) => entry.isIntersecting)
-                    .sort((left, right) => right.intersectionRatio - left.intersectionRatio)
-
-                if (visibleEntries.length === 0) {
-                    return
-                }
-                setActiveSectionId(visibleEntries[0].target.id as VisualSectionId)
-            },
-            {
-                rootMargin: '-10% 0px -30% 0px',
-                threshold: [0.05, 0.15, 0.3, 0.55],
-            },
-        )
+        const anchor      = getSectionAnchor()
+        let nextSectionId = sections[0]?.id ?? 'server'
 
         for (const section of sections) {
             const element = sectionRefs.current[section.id]
-            if (element) {
-                observer.observe(element)
+            if (!element) {
+                continue
+            }
+            if (element.getBoundingClientRect().top <= anchor) {
+                nextSectionId = section.id
+            } else {
+                break
             }
         }
 
-        return () => observer.disconnect()
-    }, [sections])
+        setActiveSectionId((current) => (current === nextSectionId ? current : nextSectionId))
+    }, [getSectionAnchor, sections])
+
+    useEffect(() => {
+        let frameId          = 0
+        const scheduleUpdate = () => {
+            if (frameId !== 0) {
+                return
+            }
+            frameId = window.requestAnimationFrame(() => {
+                frameId = 0
+                updateActiveSection()
+            })
+        }
+
+        const scrollTarget = (() => {
+            let element = workspaceRef.current?.parentElement ?? null
+            while (element) {
+                const overflowY = getComputedStyle(element).overflowY
+                if ((overflowY === 'auto' || overflowY === 'scroll') && element.scrollHeight > element.clientHeight) {
+                    return element
+                }
+                element = element.parentElement
+            }
+            return window
+        })()
+
+        scheduleUpdate()
+        scrollTarget.addEventListener('scroll', scheduleUpdate, { passive: true })
+        window.addEventListener('resize', scheduleUpdate)
+
+        return () => {
+            if (frameId !== 0) {
+                window.cancelAnimationFrame(frameId)
+            }
+            scrollTarget.removeEventListener('scroll', scheduleUpdate)
+            window.removeEventListener('resize', scheduleUpdate)
+        }
+    }, [updateActiveSection])
 
     const handleSectionJump = useCallback((sectionId: VisualSectionId) => {
+        const element = sectionRefs.current[sectionId]
+        if (!element) {
+            return
+        }
+
+        const lockUntil                 = Date.now() + 900
+        sectionJumpLockUntilRef.current = lockUntil
         setActiveSectionId(sectionId)
-        sectionRefs.current[sectionId]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, [])
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        window.setTimeout(() => {
+            if (sectionJumpLockUntilRef.current === lockUntil) {
+                sectionJumpLockUntilRef.current = 0
+                updateActiveSection()
+            }
+        }, 950)
+    }, [updateActiveSection])
 
     const navContent = (
         <div className={styles.navList}>
@@ -418,36 +618,59 @@ export function VisualConfigEditor({
                                 onChange={(tlsEnable) => onChange({ tlsEnable })}
                             />
 
-                            {values.tlsEnable ? (
-                                <>
-                                    <Divider />
-                                    <SectionGrid>
-                                        <Input
-                                            label={t('config_management.visual.sections.tls.cert')}
-                                            placeholder='/path/to/cert.pem'
-                                            value={values.tlsCert}
-                                            onChange={(e) => onChange({ tlsCert: e.target.value })}
-                                            disabled={disabled}
-                                        />
-                                        <Input
-                                            label={t('config_management.visual.sections.tls.key')}
-                                            placeholder='/path/to/key.pem'
-                                            value={values.tlsKey}
-                                            onChange={(e) => onChange({ tlsKey: e.target.value })}
-                                            disabled={disabled}
-                                        />
-                                    </SectionGrid>
-                                    <ToggleRow
-                                        title={t('config_management.visual.sections.tls.trust_forwarded_proto')}
-                                        description={t(
-                                            'config_management.visual.sections.tls.trust_forwarded_proto_desc',
-                                        )}
-                                        checked={values.tlsTrustForwardedProto}
-                                        disabled={disabled}
-                                        onChange={(tlsTrustForwardedProto) => onChange({ tlsTrustForwardedProto })}
-                                    />
-                                </>
-                            ) : null}
+                            <Divider />
+                            <SectionGrid>
+                                <Input
+                                    label={t('config_management.visual.sections.tls.cert')}
+                                    placeholder='/path/to/cert.pem'
+                                    value={values.tlsCert}
+                                    onChange={(e) => onChange({ tlsCert: e.target.value })}
+                                    disabled={disabled}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.tls.key')}
+                                    placeholder='/path/to/key.pem'
+                                    value={values.tlsKey}
+                                    onChange={(e) => onChange({ tlsKey: e.target.value })}
+                                    disabled={disabled}
+                                />
+                                <Input
+                                    label={t(
+                                        'config_management.visual.sections.tls.http_redirect_port',
+                                        { defaultValue: 'HTTP 跳转端口' },
+                                    )}
+                                    type='number'
+                                    placeholder='80'
+                                    value={values.tlsHttpRedirectPort}
+                                    onChange={(e) => onChange({ tlsHttpRedirectPort: e.target.value })}
+                                    disabled={disabled}
+                                    error={tlsHttpRedirectPortError}
+                                />
+                            </SectionGrid>
+                            <ToggleRow
+                                title={t(
+                                    'config_management.visual.sections.tls.require_for_auth',
+                                    { defaultValue: '认证接口强制 HTTPS' },
+                                )}
+                                description={t(
+                                    'config_management.visual.sections.tls.require_for_auth_desc',
+                                    { defaultValue: '非本机访问认证接口时要求 HTTPS' },
+                                )}
+                                checked={values.tlsRequireForAuth}
+                                disabled={disabled}
+                                tone='warning'
+                                onChange={(tlsRequireForAuth) => onChange({ tlsRequireForAuth })}
+                            />
+                            <ToggleRow
+                                title={t('config_management.visual.sections.tls.trust_forwarded_proto')}
+                                description={t(
+                                    'config_management.visual.sections.tls.trust_forwarded_proto_desc',
+                                )}
+                                checked={values.tlsTrustForwardedProto}
+                                disabled={disabled}
+                                tone='danger'
+                                onChange={(tlsTrustForwardedProto) => onChange({ tlsTrustForwardedProto })}
+                            />
                         </SectionStack>
                     </ConfigSection>
 
@@ -467,6 +690,7 @@ export function VisualConfigEditor({
                                 description={t('config_management.visual.sections.remote.allow_remote_desc')}
                                 checked={values.rmAllowRemote}
                                 disabled={disabled}
+                                tone='warning'
                                 onChange={(rmAllowRemote) => onChange({ rmAllowRemote })}
                             />
                             <ToggleRow
@@ -542,24 +766,32 @@ export function VisualConfigEditor({
                                     value={values.rmSecretKey}
                                     onChange={(e) => onChange({ rmSecretKey: e.target.value })}
                                     disabled={disabled}
-                                />
-                                <Input
-                                    label={t('config_management.visual.sections.remote.panel_repo')}
-                                    placeholder='https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
-                                    value={values.rmPanelRepo}
-                                    onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
-                                    disabled={disabled}
-                                />
-                                <Input
-                                    label={t('config_management.visual.sections.remote.cpa_repo', {
-                                        defaultValue: 'CPA GitHub Repository',
-                                    })}
-                                    placeholder='https://github.com/Pyrokine/CLIProxyAPI'
-                                    value={values.rmCpaRepo}
-                                    onChange={(e) => onChange({ rmCpaRepo: e.target.value })}
-                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.remote.secret_key_hint')}
                                 />
                             </SectionGrid>
+                            <SectionSubsection
+                                title={t('config_management.visual.sections.remote.update_source')}
+                                description={t('config_management.visual.sections.remote.update_source_desc')}
+                            >
+                                <SectionGrid>
+                                    <Input
+                                        label={t('config_management.visual.sections.remote.panel_repo')}
+                                        placeholder='https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
+                                        value={values.rmPanelRepo}
+                                        onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
+                                        disabled={disabled}
+                                    />
+                                    <Input
+                                        label={t('config_management.visual.sections.remote.cpa_repo', {
+                                            defaultValue: 'CPA GitHub Repository',
+                                        })}
+                                        placeholder='https://github.com/Pyrokine/CLIProxyAPI'
+                                        value={values.rmCpaRepo}
+                                        onChange={(e) => onChange({ rmCpaRepo: e.target.value })}
+                                        disabled={disabled}
+                                    />
+                                </SectionGrid>
+                            </SectionSubsection>
                         </SectionStack>
                     </ConfigSection>
 
@@ -585,10 +817,26 @@ export function VisualConfigEditor({
                             <div className={styles.subsection}>
                                 <ApiKeysCardEditor
                                     value={values.apiKeysText}
+                                    modelRules={values.apiKeyRules}
                                     disabled={disabled}
                                     onChange={handleApiKeysTextChange}
+                                    onModelRulesChange={handleApiKeyRulesChange}
                                 />
                             </div>
+                            <TextAreaField
+                                label={t(
+                                    'config_management.visual.sections.auth.api_key_aliases',
+                                    { defaultValue: 'API Key 别名' },
+                                )}
+                                value={values.apiKeyAliasesText}
+                                placeholder={'{}'}
+                                disabled={disabled}
+                                hint={t(
+                                    'config_management.visual.sections.auth.api_key_aliases_hint',
+                                    { defaultValue: '对应源码配置 api-key-aliases，使用 YAML map 格式' },
+                                )}
+                                onChange={(apiKeyAliasesText) => onChange({ apiKeyAliasesText })}
+                            />
                         </SectionStack>
                     </ConfigSection>
 
@@ -626,23 +874,104 @@ export function VisualConfigEditor({
                                     onChange={(loggingToFile) => onChange({ loggingToFile })}
                                 />
                                 <ToggleRow
+                                    title={t('config_management.visual.sections.system.request_log')}
+                                    description={t('config_management.visual.sections.system.request_log_desc')}
+                                    checked={values.requestLog}
+                                    disabled={disabled}
+                                    onChange={(requestLog) => onChange({ requestLog })}
+                                />
+                                <ToggleRow
                                     title={t('config_management.visual.sections.system.usage_statistics')}
                                     description={t('config_management.visual.sections.system.usage_statistics_desc')}
                                     checked={values.usageStatisticsEnabled}
                                     disabled={disabled}
                                     onChange={(usageStatisticsEnabled) => onChange({ usageStatisticsEnabled })}
                                 />
+                                <ToggleRow
+                                    title={t(
+                                        'config_management.visual.sections.system.pprof_enable',
+                                        { defaultValue: '启用 pprof' },
+                                    )}
+                                    description={t(
+                                        'config_management.visual.sections.system.pprof_enable_desc',
+                                        { defaultValue: '启用后端性能调试 HTTP 服务' },
+                                    )}
+                                    checked={values.pprofEnable}
+                                    disabled={disabled}
+                                    tone='warning'
+                                    onChange={(pprofEnable) => onChange({ pprofEnable })}
+                                />
+                                <ToggleRow
+                                    title={t('config_management.visual.sections.system.plugins_enabled')}
+                                    description={t('config_management.visual.sections.system.plugins_enabled_desc')}
+                                    checked={values.pluginsEnabled}
+                                    disabled={disabled}
+                                    onChange={(pluginsEnabled) => onChange({ pluginsEnabled })}
+                                />
                             </SectionGrid>
 
-                            <SectionGrid>
-                                <Input
+                            <div className={styles.systemFieldGrid}>
+                                <FieldShell
+                                    label={t('system_info.timezone_title', { defaultValue: '显示时区' })}
+                                    hint={t('config_management.visual.sections.system.timezone_hint', {
+                                        defaultValue: 'Only affects timestamps displayed in the management panel.',
+                                    })}
+                                >
+                                    <Select
+                                        value={timezone}
+                                        onChange={setTimezone}
+                                        options={timezoneOptions}
+                                        disabled={disabled}
+                                        className={styles.fieldSelect}
+                                    />
+                                </FieldShell>
+                                <FieldShell
                                     label={t('config_management.visual.sections.system.logs_max_size')}
-                                    type='number'
-                                    placeholder='0'
-                                    value={values.logsMaxTotalSizeMb}
-                                    onChange={(e) => onChange({ logsMaxTotalSizeMb: e.target.value })}
-                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.logs_max_size_hint')}
                                     error={logsMaxSizeError}
+                                    meta={logSizeMeta}
+                                >
+                                    <input
+                                        className='input'
+                                        type='number'
+                                        placeholder='0'
+                                        value={values.logsMaxTotalSizeMb}
+                                        onChange={(e) => onChange({ logsMaxTotalSizeMb: e.target.value })}
+                                        disabled={disabled}
+                                    />
+                                </FieldShell>
+                                <Input
+                                    label={t('config_management.visual.sections.system.error_logs_max_files')}
+                                    type='number'
+                                    placeholder='10'
+                                    value={values.errorLogsMaxFiles}
+                                    onChange={(e) => onChange({ errorLogsMaxFiles: e.target.value })}
+                                    disabled={disabled}
+                                    error={errorLogsMaxFilesError}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.system.redis_usage_retention')}
+                                    type='number'
+                                    placeholder='60'
+                                    value={values.redisUsageQueueRetentionSeconds}
+                                    onChange={(e) => onChange({ redisUsageQueueRetentionSeconds: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.redis_usage_retention_hint')}
+                                    error={redisUsageQueueRetentionError}
+                                />
+                                <Input
+                                    label={t(
+                                        'config_management.visual.sections.system.pprof_addr',
+                                        { defaultValue: 'pprof 监听地址' },
+                                    )}
+                                    placeholder='127.0.0.1:8316'
+                                    value={values.pprofAddr}
+                                    onChange={(e) => onChange({ pprofAddr: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t(
+                                        'config_management.visual.sections.system.pprof_addr_hint',
+                                        { defaultValue: '仅在启用 pprof 时生效' },
+                                    )}
                                 />
                                 <Input
                                     label={t('config_management.visual.sections.system.usage_data_dir')}
@@ -652,7 +981,100 @@ export function VisualConfigEditor({
                                     disabled={disabled}
                                     hint={t('config_management.visual.sections.system.usage_data_dir_hint')}
                                 />
-                            </SectionGrid>
+                                <Input
+                                    label={t(
+                                        'config_management.visual.sections.system.usage_statistics_file',
+                                        { defaultValue: '使用统计旧文件路径' },
+                                    )}
+                                    placeholder=''
+                                    value={values.usageStatisticsFile}
+                                    onChange={(e) => onChange({ usageStatisticsFile: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t(
+                                        'config_management.visual.sections.system.usage_statistics_file_hint',
+                                        { defaultValue: '对应 usage-statistics-file，留空使用默认数据目录' },
+                                    )}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.system.plugins_dir')}
+                                    placeholder='plugins'
+                                    value={values.pluginsDir}
+                                    onChange={(e) => onChange({ pluginsDir: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.plugins_dir_hint')}
+                                />
+                                <FieldShell
+                                    label={t('config_management.visual.sections.system.usage_retention_max_db_size')}
+                                    hint={t('config_management.visual.sections.system.usage_retention_max_db_size_hint')}
+                                    error={usageRetentionMaxDbSizeMbError}
+                                    meta={usageDbSizeMeta}
+                                >
+                                    <input
+                                        className='input'
+                                        type='number'
+                                        placeholder='0'
+                                        value={values.usageRetentionMaxDbSizeMb}
+                                        onChange={(e) => onChange({ usageRetentionMaxDbSizeMb: e.target.value })}
+                                        disabled={disabled}
+                                    />
+                                </FieldShell>
+                                <Input
+                                    label={t('config_management.visual.sections.system.usage_retention_days')}
+                                    type='number'
+                                    placeholder='0'
+                                    value={values.usageRetentionDays}
+                                    onChange={(e) => onChange({ usageRetentionDays: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.usage_retention_hint')}
+                                    error={usageRetentionDaysError}
+                                />
+                                <Input
+                                    label={t(
+                                        'config_management.visual.sections.system.usage_retention_warning_threshold')}
+                                    type='number'
+                                    placeholder='80'
+                                    value={values.usageRetentionWarningThresholdPct}
+                                    onChange={(e) => onChange({ usageRetentionWarningThresholdPct: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t(
+                                        'config_management.visual.sections.system.usage_retention_warning_threshold_hint')}
+                                    error={usageRetentionWarningThresholdError}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.system.auto_refresh_interval')}
+                                    type='number'
+                                    placeholder='3'
+                                    value={values.autoRefreshInterval}
+                                    onChange={(e) => onChange({ autoRefreshInterval: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.auto_refresh_interval_hint')}
+                                    error={autoRefreshIntervalError}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.system.model_refresh_interval')}
+                                    type='number'
+                                    placeholder='3'
+                                    value={values.modelRefreshInterval}
+                                    onChange={(e) => onChange({ modelRefreshInterval: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.system.model_refresh_interval_hint')}
+                                    error={modelRefreshIntervalError}
+                                />
+                            </div>
+                            <TextAreaField
+                                label={t(
+                                    'config_management.visual.sections.system.plugin_configs',
+                                    { defaultValue: '插件实例配置' },
+                                )}
+                                value={values.pluginConfigsText}
+                                placeholder={'{}'}
+                                disabled={disabled}
+                                hint={t(
+                                    'config_management.visual.sections.system.plugin_configs_hint',
+                                    { defaultValue: '对应 plugins.configs，使用 YAML map 格式' },
+                                )}
+                                onChange={(pluginConfigsText) => onChange({ pluginConfigsText })}
+                            />
                         </SectionStack>
                     </ConfigSection>
 
@@ -703,6 +1125,46 @@ export function VisualConfigEditor({
                                     disabled={disabled}
                                     error={maxRetryIntervalError}
                                 />
+                                <Input
+                                    label={t('config_management.visual.sections.network.auth_auto_refresh_workers')}
+                                    type='number'
+                                    placeholder='16'
+                                    value={values.authAutoRefreshWorkers}
+                                    onChange={(e) => onChange({ authAutoRefreshWorkers: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.network.auth_auto_refresh_workers_hint')}
+                                    error={authAutoRefreshWorkersError}
+                                />
+                                <Input
+                                    label={t(
+                                        'config_management.visual.sections.network.gpt_image_2_base_model',
+                                        { defaultValue: 'gpt-image-2 基础模型' },
+                                    )}
+                                    placeholder='gpt-5.4-mini'
+                                    value={values.gptImage2BaseModel}
+                                    onChange={(e) => onChange({ gptImage2BaseModel: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t(
+                                        'config_management.visual.sections.network.gpt_image_2_base_model_hint',
+                                        { defaultValue: '代理 gpt-image-2 hosted image_generation tool 时使用' },
+                                    )}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.network.cors_allowed_origins')}
+                                    placeholder='https://example.com, https://admin.example.com'
+                                    value={values.corsAllowedOrigins}
+                                    onChange={(e) => onChange({ corsAllowedOrigins: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.network.cors_allowed_origins_hint')}
+                                />
+                                <Input
+                                    label={t('config_management.visual.sections.network.session_affinity_ttl')}
+                                    placeholder='1h'
+                                    value={values.routingSessionAffinityTTL}
+                                    onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
+                                    disabled={disabled}
+                                    hint={t('config_management.visual.sections.network.session_affinity_ttl_hint')}
+                                />
                                 <FieldShell
                                     label={t('config_management.visual.sections.network.routing_strategy')}
                                     labelId={routingStrategyLabelId}
@@ -736,13 +1198,6 @@ export function VisualConfigEditor({
                                         }
                                     />
                                 </FieldShell>
-                                <Input
-                                    label={t('config_management.visual.sections.network.session_affinity_ttl')}
-                                    placeholder='1h'
-                                    value={values.routingSessionAffinityTTL}
-                                    onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
-                                    disabled={disabled}
-                                />
                             </SectionGrid>
 
                             <SectionGrid>
@@ -754,7 +1209,55 @@ export function VisualConfigEditor({
                                     onChange={(forceModelPrefix) => onChange({ forceModelPrefix })}
                                 />
                                 <ToggleRow
+                                    title={t('config_management.visual.sections.network.enable_gemini_cli_endpoint')}
+                                    description={t(
+                                        'config_management.visual.sections.network.enable_gemini_cli_endpoint_desc')}
+                                    checked={values.enableGeminiCliEndpoint}
+                                    disabled={disabled}
+                                    tone='warning'
+                                    onChange={(enableGeminiCliEndpoint) => onChange({ enableGeminiCliEndpoint })}
+                                />
+                                <ToggleRow
+                                    title={t('config_management.visual.sections.network.passthrough_headers')}
+                                    description={t('config_management.visual.sections.network.passthrough_headers_desc')}
+                                    checked={values.passthroughHeaders}
+                                    disabled={disabled}
+                                    onChange={(passthroughHeaders) => onChange({ passthroughHeaders })}
+                                />
+                                <FieldShell
+                                    label={t('config_management.visual.sections.network.disable_image_generation')}
+                                    hint={t('config_management.visual.sections.network.disable_image_generation_hint')}
+                                >
+                                    <Select
+                                        value={values.disableImageGeneration}
+                                        options={[
+                                            {
+                                                value: 'off',
+                                                label: t(
+                                                    'config_management.visual.sections.network.disable_image_generation_off',
+                                                    { defaultValue: 'off（启用）' },
+                                                ),
+                                            },
+                                            {
+                                                value: 'all',
+                                                label: t(
+                                                    'config_management.visual.sections.network.disable_image_generation_all',
+                                                    { defaultValue: 'all（全部停用）' },
+                                                ),
+                                            },
+                                            {
+                                                value: 'chat',
+                                                label: t(
+                                                    'config_management.visual.sections.network.disable_image_generation_chat'),
+                                            },
+                                        ]}
+                                        disabled={disabled}
+                                        onChange={(disableImageGeneration) => onChange({ disableImageGeneration: disableImageGeneration as VisualConfigValues['disableImageGeneration'] })}
+                                    />
+                                </FieldShell>
+                                <ToggleRow
                                     title={t('config_management.visual.sections.network.session_affinity')}
+                                    description={t('config_management.visual.sections.network.session_affinity_desc')}
                                     checked={values.routingSessionAffinity}
                                     disabled={disabled}
                                     onChange={(routingSessionAffinity) => onChange({ routingSessionAffinity })}
@@ -771,9 +1274,105 @@ export function VisualConfigEditor({
                                     description={t('config_management.visual.sections.network.allow_query_auth_desc')}
                                     checked={values.allowQueryAuth}
                                     disabled={disabled}
+                                    tone='danger'
                                     onChange={(allowQueryAuth) => onChange({ allowQueryAuth })}
                                 />
                             </SectionGrid>
+                            <SectionSubsection
+                                title={t(
+                                    'config_management.visual.sections.network.provider_advanced',
+                                    { defaultValue: '供应商高级配置' },
+                                )}
+                                description={t(
+                                    'config_management.visual.sections.network.provider_advanced_desc',
+                                    { defaultValue: '复杂数组和映射使用 YAML 格式直接暴露，保存后写回源码配置对应路径' },
+                                )}
+                            >
+                                <SectionStack>
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.provider_keys',
+                                            { defaultValue: '供应商 Key 与 OpenAI 兼容配置' },
+                                        )}
+                                        value={values.providerConfigText}
+                                        placeholder={'gemini-api-key: []\ncodex-api-key: []\nclaude-api-key: []\nvertex-api-key: []\nopenai-compatibility: []'}
+                                        disabled={disabled}
+                                        onChange={(providerConfigText) => onChange({ providerConfigText })}
+                                    />
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.oauth_excluded_models',
+                                            { defaultValue: 'OAuth 排除模型' },
+                                        )}
+                                        value={values.oauthExcludedModelsText}
+                                        placeholder={'{}'}
+                                        disabled={disabled}
+                                        hint={t(
+                                            'config_management.visual.sections.network.oauth_excluded_models_hint',
+                                            { defaultValue: '对应 oauth-excluded-models，按 provider 写模型禁用列表' },
+                                        )}
+                                        onChange={(oauthExcludedModelsText) => onChange({ oauthExcludedModelsText })}
+                                    />
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.oauth_model_alias',
+                                            { defaultValue: 'OAuth 模型别名' },
+                                        )}
+                                        value={values.oauthModelAliasText}
+                                        placeholder={'{}'}
+                                        disabled={disabled}
+                                        hint={t(
+                                            'config_management.visual.sections.network.oauth_model_alias_hint',
+                                            { defaultValue: '对应 oauth-model-alias，按 provider 写 name/alias/fork 列表' },
+                                        )}
+                                        onChange={(oauthModelAliasText) => onChange({ oauthModelAliasText })}
+                                    />
+                                    <ToggleRow
+                                        title={t(
+                                            'config_management.visual.sections.network.codex_identity_confuse',
+                                            { defaultValue: 'Codex 身份混淆' },
+                                        )}
+                                        description={t(
+                                            'config_management.visual.sections.network.codex_identity_confuse_desc',
+                                            { defaultValue: '对应 codex.identity-confuse' },
+                                        )}
+                                        checked={values.codexIdentityConfuse}
+                                        disabled={disabled}
+                                        tone='warning'
+                                        onChange={(codexIdentityConfuse) => onChange({ codexIdentityConfuse })}
+                                    />
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.codex_header_defaults',
+                                            { defaultValue: 'Codex 默认请求头' },
+                                        )}
+                                        value={values.codexHeaderDefaultsText}
+                                        placeholder={'user-agent: ""\nbeta-features: ""'}
+                                        disabled={disabled}
+                                        onChange={(codexHeaderDefaultsText) => onChange({ codexHeaderDefaultsText })}
+                                    />
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.claude_header_defaults',
+                                            { defaultValue: 'Claude 默认请求头' },
+                                        )}
+                                        value={values.claudeHeaderDefaultsText}
+                                        placeholder={'user-agent: ""\npackage-version: ""\nruntime-version: ""\nos: ""\narch: ""\ntimeout: ""'}
+                                        disabled={disabled}
+                                        onChange={(claudeHeaderDefaultsText) => onChange({ claudeHeaderDefaultsText })}
+                                    />
+                                    <TextAreaField
+                                        label={t(
+                                            'config_management.visual.sections.network.ampcode',
+                                            { defaultValue: 'AmpCode 配置' },
+                                        )}
+                                        value={values.ampcodeText}
+                                        placeholder={'upstream-url: ""\nupstream-api-key: ""\nupstream-api-keys: []\nrestrict-management-to-localhost: false\nmodel-mappings: []\nforce-model-mappings: false'}
+                                        disabled={disabled}
+                                        onChange={(ampcodeText) => onChange({ ampcodeText })}
+                                    />
+                                </SectionStack>
+                            </SectionSubsection>
                         </SectionStack>
                     </ConfigSection>
 
@@ -787,28 +1386,82 @@ export function VisualConfigEditor({
                         title={t('config_management.visual.sections.quota.title')}
                         description={t('config_management.visual.sections.quota.description')}
                     >
-                        <SectionGrid>
-                            <ToggleRow
-                                title={t('config_management.visual.sections.quota.switch_project')}
-                                description={t('config_management.visual.sections.quota.switch_project_desc')}
-                                checked={values.quotaSwitchProject}
-                                disabled={disabled}
-                                onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
-                            />
-                            <ToggleRow
-                                title={t('config_management.visual.sections.quota.switch_preview_model')}
-                                description={t('config_management.visual.sections.quota.switch_preview_model_desc')}
-                                checked={values.quotaSwitchPreviewModel}
-                                disabled={disabled}
-                                onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
-                            />
-                            <ToggleRow
-                                title={t('config_management.visual.sections.quota.antigravity_credits')}
-                                checked={values.quotaAntigravityCredits}
-                                disabled={disabled}
-                                onChange={(quotaAntigravityCredits) => onChange({ quotaAntigravityCredits })}
-                            />
-                        </SectionGrid>
+                        <SectionStack>
+                            <SectionGrid>
+                                <ToggleRow
+                                    title={t('config_management.visual.sections.quota.switch_project')}
+                                    description={t('config_management.visual.sections.quota.switch_project_desc')}
+                                    checked={values.quotaSwitchProject}
+                                    disabled={disabled}
+                                    onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
+                                />
+                                <ToggleRow
+                                    title={t('config_management.visual.sections.quota.switch_preview_model')}
+                                    description={t('config_management.visual.sections.quota.switch_preview_model_desc')}
+                                    checked={values.quotaSwitchPreviewModel}
+                                    disabled={disabled}
+                                    onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
+                                />
+                                <ToggleRow
+                                    title={t('config_management.visual.sections.quota.antigravity_credits')}
+                                    description={t('config_management.visual.sections.quota.antigravity_credits_desc')}
+                                    checked={values.quotaAntigravityCredits}
+                                    disabled={disabled}
+                                    tone='warning'
+                                    onChange={(quotaAntigravityCredits) => onChange({ quotaAntigravityCredits })}
+                                />
+                                <ToggleRow
+                                    title={t(
+                                        'config_management.visual.sections.quota.disable_cooling',
+                                        { defaultValue: '停用冷却调度' },
+                                    )}
+                                    description={t(
+                                        'config_management.visual.sections.quota.disable_cooling_desc',
+                                        { defaultValue: '停用配额或失败后的冷却窗口' },
+                                    )}
+                                    checked={values.disableCooling}
+                                    disabled={disabled}
+                                    tone='warning'
+                                    onChange={(disableCooling) => onChange({ disableCooling })}
+                                />
+                            </SectionGrid>
+                            <SectionSubsection
+                                title={t('config_management.visual.sections.quota.refresh_title')}
+                                description={t('config_management.visual.sections.quota.refresh_desc')}
+                            >
+                                <SectionStack>
+                                    <ToggleRow
+                                        title={t('config_management.visual.sections.quota.refresh_enabled')}
+                                        description={t('config_management.visual.sections.quota.refresh_enabled_desc')}
+                                        checked={values.quotaRefreshEnabled}
+                                        disabled={disabled}
+                                        onChange={(quotaRefreshEnabled) => onChange({ quotaRefreshEnabled })}
+                                    />
+                                    <SectionGrid>
+                                        <Input
+                                            label={t('config_management.visual.sections.quota.refresh_interval')}
+                                            type='number'
+                                            placeholder='600'
+                                            value={values.quotaRefreshInterval}
+                                            onChange={(e) => onChange({ quotaRefreshInterval: e.target.value })}
+                                            disabled={disabled}
+                                            hint={t('config_management.visual.sections.quota.refresh_interval_hint')}
+                                            error={quotaRefreshIntervalError}
+                                        />
+                                        <Input
+                                            label={t('config_management.visual.sections.quota.refresh_max_interval')}
+                                            type='number'
+                                            placeholder='1800'
+                                            value={values.quotaRefreshMaxInterval}
+                                            onChange={(e) => onChange({ quotaRefreshMaxInterval: e.target.value })}
+                                            disabled={disabled}
+                                            hint={t('config_management.visual.sections.quota.refresh_max_interval_hint')}
+                                            error={quotaRefreshMaxIntervalError}
+                                        />
+                                    </SectionGrid>
+                                </SectionStack>
+                            </SectionSubsection>
+                        </SectionStack>
                     </ConfigSection>
 
                     <ConfigSection
@@ -923,6 +1576,9 @@ export function VisualConfigEditor({
                         description={t('config_management.visual.sections.payload.description')}
                     >
                         <SectionStack>
+                            <FieldMeta tone='warning'>
+                                {t('config_management.visual.sections.payload.advanced_hint')}
+                            </FieldMeta>
                             <SectionSubsection
                                 title={t('config_management.visual.sections.payload.default_rules')}
                                 description={t('config_management.visual.sections.payload.default_rules_desc')}

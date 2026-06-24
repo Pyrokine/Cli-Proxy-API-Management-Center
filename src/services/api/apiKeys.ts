@@ -13,9 +13,8 @@ export interface ApiKeyUsageEntry {
 
 export const apiKeysApi = {
     async list(): Promise<string[]> {
-        const data = await apiClient.get<Record<string, unknown>>('/api-keys')
-        const keys = data['api-keys'] ?? data.apiKeys
-        return Array.isArray(keys) ? keys.map((key) => String(key)) : []
+        const data = await apiClient.get<string[]>('/api-keys')
+        return Array.isArray(data) ? data.map((key) => String(key)) : []
     },
 
     replace: (keys: string[]) => apiClient.put('/api-keys', keys),

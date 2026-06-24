@@ -11,6 +11,8 @@ interface ApiCallRequest {
     url: string
     header?: Record<string, string>
     data?: string
+    proxyUrl?: string
+    proxy_url?: string
 }
 
 interface ApiCallResult<T = unknown> {
@@ -45,6 +47,17 @@ const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null
     }
 }
 
+const REDACTED = '[redacted]'
+
+const redactApiCallMessage = (input: string): string =>
+    input
+        .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, `$1${REDACTED}`)
+        .replace(
+            /(["']?(?:authorization|x-goog-api-key|x-api-key|api[-_ ]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|cookie|set-cookie)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)/gi,
+            `$1${REDACTED}`,
+        )
+        .replace(/([?&](?:key|api_key|apiKey|x-goog-api-key|access_token|token)=)([^&#\s"']+)/gi, `$1${REDACTED}`)
+
 export const getApiCallErrorMessage = (result: ApiCallResult): string => {
     const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
 
@@ -71,20 +84,22 @@ export const getApiCallErrorMessage = (result: ApiCallResult): string => {
         message = bodyText
     }
 
-    if (status && message) {
-        return `${status} ${message}`.trim()
+    const safeMessage = message ? redactApiCallMessage(message) : ''
+
+    if (status && safeMessage) {
+        return `${status} ${safeMessage}`.trim()
     }
     if (status) {
         return `HTTP ${status}`
     }
-    return message || 'Request failed'
+    return safeMessage || 'Request failed'
 }
 
 export const apiCallApi = {
     request: async (payload: ApiCallRequest, config?: AxiosRequestConfig): Promise<ApiCallResult> => {
         const response           = await apiClient.post<Record<string, unknown>>('/api-call', payload, config)
-        const statusCode         = Number(response?.status_code ?? response?.statusCode ?? 0)
-        const header             = (response?.header ?? response?.headers ?? {}) as Record<string, string[]>
+        const statusCode         = Number(response?.status_code ?? 0)
+        const header             = (response?.header ?? {}) as Record<string, string[]>
         const { bodyText, body } = normalizeBody(response?.body)
 
         return {

@@ -8,7 +8,7 @@
 }
 
 // Shared trigger button
-@mixin dropdown-trigger($height: 32px, $padding: 0 10px) {
+@mixin dropdown-trigger($height: $control-height-md, $padding: 0 10px) {
     display: inline-flex;
     align-items: center;
     justify-content: space-between;

@@ -22,7 +22,9 @@
 }
 
 .dateInput {
-    padding: 5px 8px;
+    box-sizing: border-box;
+    height: $control-height-md;
+    padding: 0 8px;
     border: 1px solid var(--border-color);
     border-radius: $radius-md;
     background: var(--bg-primary);
@@ -55,12 +57,17 @@
 }
 
 .preset {
-    padding: 4px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: $control-height-md;
+    padding: 0 10px;
     border: 1px solid var(--border-color);
     border-radius: $radius-md;
     background: var(--bg-primary);
     color: var(--text-secondary);
     font-size: $font-size-sm;
+    line-height: 1;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;

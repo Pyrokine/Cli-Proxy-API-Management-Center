@@ -57,6 +57,9 @@ const serializeApiKeyEntry = (entry: ApiKeyEntry) => {
     if (entry.proxyUrl) {
         payload['proxy-url'] = entry.proxyUrl
     }
+    if (entry.authIndex?.trim()) {
+        payload['auth-index'] = entry.authIndex.trim()
+    }
     const headers = serializeHeaders(entry.headers)
     if (headers) {
         payload.headers = headers

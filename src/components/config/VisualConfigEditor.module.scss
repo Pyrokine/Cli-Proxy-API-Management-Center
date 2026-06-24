@@ -72,36 +72,247 @@
     }
 }
 
-.overview {
-    position: relative;
+.yamlTextArea {
+    min-height: 144px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: $font-size-sm;
+    line-height: 1.45;
+}
+
+.apiKeyModelLimitSummary {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: 1.45;
+}
+
+.modelLimitModal {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+
+.modelLimitTarget {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.modelLimitHint {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: 1.6;
+}
+
+.modelLimitUnavailable {
+    border-radius: 12px;
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    font-size: $font-size-xs;
+    line-height: 1.6;
+    padding: 8px 10px;
+}
+
+.modelLimitTransfer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+    min-height: 0;
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.modelLimitPanel {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    border-radius: 30px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
-    background: radial-gradient(
-        circle at top right,
-        color-mix(in srgb, var(--primary-color) 12%, transparent),
-        transparent 36%
-    ),
-    linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--bg-primary) 94%, transparent),
-        color-mix(in srgb, var(--bg-secondary) 96%, transparent)
-    );
-    padding: clamp(22px, 3vw, 30px);
+    min-width: 0;
+    height: clamp(520px, 72vh, 720px);
+    border-radius: 18px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+}
 
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0 auto auto 0;
-        width: min(220px, 44vw);
-        height: min(220px, 44vw);
-        background: radial-gradient(circle, color-mix(in srgb, var(--primary-color) 16%, transparent), transparent 72%);
-        opacity: 0.6;
-        pointer-events: none;
+.modelLimitPanelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.modelTree {
+    overflow: auto;
+    flex: 1;
+    padding: 8px;
+}
+
+.modelTreeNodeBlock {
+    display: flex;
+    flex-direction: column;
+}
+
+.modelTreeNode {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    border-radius: 10px;
+
+    &:hover {
+        background: color-mix(in srgb, var(--bg-secondary) 56%, transparent);
     }
+}
+
+.modelTreeExpand,
+.modelTreeCheck,
+.modelTreeLabel {
+    @include button-reset;
+}
+
+.modelTreeExpand {
+    width: 22px;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.modelTreeCheck {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    color: var(--text-primary);
+    font-size: $font-size-xs;
+    line-height: 1;
+}
+
+.modelTreeCheckActive {
+    border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+}
+
+.modelTreeLabel {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    min-width: 0;
+    min-height: 34px;
+    flex: 1;
+    color: var(--text-primary);
+    line-height: 1;
+    text-align: left;
+}
+
+.modelTreeName {
+    overflow: hidden;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modelTreeCount,
+.providerTag {
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-secondary) 72%, transparent),
+        color-mix(in srgb, var(--border-color) 84%, transparent),
+        20px,
+        8px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
+}
+
+.providerTag {
+    color: var(--primary-hover);
+}
+
+.modelTreeAlias {
+    @include token-soft(
+        var(--primary-hover),
+        color-mix(in srgb, var(--primary-color) 10%, transparent),
+        color-mix(in srgb, var(--primary-color) 28%, transparent),
+        20px,
+        8px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.modelLimitActions {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    min-width: 112px;
+
+    :global(.btn) {
+        justify-content: center;
+        width: 100%;
+    }
+
+    @include mobile {
+        flex-direction: row;
+        flex-wrap: wrap;
+
+        :global(.btn) {
+            width: auto;
+        }
+    }
+}
+
+.modelLimitActionContent {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.modelLimitEmpty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    padding: 20px 16px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    text-align: center;
+    white-space: normal;
+}
+
+.modelLimitEmptyPlaceholder {
+    min-height: 0;
+}
+
+.modelLimitEmptyWarning {
+    color: var(--warning-text);
+    background: var(--warning-bg);
+}
+
+.overview {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
 }
 
 .overviewHeader {
@@ -120,17 +331,16 @@
 }
 
 .overviewPill {
-    display: inline-flex;
-    align-items: center;
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-primary) 82%, transparent),
+        color-mix(in srgb, var(--border-color) 84%, transparent),
+        34px,
+        14px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     gap: 6px;
-    min-height: 34px;
-    padding: 0 14px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-    color: var(--text-secondary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
     letter-spacing: 0.04em;
 }
 
@@ -241,8 +451,19 @@
 }
 
 .sidebarRail {
+    overflow-y: auto;
+    overflow-x: hidden;
     max-height: calc(100vh - var(--header-height, 64px) - 36px);
-    @include glass-rail;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
 }
 
 .navList {
@@ -368,16 +589,30 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    padding: clamp(20px, 3vw, 30px);
-    border-radius: 32px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 76%, transparent);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .sectionGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
     gap: 16px;
+}
+
+.systemFieldGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+
+    @media (max-width: 1120px) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .sectionStack {
@@ -394,36 +629,61 @@
 .toggleRow {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
+    gap: 14px;
     align-items: center;
-    padding: 16px 18px;
-    border-radius: 18px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+    min-height: 52px;
+    padding: 10px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    background: transparent;
 
     @include mobile {
         grid-template-columns: minmax(0, 1fr);
     }
 }
 
+.toggleRowWarning,
+.toggleRowDanger {
+    padding: 12px 14px;
+    border: 1px solid var(--warning-border);
+    border-radius: 16px;
+    background: var(--warning-bg);
+}
+
+.toggleRowWarning {
+    .toggleTitle,
+    .toggleDescription {
+        color: var(--warning-text);
+    }
+}
+
+.toggleRowDanger {
+    border-color: color-mix(in srgb, var(--error-color) 38%, var(--border-color));
+    background: var(--bg-error-light);
+
+    .toggleTitle,
+    .toggleDescription {
+        color: var(--error-color);
+    }
+}
+
 .toggleCopy {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
 }
 
 .toggleTitle {
     color: var(--text-primary);
-    font-size: $font-size-base;
-    font-weight: $font-weight-semibold;
-    line-height: 1.2;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    line-height: 1.25;
 }
 
 .toggleDescription {
     color: var(--text-secondary);
     font-size: $font-size-xs;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 
 .fieldShell {
@@ -438,6 +698,18 @@
     font-size: $font-size-xs;
     font-weight: $font-weight-semibold;
     letter-spacing: 0.04em;
+}
+
+.fieldSelect {
+    width: 100%;
+
+    button {
+        min-height: 48px;
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+        border-color: color-mix(in srgb, var(--border-color) 84%, transparent);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
 }
 
 .fieldControl {
@@ -457,22 +729,50 @@
     line-height: 1.6;
 }
 
+.fieldMeta {
+    padding: 7px 10px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+    background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: 1.5;
+}
+
+.systemFieldGrid .fieldMeta {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    line-height: 1.45;
+}
+
+.fieldMetaWarning {
+    border-color: var(--warning-border);
+    background: var(--warning-bg);
+    color: var(--warning-text);
+}
+
+.fieldMetaDanger {
+    border-color: color-mix(in srgb, var(--error-color) 38%, var(--border-color));
+    background: var(--bg-error-light);
+    color: var(--error-color);
+}
+
 .inlinePill {
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-primary) 92%, transparent),
+        color-mix(in srgb, var(--border-color) 82%, transparent),
+        26px,
+        10px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     position: absolute;
     right: 10px;
     top: 50%;
     transform: translateY(-50%);
-    display: inline-flex;
     pointer-events: none;
-    align-items: center;
-    min-height: 26px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
-    color: var(--text-secondary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
     letter-spacing: 0.04em;
 }
 
@@ -636,6 +936,42 @@
     }
 }
 
+.apiKeyModalSecretInput {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+
+    :global(.input) {
+        width: 100%;
+        padding-right: 42px;
+    }
+}
+
+.apiKeyModalVisibilityButton {
+    @include button-reset;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+
+    &:hover:not(:disabled) {
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+}
+
 .searchHighlight {
     padding: 0 2px;
     border-radius: 4px;
@@ -662,6 +998,15 @@
 }
 
 @include mobile {
+    .modelLimitPanel {
+        height: min(58vh, 440px);
+        min-height: 340px;
+    }
+
+    .modelLimitEmpty {
+        white-space: normal;
+    }
+
     .sections {
         border-radius: 26px;
         padding: 18px;

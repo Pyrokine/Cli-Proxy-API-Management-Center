@@ -26,6 +26,9 @@ interface AutocompleteInputProps {
     wrapperStyle?: CSSProperties
     id?: string
     rightElement?: ReactNode
+    onInputChange?: (value: string) => void
+    onOptionSelect?: (value: string) => void
+    onSubmit?: (value: string) => void
 }
 
 export function AutocompleteInput({
@@ -42,6 +45,9 @@ export function AutocompleteInput({
                                       wrapperStyle,
                                       id,
                                       rightElement,
+                                      onInputChange,
+                                      onOptionSelect,
+                                      onSubmit,
                                   }: AutocompleteInputProps) {
     const [isOpen, setIsOpen]                     = useState(false)
     const [highlightedIndex, setHighlightedIndex] = useState(-1)
@@ -121,13 +127,22 @@ export function AutocompleteInput({
     }, [isOpen, calcDropdownStyle])
 
     const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-        onChange(e.target.value)
+        const nextValue = e.target.value
+        if (onInputChange) {
+            onInputChange(nextValue)
+        } else {
+            onChange(nextValue)
+        }
         setIsOpen(true)
         setHighlightedIndex(-1)
     }
 
     const handleSelect = (selectedValue: string) => {
-        onChange(selectedValue)
+        if (onOptionSelect) {
+            onOptionSelect(selectedValue)
+        } else {
+            onChange(selectedValue)
+        }
         setIsOpen(false)
     }
 
@@ -152,6 +167,9 @@ export function AutocompleteInput({
                 handleSelect(filteredOptions[highlightedIndex].value)
             } else if (isOpen) {
                 e.preventDefault()
+                if (onSubmit) {
+                    onSubmit(value)
+                }
                 setIsOpen(false)
             }
         } else if (e.key === 'Escape') {

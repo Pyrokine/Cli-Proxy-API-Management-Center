@@ -5,6 +5,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-height: $control-height-sm;
     cursor: pointer;
 }
 
@@ -26,11 +27,12 @@
 }
 
 .track {
-    width: 32px;
+    width: $control-height-sm;
     height: 18px;
     background: var(--border-color);
     border-radius: $radius-full;
     position: relative;
+    flex: 0 0 $control-height-sm;
     transition: background $transition-fast;
 }
 
@@ -51,7 +53,7 @@
 }
 
 .root input:checked + .track .thumb {
-    transform: translateX(14px);
+    transform: translateX($control-height-sm - 18px);
 }
 
 .root:not(.disabled):hover .track {

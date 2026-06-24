@@ -24,6 +24,31 @@ export interface RemoteManagementConfig {
     cpaGithubRepository?: string
 }
 
+export interface UsageRetentionConfig {
+    days?: number
+    maxDbSizeMb?: number
+    warningThresholdPct?: number
+}
+
+export interface QuotaRefreshConfig {
+    enabled?: boolean
+    interval?: number
+    maxInterval?: number
+}
+
+export interface PluginInstanceConfig {
+    enabled?: boolean
+    priority?: number
+
+    [key: string]: unknown
+}
+
+export interface PluginsConfig {
+    enabled?: boolean
+    dir?: string
+    configs?: Record<string, PluginInstanceConfig>
+}
+
 export interface Config {
     debug?: boolean
     proxyUrl?: string
@@ -34,6 +59,7 @@ export interface Config {
     loggingToFile?: boolean
     logsMaxTotalSizeMb?: number
     errorLogsMaxFiles?: number
+    usageRetention?: UsageRetentionConfig
     wsAuth?: boolean
     forceModelPrefix?: boolean
     routingStrategy?: string
@@ -48,7 +74,10 @@ export interface Config {
     openaiCompatibility?: OpenAIProviderConfig[]
     oauthExcludedModels?: Record<string, string[]>
     autoRefreshInterval?: number
+    modelRefreshInterval?: number
+    quotaRefresh?: QuotaRefreshConfig
     remoteManagement?: RemoteManagementConfig
+    plugins?: PluginsConfig
     raw?: Record<string, unknown>
 }
 
@@ -62,6 +91,7 @@ export type RawConfigSection =
     | 'logging-to-file'
     | 'logs-max-total-size-mb'
     | 'error-logs-max-files'
+    | 'usage-retention'
     | 'ws-auth'
     | 'force-model-prefix'
     | 'routing/strategy'
@@ -74,4 +104,7 @@ export type RawConfigSection =
     | 'openai-compatibility'
     | 'oauth-excluded-models'
     | 'auto-refresh-interval'
+    | 'model-refresh-interval'
+    | 'quota-refresh'
     | 'remote-management'
+    | 'plugins'

@@ -1,4 +1,5 @@
 import {Button} from '@/components/ui/Button'
+import {IconChevronLeft, IconChevronRight, IconEye, IconEyeOff} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Pagination} from '@/components/ui/Pagination'
@@ -10,8 +11,10 @@ import {
     VISUAL_CONFIG_PROTOCOL_OPTIONS,
 } from '@/hooks/useVisualConfig'
 import {apiKeyAliasApi} from '@/services/api/apiKeys'
-import {useNotificationStore} from '@/stores'
+import {type ModelCatalogRow, modelsApi} from '@/services/api/models'
+import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {
+    ApiKeyModelRule,
     PayloadFilterRule,
     PayloadModelEntry,
     PayloadParamEntry,
@@ -22,16 +25,173 @@ import type {
 import {makeClientId} from '@/types/visualConfig'
 import {copyToClipboard} from '@/utils/clipboard'
 import {maskApiKey} from '@/utils/format'
+import {
+    buildModelTree,
+    countModelLeaves,
+    getGloballyExcludedModelKeys,
+    isModelGloballyExcluded,
+    modelLeaves,
+    type ModelTreeNode,
+    selectionState,
+} from '@/utils/modelTree'
 import {isValidApiKey} from '@/utils/validation'
-import {Fragment, memo, type ReactNode, useCallback, useEffect, useId, useMemo, useState} from 'react'
+import {Fragment, memo, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VisualConfigEditor.module.scss'
+
+type ModelLimitCatalogEntry = {
+    model: string
+    provider?: string
+    group?: string
+}
+
+function modelKey(model: string): string {
+    return model.trim().toLowerCase()
+}
+
+function uniqueSorted(models: Iterable<string>): string[] {
+    const seen          = new Set<string>()
+    const out: string[] = []
+    for (const model of models) {
+        const trimmed = model.trim()
+        const key     = modelKey(trimmed)
+        if (!trimmed || seen.has(key)) {
+            continue
+        }
+        seen.add(key)
+        out.push(trimmed)
+    }
+    return out.sort((a, b) => a.localeCompare(b))
+}
+
+function modelLimitKeyCandidates(model: string): string[] {
+    const key = modelKey(model)
+    if (!key) {
+        return []
+    }
+    const withoutModels = key.startsWith('models/') ? key.slice('models/'.length) : key
+    return Array.from(new Set([key, withoutModels, `models/${withoutModels}`]))
+}
+
+function modelLimitKeySet(models: Iterable<string>): Set<string> {
+    const keys = new Set<string>()
+    for (const model of models) {
+        modelLimitKeyCandidates(model).forEach((key) => keys.add(key))
+    }
+    return keys
+}
+
+function modelLimitMatches(keys: Set<string>, model: string): boolean {
+    return modelLimitKeyCandidates(model).some((key) => keys.has(key))
+}
+
+function removeModelLimitMatches(models: Set<string>, model: string): void {
+    const removeKeys = new Set(modelLimitKeyCandidates(model))
+    for (const existing of Array.from(models)) {
+        if (modelLimitKeyCandidates(existing).some((key) => removeKeys.has(key))) {
+            models.delete(existing)
+        }
+    }
+}
+
+function catalogModelEntries(rows: ModelCatalogRow[]): ModelLimitCatalogEntry[] {
+    const seen                              = new Set<string>()
+    const entries: ModelLimitCatalogEntry[] = []
+    for (const row of rows) {
+        const model = row.name.trim()
+        const key   = modelKey(model)
+        if (!model || seen.has(key)) {
+            continue
+        }
+        seen.add(key)
+        entries.push({
+                         model,
+                         provider: row.provider.trim() || undefined,
+                         group: row.group.trim() || undefined,
+                     })
+    }
+    return entries.sort((a, b) => a.model.localeCompare(b.model))
+}
+
+function buildCatalogAliasLabelsByModel(rows: ModelCatalogRow[]): Map<string, string[]> {
+    const labelsByModel = new Map<string, string[]>()
+    for (const row of rows) {
+        const name = row.name.trim()
+        if (!name) {
+            continue
+        }
+        const labelPrefix = row.channel.trim() ? channelLabel(row.channel.trim().toLowerCase()) : row.provider.trim()
+        const labels      = uniqueSorted((row.aliases ?? []).map((alias) => {
+            const trimmed = alias.trim()
+            return trimmed && labelPrefix ? `${labelPrefix}: ${trimmed}` : trimmed
+        }))
+        if (labels.length > 0) {
+            labelsByModel.set(modelKey(name), labels)
+        }
+    }
+    return labelsByModel
+}
+
+function getModelLimitUnavailableSummary(
+    t: ReturnType<typeof useTranslation>['t'],
+    models: string[],
+): string {
+    const preview = models.slice(0, 6).join('、')
+    const suffix  = models.length > 6 ? ` 等 ${models.length} 个` : `${models.length} 个`
+    return t('config_management.visual.api_keys.model_limit_global_disabled_summary', {
+        count: models.length,
+        models: preview,
+        defaultValue: `全局禁用 ${suffix}模型，已从 API Key 可用列表移除：${preview}`,
+    })
+}
 
 function getValidationMessage(t: ReturnType<typeof useTranslation>['t'], errorCode?: PayloadParamValidationErrorCode) {
     if (!errorCode) {
         return undefined
     }
     return t(`config_management.visual.validation.${errorCode}`)
+}
+
+function channelLabel(channel: string): string {
+    const labels: Record<string, string> = {
+        'aistudio': 'AI Studio',
+        'antigravity': 'Antigravity',
+        'claude': 'Claude',
+        'codex': 'Codex',
+        'gemini-cli': 'Gemini CLI',
+        'iflow': 'iFlow',
+        'openai': 'OpenAI',
+        'vertex': 'Vertex',
+    }
+    return labels[channel] ?? channel
+}
+
+function filterModelTreeWithAliases(
+    nodes: ModelTreeNode[],
+    query: string,
+    aliasLabelsByModel: Map<string, string[]>,
+): ModelTreeNode[] {
+    const q = query.trim().toLowerCase()
+    if (!q) {
+        return nodes
+    }
+    const filtered: ModelTreeNode[] = []
+    for (const node of nodes) {
+        const aliasLabels = node.kind === 'model' ? aliasLabelsByModel.get(modelKey(node.id)) ?? [] : []
+        const selfMatches =
+                  node.label.toLowerCase().includes(q) ||
+                  node.provider.toLowerCase().includes(q) ||
+                  aliasLabels.some((label) => label.toLowerCase().includes(q))
+        if (selfMatches) {
+            filtered.push(node)
+            continue
+        }
+        const children = node.children ? filterModelTreeWithAliases(node.children, query, aliasLabelsByModel) : []
+        if (children.length > 0) {
+            filtered.push({ ...node, children })
+        }
+    }
+    return filtered
 }
 
 function buildProtocolOptions(
@@ -96,17 +256,166 @@ function highlightText(text: string, query: string): ReactNode {
     return nodes.length > 0 ? nodes : text
 }
 
+type ModelTreePanelProps = {
+    title: string
+    nodes: ModelTreeNode[]
+    selected: Set<string>
+    onToggle: (node: ModelTreeNode) => void
+    onMoveModel: (model: string) => void
+    emptyText: string
+    emptyVariant?: 'neutral' | 'warning'
+    expandMatches?: boolean
+    showEmptyState?: boolean
+    aliasLabelsByModel?: Map<string, string[]>
+}
+
+function collapsedModelTreeNodes(nodes: ModelTreeNode[]): Set<string> {
+    const collapsed = new Set<string>()
+    const collect   = (node: ModelTreeNode) => {
+        if (node.children?.length) {
+            collapsed.add(node.id)
+            for (const child of node.children) {
+                collect(child)
+            }
+        }
+    }
+    nodes.forEach(collect)
+    return collapsed
+}
+
+function ModelTreePanel({
+                            title,
+                            nodes,
+                            selected,
+                            onToggle,
+                            onMoveModel,
+                            emptyText,
+                            emptyVariant,
+                            expandMatches,
+                            showEmptyState = true,
+                            aliasLabelsByModel,
+                        }: ModelTreePanelProps) {
+    const [collapsed, setCollapsed] = useState<Set<string>>(() => collapsedModelTreeNodes(nodes))
+    const knownCollapsedNodes       = useRef<Set<string>>(collapsedModelTreeNodes(nodes))
+    const visibleCollapsed          = expandMatches ? new Set<string>() : collapsed
+
+    useEffect(() => {
+        const nextCollapsedNodes = collapsedModelTreeNodes(nodes)
+        setCollapsed((prev) => {
+            const next = new Set(prev)
+            nextCollapsedNodes.forEach((nodeId) => {
+                if (!knownCollapsedNodes.current.has(nodeId)) {
+                    next.add(nodeId)
+                }
+            })
+            knownCollapsedNodes.current = nextCollapsedNodes
+            return next
+        })
+    }, [nodes])
+
+    const renderNode = (node: ModelTreeNode, depth: number): ReactNode => {
+        const state       = selectionState(node, selected)
+        const expandable  = Boolean(node.children?.length)
+        const isExpanded  = !visibleCollapsed.has(node.id)
+        const leaves      = modelLeaves(node)
+        const aliasLabels = node.kind === 'model' ? aliasLabelsByModel?.get(modelKey(node.id)) ?? [] : []
+        return (
+            <div key={node.id} className={styles.modelTreeNodeBlock}>
+                <div className={styles.modelTreeNode} style={{ paddingLeft: depth * 14 }}>
+                    <button
+                        type='button'
+                        className={styles.modelTreeExpand}
+                        onClick={() => {
+                            if (!expandable) {
+                                return
+                            }
+                            setCollapsed((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(node.id)) {
+                                    next.delete(node.id)
+                                } else {
+                                    next.add(node.id)
+                                }
+                                return next
+                            })
+                        }}
+                        disabled={!expandable}
+                    >
+                        {expandable ? (isExpanded ? '▾' : '▸') : ''}
+                    </button>
+                    <button
+                        type='button'
+                        className={`${styles.modelTreeCheck} ${state === 'all' ? styles.modelTreeCheckActive : ''}`}
+                        aria-pressed={state !== 'none'}
+                        onClick={() => onToggle(node)}
+                    >
+                        {state === 'all' ? '✓' : state === 'partial' ? '−' : ''}
+                    </button>
+                    <button
+                        type='button'
+                        className={styles.modelTreeLabel}
+                        onDoubleClick={() => {
+                            if (node.kind === 'model') {
+                                onMoveModel(node.id)
+                            }
+                        }}
+                    >
+                        <span className={styles.modelTreeName}>{node.label}</span>
+                        {aliasLabels.length > 0 ? (
+                            <span className={styles.modelTreeAlias} title={aliasLabels.join('\n')}>
+                                {aliasLabels[0]}{aliasLabels.length > 1 ? ` +${aliasLabels.length - 1}` : ''}
+                            </span>
+                        ) : null}
+                        {node.kind === 'model' ? <span className={styles.providerTag}>{node.provider}</span> : null}
+                        {node.kind !== 'model' ? <span className={styles.modelTreeCount}>{leaves.length}</span> : null}
+                    </button>
+                </div>
+                {expandable && isExpanded ? node.children?.map((child) => renderNode(child, depth + 1)) : null}
+            </div>
+        )
+    }
+
+    return (
+        <section className={styles.modelLimitPanel}>
+            <div className={styles.modelLimitPanelHeader}>
+                <span>{title}</span>
+                <span className={styles.modelTreeCount}>{countModelLeaves(nodes)}</span>
+            </div>
+            {nodes.length > 0 ? (
+                <div className={styles.modelTree}>{nodes.map((node) => renderNode(node, 0))}</div>
+            ) : showEmptyState ? (
+                <div
+                    className={`${styles.modelLimitEmpty} ${emptyVariant === 'warning' ?
+                                                            styles.modelLimitEmptyWarning :
+                                                            ''}`}
+                >
+                    {emptyText}
+                </div>
+            ) : (
+                    <div className={styles.modelLimitEmptyPlaceholder} />
+                )}
+        </section>
+    )
+}
+
 export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                      value,
+                                                                     modelRules,
                                                                      disabled,
                                                                      onChange,
+                                                                     onModelRulesChange,
                                                                  }: {
     value: string
+    modelRules: Record<string, ApiKeyModelRule>
     disabled?: boolean
     onChange: (nextValue: string) => void
+    onModelRulesChange: (nextValue: Record<string, ApiKeyModelRule>) => void
 }) {
     const { t }                     = useTranslation()
     const showNotification          = useNotificationStore((state) => state.showNotification)
+    const apiBase                   = useAuthStore((state) => state.apiBase)
+    const connectionStatus          = useAuthStore((state) => state.connectionStatus)
+    const oauthExcludedModels       = useConfigStore((state) => state.config?.oauthExcludedModels)
     const apiKeys                   = useMemo(
         () =>
             value
@@ -126,19 +435,29 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         return [...apiKeyIds, ...Array.from({ length: apiKeys.length - apiKeyIds.length }, () => makeClientId())]
     }, [apiKeyIds, apiKeys.length])
 
-    const apiKeyInputId                         = useId()
-    const aliasInputId                          = useId()
-    const apiKeyHintId                          = `${apiKeyInputId}-hint`
-    const apiKeyErrorId                         = `${apiKeyInputId}-error`
-    const aliasHintId                           = `${aliasInputId}-hint`
-    const aliasErrorId                          = `${aliasInputId}-error`
-    const [modalOpen, setModalOpen]             = useState(false)
-    const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null)
-    const [inputValue, setInputValue]           = useState('')
-    const [formError, setFormError]             = useState('')
-    const [aliasValue, setAliasValue]           = useState('')
-    const [aliasError, setAliasError]           = useState('')
-    const [aliases, setAliases]                 = useState<Record<string, string>>({})
+    const apiKeyInputId                                 = useId()
+    const aliasInputId                                  = useId()
+    const apiKeyHintId                                  = `${apiKeyInputId}-hint`
+    const apiKeyErrorId                                 = `${apiKeyInputId}-error`
+    const aliasHintId                                   = `${aliasInputId}-hint`
+    const aliasErrorId                                  = `${aliasInputId}-error`
+    const [modalOpen, setModalOpen]                     = useState(false)
+    const [editingApiKeyId, setEditingApiKeyId]         = useState<string | null>(null)
+    const [inputValue, setInputValue]                   = useState('')
+    const [apiKeyVisible, setApiKeyVisible]             = useState(false)
+    const [formError, setFormError]                     = useState('')
+    const [aliasValue, setAliasValue]                   = useState('')
+    const [aliasError, setAliasError]                   = useState('')
+    const [aliases, setAliases]                         = useState<Record<string, string>>({})
+    const [modelCatalogRows, setModelCatalogRows]       = useState<ModelCatalogRow[]>([])
+    const [modelCatalogLoaded, setModelCatalogLoaded]   = useState(false)
+    const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
+    const [modelCatalogError, setModelCatalogError]     = useState('')
+    const [modelLimitKey, setModelLimitKey]             = useState<string | null>(null)
+    const [modelLimitQuery, setModelLimitQuery]         = useState('')
+    const [draftBlockedModels, setDraftBlockedModels]   = useState<Set<string>>(() => new Set())
+    const [selectedAllowed, setSelectedAllowed]         = useState<Set<string>>(() => new Set())
+    const [selectedBlocked, setSelectedBlocked]         = useState<Set<string>>(() => new Set())
 
     useEffect(() => {
         apiKeyAliasApi
@@ -162,6 +481,197 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 return key.toLowerCase().includes(q) || (alias?.toLowerCase().includes(q) ?? false)
             })
     }, [apiKeys, searchQuery, aliases])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const loadModelCatalog = async () => {
+            if (modelLimitKey === null) {
+                return
+            }
+            if (connectionStatus !== 'connected' || !apiBase) {
+                if (!cancelled) {
+                    setModelCatalogLoaded(false)
+                    setModelCatalogLoading(false)
+                    setModelCatalogError(t('config_management.visual.api_keys.model_catalog_disconnected', {
+                        defaultValue: '管理端未连接，无法加载模型目录',
+                    }))
+                }
+                return
+            }
+            setModelCatalogLoading(true)
+            setModelCatalogError('')
+            try {
+                const catalog = await modelsApi.fetchModelCatalog()
+                if (cancelled) {
+                    return
+                }
+                setModelCatalogRows(catalog.models ?? [])
+                setModelCatalogLoaded(true)
+            } catch (err) {
+                if (cancelled) {
+                    return
+                }
+                console.warn('Failed to load model catalog:', err)
+                setModelCatalogRows([])
+                setModelCatalogLoaded(false)
+                setModelCatalogError(err instanceof Error ? err.message : String(err || t('common.unknown_error')))
+            } finally {
+                if (!cancelled) {
+                    setModelCatalogLoading(false)
+                }
+            }
+        }
+
+        void loadModelCatalog()
+        return () => {
+            cancelled = true
+        }
+    }, [apiBase, connectionStatus, modelLimitKey, t])
+
+    const aliasLabelsByModel                                   = useMemo(
+        () => buildCatalogAliasLabelsByModel(modelCatalogRows),
+        [modelCatalogRows],
+    )
+    const globallyExcludedModelKeys                            = useMemo(
+        () => getGloballyExcludedModelKeys(oauthExcludedModels),
+        [oauthExcludedModels],
+    )
+    const catalogEntries                                       = useMemo(
+        () => catalogModelEntries(modelCatalogRows),
+        [modelCatalogRows],
+    )
+    const catalogModelNames                                    = useMemo(
+        () => catalogEntries.map((entry) => entry.model),
+        [catalogEntries],
+    )
+    const draftBlockedModelKeys                                = useMemo(
+        () => modelLimitKeySet(draftBlockedModels),
+        [draftBlockedModels],
+    )
+    const unavailableModelNames                                = useMemo(
+        () => catalogModelNames
+            .filter((model) => isModelGloballyExcluded(model, globallyExcludedModelKeys)),
+        [catalogModelNames, globallyExcludedModelKeys],
+    )
+    const availableModelEntries                                = useMemo(
+        () => catalogEntries
+            .filter((entry) => !isModelGloballyExcluded(entry.model, globallyExcludedModelKeys)),
+        [catalogEntries, globallyExcludedModelKeys],
+    )
+    const availableModelNames                                  = useMemo(
+        () => availableModelEntries.map((entry) => entry.model),
+        [availableModelEntries],
+    )
+    const modelLimitCatalogReady                               = modelCatalogLoaded &&
+                                                                 !modelCatalogLoading &&
+                                                                 !modelCatalogError
+    const availableModelsAllBlocked                            = availableModelNames.length >
+                                                                 0 &&
+                                                                 availableModelNames.every((model) => modelLimitMatches(
+                                                                     draftBlockedModelKeys,
+                                                                     model,
+                                                                 ))
+    const hasVisibleBlockedModels                              = availableModelNames.some((model) => modelLimitMatches(
+        draftBlockedModelKeys,
+        model,
+    ))
+    const allowedModelTree                                     = useMemo(
+        () => buildModelTree(availableModelEntries.filter((entry) => !modelLimitMatches(
+            draftBlockedModelKeys,
+            entry.model,
+        ))),
+        [availableModelEntries, draftBlockedModelKeys],
+    )
+    const blockedModelTree                                     = useMemo(
+        () => buildModelTree(availableModelEntries.filter((entry) => modelLimitMatches(
+            draftBlockedModelKeys,
+            entry.model,
+        ))),
+        [availableModelEntries, draftBlockedModelKeys],
+    )
+    const filteredAllowedTree                                  = useMemo(
+        () => filterModelTreeWithAliases(allowedModelTree, modelLimitQuery, aliasLabelsByModel),
+        [aliasLabelsByModel, allowedModelTree, modelLimitQuery],
+    )
+    const filteredBlockedTree                                  = useMemo(
+        () => filterModelTreeWithAliases(blockedModelTree, modelLimitQuery, aliasLabelsByModel),
+        [aliasLabelsByModel, blockedModelTree, modelLimitQuery],
+    )
+    const hasModelLimitQuery                                   = modelLimitQuery.trim().length > 0
+    const expandModelMatches                                   = hasModelLimitQuery
+    const modelLimitBothPanelsEmpty                            = filteredAllowedTree.length ===
+                                                                 0 &&
+                                                                 filteredBlockedTree.length ===
+                                                                 0
+    const currentModelLimitTitle                               = modelLimitKey
+                                                                 ? aliases[modelLimitKey]
+                                                                   ?
+                                                                   `${aliases[modelLimitKey]} · ${maskApiKey(
+                                                                       modelLimitKey)}`
+                                                                   :
+                                                                   maskApiKey(modelLimitKey)
+                                                                 : ''
+    const modelLimitAllowedEmptyText                           = hasModelLimitQuery
+                                                                 ?
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_search_empty_allowed',
+                                                                     {
+                                                                         defaultValue: '允许列表中没有匹配模型',
+                                                                     },
+                                                                 )
+                                                                 :
+                                                                 modelCatalogLoading
+                                                                 ?
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_loading',
+                                                                     {
+                                                                         defaultValue: '模型列表加载中',
+                                                                     },
+                                                                 )
+                                                                 :
+                                                                 catalogModelNames.length === 0
+                                                                 ?
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_registry_empty',
+                                                                     {
+                                                                         defaultValue: '模型列表未加载，请刷新后再配置模型限制',
+                                                                     },
+                                                                 )
+                                                                 :
+                                                                 availableModelNames.length === 0
+                                                                 ?
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_global_empty',
+                                                                     {
+                                                                         defaultValue: '全局可用模型为空，请先检查模型管理中的全局禁用配置',
+                                                                     },
+                                                                 )
+                                                                 :
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_allowed_empty',
+                                                                     {
+                                                                         defaultValue: '当前密钥已限制所有模型，将无法发起任何 API 请求',
+                                                                     },
+                                                                 )
+    const modelLimitAllowedEmptyVariant: 'neutral' | 'warning' = !hasModelLimitQuery &&
+                                                                 !modelCatalogLoading &&
+                                                                 catalogModelNames.length >
+                                                                 0 &&
+                                                                 availableModelNames.length >
+                                                                 0
+                                                                 ? 'warning'
+                                                                 : 'neutral'
+    const modelLimitPrimaryEmptyText                           = modelLimitBothPanelsEmpty && hasModelLimitQuery
+                                                                 ?
+                                                                 t(
+                                                                     'config_management.visual.api_keys.model_limit_search_empty',
+                                                                     {
+                                                                         defaultValue: '没有匹配模型',
+                                                                     },
+                                                                 )
+                                                                 :
+                                                                 modelLimitAllowedEmptyText
 
     const {
               currentItems: pagedKeys,
@@ -197,6 +707,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         setEditingApiKeyId(null)
         setInputValue('')
         setFormError('')
+        setApiKeyVisible(false)
         setAliasValue('')
         setAliasError('')
         setModalOpen(true)
@@ -208,9 +719,47 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         setEditingApiKeyId(apiKeyId)
         setInputValue(key)
         setFormError('')
+        setApiKeyVisible(false)
         setAliasValue(aliases[key] ?? '')
         setAliasError('')
         setModalOpen(true)
+    }
+
+    const openModelLimitModal = (apiKey: string) => {
+        const blockedModels = (modelRules[apiKey]?.blockedModels ?? [])
+            .map((model) => model.trim())
+            .filter(Boolean)
+        setModelCatalogRows([])
+        setModelCatalogLoaded(false)
+        setModelCatalogError('')
+        setModelLimitKey(apiKey)
+        setDraftBlockedModels(new Set(blockedModels))
+        setSelectedAllowed(new Set())
+        setSelectedBlocked(new Set())
+        setModelLimitQuery('')
+    }
+
+    const closeModelLimitModal = () => {
+        setModelLimitKey(null)
+        setDraftBlockedModels(new Set())
+        setSelectedAllowed(new Set())
+        setSelectedBlocked(new Set())
+        setModelLimitQuery('')
+    }
+
+    const saveModelLimitRules = () => {
+        if (!modelLimitKey || !modelLimitCatalogReady) {
+            return
+        }
+        const blockedModels = uniqueSorted(draftBlockedModels)
+        const nextRules     = { ...modelRules }
+        if (blockedModels.length > 0) {
+            nextRules[modelLimitKey] = { blockedModels }
+        } else {
+            delete nextRules[modelLimitKey]
+        }
+        onModelRulesChange(nextRules)
+        closeModelLimitModal()
     }
 
     const closeModal = () => {
@@ -218,6 +767,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         setInputValue('')
         setEditingApiKeyId(null)
         setFormError('')
+        setApiKeyVisible(false)
         setAliasValue('')
         setAliasError('')
         setSearchQuery('')
@@ -225,6 +775,49 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
 
     const updateApiKeys = (nextKeys: string[]) => {
         onChange(nextKeys.join('\n'))
+    }
+
+    const toggleTreeSelection = (
+        node: ModelTreeNode,
+        selected: Set<string>,
+        setSelected: (next: Set<string>) => void,
+    ) => {
+        const leaves      = modelLeaves(node)
+        const allSelected = leaves.length > 0 && leaves.every((model) => selected.has(model))
+        const next        = new Set(selected)
+        for (const model of leaves) {
+            if (allSelected) {
+                next.delete(model)
+            } else {
+                next.add(model)
+            }
+        }
+        setSelected(next)
+    }
+
+    const moveAllowedToBlocked = (models: Iterable<string>) => {
+        const next = new Set(draftBlockedModels)
+        for (const model of models) {
+            removeModelLimitMatches(next, model)
+            next.add(model)
+        }
+        setDraftBlockedModels(next)
+        setSelectedAllowed(new Set())
+    }
+
+    const moveAllAllowedToBlocked = () => {
+        setDraftBlockedModels(new Set([...draftBlockedModels, ...availableModelNames]))
+        setSelectedAllowed(new Set())
+        setSelectedBlocked(new Set())
+    }
+
+    const moveBlockedToAllowed = (models: Iterable<string>) => {
+        const next = new Set(draftBlockedModels)
+        for (const model of models) {
+            removeModelLimitMatches(next, model)
+        }
+        setDraftBlockedModels(next)
+        setSelectedBlocked(new Set())
     }
 
     const handleDelete = (apiKeyId: string) => {
@@ -235,6 +828,11 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         const deletedKey = apiKeys[index]
         setApiKeyIds(renderApiKeyIds.filter((id) => id !== apiKeyId))
         updateApiKeys(apiKeys.filter((_, i) => i !== index))
+        if (deletedKey && modelRules[deletedKey]) {
+            const nextRules = { ...modelRules }
+            delete nextRules[deletedKey]
+            onModelRulesChange(nextRules)
+        }
 
         // 清除该 key 的别名
         if (deletedKey && aliases[deletedKey]) {
@@ -294,6 +892,11 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
             setApiKeyIds([...renderApiKeyIds, makeClientId()])
         }
         updateApiKeys(nextKeys)
+        if (oldKey && oldKey !== trimmed && modelRules[oldKey]) {
+            const nextRules = { ...modelRules, [trimmed]: modelRules[oldKey] }
+            delete nextRules[oldKey]
+            onModelRulesChange(nextRules)
+        }
 
         // 处理别名的增删改
         try {
@@ -375,12 +978,17 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      )}
                                  </div>
                                  <div className='item-subtitle'>
-                                     {highlightText(
-                                         aliases[item.key] ?
-                                         maskApiKey(String(item.key || '')) :
-                                         String(item.key || ''),
-                                         searchQuery,
-                                     )}
+                                     {highlightText(maskApiKey(String(item.key || '')), searchQuery)}
+                                 </div>
+                                 <div className={styles.apiKeyModelLimitSummary}>
+                                     {modelRules[item.key]?.blockedModels?.length
+                                      ? t('config_management.visual.api_keys.model_limit_blocked_summary', {
+                                             count: modelRules[item.key]?.blockedModels.length,
+                                             defaultValue: '模型访问：已禁止 {{count}} 个模型',
+                                         })
+                                      : t('config_management.visual.api_keys.model_limit_all_allowed', {
+                                             defaultValue: '模型访问：全部允许',
+                                         })}
                                  </div>
                              </div>
                              <div className='item-actions'>
@@ -399,6 +1007,16 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      disabled={disabled}
                                  >
                                      {t('config_management.visual.common.edit')}
+                                 </Button>
+                                 <Button
+                                     variant='secondary'
+                                     size='sm'
+                                     onClick={() => openModelLimitModal(item.key)}
+                                     disabled={disabled}
+                                 >
+                                     {t('config_management.visual.api_keys.model_limit_button', {
+                                         defaultValue: '模型限制',
+                                     })}
                                  </Button>
                                  <Button
                                      variant='danger'
@@ -501,16 +1119,36 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 <div className='form-group'>
                     <label htmlFor={apiKeyInputId}>{t('config_management.visual.api_keys.input_label')}</label>
                     <div className={styles.apiKeyModalInputRow}>
-                        <input
-                            id={apiKeyInputId}
-                            className='input'
-                            placeholder={t('config_management.visual.api_keys.input_placeholder')}
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            disabled={disabled}
-                            aria-describedby={formError ? `${apiKeyErrorId} ${apiKeyHintId}` : apiKeyHintId}
-                            aria-invalid={Boolean(formError)}
-                        />
+                        <div className={styles.apiKeyModalSecretInput}>
+                            <input
+                                id={apiKeyInputId}
+                                className='input'
+                                type={apiKeyVisible ? 'text' : 'password'}
+                                placeholder={t('config_management.visual.api_keys.input_placeholder')}
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                disabled={disabled}
+                                aria-describedby={formError ? `${apiKeyErrorId} ${apiKeyHintId}` : apiKeyHintId}
+                                aria-invalid={Boolean(formError)}
+                                autoComplete='new-password'
+                                spellCheck={false}
+                                autoCapitalize='none'
+                                autoCorrect='off'
+                            />
+                            <button
+                                type='button'
+                                className={styles.apiKeyModalVisibilityButton}
+                                onClick={() => setApiKeyVisible((value) => !value)}
+                                disabled={disabled}
+                                aria-label={
+                                    apiKeyVisible
+                                    ? t('login.hide_key', { defaultValue: 'Hide key' })
+                                    : t('login.show_key', { defaultValue: 'Show key' })
+                                }
+                            >
+                                {apiKeyVisible ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+                            </button>
+                        </div>
                         <Button
                             type='button'
                             variant='secondary'
@@ -529,6 +1167,156 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             {formError}
                         </div>
                     )}
+                </div>
+            </Modal>
+
+            <Modal
+                open={modelLimitKey !== null}
+                onClose={closeModelLimitModal}
+                width='min(1180px, calc(100vw - 48px))'
+                title={t('config_management.visual.api_keys.model_limit_title', {
+                    defaultValue: '模型访问限制',
+                })}
+                footer={
+                    <>
+                        <Button variant='secondary' onClick={closeModelLimitModal} disabled={disabled}>
+                            {t('config_management.visual.common.cancel')}
+                        </Button>
+                        <Button onClick={saveModelLimitRules} disabled={disabled || !modelLimitCatalogReady}>
+                            {t('config_management.visual.common.update')}
+                        </Button>
+                    </>
+                }
+            >
+                <div className={styles.modelLimitModal}>
+                    <div className={styles.modelLimitTarget}>{currentModelLimitTitle}</div>
+                    <div className={styles.modelLimitHint}>
+                        {t('config_management.visual.api_keys.model_limit_hint', {
+                            defaultValue: '默认允许全部模型，系统新增模型也会默认允许；移入右侧后该 key 将无法访问',
+                        })}
+                    </div>
+                    {unavailableModelNames.length > 0 ? (
+                        <div className={styles.modelLimitUnavailable}>
+                            {getModelLimitUnavailableSummary(t, unavailableModelNames)}
+                        </div>
+                    ) : null}
+                    {modelCatalogError ? (
+                        <div className='error-box'>
+                            {t('config_management.visual.api_keys.model_catalog_load_failed', {
+                                error: modelCatalogError,
+                                defaultValue: `模型目录加载失败：${modelCatalogError}`,
+                            })}
+                        </div>
+                    ) : null}
+                    <Input
+                        placeholder={t('config_management.visual.api_keys.model_limit_search', {
+                            defaultValue: '搜索模型或供应商',
+                        })}
+                        value={modelLimitQuery}
+                        onChange={(event) => setModelLimitQuery(event.target.value)}
+                    />
+                    <div className={styles.modelLimitTransfer}>
+                        <ModelTreePanel
+                            title={t('config_management.visual.api_keys.model_limit_allowed', {
+                                defaultValue: '允许访问（默认）',
+                            })}
+                            nodes={filteredAllowedTree}
+                            selected={selectedAllowed}
+                            onToggle={(node) => toggleTreeSelection(node, selectedAllowed, setSelectedAllowed)}
+                            onMoveModel={(model) => moveAllowedToBlocked([model])}
+                            emptyText={modelLimitPrimaryEmptyText}
+                            emptyVariant={modelLimitAllowedEmptyVariant}
+                            expandMatches={expandModelMatches}
+                            aliasLabelsByModel={aliasLabelsByModel}
+                        />
+                        <div className={styles.modelLimitActions}>
+                            <Button
+                                type='button'
+                                variant='secondary'
+                                size='sm'
+                                onClick={() => moveAllowedToBlocked(selectedAllowed)}
+                                disabled={selectedAllowed.size === 0 || disabled}
+                            >
+                                <span className={styles.modelLimitActionContent}>
+                                    {t('config_management.visual.api_keys.model_limit_move_blocked', {
+                                        defaultValue: '移到禁止',
+                                    })}
+                                    <IconChevronRight size={14} />
+                                </span>
+                            </Button>
+                            <Button
+                                type='button'
+                                variant='secondary'
+                                size='sm'
+                                onClick={() => moveBlockedToAllowed(selectedBlocked)}
+                                disabled={selectedBlocked.size === 0 || disabled}
+                            >
+                                <span className={styles.modelLimitActionContent}>
+                                    <IconChevronLeft size={14} />
+                                    {t('config_management.visual.api_keys.model_limit_move_allowed', {
+                                        defaultValue: '恢复允许',
+                                    })}
+                                </span>
+                            </Button>
+                            <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                onClick={moveAllAllowedToBlocked}
+                                disabled={availableModelNames.length === 0 || availableModelsAllBlocked || disabled}
+                            >
+                                <span className={styles.modelLimitActionContent}>
+                                    {t('config_management.visual.api_keys.model_limit_block_all', {
+                                        defaultValue: '全部禁止',
+                                    })}
+                                    <IconChevronRight size={14} />
+                                </span>
+                            </Button>
+                            <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => {
+                                    const next = new Set(draftBlockedModels)
+                                    for (const model of availableModelNames) {
+                                        removeModelLimitMatches(next, model)
+                                    }
+                                    setDraftBlockedModels(next)
+                                    setSelectedAllowed(new Set())
+                                    setSelectedBlocked(new Set())
+                                }}
+                                disabled={!hasVisibleBlockedModels || disabled}
+                            >
+                                <span className={styles.modelLimitActionContent}>
+                                    <IconChevronLeft size={14} />
+                                    {t('config_management.visual.api_keys.model_limit_allow_all', {
+                                        defaultValue: '全部允许',
+                                    })}
+                                </span>
+                            </Button>
+                        </div>
+                        <ModelTreePanel
+                            title={t('config_management.visual.api_keys.model_limit_blocked', {
+                                defaultValue: '禁止访问（黑名单）',
+                            })}
+                            nodes={filteredBlockedTree}
+                            selected={selectedBlocked}
+                            onToggle={(node) => toggleTreeSelection(node, selectedBlocked, setSelectedBlocked)}
+                            onMoveModel={(model) => moveBlockedToAllowed([model])}
+                            emptyText={
+                                hasModelLimitQuery
+                                ? t('config_management.visual.api_keys.model_limit_search_empty_blocked', {
+                                    defaultValue: '黑名单中没有匹配模型',
+                                })
+                                : t('config_management.visual.api_keys.model_limit_blocked_empty', {
+                                    defaultValue: '未限制任何模型，从左侧移入后禁止访问',
+                                })
+                            }
+                            expandMatches={expandModelMatches}
+                            showEmptyState={!modelLimitBothPanelsEmpty}
+                            aliasLabelsByModel={aliasLabelsByModel}
+                        />
+                    </div>
                 </div>
             </Modal>
         </div>

@@ -1,4 +1,5 @@
 import type {
+    ApiKeyModelRule,
     PayloadFilterRule,
     PayloadParamEntry,
     PayloadParamValidationErrorCode,
@@ -10,13 +11,35 @@ import type {
 } from '@/types/visualConfig'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 import {useCallback, useMemo, useState} from 'react'
-import {isMap, parse as parseYaml, parseDocument} from 'yaml'
+import {isMap, parse as parseYaml, parseDocument, stringify as stringifyYaml} from 'yaml'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         return null
     }
     return value as Record<string, unknown>
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+    if (value === undefined || value === null) {
+        return undefined
+    }
+    if (typeof value === 'boolean') {
+        return value
+    }
+    if (typeof value === 'number') {
+        return value !== 0
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase()
+        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) {
+            return true
+        }
+        if (['false', '0', 'no', 'n', 'off'].includes(normalized)) {
+            return false
+        }
+    }
+    return Boolean(value)
 }
 
 function extractApiKeyValue(raw: unknown): string | null {
@@ -136,6 +159,57 @@ function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value)) as T
 }
 
+function yamlBlockToText(value: unknown): string {
+    if (value === undefined) {
+        return ''
+    }
+    return stringifyYaml(value).trimEnd()
+}
+
+function parseYamlBlockText(value: string): unknown {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    return parseYaml(trimmed)
+}
+
+function setYamlBlockTextInDoc(doc: YamlDocument, path: YamlPath, value: string): void {
+    const parsed = parseYamlBlockText(value)
+    if (parsed === undefined) {
+        if (docHas(doc, path)) {
+            doc.deleteIn(path)
+        }
+        return
+    }
+    doc.setIn(path, parsed)
+}
+
+const providerConfigKeys = [
+    'gemini-api-key',
+    'codex-api-key',
+    'claude-api-key',
+    'vertex-api-key',
+    'openai-compatibility',
+] as const
+
+function buildProviderConfigText(parsed: Record<string, unknown>): string {
+    return yamlBlockToText(Object.fromEntries(providerConfigKeys.map((key) => [key, parsed[key] ?? []])))
+}
+
+function setProviderConfigTextInDoc(doc: YamlDocument, value: string): void {
+    const parsed = parseYamlBlockText(value)
+    const record = asRecord(parsed) ?? {}
+    providerConfigKeys.forEach((key) => {
+        const nextValue = record[key]
+        if (nextValue === undefined) {
+            doc.setIn([key], [])
+        } else {
+            doc.setIn([key], nextValue)
+        }
+    })
+}
+
 function arePayloadModelEntriesEqual(left: PayloadRule['models'], right: PayloadRule['models']): boolean {
     if (left === right) {
         return true
@@ -176,6 +250,34 @@ function arePayloadParamEntriesEqual(left: PayloadRule['params'], right: Payload
             current.value !== next.value
         ) {
             return false
+        }
+    }
+    return true
+}
+
+function areApiKeyRulesEqual(
+    left: Record<string, ApiKeyModelRule>,
+    right: Record<string, ApiKeyModelRule>,
+): boolean {
+    const leftKeys  = Object.keys(left).sort()
+    const rightKeys = Object.keys(right).sort()
+    if (leftKeys.length !== rightKeys.length) {
+        return false
+    }
+    for (let i = 0; i < leftKeys.length; i++) {
+        const key = leftKeys[i]
+        if (key !== rightKeys[i]) {
+            return false
+        }
+        const leftModels  = [...(left[key]?.blockedModels ?? [])].sort()
+        const rightModels = [...(right[key]?.blockedModels ?? [])].sort()
+        if (leftModels.length !== rightModels.length) {
+            return false
+        }
+        for (let j = 0; j < leftModels.length; j++) {
+            if (leftModels[j] !== rightModels[j]) {
+                return false
+            }
         }
     }
     return true
@@ -245,6 +347,8 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         left.tlsEnable === right.tlsEnable &&
         left.tlsCert === right.tlsCert &&
         left.tlsKey === right.tlsKey &&
+        left.tlsHttpRedirectPort === right.tlsHttpRedirectPort &&
+        left.tlsRequireForAuth === right.tlsRequireForAuth &&
         left.tlsTrustForwardedProto === right.tlsTrustForwardedProto &&
         left.rmAllowRemote === right.rmAllowRemote &&
         left.rmSecretKey === right.rmSecretKey &&
@@ -257,26 +361,58 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         left.rmCpaRepo === right.rmCpaRepo &&
         left.authDir === right.authDir &&
         left.usageDataDir === right.usageDataDir &&
+        left.usageStatisticsFile === right.usageStatisticsFile &&
+        left.pluginsEnabled === right.pluginsEnabled &&
+        left.pluginsDir === right.pluginsDir &&
+        left.pluginConfigsText === right.pluginConfigsText &&
         left.apiKeysText === right.apiKeysText &&
+        left.apiKeyAliasesText === right.apiKeyAliasesText &&
+        areApiKeyRulesEqual(left.apiKeyRules, right.apiKeyRules) &&
         left.debug === right.debug &&
         left.commercialMode === right.commercialMode &&
         left.loggingToFile === right.loggingToFile &&
+        left.requestLog === right.requestLog &&
+        left.pprofEnable === right.pprofEnable &&
+        left.pprofAddr === right.pprofAddr &&
         left.logsMaxTotalSizeMb === right.logsMaxTotalSizeMb &&
+        left.errorLogsMaxFiles === right.errorLogsMaxFiles &&
+        left.redisUsageQueueRetentionSeconds === right.redisUsageQueueRetentionSeconds &&
         left.usageStatisticsEnabled === right.usageStatisticsEnabled &&
+        left.usageRetentionDays === right.usageRetentionDays &&
+        left.usageRetentionMaxDbSizeMb === right.usageRetentionMaxDbSizeMb &&
+        left.usageRetentionWarningThresholdPct === right.usageRetentionWarningThresholdPct &&
+        left.autoRefreshInterval === right.autoRefreshInterval &&
+        left.modelRefreshInterval === right.modelRefreshInterval &&
         left.proxyUrl === right.proxyUrl &&
         left.forceModelPrefix === right.forceModelPrefix &&
+        left.enableGeminiCliEndpoint === right.enableGeminiCliEndpoint &&
+        left.passthroughHeaders === right.passthroughHeaders &&
+        left.disableImageGeneration === right.disableImageGeneration &&
+        left.gptImage2BaseModel === right.gptImage2BaseModel &&
+        left.authAutoRefreshWorkers === right.authAutoRefreshWorkers &&
         left.requestRetry === right.requestRetry &&
         left.maxRetryCredentials === right.maxRetryCredentials &&
         left.maxRetryInterval === right.maxRetryInterval &&
         left.quotaSwitchProject === right.quotaSwitchProject &&
         left.quotaSwitchPreviewModel === right.quotaSwitchPreviewModel &&
         left.quotaAntigravityCredits === right.quotaAntigravityCredits &&
+        left.disableCooling === right.disableCooling &&
+        left.quotaRefreshEnabled === right.quotaRefreshEnabled &&
+        left.quotaRefreshInterval === right.quotaRefreshInterval &&
+        left.quotaRefreshMaxInterval === right.quotaRefreshMaxInterval &&
         left.routingStrategy === right.routingStrategy &&
         left.routingSessionAffinity === right.routingSessionAffinity &&
         left.routingSessionAffinityTTL === right.routingSessionAffinityTTL &&
         left.wsAuth === right.wsAuth &&
         left.allowQueryAuth === right.allowQueryAuth &&
         left.corsAllowedOrigins === right.corsAllowedOrigins &&
+        left.providerConfigText === right.providerConfigText &&
+        left.oauthExcludedModelsText === right.oauthExcludedModelsText &&
+        left.oauthModelAliasText === right.oauthModelAliasText &&
+        left.codexIdentityConfuse === right.codexIdentityConfuse &&
+        left.codexHeaderDefaultsText === right.codexHeaderDefaultsText &&
+        left.claudeHeaderDefaultsText === right.claudeHeaderDefaultsText &&
+        left.ampcodeText === right.ampcodeText &&
         left.streaming.keepaliveSeconds === right.streaming.keepaliveSeconds &&
         left.streaming.bootstrapRetries === right.streaming.bootstrapRetries &&
         left.streaming.nonstreamKeepaliveInterval === right.streaming.nonstreamKeepaliveInterval &&
@@ -286,6 +422,41 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         arePayloadRulesEqual(left.payloadOverrideRawRules, right.payloadOverrideRawRules) &&
         arePayloadFilterRulesEqual(left.payloadFilterRules, right.payloadFilterRules)
     )
+}
+
+function parseApiKeyRules(raw: unknown): Record<string, ApiKeyModelRule> {
+    const record = asRecord(raw)
+    if (!record) {
+        return {}
+    }
+    const rules: Record<string, ApiKeyModelRule> = {}
+    for (const [apiKey, rawRule] of Object.entries(record)) {
+        const key  = apiKey.trim()
+        const rule = asRecord(rawRule)
+        if (!key || !rule) {
+            continue
+        }
+        const blockedRaw    = rule['blocked-models'] ?? rule.blockedModels
+        const blockedModels = Array.isArray(blockedRaw)
+                              ? [...new Set(blockedRaw.map((item) => String(item).trim()).filter(Boolean))]
+                              : []
+        if (blockedModels.length > 0) {
+            rules[key] = { blockedModels }
+        }
+    }
+    return rules
+}
+
+function serializeApiKeyRulesForYaml(rules: Record<string, ApiKeyModelRule>): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    for (const [apiKey, rule] of Object.entries(rules)) {
+        const key           = apiKey.trim()
+        const blockedModels = [...new Set(rule.blockedModels.map((model) => model.trim()).filter(Boolean))]
+        if (key && blockedModels.length > 0) {
+            out[key] = { 'blocked-models': blockedModels }
+        }
+    }
+    return out
 }
 
 function parsePayloadParamValue(raw: unknown): { valueType: PayloadParamValueType; value: string } {
@@ -549,13 +720,58 @@ function getNonNegativeIntegerError(value: string): VisualConfigValidationErrorC
     return undefined
 }
 
+function parseOptionalInteger(value: string): number | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    const parsed = Number(trimmed)
+    return Number.isInteger(parsed) ? parsed : undefined
+}
+
+function getQuotaRefreshIntervalError(values: VisualConfigValues): VisualConfigValidationErrorCode | undefined {
+    const baseError = getNonNegativeIntegerError(values.quotaRefreshInterval)
+    if (baseError || !values.quotaRefreshEnabled) {
+        return baseError
+    }
+    const interval = parseOptionalInteger(values.quotaRefreshInterval)
+    if (interval === undefined || interval < 60) {
+        return 'quota_refresh_interval_range'
+    }
+    return undefined
+}
+
+function getQuotaRefreshMaxIntervalError(values: VisualConfigValues): VisualConfigValidationErrorCode | undefined {
+    const baseError = getNonNegativeIntegerError(values.quotaRefreshMaxInterval)
+    if (baseError || !values.quotaRefreshEnabled) {
+        return baseError
+    }
+    const interval    = parseOptionalInteger(values.quotaRefreshInterval)
+    const maxInterval = parseOptionalInteger(values.quotaRefreshMaxInterval)
+    if (maxInterval === undefined || maxInterval < 300 || (interval !== undefined && maxInterval < interval)) {
+        return 'quota_refresh_max_interval_range'
+    }
+    return undefined
+}
+
 function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConfigValidationErrors {
     return {
         port: getPortError(values.port),
+        tlsHttpRedirectPort: getNonNegativeIntegerError(values.tlsHttpRedirectPort),
         logsMaxTotalSizeMb: getNonNegativeIntegerError(values.logsMaxTotalSizeMb),
+        errorLogsMaxFiles: getNonNegativeIntegerError(values.errorLogsMaxFiles),
+        redisUsageQueueRetentionSeconds: getNonNegativeIntegerError(values.redisUsageQueueRetentionSeconds),
+        authAutoRefreshWorkers: getNonNegativeIntegerError(values.authAutoRefreshWorkers),
+        usageRetentionDays: getNonNegativeIntegerError(values.usageRetentionDays),
+        usageRetentionMaxDbSizeMb: getNonNegativeIntegerError(values.usageRetentionMaxDbSizeMb),
+        usageRetentionWarningThresholdPct: getNonNegativeIntegerError(values.usageRetentionWarningThresholdPct),
+        autoRefreshInterval: getNonNegativeIntegerError(values.autoRefreshInterval),
+        modelRefreshInterval: getNonNegativeIntegerError(values.modelRefreshInterval),
         requestRetry: getNonNegativeIntegerError(values.requestRetry),
         maxRetryCredentials: getNonNegativeIntegerError(values.maxRetryCredentials),
         maxRetryInterval: getNonNegativeIntegerError(values.maxRetryInterval),
+        quotaRefreshInterval: getQuotaRefreshIntervalError(values),
+        quotaRefreshMaxInterval: getQuotaRefreshMaxIntervalError(values),
         'streaming.keepaliveSeconds': getNonNegativeIntegerError(values.streaming.keepaliveSeconds),
         'streaming.bootstrapRetries': getNonNegativeIntegerError(values.streaming.bootstrapRetries),
         'streaming.nonstreamKeepaliveInterval': getNonNegativeIntegerError(values.streaming.nonstreamKeepaliveInterval),
@@ -730,7 +946,11 @@ export function useVisualConfig() {
             const { text: apiKeysText, metadata: nextApiKeysStorage } = resolveApiKeysStorage(parsed)
             const tls                                                 = asRecord(parsed.tls)
             const remoteManagement                                    = asRecord(parsed['remote-management'])
+            const pprof                                               = asRecord(parsed.pprof)
+            const usageRetention                                      = asRecord(parsed['usage-retention'])
             const quotaExceeded                                       = asRecord(parsed['quota-exceeded'])
+            const quotaRefresh                                        = asRecord(parsed['quota-refresh'])
+            const plugins                                             = asRecord(parsed.plugins)
             const routing                                             = asRecord(parsed.routing)
             const payload                                             = asRecord(parsed.payload)
             const streaming                                           = asRecord(parsed.streaming)
@@ -739,20 +959,21 @@ export function useVisualConfig() {
                 host: typeof parsed.host === 'string' ? parsed.host : '',
                 port: String(parsed.port ?? ''),
 
-                tlsEnable: Boolean(tls?.enable),
+                tlsEnable: normalizeBoolean(tls?.enable) ?? false,
                 tlsCert: typeof tls?.cert === 'string' ? tls.cert : '',
                 tlsKey: typeof tls?.key === 'string' ? tls.key : '',
-                tlsTrustForwardedProto: Boolean(tls?.['trust-forwarded-proto']),
+                tlsHttpRedirectPort: String(tls?.['http-redirect-port'] ?? ''),
+                tlsRequireForAuth: normalizeBoolean(tls?.['require-for-auth']) ?? false,
+                tlsTrustForwardedProto: normalizeBoolean(tls?.['trust-forwarded-proto']) ?? false,
 
-                rmAllowRemote: Boolean(remoteManagement?.['allow-remote']),
+                rmAllowRemote: normalizeBoolean(remoteManagement?.['allow-remote']) ?? false,
                 rmSecretKey: typeof remoteManagement?.['secret-key'] === 'string' ? remoteManagement['secret-key'] : '',
-                rmDisableControlPanel: Boolean(remoteManagement?.['disable-control-panel']),
-                rmAutoUpdatePanel:
-                    remoteManagement?.['auto-update-panel'] === undefined
-                    ? true
-                    : Boolean(remoteManagement['auto-update-panel']),
-                rmAutoUpdateCPA: Boolean(remoteManagement?.['auto-update-cpa']),
-                rmAutoCheckUpdate: Boolean(remoteManagement?.['auto-check-update']),
+                rmDisableControlPanel: normalizeBoolean(remoteManagement?.['disable-control-panel']) ?? false,
+                rmAutoUpdatePanel: remoteManagement?.['disable-auto-update-panel'] !== undefined
+                                   ? !(normalizeBoolean(remoteManagement['disable-auto-update-panel']) ?? false)
+                                   : normalizeBoolean(remoteManagement?.['auto-update-panel']) ?? true,
+                rmAutoUpdateCPA: normalizeBoolean(remoteManagement?.['auto-update-cpa']) ?? false,
+                rmAutoCheckUpdate: normalizeBoolean(remoteManagement?.['auto-check-update']) ?? false,
                 rmCheckInterval: String(remoteManagement?.['check-interval'] ?? ''),
                 rmPanelRepo:
                     typeof remoteManagement?.['panel-github-repository'] === 'string'
@@ -767,33 +988,75 @@ export function useVisualConfig() {
 
                 authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
                 usageDataDir: typeof parsed['usage-data-dir'] === 'string' ? parsed['usage-data-dir'] : '',
+                usageStatisticsFile: typeof parsed['usage-statistics-file'] === 'string' ?
+                                     parsed['usage-statistics-file'] :
+                                     '',
+                pluginsEnabled: normalizeBoolean(plugins?.enabled) ?? false,
+                pluginsDir: typeof plugins?.dir === 'string' ? plugins.dir : 'plugins',
+                pluginConfigsText: yamlBlockToText(plugins?.configs ?? {}),
                 apiKeysText,
+                apiKeyAliasesText: yamlBlockToText(parsed['api-key-aliases'] ?? {}),
+                apiKeyRules: parseApiKeyRules(parsed['api-key-rules']),
 
-                debug: Boolean(parsed.debug),
-                commercialMode: Boolean(parsed['commercial-mode']),
-                loggingToFile: Boolean(parsed['logging-to-file']),
+                debug: normalizeBoolean(parsed.debug) ?? false,
+                commercialMode: normalizeBoolean(parsed['commercial-mode']) ?? false,
+                loggingToFile: normalizeBoolean(parsed['logging-to-file']) ?? false,
+                requestLog: normalizeBoolean(parsed['request-log']) ?? false,
+                pprofEnable: normalizeBoolean(pprof?.enable) ?? false,
+                pprofAddr: typeof pprof?.addr === 'string' ? pprof.addr : '',
                 logsMaxTotalSizeMb: String(parsed['logs-max-total-size-mb'] ?? ''),
-                usageStatisticsEnabled: Boolean(parsed['usage-statistics-enabled']),
+                errorLogsMaxFiles: String(parsed['error-logs-max-files'] ?? ''),
+                redisUsageQueueRetentionSeconds: String(parsed['redis-usage-queue-retention-seconds'] ?? ''),
+                usageStatisticsEnabled: normalizeBoolean(parsed['usage-statistics-enabled']) ?? false,
+                usageRetentionDays: String(usageRetention?.days ?? ''),
+                usageRetentionMaxDbSizeMb: String(usageRetention?.['max-db-size-mb'] ?? ''),
+                usageRetentionWarningThresholdPct: String(usageRetention?.['warning-threshold-pct'] ?? ''),
+                autoRefreshInterval: String(parsed['auto-refresh-interval'] ?? ''),
+                modelRefreshInterval: String(parsed['model-refresh-interval'] ?? ''),
 
                 proxyUrl: typeof parsed['proxy-url'] === 'string' ? parsed['proxy-url'] : '',
-                forceModelPrefix: Boolean(parsed['force-model-prefix']),
+                forceModelPrefix: normalizeBoolean(parsed['force-model-prefix']) ?? false,
+                enableGeminiCliEndpoint: normalizeBoolean(parsed['enable-gemini-cli-endpoint']) ?? false,
+                passthroughHeaders: normalizeBoolean(parsed['passthrough-headers']) ?? false,
+                disableImageGeneration: parsed['disable-image-generation'] ===
+                                        'all' ||
+                                        parsed['disable-image-generation'] ===
+                                        'chat'
+                                        ? parsed['disable-image-generation']
+                                        : 'off',
+                gptImage2BaseModel: typeof parsed['gpt-image-2-base-model'] === 'string' ?
+                                    parsed['gpt-image-2-base-model'] :
+                                    '',
+                authAutoRefreshWorkers: String(parsed['auth-auto-refresh-workers'] ?? ''),
                 requestRetry: String(parsed['request-retry'] ?? ''),
                 maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
                 maxRetryInterval: String(parsed['max-retry-interval'] ?? ''),
-                wsAuth: parsed['ws-auth'] === undefined ? true : Boolean(parsed['ws-auth']),
-                allowQueryAuth: parsed['allow-query-auth'] === true,
+                wsAuth: normalizeBoolean(parsed['ws-auth']) ?? true,
+                allowQueryAuth: normalizeBoolean(parsed['allow-query-auth']) ?? false,
                 corsAllowedOrigins: Array.isArray(parsed['cors-allowed-origins'])
                                     ? (parsed['cors-allowed-origins'] as string[]).join(', ')
                                     : '',
+                providerConfigText: buildProviderConfigText(parsed),
+                oauthExcludedModelsText: yamlBlockToText(parsed['oauth-excluded-models'] ?? {}),
+                oauthModelAliasText: yamlBlockToText(parsed['oauth-model-alias'] ?? {}),
+                codexIdentityConfuse: normalizeBoolean(asRecord(parsed.codex)?.['identity-confuse']) ?? false,
+                codexHeaderDefaultsText: yamlBlockToText(parsed['codex-header-defaults'] ?? {}),
+                claudeHeaderDefaultsText: yamlBlockToText(parsed['claude-header-defaults'] ?? {}),
+                ampcodeText: yamlBlockToText(parsed.ampcode ?? {}),
 
-                quotaSwitchProject: Boolean(quotaExceeded?.['switch-project'] ?? true),
-                quotaSwitchPreviewModel: Boolean(quotaExceeded?.['switch-preview-model'] ?? true),
-                quotaAntigravityCredits: Boolean(quotaExceeded?.['antigravity-credits'] ?? false),
+                quotaSwitchProject: normalizeBoolean(quotaExceeded?.['switch-project']) ?? true,
+                quotaSwitchPreviewModel: normalizeBoolean(quotaExceeded?.['switch-preview-model']) ?? true,
+                quotaAntigravityCredits: normalizeBoolean(quotaExceeded?.['antigravity-credits']) ?? false,
+                disableCooling: normalizeBoolean(parsed['disable-cooling']) ?? false,
+                quotaRefreshEnabled: normalizeBoolean(quotaRefresh?.enabled) ?? false,
+                quotaRefreshInterval: String(quotaRefresh?.interval ?? ''),
+                quotaRefreshMaxInterval: String(quotaRefresh?.['max-interval'] ?? ''),
 
                 routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
-                routingSessionAffinity: Boolean(
+                routingSessionAffinity:
+                    normalizeBoolean(
                     routing?.['session-affinity'] ?? routing?.sessionAffinity ?? routing?.['sessionAffinity'],
-                ),
+                    ) ?? false,
                 routingSessionAffinityTTL:
                     typeof routing?.['session-affinity-ttl'] === 'string'
                     ? routing['session-affinity-ttl']
@@ -810,7 +1073,9 @@ export function useVisualConfig() {
                 streaming: {
                     keepaliveSeconds: String(streaming?.['keepalive-seconds'] ?? ''),
                     bootstrapRetries: String(streaming?.['bootstrap-retries'] ?? ''),
-                    nonstreamKeepaliveInterval: String(parsed['nonstream-keepalive-interval'] ?? ''),
+                    nonstreamKeepaliveInterval: String(
+                        parsed['nonstream-keepalive-interval'] ?? streaming?.['nonstream-keepalive-interval'] ?? '',
+                    ),
                 },
             }
 
@@ -846,12 +1111,16 @@ export function useVisualConfig() {
                     values.tlsEnable ||
                     values.tlsCert.trim() ||
                     values.tlsKey.trim() ||
+                    values.tlsHttpRedirectPort.trim() ||
+                    values.tlsRequireForAuth ||
                     values.tlsTrustForwardedProto
                 ) {
                     ensureMapInDoc(doc, ['tls'])
                     setBooleanInDoc(doc, ['tls', 'enable'], values.tlsEnable)
                     setStringInDoc(doc, ['tls', 'cert'], values.tlsCert)
                     setStringInDoc(doc, ['tls', 'key'], values.tlsKey)
+                    setIntFromStringInDoc(doc, ['tls', 'http-redirect-port'], values.tlsHttpRedirectPort)
+                    setBooleanInDoc(doc, ['tls', 'require-for-auth'], values.tlsRequireForAuth)
                     setBooleanInDoc(doc, ['tls', 'trust-forwarded-proto'], values.tlsTrustForwardedProto)
                     deleteIfMapEmpty(doc, ['tls'])
                 }
@@ -873,6 +1142,9 @@ export function useVisualConfig() {
                     setStringInDoc(doc, ['remote-management', 'secret-key'], values.rmSecretKey)
                     setBooleanInDoc(doc, ['remote-management', 'disable-control-panel'], values.rmDisableControlPanel)
                     setBooleanInDoc(doc, ['remote-management', 'auto-update-panel'], values.rmAutoUpdatePanel)
+                    if (docHas(doc, ['remote-management', 'disable-auto-update-panel'])) {
+                        doc.deleteIn(['remote-management', 'disable-auto-update-panel'])
+                    }
                     setBooleanInDoc(doc, ['remote-management', 'auto-update-cpa'], values.rmAutoUpdateCPA)
                     setBooleanInDoc(doc, ['remote-management', 'auto-check-update'], values.rmAutoCheckUpdate)
                     setIntFromStringInDoc(doc, ['remote-management', 'check-interval'], values.rmCheckInterval)
@@ -886,6 +1158,20 @@ export function useVisualConfig() {
 
                 setStringInDoc(doc, ['auth-dir'], values.authDir)
                 setStringInDoc(doc, ['usage-data-dir'], values.usageDataDir)
+                setStringInDoc(doc, ['usage-statistics-file'], values.usageStatisticsFile)
+                if (
+                    docHas(doc, ['plugins']) ||
+                    values.pluginsEnabled ||
+                    values.pluginsEnabled !== baselineValues.pluginsEnabled ||
+                    values.pluginsDir !== baselineValues.pluginsDir ||
+                    (values.pluginsDir.trim() !== '' && values.pluginsDir.trim() !== 'plugins')
+                ) {
+                    ensureMapInDoc(doc, ['plugins'])
+                    doc.setIn(['plugins', 'enabled'], values.pluginsEnabled)
+                    setStringInDoc(doc, ['plugins', 'dir'], values.pluginsDir)
+                    setYamlBlockTextInDoc(doc, ['plugins', 'configs'], values.pluginConfigsText)
+                    deleteIfMapEmpty(doc, ['plugins'])
+                }
                 if (values.apiKeysText !== baselineValues.apiKeysText) {
                     const apiKeys = values.apiKeysText
                                           .split('\n')
@@ -936,15 +1222,60 @@ export function useVisualConfig() {
                     }
                 }
 
+                setYamlBlockTextInDoc(doc, ['api-key-aliases'], values.apiKeyAliasesText)
+
+                const apiKeyRules = serializeApiKeyRulesForYaml(values.apiKeyRules)
+                if (Object.keys(apiKeyRules).length > 0) {
+                    doc.setIn(['api-key-rules'], apiKeyRules)
+                } else if (docHas(doc, ['api-key-rules'])) {
+                    doc.deleteIn(['api-key-rules'])
+                }
+
                 setBooleanInDoc(doc, ['debug'], values.debug)
 
                 setBooleanInDoc(doc, ['commercial-mode'], values.commercialMode)
                 setBooleanInDoc(doc, ['logging-to-file'], values.loggingToFile)
+                setBooleanInDoc(doc, ['request-log'], values.requestLog)
+                if (docHas(doc, ['pprof']) || values.pprofEnable || values.pprofAddr.trim()) {
+                    ensureMapInDoc(doc, ['pprof'])
+                    setBooleanInDoc(doc, ['pprof', 'enable'], values.pprofEnable)
+                    setStringInDoc(doc, ['pprof', 'addr'], values.pprofAddr)
+                    deleteIfMapEmpty(doc, ['pprof'])
+                }
                 setIntFromStringInDoc(doc, ['logs-max-total-size-mb'], values.logsMaxTotalSizeMb)
+                setIntFromStringInDoc(doc, ['error-logs-max-files'], values.errorLogsMaxFiles)
+                setIntFromStringInDoc(
+                    doc,
+                    ['redis-usage-queue-retention-seconds'],
+                    values.redisUsageQueueRetentionSeconds,
+                )
                 setBooleanInDoc(doc, ['usage-statistics-enabled'], values.usageStatisticsEnabled)
+                if (
+                    docHas(doc, ['usage-retention']) ||
+                    values.usageRetentionDays.trim() ||
+                    values.usageRetentionMaxDbSizeMb.trim() ||
+                    values.usageRetentionWarningThresholdPct.trim()
+                ) {
+                    ensureMapInDoc(doc, ['usage-retention'])
+                    setIntFromStringInDoc(doc, ['usage-retention', 'days'], values.usageRetentionDays)
+                    setIntFromStringInDoc(doc, ['usage-retention', 'max-db-size-mb'], values.usageRetentionMaxDbSizeMb)
+                    setIntFromStringInDoc(
+                        doc,
+                        ['usage-retention', 'warning-threshold-pct'],
+                        values.usageRetentionWarningThresholdPct,
+                    )
+                    deleteIfMapEmpty(doc, ['usage-retention'])
+                }
+                setIntFromStringInDoc(doc, ['auto-refresh-interval'], values.autoRefreshInterval)
+                setIntFromStringInDoc(doc, ['model-refresh-interval'], values.modelRefreshInterval)
 
                 setStringInDoc(doc, ['proxy-url'], values.proxyUrl)
                 setBooleanInDoc(doc, ['force-model-prefix'], values.forceModelPrefix)
+                setBooleanInDoc(doc, ['enable-gemini-cli-endpoint'], values.enableGeminiCliEndpoint)
+                setBooleanInDoc(doc, ['passthrough-headers'], values.passthroughHeaders)
+                doc.setIn(['disable-image-generation'], values.disableImageGeneration)
+                setStringInDoc(doc, ['gpt-image-2-base-model'], values.gptImage2BaseModel)
+                setIntFromStringInDoc(doc, ['auth-auto-refresh-workers'], values.authAutoRefreshWorkers)
                 setIntFromStringInDoc(doc, ['request-retry'], values.requestRetry)
                 setIntFromStringInDoc(doc, ['max-retry-credentials'], values.maxRetryCredentials)
                 setIntFromStringInDoc(doc, ['max-retry-interval'], values.maxRetryInterval)
@@ -960,6 +1291,14 @@ export function useVisualConfig() {
                 } else if (docHas(doc, ['cors-allowed-origins'])) {
                     doc.deleteIn(['cors-allowed-origins'])
                 }
+                setProviderConfigTextInDoc(doc, values.providerConfigText)
+                setYamlBlockTextInDoc(doc, ['oauth-excluded-models'], values.oauthExcludedModelsText)
+                setYamlBlockTextInDoc(doc, ['oauth-model-alias'], values.oauthModelAliasText)
+                ensureMapInDoc(doc, ['codex'])
+                doc.setIn(['codex', 'identity-confuse'], values.codexIdentityConfuse)
+                setYamlBlockTextInDoc(doc, ['codex-header-defaults'], values.codexHeaderDefaultsText)
+                setYamlBlockTextInDoc(doc, ['claude-header-defaults'], values.claudeHeaderDefaultsText)
+                setYamlBlockTextInDoc(doc, ['ampcode'], values.ampcodeText)
 
                 if (
                     docHas(doc, ['quota-exceeded']) ||
@@ -974,6 +1313,21 @@ export function useVisualConfig() {
                         doc.setIn(['quota-exceeded', 'antigravity-credits'], values.quotaAntigravityCredits)
                     }
                     deleteIfMapEmpty(doc, ['quota-exceeded'])
+                }
+
+                setBooleanInDoc(doc, ['disable-cooling'], values.disableCooling)
+
+                if (
+                    docHas(doc, ['quota-refresh']) ||
+                    values.quotaRefreshEnabled ||
+                    values.quotaRefreshInterval.trim() ||
+                    values.quotaRefreshMaxInterval.trim()
+                ) {
+                    ensureMapInDoc(doc, ['quota-refresh'])
+                    doc.setIn(['quota-refresh', 'enabled'], values.quotaRefreshEnabled)
+                    setIntFromStringInDoc(doc, ['quota-refresh', 'interval'], values.quotaRefreshInterval)
+                    setIntFromStringInDoc(doc, ['quota-refresh', 'max-interval'], values.quotaRefreshMaxInterval)
+                    deleteIfMapEmpty(doc, ['quota-refresh'])
                 }
 
                 if (

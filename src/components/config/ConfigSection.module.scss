@@ -28,7 +28,7 @@
     align-self: start;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
 
     @include mobile {
         position: static;
@@ -46,13 +46,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 42px;
-    height: 42px;
-    padding: 0 12px;
-    border-radius: 14px;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 92%, transparent), transparent),
-    color-mix(in srgb, var(--primary-color) 11%, var(--bg-secondary));
-    border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+    min-width: 34px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--primary-color) 14%, var(--border-color));
     color: var(--primary-hover);
     font-size: $font-size-xs;
     font-weight: $font-weight-semibold;
@@ -63,9 +62,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
     background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
     border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     color: var(--text-secondary);
@@ -75,24 +74,24 @@
 .headingGroup {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     min-width: 0;
 }
 
 .title {
     margin: 0;
-    font-size: $font-size-lg;
-    line-height: 1.2;
+    font-size: $font-size-base;
+    line-height: 1.25;
     font-weight: $font-weight-semibold;
     color: var(--text-primary);
 }
 
 .description {
     margin: 0;
-    max-width: 34ch;
+    max-width: 36ch;
     color: var(--text-secondary);
-    font-size: $font-size-sm;
-    line-height: 1.7;
+    font-size: $font-size-xs;
+    line-height: 1.6;
 
     @include mobile {
         max-width: none;

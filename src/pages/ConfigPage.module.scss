@@ -7,41 +7,14 @@
     display: flex;
     flex-direction: column;
     gap: $spacing-lg;
-    overflow-y: auto;
     padding-bottom: calc(var(--config-action-bar-height, 0px) + 16px + env(safe-area-inset-bottom) + #{$spacing-md});
 }
 
 .pageHeader {
-    position: relative;
-    overflow: hidden;
     display: grid;
     grid-template-columns: minmax(0, 1.2fr) auto;
     gap: 24px;
     align-items: end;
-    padding: clamp(22px, 3vw, 30px);
-    border-radius: 30px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background: radial-gradient(
-        circle at top right,
-        color-mix(in srgb, var(--primary-color) 14%, transparent),
-        transparent 34%
-    ),
-    linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--bg-primary) 94%, transparent),
-        color-mix(in srgb, var(--bg-secondary) 96%, transparent)
-    );
-
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0 auto auto 0;
-        width: min(260px, 48vw);
-        height: min(260px, 48vw);
-        background: radial-gradient(circle, color-mix(in srgb, var(--primary-color) 12%, transparent), transparent 70%);
-        pointer-events: none;
-        opacity: 0.7;
-    }
 
     @include mobile {
         grid-template-columns: minmax(0, 1fr);
@@ -96,17 +69,15 @@
 }
 
 .statusBadge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 38px;
-    padding: 0 14px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 86%, transparent);
-    color: var(--text-primary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
+    @include token-soft(
+        var(--text-primary),
+        color-mix(in srgb, var(--bg-primary) 86%, transparent),
+        color-mix(in srgb, var(--border-color) 82%, transparent),
+        38px,
+        14px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     text-align: center;
 
     @include mobile {
@@ -114,76 +85,22 @@
     }
 }
 
-.tabBar {
+.configToolbar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    width: fit-content;
-    max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-
-    &::-webkit-scrollbar {
-        display: none;
-    }
+    justify-content: flex-start;
+    gap: $spacing-md;
 
     @include mobile {
-        width: 100%;
+        align-items: stretch;
+        flex-direction: column;
     }
-}
-
-.tabItem {
-    @include button-reset;
-    padding: 10px 16px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    color: var(--text-secondary);
-    font-size: $font-size-sm;
-    font-weight: $font-weight-semibold;
-    white-space: nowrap;
-    transition: color 0.15s ease,
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.15s ease;
-
-    &:hover:not(:disabled) {
-        color: var(--text-primary);
-        background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
-        border-color: color-mix(in srgb, var(--border-color) 88%, transparent);
-    }
-
-    &:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none;
-    }
-
-    @include mobile {
-        flex: 1;
-        text-align: center;
-    }
-}
-
-.tabActive {
-    color: var(--text-primary);
-    background: var(--bg-primary);
-    border-color: color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
-    box-shadow: 0 16px 32px -28px rgba(0, 0, 0, 0.3);
 }
 
 .workspaceShell {
     display: flex;
     flex-direction: column;
-    gap: $spacing-lg;
-    padding: clamp(18px, 3vw, 28px);
-    border-radius: 32px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
-    background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
-    box-shadow: var(--shadow);
+    gap: $spacing-md;
     min-height: 60vh;
 }
 
@@ -240,18 +157,16 @@
 }
 
 .searchCount {
-    display: inline-flex;
-    align-items: center;
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
-    color: var(--text-secondary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-primary) 88%, transparent),
+        color-mix(in srgb, var(--border-color) 84%, transparent),
+        28px,
+        10px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     pointer-events: none;
-    white-space: nowrap;
 }
 
 .searchButton {
@@ -307,10 +222,10 @@
     width: 100%;
     flex: 0 0 auto;
     height: clamp(420px, 64vh, 980px);
-    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
-    border-radius: 28px;
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
-    background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+    background: transparent;
 
     @supports (height: 100dvh) {
         height: clamp(420px, 64dvh, 980px);
@@ -425,20 +340,18 @@
 }
 
 .floatingStatus {
-    display: inline-flex;
-    align-items: center;
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    background: color-mix(in srgb, var(--text-primary) 6%, transparent);
-    color: var(--text-primary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
-    text-align: center;
+    @include token-soft(
+        var(--text-primary),
+        color-mix(in srgb, var(--text-primary) 6%, transparent),
+        transparent,
+        28px,
+        10px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     max-width: min(280px, 46vw);
-    white-space: nowrap;
     overflow: hidden;
+    text-align: center;
     text-overflow: ellipsis;
 }
 

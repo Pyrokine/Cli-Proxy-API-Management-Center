@@ -3,10 +3,14 @@ import {VisualConfigEditor} from '@/components/config/VisualConfigEditor'
 import {Button} from '@/components/ui/Button'
 import {IconCheck, IconChevronDown, IconChevronUp, IconRefreshCw, IconSearch} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
+import {Tabs} from '@/components/ui/Tabs'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useVisualConfig} from '@/hooks/useVisualConfig'
 import {configFileApi, type ConfigValidationError} from '@/services/api/configFile'
+import {logsApi} from '@/services/api/logs'
+import {usageApi} from '@/services/api/usage'
 import {useAuthStore, useConfigStore, useNotificationStore, useThemeStore} from '@/stores'
+import type {VisualConfigRuntimeInfo} from '@/types/visualConfig'
 import {mergeConfigWithDefaults} from '@/utils/configDefaults'
 import {yaml} from '@codemirror/lang-yaml'
 import {highlightSelectionMatches, search, searchKeymap} from '@codemirror/search'
@@ -71,6 +75,10 @@ export function ConfigPage() {
     const [mergedYaml, setMergedYaml]                 = useState('')
     const [validationWarnings, setValidationWarnings] = useState<string[]>([])
     const [validationErrors, setValidationErrors]     = useState<ConfigValidationError[]>([])
+    const [runtimeInfo, setRuntimeInfo]               = useState<VisualConfigRuntimeInfo>({
+                                                                                              logSize: { status: 'loading' },
+                                                                                              usageDbSize: { status: 'loading' },
+                                                                                          })
 
     // Search state
     const [searchQuery, setSearchQuery]             = useState('')
@@ -99,6 +107,39 @@ export function ConfigPage() {
     const hasVisualValidationErrors =
               activeTab === 'visual' &&
               (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors)
+    const loadRuntimeInfo           = useCallback(async () => {
+        setRuntimeInfo({
+                           logSize: { status: 'loading' },
+                           usageDbSize: { status: 'loading' },
+                       })
+
+        const [logSizeResult, usageDbSizeResult] = await Promise.allSettled([
+                                                                                logsApi.fetchLogSize(),
+                                                                                usageApi.getDBSize(),
+                                                                            ])
+
+        setRuntimeInfo({
+                           logSize:
+                               logSizeResult.status === 'fulfilled'
+                               ? {
+                                       status: 'ready',
+                                       totalBytes: logSizeResult.value.total_bytes ?? 0,
+                                       fileCount: logSizeResult.value.file_count ?? 0,
+                                   }
+                               : { status: 'error' },
+                           usageDbSize:
+                               usageDbSizeResult.status === 'fulfilled'
+                               ? {
+                                       status: 'ready',
+                                       sizeBytes: usageDbSizeResult.value.size_bytes ?? 0,
+                                       maxSizeBytes: usageDbSizeResult.value.max_size_bytes ?? undefined,
+                                       warningThresholdPct: usageDbSizeResult.value.warning_threshold_pct ?? undefined,
+                                       warning: Boolean(usageDbSizeResult.value.warning),
+                                       capped: Boolean(usageDbSizeResult.value.capped),
+                                   }
+                               : { status: 'error' },
+                       })
+    }, [])
 
     const loadConfig = useCallback(async () => {
         setLoading(true)
@@ -123,8 +164,9 @@ export function ConfigPage() {
     useEffect(() => {
         queueMicrotask(() => {
             void loadConfig()
+            void loadRuntimeInfo()
         })
-    }, [loadConfig])
+    }, [loadConfig, loadRuntimeInfo])
 
     useEffect(() => {
         if (activeTab !== 'visual' || !visualParseError) {
@@ -205,10 +247,13 @@ export function ConfigPage() {
                 const validation = await configFileApi.validateConfigYaml(nextMergedYaml)
                 setValidationErrors(validation.valid ? [] : (validation.errors ?? []))
                 setValidationWarnings(validation.warnings ?? [])
-            } catch {
-                // Validation endpoint unavailable -- proceed without validation info
-                setValidationErrors([])
-                setValidationWarnings([])
+            } catch (err) {
+                const message = err instanceof Error ? err.message : t('config_management.validation_unavailable')
+                showNotification(
+                    t('config_management.validation_unavailable_message', { message }),
+                    'error',
+                )
+                return
             }
 
             // In visual mode, applyVisualChangesToYaml re-serializes YAML via parseDocument → toString,
@@ -470,7 +515,7 @@ export function ConfigPage() {
 
     const handleReload = useCallback(() => {
         if (!isDirty) {
-            void loadConfig()
+            void Promise.all([loadConfig(), loadRuntimeInfo()])
             return
         }
 
@@ -481,12 +526,15 @@ export function ConfigPage() {
                              cancelText: t('common.cancel'),
                              variant: 'danger',
                              onConfirm: async () => {
-                                 await loadConfig()
+                                 await Promise.all([loadConfig(), loadRuntimeInfo()])
                              },
                          })
-    }, [isDirty, loadConfig, showConfirmation, t])
+    }, [isDirty, loadConfig, loadRuntimeInfo, showConfirmation, t])
 
-    const floatingActions = (
+    const shouldShowFloatingActions =
+              isDirty || saving || loading || Boolean(error) || hasVisualModeError || hasVisualValidationErrors
+
+    const floatingActions = shouldShowFloatingActions ? (
         <div className={styles.floatingActionContainer} ref={floatingActionsRef}>
             <div className={styles.floatingActionList}>
                 <div className={`${styles.floatingStatus} ${getStatusClass()}`}>{getStatusText()}</div>
@@ -521,7 +569,7 @@ export function ConfigPage() {
                 </button>
             </div>
         </div>
-    )
+    ) : null
 
     const pageEyebrow     =
               activeTab === 'visual'
@@ -541,25 +589,27 @@ export function ConfigPage() {
 
                 <div className={styles.pageMeta}>
                     <div className={`${styles.statusBadge} ${getStatusClass()}`}>{getStatusText()}</div>
-                    <div className={styles.tabBar}>
-                        <button
-                            type='button'
-                            className={`${styles.tabItem} ${activeTab === 'visual' ? styles.tabActive : ''}`}
-                            onClick={() => handleTabChange('visual')}
-                            disabled={saving || loading}
-                        >
-                            {t('config_management.tabs.visual', { defaultValue: '可视化编辑' })}
-                        </button>
-                        <button
-                            type='button'
-                            className={`${styles.tabItem} ${activeTab === 'source' ? styles.tabActive : ''}`}
-                            onClick={() => handleTabChange('source')}
-                            disabled={saving || loading}
-                        >
-                            {t('config_management.tabs.source', { defaultValue: '源代码编辑' })}
-                        </button>
-                    </div>
                 </div>
+            </div>
+
+            <div className={styles.configToolbar}>
+                <Tabs
+                    items={[
+                        {
+                            value: 'visual',
+                            label: t('config_management.tabs.visual', { defaultValue: '可视化编辑' }),
+                            disabled: saving || loading,
+                        },
+                        {
+                            value: 'source',
+                            label: t('config_management.tabs.source', { defaultValue: '源代码编辑' }),
+                            disabled: saving || loading,
+                        },
+                    ]}
+                    activeValue={activeTab}
+                    onChange={handleTabChange}
+                    ariaLabel={t('config_management.title')}
+                />
             </div>
 
             <div className={styles.workspaceShell}>
@@ -577,6 +627,7 @@ export function ConfigPage() {
                             validationErrors={visualValidationErrors}
                             hasPayloadValidationErrors={visualHasPayloadValidationErrors}
                             disabled={disableControls || loading}
+                            runtimeInfo={runtimeInfo}
                             onChange={setVisualValues}
                         />
                     ) : (
