@@ -50,9 +50,8 @@ export default defineConfig({
                                     __APP_VERSION__: JSON.stringify(getVersion()),
                                     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
                                     // Lowest server (CPA) build the panel can talk to.
-                                    // Bump alongside API-breaking changes so the VersionCompatBanner
-                                    // warns operators running stale backends.
-                                    __COMPAT_MIN_SERVER__: JSON.stringify('6.9.0-aug.1'),
+                                    // Bump when the panel depends on newer management APIs.
+                                    __COMPAT_MIN_SERVER__: JSON.stringify('7.1.68-aug.1'),
                                 },
                                 resolve: {
                                     alias: {

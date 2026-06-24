@@ -32,7 +32,7 @@
         ],
         "property-no-vendor-prefix": null,
         "rule-empty-line-before": null,
-        "selector-class-pattern": false,
+        "selector-class-pattern": null,
         "selector-not-notation": null,
         "selector-pseudo-class-no-unknown": [
             true,
