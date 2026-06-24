@@ -113,9 +113,14 @@ export function AiProvidersCodexEditPage() {
         { disableControls, saving, loading, invalidIndexParam, invalidIndex },
         {
             buildEndpoint: (baseUrl) => modelsApi.buildV1ModelsEndpoint(baseUrl),
-            fetchModels: (baseUrl, apiKey, headers) => {
+            fetchModels: (baseUrl, apiKey, headers, proxyUrl) => {
                 const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
-                return modelsApi.fetchV1ModelsViaApiCall(baseUrl, hasCustomAuthorization ? undefined : apiKey, headers)
+                return modelsApi.fetchV1ModelsViaApiCall(
+                    baseUrl,
+                    hasCustomAuthorization ? undefined : apiKey,
+                    headers,
+                    proxyUrl,
+                )
             },
             canAutoFetch: (apiKey, headers) => {
                 const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
@@ -146,6 +151,7 @@ export function AiProvidersCodexEditPage() {
                 value={form.apiKey}
                 onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
                 disabled={disabled}
+                secret
             />
             <PriorityField form={form} setForm={setForm} disabled={disabled} />
             <PrefixField form={form} setForm={setForm} disabled={disabled} />

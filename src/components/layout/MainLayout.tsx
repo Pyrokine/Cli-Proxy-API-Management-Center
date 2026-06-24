@@ -4,6 +4,7 @@ import {PageTransition} from '@/components/common/PageTransition'
 import {VersionCompatBanner} from '@/components/common/VersionCompatBanner'
 import {Button} from '@/components/ui/Button'
 import {
+    IconBot,
     IconSidebarAuthFiles,
     IconSidebarConfig,
     IconSidebarDashboard,
@@ -13,6 +14,7 @@ import {
     IconSidebarQuota,
     IconSidebarSystem,
     IconSidebarUsage,
+    IconSlidersHorizontal,
 } from '@/components/ui/icons'
 import {triggerHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {MainRoutes} from '@/router/MainRoutes'
@@ -30,6 +32,8 @@ const sidebarIcons: Record<string, ReactNode> = {
     authFiles: <IconSidebarAuthFiles size={18} />,
     oauth: <IconSidebarOauth size={18} />,
     quota: <IconSidebarQuota size={18} />,
+    models: <IconBot size={18} />,
+    plugins: <IconSlidersHorizontal size={18} />,
     usage: <IconSidebarUsage size={18} />,
     config: <IconSidebarConfig size={18} />,
     logs: <IconSidebarLogs size={18} />,
@@ -472,6 +476,8 @@ export function MainLayout() {
             { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
             { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
             { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
+            { path: '/models', label: t('nav.model_management'), icon: sidebarIcons.models },
+            { path: '/plugins', label: t('nav.plugin_management'), icon: sidebarIcons.plugins },
             { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
             ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
             { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },

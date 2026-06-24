@@ -342,11 +342,6 @@
     transition: background 0.15s ease,
     border-color 0.15s ease;
 
-    input[type='checkbox'] {
-        margin-top: 2px;
-        cursor: pointer;
-    }
-
     &:hover {
         border-color: var(--primary-color);
         background: var(--bg-secondary);
@@ -359,9 +354,14 @@
 }
 
 .modelDiscoveryMeta {
+    @include button-reset;
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 2px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
 }
 
 .modelDiscoveryName {
@@ -823,9 +823,9 @@
 // 表头
 .keyTableHeader {
     display: grid;
-    grid-template-columns: 46px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+    grid-template-columns: 46px minmax(220px, 1.35fr) minmax(180px, 1fr) minmax(140px, 0.8fr) 160px;
     gap: $spacing-sm;
-    min-width: 700px;
+    min-width: 820px;
     padding: 10px $spacing-md;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -842,9 +842,9 @@
 // 数据行
 .keyTableRow {
     display: grid;
-    grid-template-columns: 46px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+    grid-template-columns: 46px minmax(220px, 1.35fr) minmax(180px, 1fr) minmax(140px, 0.8fr) 160px;
     gap: $spacing-sm;
-    min-width: 700px;
+    min-width: 820px;
     padding: 10px $spacing-md;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -870,7 +870,8 @@
 }
 
 .keyTableColKey,
-.keyTableColProxy {
+.keyTableColProxy,
+.keyTableColAuth {
     min-width: 0;
     display: flex;
     align-items: center;
@@ -882,6 +883,7 @@
     align-items: center;
     justify-content: center;
     gap: $spacing-xs;
+    flex-wrap: wrap;
     flex-shrink: 0;
     white-space: nowrap;
 }
@@ -892,6 +894,40 @@
     font-size: $font-size-base;
     min-height: 38px;
     text-align: center;
+}
+
+.keyInputWrapper {
+    position: relative;
+    width: 100%;
+}
+
+.keyTableSecretInput {
+    padding-right: 38px;
+}
+
+.keyVisibilityButton {
+    @include button-reset;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: $radius-sm;
+    color: var(--text-secondary);
+
+    &:hover:not(:disabled) {
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
 }
 
 .addKeyButton {
@@ -913,6 +949,14 @@
 .modelTestAllButton {
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+.keyTestStatusBadge {
+    flex: 1 0 100%;
+    max-width: 100%;
+    justify-content: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .statusIconWrapper {

@@ -32,6 +32,7 @@ export type OpenAIEditOutletContext = {
     setTestMessage: Dispatch<SetStateAction<string>>
     keyTestStatuses: KeyTestStatus[]
     setDraftKeyTestStatus: (keyIndex: number, status: KeyTestStatus) => void
+    setDraftKeyTestStatuses: (statuses: KeyTestStatus[]) => void
     resetDraftKeyTestStatuses: (count: number) => void
     availableModels: string[]
     handleBack: () => void
@@ -78,16 +79,18 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
         Array<{
             apiKey: string
             proxyUrl: string
+            authIndex: string
             headers: Array<{ key: string; value: string }>
         }>
     >((acc, entry) => {
-        const apiKey   = String(entry?.apiKey ?? '').trim()
-        const proxyUrl = String(entry?.proxyUrl ?? '').trim()
-        const headers  = normalizeKeyHeaders(entry?.headers)
-        if (!apiKey && !proxyUrl && headers.length === 0) {
+        const apiKey    = String(entry?.apiKey ?? '').trim()
+        const proxyUrl  = String(entry?.proxyUrl ?? '').trim()
+        const authIndex = String(entry?.authIndex ?? '').trim()
+        const headers   = normalizeKeyHeaders(entry?.headers)
+        if (!apiKey && !proxyUrl && !authIndex && headers.length === 0) {
             return acc
         }
-        acc.push({ apiKey, proxyUrl, headers })
+        acc.push({ apiKey, proxyUrl, authIndex, headers })
         return acc
     }, [])
 
@@ -100,6 +103,7 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        disabled: Boolean(form.disabled),
+                       authIndex: String(form.authIndex ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
                        apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
                        models: normalizeModelEntries(form.modelEntries),
@@ -112,6 +116,7 @@ const buildEmptyForm = (): OpenAIFormState => ({
     prefix: '',
     baseUrl: '',
     headers: [],
+    authIndex: undefined,
     apiKeyEntries: [buildApiKeyEntry()],
     modelEntries: [{ name: '', alias: '' }],
     testModel: undefined,
@@ -133,6 +138,7 @@ export function AiProvidersOpenAIEditLayout() {
     const draftStore                   = useOpenAIEditDraftStore
     const rawDrafts                    = draftStore((state) => state.drafts)
     const rawSetDraftKeyTestStatus     = draftStore((state) => state.setDraftKeyTestStatus)
+    const rawSetDraftKeyTestStatuses   = draftStore((state) => state.setDraftKeyTestStatuses)
     const rawResetDraftKeyTestStatuses = draftStore((state) => state.resetDraftKeyTestStatuses)
 
     const buildEmptyDraftInit = useCallback(
@@ -154,9 +160,18 @@ export function AiProvidersOpenAIEditLayout() {
             prefix: data.prefix ?? '',
             baseUrl: data.baseUrl,
             headers: headersToEntries(data.headers),
+            authIndex: data.authIndex,
             testModel: data.testModel,
             modelEntries,
-            apiKeyEntries: data.apiKeyEntries?.length ? data.apiKeyEntries : [buildApiKeyEntry()],
+            apiKeyEntries: data.apiKeyEntries?.length
+                           ?
+                           data.apiKeyEntries.map((entry) => buildApiKeyEntry({
+                                                                                  ...entry,
+                                                                                  authIndex: entry.authIndex ??
+                                                                                             data.authIndex,
+                                                                              }))
+                           :
+                [buildApiKeyEntry({ authIndex: data.authIndex })],
             disabled: data.disabled ?? false,
         }
 
@@ -206,6 +221,7 @@ export function AiProvidersOpenAIEditLayout() {
                         apiKey: entry.apiKey.trim(),
                         proxyUrl: entry.proxyUrl?.trim() || undefined,
                         headers: entry.headers,
+                        authIndex: entry.authIndex?.trim() || undefined,
                     })),
                 }
                 if (form.priority !== undefined && Number.isFinite(form.priority)) {
@@ -285,6 +301,13 @@ export function AiProvidersOpenAIEditLayout() {
         [draftKey, rawSetDraftKeyTestStatus],
     )
 
+    const handleSetDraftKeyTestStatuses = useCallback(
+        (statuses: KeyTestStatus[]) => {
+            rawSetDraftKeyTestStatuses(draftKey, statuses)
+        },
+        [draftKey, rawSetDraftKeyTestStatuses],
+    )
+
     const handleResetDraftKeyTestStatuses = useCallback(
         (count: number) => {
             rawResetDraftKeyTestStatuses(draftKey, count)
@@ -313,6 +336,7 @@ export function AiProvidersOpenAIEditLayout() {
                     setTestMessage: layout.setTestMessage,
                     keyTestStatuses,
                     setDraftKeyTestStatus: handleSetDraftKeyTestStatus,
+                    setDraftKeyTestStatuses: handleSetDraftKeyTestStatuses,
                     resetDraftKeyTestStatuses: handleResetDraftKeyTestStatuses,
                     availableModels: layout.availableModels,
                     handleBack: layout.handleBack,

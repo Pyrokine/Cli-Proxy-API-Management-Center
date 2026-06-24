@@ -3,7 +3,7 @@ import {HeaderInputList} from '@/components/ui/HeaderInputList'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
 import type {ModelDiscoveryReturn} from '@/hooks/useModelDiscovery'
-import type {Dispatch, SetStateAction} from 'react'
+import type {Dispatch, ReactNode, SetStateAction} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ModelDiscoveryModal} from './ModelDiscoveryModal'
 import styles from './ProviderEditForm.module.scss'
@@ -126,7 +126,8 @@ function ModelConfigSection({
                         {t(`ai_providers.${i18nPrefix}_models_add_btn`)}
                     </Button>
                     {onDiscovery && (
-                        <Button variant='secondary' size='sm' onClick={onDiscovery} disabled={discoveryDisabled}>
+                        <Button variant='secondary' size='sm' onClick={onDiscovery}
+                                disabled={disabled || discoveryDisabled}>
                             {t(`ai_providers.${i18nPrefix}_models_fetch_button`)}
                         </Button>
                     )}
@@ -190,11 +191,12 @@ interface ProviderModelSectionProps<
     discovery: ModelDiscoveryReturn
     discoveryDisabled?: boolean
     i18nPrefix: string
+    children?: ReactNode
 }
 
 export function ProviderModelSection<
     T extends { modelEntries: Array<{ name: string; alias: string }>; excludedText: string },
->({ form, setForm, disabled, discovery, discoveryDisabled, i18nPrefix }: ProviderModelSectionProps<T>) {
+>({ form, setForm, disabled, discovery, discoveryDisabled, i18nPrefix, children }: ProviderModelSectionProps<T>) {
     return (
         <>
             <ModelConfigSection
@@ -211,6 +213,7 @@ export function ProviderModelSection<
                 onDiscovery={() => discovery.setOpen(true)}
                 discoveryDisabled={discoveryDisabled ?? !discovery.canOpen}
             />
+            {children}
             <ExcludedModelsField
                 value={form.excludedText}
                 onChange={(value) => setForm((prev) => ({ ...prev, excludedText: value }))}

@@ -1,0 +1,303 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+@include management-page-shell;
+
+.statCard {
+    strong {
+        display: block;
+        margin-bottom: 4px;
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: $font-size-xl;
+        font-weight: $font-weight-semibold;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    span {
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+    }
+}
+
+.noticeCard {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-style: dashed;
+
+    p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        line-height: $line-height-base;
+    }
+}
+
+.noticeTitle {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.inlineLink,
+.menuLink {
+    width: fit-content;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--primary-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    text-align: left;
+    text-decoration: none;
+
+    &:hover,
+    &:focus-visible {
+        text-decoration: underline;
+    }
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.62;
+        text-decoration: none;
+    }
+}
+
+.pluginTable {
+    min-width: 1040px;
+}
+
+.mainRow {
+    td {
+        vertical-align: top;
+    }
+}
+
+.pluginCell,
+.metaStack,
+.statusCell,
+.menuList,
+.detailText,
+.configForm,
+.configField {
+    display: flex;
+    flex-direction: column;
+}
+
+.pluginCell {
+    gap: 4px;
+    min-width: 0;
+}
+
+.pluginName {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.pluginID,
+.pluginPath,
+.muted {
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+}
+
+.pluginID,
+.pluginPath {
+    overflow: hidden;
+    font-family: $font-mono;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.statusCell,
+.metaStack,
+.menuList {
+    gap: 6px;
+}
+
+.metaStack {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.badge,
+.fieldPill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: $radius-full;
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--bg-tertiary) 74%, transparent);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+    line-height: 1.2;
+}
+
+.badge_success {
+    border-color: color-mix(in srgb, var(--success-color) 36%, var(--border-color));
+    color: var(--success-color);
+}
+
+.badge_warning {
+    border-color: color-mix(in srgb, var(--warning-color) 36%, var(--border-color));
+    color: var(--warning-color);
+}
+
+.badge_error {
+    border-color: color-mix(in srgb, var(--error-color) 36%, var(--border-color));
+    color: var(--error-color);
+}
+
+.badge_muted {
+    color: var(--text-secondary);
+}
+
+.menuList {
+    align-items: flex-start;
+}
+
+.actionCell,
+.modalActions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.detailRow {
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+
+    td {
+        padding: $spacing-md;
+    }
+}
+
+.detailGrid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: $spacing-md;
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.detailLabel {
+    margin-bottom: 8px;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.detailText {
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+
+    a {
+        overflow-wrap: anywhere;
+        color: var(--primary-color);
+        text-decoration: none;
+
+        &:hover,
+        &:focus-visible {
+            text-decoration: underline;
+        }
+    }
+}
+
+.fieldPills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.fieldPill {
+    span {
+        color: var(--text-tertiary);
+        font-family: $font-mono;
+        font-size: $font-size-xs;
+    }
+}
+
+.configForm {
+    gap: $spacing-md;
+}
+
+.configRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-md;
+    padding: $spacing-sm $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+
+    label {
+        color: var(--text-primary);
+        font-size: $font-size-sm;
+        font-weight: $font-weight-medium;
+    }
+}
+
+.configField {
+    gap: 8px;
+}
+
+.fieldHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+
+    label {
+        color: var(--text-primary);
+        font-size: $font-size-sm;
+        font-weight: $font-weight-medium;
+    }
+
+    span {
+        color: var(--text-tertiary);
+        font-family: $font-mono;
+        font-size: $font-size-xs;
+    }
+}
+
+.configField p,
+.emptyConfig {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: $line-height-base;
+}
+
+.textarea {
+    width: 100%;
+    min-height: 112px;
+    resize: vertical;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+
+    &:focus {
+        border-color: var(--primary-color);
+        outline: none;
+        box-shadow: 0 0 0 3px rgba($primary-color, 0.12);
+    }
+}

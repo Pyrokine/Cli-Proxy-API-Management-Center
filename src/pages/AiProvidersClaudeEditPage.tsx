@@ -264,6 +264,7 @@ export function AiProvidersClaudeEditPage() {
                     value={form.apiKey}
                     onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
                     disabled={controlsDisabled}
+                    secret
                 />
                 <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
                 <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />

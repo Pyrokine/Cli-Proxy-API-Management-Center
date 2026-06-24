@@ -162,27 +162,15 @@ export function ProviderModelsPage({
             onBack={handleBack}
             backLabel={t('common.back')}
             backAriaLabel={t('common.back')}
-            hideTopBarBackButton
-            hideTopBarRightAction
-            floatingAction={
-                <div className={layoutStyles.floatingActions}>
-                    <Button
-                        variant='secondary'
-                        size='sm'
-                        onClick={handleBack}
-                        className={layoutStyles.floatingBackButton}
-                    >
-                        {t('common.back')}
-                    </Button>
-                    <Button
-                        size='sm'
-                        onClick={handleApply}
-                        disabled={!canApply}
-                        className={layoutStyles.floatingSaveButton}
-                    >
-                        {t(`ai_providers.${i18nPrefix}_fetch_apply`)}
-                    </Button>
-                </div>
+            rightAction={
+                <Button
+                    size='sm'
+                    onClick={handleApply}
+                    disabled={!canApply}
+                    className={layoutStyles.floatingSaveButton}
+                >
+                    {t(`ai_providers.${i18nPrefix}_fetch_apply`)}
+                </Button>
             }
             isLoading={initialLoading}
             loadingLabel={t('common.loading')}

@@ -1,3 +1,4 @@
+import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import type {ModelInfo} from '@/utils/models'
 import styles from './ProviderEditForm.module.scss'
 
@@ -13,19 +14,28 @@ export function ModelCheckboxList({ models, selected, onToggle }: ModelCheckboxL
             {models.map((model) => {
                 const checked = selected.has(model.name)
                 return (
-                    <label
+                    <div
                         key={model.name}
                         className={`${styles.modelDiscoveryRow} ${checked ? styles.modelDiscoveryRowSelected : ''}`}
                     >
-                        <input type='checkbox' checked={checked} onChange={() => onToggle(model.name)} />
-                        <div className={styles.modelDiscoveryMeta}>
-                            <div className={styles.modelDiscoveryName}>
+                        <SelectionCheckbox
+                            checked={checked}
+                            onChange={() => onToggle(model.name)}
+                            ariaLabel={model.name}
+                        />
+                        <button
+                            type='button'
+                            className={styles.modelDiscoveryMeta}
+                            onClick={() => onToggle(model.name)}
+                        >
+                            <span className={styles.modelDiscoveryName}>
                                 {model.name}
                                 {model.alias && <span className={styles.modelDiscoveryAlias}>{model.alias}</span>}
-                            </div>
-                            {model.description && <div className={styles.modelDiscoveryDesc}>{model.description}</div>}
-                        </div>
-                    </label>
+                            </span>
+                            {model.description &&
+                             <span className={styles.modelDiscoveryDesc}>{model.description}</span>}
+                        </button>
+                    </div>
                 )
             })}
         </div>

@@ -1,5 +1,5 @@
-import {FloatingEditActions} from '@/components/common/FloatingEditActions'
 import {SecondaryScreenShell} from '@/components/common/SecondaryScreenShell'
+import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import type {ReactNode, RefObject} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -21,7 +21,6 @@ interface ProviderEditShellProps {
 
 /**
  * Shared page shell for all provider edit pages.
- * Wraps SecondaryScreenShell + FloatingEditActions + Card with error/invalid state.
  */
 export function ProviderEditShell({
                                       title,
@@ -46,9 +45,17 @@ export function ProviderEditShell({
             onBack={onBack}
             backLabel={t('common.back')}
             backAriaLabel={t('common.back')}
-            hideTopBarBackButton
-            hideTopBarRightAction
-            floatingAction={<FloatingEditActions onBack={onBack} onSave={onSave} saving={saving} canSave={canSave} />}
+            rightAction={
+                <Button
+                    size='sm'
+                    onClick={onSave}
+                    loading={saving}
+                    disabled={!canSave}
+                    className={layoutStyles.floatingSaveButton}
+                >
+                    {t('common.save')}
+                </Button>
+            }
             isLoading={loading}
             loadingLabel={t('common.loading')}
         >

@@ -1,0 +1,775 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+@include management-page-shell;
+
+.headerActions,
+.rowActions,
+.modalActions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.statCard {
+    strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-primary);
+        font-size: $font-size-xl;
+        font-weight: $font-weight-semibold;
+        line-height: 1;
+    }
+
+    span {
+        display: block;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        line-height: $line-height-base;
+
+        + span {
+            margin-top: 2px;
+        }
+    }
+}
+
+.modelMatrixCard {
+    min-width: 0;
+}
+
+.treeSummary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.sourceHelp {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: $line-height-base;
+}
+
+.callGuideDisclosure {
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-primary) 74%, transparent);
+
+    summary {
+        display: flex;
+        align-items: center;
+        gap: $spacing-sm;
+        min-height: 38px;
+        padding: 0 $spacing-md;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        cursor: pointer;
+
+        span {
+            color: var(--text-primary);
+            font-weight: $font-weight-semibold;
+        }
+
+        code {
+            padding: 3px 6px;
+            border-radius: $radius-sm;
+            background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+            color: var(--text-primary);
+            font-size: $font-size-xs;
+            white-space: nowrap;
+        }
+    }
+}
+
+.callGuideContent {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $spacing-sm;
+    padding: 0 $spacing-md $spacing-md;
+
+    > div {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.callGuideLabel {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.callGuideText {
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.endpointList {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.endpointCode {
+    overflow: hidden;
+    width: fit-content;
+    max-width: 100%;
+    padding: 5px 7px;
+    border-radius: $radius-sm;
+    background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+    color: var(--text-primary);
+    font-size: $font-size-xs;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.treeMeta {
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+}
+
+.matrixSearch {
+    width: min(320px, 100%);
+}
+
+.modelMatrixWrap {
+    position: relative;
+    overflow: auto;
+    max-height: clamp(360px, calc(100vh - 300px), 680px);
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    border-radius: $radius-lg;
+    background: radial-gradient(circle at 0 0, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 32%),
+    color-mix(in srgb, var(--bg-primary) 94%, transparent);
+}
+
+.modelMatrix {
+    width: 100%;
+    min-width: 1120px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+
+    .modelTreeCol {
+        width: 32%;
+    }
+
+    .enabledCol {
+        width: 8%;
+    }
+
+    .requestableCol {
+        width: 10%;
+    }
+
+    .aliasCol {
+        width: 15%;
+    }
+
+    .priceCol {
+        width: 24%;
+    }
+
+    .actionsCol {
+        width: 11%;
+    }
+
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        height: 40px;
+        padding: 0 10px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+        background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+        color: var(--text-secondary);
+        font-size: $font-size-xs;
+        font-weight: $font-weight-medium;
+        line-height: 1;
+        text-align: left;
+        vertical-align: middle;
+        white-space: nowrap;
+        backdrop-filter: blur(12px);
+    }
+
+    td {
+        height: 50px;
+        padding: 6px 10px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border-color) 66%, transparent);
+        color: var(--text-primary);
+        font-size: $font-size-sm;
+        vertical-align: middle;
+    }
+
+    th.centerCell {
+        text-align: center;
+    }
+}
+
+.centerCell {
+    padding-top: 0;
+    padding-bottom: 0;
+    text-align: center;
+    vertical-align: middle;
+
+    :global(.btn) {
+        min-height: 28px;
+        padding: 0 10px;
+        vertical-align: middle;
+    }
+
+    .rowActions {
+        width: 100%;
+    }
+}
+
+.centerContent {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 42px;
+    min-width: 0;
+}
+
+.groupRow {
+    cursor: pointer;
+    background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+    transition: background-color 160ms ease, box-shadow 160ms ease;
+
+    td {
+        height: 44px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        color: var(--text-secondary);
+    }
+
+    &:hover {
+        background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+        box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 58%, transparent);
+    }
+}
+
+.providerRow {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color) 10%, transparent), color-mix(in srgb, var(--bg-secondary) 54%, transparent));
+}
+
+.groupLevelRow {
+    background: color-mix(in srgb, var(--bg-secondary) 36%, transparent);
+}
+
+.modelRow {
+    transition: background-color 160ms ease, box-shadow 160ms ease;
+
+    &:hover {
+        background: color-mix(in srgb, var(--primary-color) 7%, transparent);
+        box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 70%, transparent);
+    }
+}
+
+.priceOnlyRow {
+    background: color-mix(in srgb, var(--bg-secondary) 24%, transparent);
+
+    .modelName,
+    .modelMeta {
+        color: var(--text-secondary);
+    }
+}
+
+.treeCell,
+.groupRowInner {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    min-width: 0;
+}
+
+.groupRowInner {
+    min-height: 32px;
+}
+
+.groupTitleCell,
+.modelCell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.groupName,
+.modelName {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    line-height: $line-height-heading;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.providerRow .groupName,
+.modelName {
+    font-weight: $font-weight-semibold;
+}
+
+.modelName {
+    font-size: $font-size-sm;
+}
+
+.groupMeta,
+.modelMeta {
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: $line-height-heading;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.matrixExpand,
+.matrixExpandSpacer {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+}
+
+.matrixExpand {
+    border: 1px solid transparent;
+    border-radius: $radius-md;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    &:not(:disabled):hover {
+        border-color: color-mix(in srgb, var(--primary-color) 24%, transparent);
+        background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+        color: var(--primary-hover);
+    }
+
+    &:disabled {
+        cursor: default;
+    }
+}
+
+.busyPill {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: 7px 10px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    border-radius: $radius-full;
+    background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(10px);
+}
+
+.countBadge,
+.requestableBadge,
+.aliasMore,
+.userCreatedPill {
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-secondary) 72%, transparent),
+        color-mix(in srgb, var(--border-color) 84%, transparent),
+        24px,
+        9px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
+}
+
+.requestableBadge {
+    min-width: 48px;
+}
+
+.requestableCell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.requestableReason {
+    overflow: hidden;
+    max-width: 112px;
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestableYes {
+    color: var(--success-color);
+}
+
+.requestableNo {
+    color: var(--text-secondary);
+}
+
+.enableUnavailable {
+    @include token-soft(
+        var(--text-tertiary),
+        color-mix(in srgb, var(--bg-secondary) 56%, transparent),
+        color-mix(in srgb, var(--border-color) 58%, transparent),
+        24px,
+        8px,
+        $font-size-xs,
+        $font-weight-medium
+    );
+}
+
+.userCreatedPill {
+    width: fit-content;
+    min-width: 56px;
+    color: var(--warning-text);
+}
+
+.modelNameRow {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    min-width: 0;
+}
+
+.modelCell {
+    max-width: 440px;
+}
+
+.switchCell,
+.priceCell,
+.aliasCell,
+.rowActions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+}
+
+.switchCell {
+    min-height: 28px;
+}
+
+.priceCell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    max-width: 100%;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+}
+
+.priceItem {
+    display: grid;
+    grid-template-columns: 36px minmax(84px, 1fr);
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 22px;
+    padding: 3px 7px;
+    border-radius: $radius-sm;
+    background: color-mix(in srgb, var(--bg-secondary) 66%, transparent);
+    line-height: 1;
+    white-space: nowrap;
+
+    span {
+        color: var(--text-tertiary);
+        font-size: $font-size-xs;
+    }
+
+    strong {
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: $font-size-xs;
+        font-weight: $font-weight-semibold;
+        text-align: right;
+        text-overflow: ellipsis;
+    }
+}
+
+.aliasCell {
+    flex-direction: row;
+    gap: 6px;
+    width: 100%;
+    max-width: 100%;
+    color: var(--text-primary);
+    text-align: center;
+    font-size: $font-size-xs;
+    line-height: 1;
+
+    > span:first-child {
+        overflow: hidden;
+        max-width: 140px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.rowActions {
+    gap: 6px;
+    flex-wrap: nowrap;
+    min-height: 28px;
+}
+
+.muted,
+.groupSummary {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.emptyCell {
+    display: block;
+    min-height: 1px;
+}
+
+.aliasMore {
+    width: fit-content;
+    min-width: 32px;
+    padding: 0 7px;
+}
+
+.unconfigured {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    color: var(--warning-text);
+    font-size: $font-size-sm;
+    line-height: 1;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.modalBody {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+.inlineHint {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: $spacing-sm;
+    border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-secondary) 54%, transparent);
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    strong {
+        color: var(--text-primary);
+        font-weight: $font-weight-semibold;
+    }
+}
+
+.formGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $spacing-sm;
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.aliasSection {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+}
+
+.aliasHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+}
+
+.aliasRow {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.3fr) minmax(120px, auto) auto;
+    gap: $spacing-sm;
+    align-items: end;
+
+    > * {
+        min-width: 0;
+    }
+
+    :global(.form-group) {
+        margin-bottom: 0;
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.aliasForkCell,
+.aliasRemoveCell {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+}
+
+.aliasForkCell {
+    justify-content: center;
+    padding-bottom: 2px;
+}
+
+.textareaField {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+
+    textarea {
+        min-height: 92px;
+        padding: 10px 12px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+        border-radius: $radius-md;
+        background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+        color: var(--text-primary);
+        font: inherit;
+        line-height: $line-height-base;
+        resize: vertical;
+
+        &:focus {
+            border-color: color-mix(in srgb, var(--primary-color) 58%, transparent);
+            outline: none;
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 14%, transparent);
+        }
+    }
+}
+
+.updateCard {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+.updateHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-md;
+
+    h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: $font-size-lg;
+        line-height: $line-height-heading;
+    }
+}
+
+.fieldChanges {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+}
+
+.fieldChangeHeader,
+.fieldChange {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1fr);
+    gap: $spacing-sm;
+}
+
+.fieldChangeHeader {
+    padding: 0 $spacing-sm;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+}
+
+.fieldChange {
+    align-items: stretch;
+    padding: $spacing-sm;
+    border: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-secondary) 42%, transparent);
+
+    pre {
+        overflow: auto;
+        min-height: 42px;
+        max-height: 160px;
+        margin: 0;
+        padding: 8px;
+        border-radius: $radius-sm;
+        background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+        color: var(--text-primary);
+        font-size: $font-size-xs;
+        line-height: $line-height-base;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.fieldName {
+    display: flex;
+    align-items: center;
+    min-height: 42px;
+    color: var(--text-primary) !important;
+    font-size: $font-size-sm !important;
+    font-weight: $font-weight-semibold !important;
+}
+
+.updateDecisionBar,
+.updateFooter,
+.updatePager {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+}
+
+.updateDecisionBar {
+    justify-content: flex-end;
+    padding-top: $spacing-xs;
+}
+
+.updateFooter {
+    justify-content: space-between;
+    width: 100%;
+}
+
+.updatePager {
+    justify-content: flex-end;
+}
+
+.updatePrimaryAction {
+    border-color: color-mix(in srgb, var(--primary-color) 82%, white 18%);
+    background: color-mix(in srgb, var(--primary-color) 86%, white 14%);
+    color: white;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-color) 34%, transparent);
+}

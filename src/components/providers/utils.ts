@@ -1,5 +1,5 @@
-import type {AmpcodeConfig, AmpcodeModelMapping, ApiKeyEntry} from '@/types'
-import type {AmpcodeFormState, ModelEntry} from './types'
+import type {AmpcodeConfig, AmpcodeModelMapping, AmpcodeUpstreamApiKeyMapping, ApiKeyEntry} from '@/types'
+import type {AmpcodeFormState, AmpcodeUpstreamApiKeyEntry, ModelEntry} from './types'
 
 export const parseTextList = (text: string): string[] =>
     text
@@ -41,6 +41,7 @@ export const buildApiKeyEntry = (input?: Partial<ApiKeyEntry>): ApiKeyEntry => (
     apiKey: input?.apiKey ?? '',
     proxyUrl: input?.proxyUrl ?? '',
     headers: input?.headers ?? {},
+    authIndex: input?.authIndex ?? '',
 })
 
 const ampcodeMappingsToEntries = (mappings?: AmpcodeModelMapping[]): ModelEntry[] => {
@@ -74,9 +75,42 @@ export const entriesToAmpcodeMappings = (entries: ModelEntry[]): AmpcodeModelMap
     return mappings
 }
 
+const ampcodeUpstreamApiKeysToEntries = (entries?: AmpcodeUpstreamApiKeyMapping[]): AmpcodeUpstreamApiKeyEntry[] => {
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return [{ upstreamApiKey: '', clientApiKeysText: '' }]
+    }
+    return entries.map((entry) => ({
+        upstreamApiKey: entry.upstreamApiKey ?? '',
+        clientApiKeysText: Array.isArray(entry.apiKeys) ? entry.apiKeys.join('\n') : '',
+    }))
+}
+
+export const entriesToAmpcodeUpstreamApiKeys = (
+    entries: AmpcodeUpstreamApiKeyEntry[],
+): AmpcodeUpstreamApiKeyMapping[] => {
+    const seen                                     = new Set<string>()
+    const mappings: AmpcodeUpstreamApiKeyMapping[] = []
+
+    entries.forEach((entry) => {
+        const upstreamApiKey = entry.upstreamApiKey.trim()
+        if (!upstreamApiKey || seen.has(upstreamApiKey)) {
+            return
+        }
+        const apiKeys = parseTextList(entry.clientApiKeysText)
+        if (!apiKeys.length) {
+            return
+        }
+        seen.add(upstreamApiKey)
+        mappings.push({ upstreamApiKey, apiKeys: Array.from(new Set(apiKeys)) })
+    })
+
+    return mappings
+}
+
 export const buildAmpcodeFormState = (ampcode?: AmpcodeConfig | null): AmpcodeFormState => ({
     upstreamUrl: ampcode?.upstreamUrl ?? '',
     upstreamApiKey: '',
+    upstreamApiKeyEntries: ampcodeUpstreamApiKeysToEntries(ampcode?.upstreamApiKeys),
     forceModelMappings: ampcode?.forceModelMappings ?? false,
     mappingEntries: ampcodeMappingsToEntries(ampcode?.modelMappings),
 })

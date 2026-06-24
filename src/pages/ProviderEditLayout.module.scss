@@ -1,3 +1,4 @@
+@use '../styles/mixins' as *;
 @use '../styles/variables' as *;
 
 .content {
@@ -6,14 +7,11 @@
     margin: 0 auto;
 }
 
-.floatingActions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.floatingBackButton {
-    min-width: 82px;
+.subtitle {
+    margin: 0 0 12px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
 }
 
 .floatingSaveButton {
@@ -32,4 +30,52 @@
     margin: 0;
     color: var(--text-secondary);
     font-size: $font-size-base;
+}
+
+.sectionHeaderRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.upstreamApiKeysList {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.upstreamApiKeysItem {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.9fr) minmax(220px, 1.1fr) auto;
+    gap: 8px;
+    align-items: start;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+
+    @include mobile {
+        grid-template-columns: 1fr;
+    }
+}
+
+.upstreamApiKeysItemTitle {
+    grid-column: 1 / -1;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-secondary);
+}
+
+.upstreamApiKeysInput,
+.upstreamApiKeysClientInput {
+    width: 100%;
+}
+
+.upstreamApiKeysClientInput {
+    min-height: 84px;
+    resize: vertical;
+    line-height: $line-height-base;
 }

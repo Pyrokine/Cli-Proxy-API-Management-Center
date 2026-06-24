@@ -23,27 +23,53 @@ export function AiProvidersOpenAIModelsPage() {
         }
 
         const headerObject = buildHeaderObject(form.headers)
-        const firstKey     = form.apiKeyEntries.find((entry) => entry.apiKey?.trim())?.apiKey?.trim()
+        const keyEntry     = form.apiKeyEntries.find((entry) => entry.apiKey?.trim() || entry.authIndex?.trim())
+        const firstKey     = keyEntry?.apiKey?.trim()
+        const authIndex    = keyEntry?.authIndex?.trim() || form.authIndex?.trim()
         const authKey      = hasHeader(headerObject, 'authorization') ? undefined : firstKey
 
         try {
-            return await modelsApi.fetchV1ModelsViaApiCall(trimmedBaseUrl, authKey, headerObject)
+            return await modelsApi.fetchV1ModelsViaApiCall(
+                trimmedBaseUrl,
+                authKey,
+                headerObject,
+                keyEntry?.proxyUrl,
+                authIndex,
+            )
         } catch (v1Error: unknown) {
             try {
-                return await modelsApi.fetchModelsViaApiCall(trimmedBaseUrl, authKey, headerObject)
+                return await modelsApi.fetchModelsViaApiCall(
+                    trimmedBaseUrl,
+                    authKey,
+                    headerObject,
+                    keyEntry?.proxyUrl,
+                    authIndex,
+                )
             } catch {
                 try {
-                    return await modelsApi.fetchV1ModelsViaApiCall(trimmedBaseUrl)
+                    return await modelsApi.fetchV1ModelsViaApiCall(
+                        trimmedBaseUrl,
+                        undefined,
+                        undefined,
+                        undefined,
+                        authIndex,
+                    )
                 } catch {
                     try {
-                        return await modelsApi.fetchModelsViaApiCall(trimmedBaseUrl)
+                        return await modelsApi.fetchModelsViaApiCall(
+                            trimmedBaseUrl,
+                            undefined,
+                            undefined,
+                            undefined,
+                            authIndex,
+                        )
                     } catch {
                         throw v1Error
                     }
                 }
             }
         }
-    }, [form.apiKeyEntries, form.baseUrl, form.headers])
+    }, [form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers])
 
     const fetchDeps = useMemo(() => [fetchModels, form.baseUrl] as const, [fetchModels, form.baseUrl])
 

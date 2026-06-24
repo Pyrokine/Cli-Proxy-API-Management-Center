@@ -81,12 +81,6 @@ export function AiProvidersVertexEditPage() {
                         .filter(Boolean) as ProviderKeyConfig['models'],
         }),
         saveConfigs: (configs) => providersApi.saveVertexConfigs(configs),
-        validateBeforeSave: (form) => {
-            if (!(form.baseUrl ?? '').trim()) {
-                return 'notification.vertex_base_url_required'
-            }
-            return undefined
-        },
         i18n: {
             editTitle: 'ai_providers.vertex_edit_modal_title',
             addTitle: 'ai_providers.vertex_add_modal_title',
@@ -130,6 +124,7 @@ export function AiProvidersVertexEditPage() {
                 value={form.apiKey}
                 onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
                 disabled={disabled}
+                secret
             />
             <PrefixField form={form} setForm={setForm} disabled={disabled} />
             <Input

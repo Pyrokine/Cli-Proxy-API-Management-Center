@@ -1,5 +1,9 @@
 import type {AmpcodeFormState} from '@/components/providers'
-import {buildAmpcodeFormState, entriesToAmpcodeMappings} from '@/components/providers/utils'
+import {
+    buildAmpcodeFormState,
+    entriesToAmpcodeMappings,
+    entriesToAmpcodeUpstreamApiKeys,
+} from '@/components/providers/utils'
 import {Button} from '@/components/ui/Button'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
@@ -28,10 +32,22 @@ const normalizeMappingEntries = (entries: Array<{ name: string; alias: string }>
         return acc
     }, [])
 
+const normalizeUpstreamApiKeyEntries = (entries: AmpcodeFormState['upstreamApiKeyEntries']) =>
+    (entries ?? []).reduce<Array<{ upstreamApiKey: string; clientApiKeysText: string }>>((acc, entry) => {
+        const upstreamApiKey    = String(entry?.upstreamApiKey ?? '').trim()
+        const clientApiKeysText = String(entry?.clientApiKeysText ?? '').trim()
+        if (!upstreamApiKey && !clientApiKeysText) {
+            return acc
+        }
+        acc.push({ upstreamApiKey, clientApiKeysText })
+        return acc
+    }, [])
+
 const buildAmpcodeSignature = (form: AmpcodeFormState) =>
     JSON.stringify({
                        upstreamUrl: String(form.upstreamUrl ?? '').trim(),
                        upstreamApiKey: String(form.upstreamApiKey ?? '').trim(),
+                       upstreamApiKeys: normalizeUpstreamApiKeyEntries(form.upstreamApiKeyEntries),
                        forceModelMappings: Boolean(form.forceModelMappings),
                        modelMappings: normalizeMappingEntries(form.mappingEntries),
                    })
@@ -50,6 +66,7 @@ export function AiProvidersAmpcodeEditPage() {
     const [loading, setLoading]                     = useState(false)
     const [loaded, setLoaded]                       = useState(false)
     const [mappingsDirty, setMappingsDirty]         = useState(false)
+    const [upstreamKeysDirty, setUpstreamKeysDirty] = useState(false)
     const [error, setError]                         = useState('')
     const [saving, setSaving]                       = useState(false)
     const [baselineSignature, setBaselineSignature] = useState(() => buildAmpcodeSignature(buildAmpcodeFormState(null)))
@@ -94,6 +111,7 @@ export function AiProvidersAmpcodeEditPage() {
         setLoading(true)
         setLoaded(false)
         setMappingsDirty(false)
+        setUpstreamKeysDirty(false)
         setError('')
         const initialForm = buildAmpcodeFormState(useConfigStore.getState().config?.ampcode ?? null)
         setForm(initialForm)
@@ -107,6 +125,8 @@ export function AiProvidersAmpcodeEditPage() {
                 }
 
                 setLoaded(true)
+                setMappingsDirty(false)
+                setUpstreamKeysDirty(false)
                 updateConfigValue('ampcode', ampcode)
                 clearCache('ampcode')
                 const nextForm = buildAmpcodeFormState(ampcode)
@@ -178,9 +198,10 @@ export function AiProvidersAmpcodeEditPage() {
         setSaving(true)
         setError('')
         try {
-            const upstreamUrl   = form.upstreamUrl.trim()
-            const overrideKey   = form.upstreamApiKey.trim()
-            const modelMappings = entriesToAmpcodeMappings(form.mappingEntries)
+            const upstreamUrl     = form.upstreamUrl.trim()
+            const overrideKey     = form.upstreamApiKey.trim()
+            const modelMappings   = entriesToAmpcodeMappings(form.mappingEntries)
+            const upstreamApiKeys = entriesToAmpcodeUpstreamApiKeys(form.upstreamApiKeyEntries)
 
             if (upstreamUrl) {
                 await ampcodeApi.updateUpstreamUrl(upstreamUrl)
@@ -196,6 +217,10 @@ export function AiProvidersAmpcodeEditPage() {
                 } else {
                     await ampcodeApi.clearModelMappings()
                 }
+            }
+
+            if (loaded || upstreamKeysDirty) {
+                await ampcodeApi.saveUpstreamApiKeys(upstreamApiKeys)
             }
 
             if (overrideKey) {
@@ -216,6 +241,10 @@ export function AiProvidersAmpcodeEditPage() {
                 next.modelMappings = previous.modelMappings
             }
 
+            if (Array.isArray(previous.upstreamApiKeys)) {
+                next.upstreamApiKeys = previous.upstreamApiKeys
+            }
+
             if (overrideKey) {
                 next.upstreamApiKey = overrideKey
             }
@@ -228,10 +257,20 @@ export function AiProvidersAmpcodeEditPage() {
                 }
             }
 
+            if (loaded || upstreamKeysDirty) {
+                if (upstreamApiKeys.length) {
+                    next.upstreamApiKeys = upstreamApiKeys
+                } else {
+                    delete next.upstreamApiKeys
+                }
+            }
+
             updateConfigValue('ampcode', next)
             clearCache('ampcode')
             showNotification(t('notification.ampcode_updated'), 'success')
             allowNextNavigation()
+            setMappingsDirty(false)
+            setUpstreamKeysDirty(false)
             setBaselineSignature(buildAmpcodeSignature(form))
             handleBack()
         } catch (err: unknown) {
@@ -244,12 +283,12 @@ export function AiProvidersAmpcodeEditPage() {
     }
 
     const saveAmpcode = async () => {
-        if (!loaded && mappingsDirty) {
+        if (!loaded && (mappingsDirty || upstreamKeysDirty)) {
             showConfirmation({
-                                 title: t('ai_providers.ampcode_mappings_overwrite_title', {
-                                     defaultValue: 'Overwrite Mappings',
+                                 title: t('ai_providers.ampcode_lists_overwrite_title', {
+                                     defaultValue: 'Overwrite list settings',
                                  }),
-                                 message: t('ai_providers.ampcode_mappings_overwrite_confirm'),
+                                 message: t('ai_providers.ampcode_lists_overwrite_confirm'),
                                  variant: 'secondary',
                                  confirmText: t('common.confirm'),
                                  onConfirm: performSaveAmpcode,
@@ -258,6 +297,44 @@ export function AiProvidersAmpcodeEditPage() {
         }
 
         await performSaveAmpcode()
+    }
+
+    const updateUpstreamApiKeyEntry = (
+        index: number,
+        field: 'upstreamApiKey' | 'clientApiKeysText',
+        value: string,
+    ) => {
+        setUpstreamKeysDirty(true)
+        setForm((prev) => ({
+            ...prev,
+            upstreamApiKeyEntries: prev.upstreamApiKeyEntries.map((entry, entryIndex) =>
+                                                                      entryIndex === index ?
+                                                                          { ...entry, [field]: value } :
+                                                                      entry,
+            ),
+        }))
+    }
+
+    const addUpstreamApiKeyEntry = () => {
+        setUpstreamKeysDirty(true)
+        setForm((prev) => ({
+            ...prev,
+            upstreamApiKeyEntries: [
+                ...prev.upstreamApiKeyEntries,
+                { upstreamApiKey: '', clientApiKeysText: '' },
+            ],
+        }))
+    }
+
+    const removeUpstreamApiKeyEntry = (index: number) => {
+        setUpstreamKeysDirty(true)
+        setForm((prev) => {
+            const next = prev.upstreamApiKeyEntries.filter((_, entryIndex) => entryIndex !== index)
+            return {
+                ...prev,
+                upstreamApiKeyEntries: next.length ? next : [{ upstreamApiKey: '', clientApiKeysText: '' }],
+            }
+        })
     }
 
     const canSave = !disableControls && !saving && !loading
@@ -273,7 +350,7 @@ export function AiProvidersAmpcodeEditPage() {
             onSave={() => void saveAmpcode()}
             swipeRef={swipeRef}
         >
-            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.5 }}>
+            <p className={layoutStyles.subtitle}>
                 {t('ai_providers.ampcode_subtitle')}
             </p>
             <Input
@@ -287,11 +364,11 @@ export function AiProvidersAmpcodeEditPage() {
             <Input
                 label={t('ai_providers.ampcode_upstream_api_key_label')}
                 placeholder={t('ai_providers.ampcode_upstream_api_key_placeholder')}
-                type='password'
                 value={form.upstreamApiKey}
                 onChange={(e) => setForm((prev) => ({ ...prev, upstreamApiKey: e.target.value }))}
                 disabled={loading || saving || disableControls}
                 hint={t('ai_providers.ampcode_upstream_api_key_hint')}
+                secret
             />
             <div className={layoutStyles.upstreamApiKeyRow}>
                 <div className={layoutStyles.upstreamApiKeyHint}>
@@ -309,6 +386,69 @@ export function AiProvidersAmpcodeEditPage() {
                 >
                     {t('ai_providers.ampcode_clear_upstream_api_key')}
                 </Button>
+            </div>
+
+            <div className='form-group'>
+                <div className={layoutStyles.sectionHeaderRow}>
+                    <label>{t('ai_providers.ampcode_upstream_api_keys_label')}</label>
+                    <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={addUpstreamApiKeyEntry}
+                        disabled={loading || saving || disableControls}
+                    >
+                        {t('ai_providers.ampcode_upstream_api_keys_add_btn')}
+                    </Button>
+                </div>
+                <div className={layoutStyles.upstreamApiKeysList}>
+                    {form.upstreamApiKeyEntries.map((entry, index) => (
+                        <div key={index} className={layoutStyles.upstreamApiKeysItem}>
+                            <div className={layoutStyles.upstreamApiKeysItemTitle}>
+                                {t('ai_providers.ampcode_upstream_api_keys_item_title', { index: index + 1 })}
+                            </div>
+                            <input
+                                type='password'
+                                className={`input ${layoutStyles.upstreamApiKeysInput}`}
+                                value={entry.upstreamApiKey}
+                                onChange={(event) => updateUpstreamApiKeyEntry(
+                                    index,
+                                    'upstreamApiKey',
+                                    event.target.value,
+                                )}
+                                placeholder={t('ai_providers.ampcode_upstream_api_keys_upstream_placeholder')}
+                                disabled={loading || saving || disableControls}
+                                autoComplete='new-password'
+                                spellCheck={false}
+                                autoCapitalize='none'
+                                autoCorrect='off'
+                            />
+                            <textarea
+                                className={`input ${layoutStyles.upstreamApiKeysClientInput}`}
+                                value={entry.clientApiKeysText}
+                                onChange={(event) => updateUpstreamApiKeyEntry(
+                                    index,
+                                    'clientApiKeysText',
+                                    event.target.value,
+                                )}
+                                placeholder={t('ai_providers.ampcode_upstream_api_keys_clients_placeholder')}
+                                disabled={loading || saving || disableControls}
+                                rows={3}
+                                spellCheck={false}
+                                autoCapitalize='none'
+                                autoCorrect='off'
+                            />
+                            <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => removeUpstreamApiKeyEntry(index)}
+                                disabled={loading || saving || disableControls}
+                            >
+                                {t('common.delete')}
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+                <div className='hint'>{t('ai_providers.ampcode_upstream_api_keys_hint')}</div>
             </div>
 
             <div className='form-group'>

@@ -8,13 +8,13 @@ import {AiProvidersOpenAIEditLayout} from '@/pages/AiProvidersOpenAIEditLayout'
 import {AiProvidersOpenAIEditPage} from '@/pages/AiProvidersOpenAIEditPage'
 import {AiProvidersOpenAIModelsPage} from '@/pages/AiProvidersOpenAIModelsPage'
 import {AiProvidersVertexEditPage} from '@/pages/AiProvidersVertexEditPage'
-import {AuthFilesOAuthExcludedEditPage} from '@/pages/AuthFilesOAuthExcludedEditPage'
-import {AuthFilesOAuthModelAliasEditPage} from '@/pages/AuthFilesOAuthModelAliasEditPage'
 import {ConfigPage} from '@/pages/ConfigPage'
 import CredentialsPage from '@/pages/CredentialsPage'
 import {DashboardPage} from '@/pages/DashboardPage'
 import {LogsPage} from '@/pages/LogsPage'
+import {ModelManagementPage} from '@/pages/ModelManagementPage'
 import {NotFoundPage} from '@/pages/NotFoundPage'
+import {PluginManagementPage} from '@/pages/PluginManagementPage'
 import {SystemPage} from '@/pages/SystemPage'
 import {UsagePage} from '@/pages/UsagePage'
 import {type Location, useRoutes} from 'react-router-dom'
@@ -66,9 +66,9 @@ const mainRoutes = [
         ],
     },
     { path: '/credentials/ampcode', element: <AiProvidersAmpcodeEditPage /> },
-    { path: '/credentials/oauth-excluded', element: <AuthFilesOAuthExcludedEditPage /> },
-    { path: '/credentials/oauth-model-alias', element: <AuthFilesOAuthModelAliasEditPage /> },
 
+    { path: '/models', element: <ModelManagementPage /> },
+    { path: '/plugins', element: <PluginManagementPage /> },
     { path: '/usage', element: <UsagePage /> },
     { path: '/config', element: <ConfigPage /> },
     { path: '/logs', element: <LogsPage /> },

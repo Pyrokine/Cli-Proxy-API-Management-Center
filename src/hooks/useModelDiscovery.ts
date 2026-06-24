@@ -16,7 +16,12 @@ interface ModelDiscoveryConfig {
     buildEndpoint: (baseUrl: string) => string
 
     /** Fetch models from the endpoint */
-    fetchModels: (baseUrl: string, apiKey: string | undefined, headers: Record<string, string>) => Promise<ModelInfo[]>
+    fetchModels: (
+        baseUrl: string,
+        apiKey: string | undefined,
+        headers: Record<string, string>,
+        proxyUrl?: string,
+    ) => Promise<ModelInfo[]>
 
     /**
      * Determine if auto-fetch should proceed based on credentials.
@@ -66,6 +71,7 @@ export interface ModelDiscoveryReturn {
 interface DiscoveryFormState {
     apiKey: string
     baseUrl?: string
+    proxyUrl?: string
     headers: HeaderEntry[]
     modelEntries: Array<{ name: string; alias: string }>
 }
@@ -179,7 +185,13 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         try {
             const headerObject = buildHeaderObject(formState.headers)
             const apiKey       = formState.apiKey.trim() || undefined
-            const list         = await discoveryConfig.fetchModels(formState.baseUrl ?? '', apiKey, headerObject)
+            const proxyUrl     = formState.proxyUrl?.trim() || undefined
+            const list         = await discoveryConfig.fetchModels(
+                formState.baseUrl ?? '',
+                apiKey,
+                headerObject,
+                proxyUrl,
+            )
             if (requestIdRef.current !== requestId) {
                 return
             }
@@ -201,48 +213,60 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 setFetching(false)
             }
         }
-    }, [discoveryConfig, formState.apiKey, formState.baseUrl, formState.headers])
+    }, [discoveryConfig, formState.apiKey, formState.baseUrl, formState.headers, formState.proxyUrl])
 
     // ---- Auto-fetch when modal opens ----
 
-    useEffect(() => {
-        queueMicrotask(() => {
-            if (!open) {
-                autoFetchSignatureRef.current = ''
-                requestIdRef.current += 1
-                setFetching(false)
-                return
-            }
+    useEffect(
+        () => {
+            queueMicrotask(() => {
+                if (!open) {
+                    autoFetchSignatureRef.current = ''
+                    requestIdRef.current += 1
+                    setFetching(false)
+                    return
+                }
 
-            const nextEndpoint = discoveryConfig.buildEndpoint(formState.baseUrl ?? '')
-            setEndpoint(nextEndpoint)
-            setDiscoveredModels([])
-            setSearch('')
-            setSelected(new Set())
-            setError('')
+                const nextEndpoint = discoveryConfig.buildEndpoint(formState.baseUrl ?? '')
+                setEndpoint(nextEndpoint)
+                setDiscoveredModels([])
+                setSearch('')
+                setSelected(new Set())
+                setError('')
 
-            if (!nextEndpoint) {
-                return
-            }
+                if (!nextEndpoint) {
+                    return
+                }
 
-            const headerObject = buildHeaderObject(formState.headers)
-            if (!discoveryConfig.canAutoFetch(formState.apiKey.trim(), headerObject)) {
-                return
-            }
+                const headerObject = buildHeaderObject(formState.headers)
+                if (!discoveryConfig.canAutoFetch(formState.apiKey.trim(), headerObject)) {
+                    return
+                }
 
-            const headerSignature = Object.entries(headerObject)
-                                          .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                          .map(([key, value]) => `${key}:${value}`)
-                                          .join('|')
-            const signature       = `${nextEndpoint}||${formState.apiKey.trim()}||${headerSignature}`
-            if (autoFetchSignatureRef.current === signature) {
-                return
-            }
-            autoFetchSignatureRef.current = signature
+                const headerSignature = Object.entries(headerObject)
+                                              .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+                                              .map(([key, value]) => `${key}:${value}`)
+                                              .join('|')
+                const signature       = `${nextEndpoint}||${formState.apiKey.trim()}||${formState.proxyUrl?.trim() ??
+                                                                                        ''}||${headerSignature}`
+                if (autoFetchSignatureRef.current === signature) {
+                    return
+                }
+                autoFetchSignatureRef.current = signature
 
-            void fetchDiscovery()
-        })
-    }, [discoveryConfig, fetchDiscovery, formState.apiKey, formState.baseUrl, formState.headers, open])
+                void fetchDiscovery()
+            })
+        },
+        [
+            discoveryConfig,
+            fetchDiscovery,
+            formState.apiKey,
+            formState.baseUrl,
+            formState.headers,
+            formState.proxyUrl,
+            open,
+        ],
+    )
 
     // ---- Toggle selection ----
 

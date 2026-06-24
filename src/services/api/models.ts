@@ -6,6 +6,7 @@ import {normalizeApiBase} from '@/utils/connection'
 import {normalizeModelList} from '@/utils/models'
 import axios from 'axios'
 import {apiCallApi, getApiCallErrorMessage} from './apiCall'
+import {apiClient} from './client'
 
 const DEFAULT_CLAUDE_BASE_URL   = 'https://api.anthropic.com'
 const DEFAULT_GEMINI_BASE_URL   = 'https://generativelanguage.googleapis.com'
@@ -13,15 +14,102 @@ const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 const CLAUDE_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
 const GEMINI_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
 
+export type ModelCatalogPrice = {
+    prompt: number
+    completion: number
+    cache: number
+}
+
+export type ModelCatalogFileModel = {
+    name: string
+    provider: string
+    channel: string
+    group: string
+    display_name?: string
+    user_created: boolean
+    enabled: boolean
+    aliases?: string[]
+    price?: ModelCatalogPrice
+}
+
+export type ModelCatalogRow = ModelCatalogFileModel & {
+    id: string
+    runtime_available: boolean
+    runtime_providers?: string[]
+    requestable: boolean
+    not_requestable_reason?: string
+    api_key_blocked_count?: number
+    credential_excluded_count?: number
+    credential_configured_count?: number
+}
+
+export type ModelCatalogResponse = {
+    models: ModelCatalogRow[]
+    meta?: Record<string, unknown>
+}
+
+export type ModelCatalogPatchRequest = {
+    name: string
+    provider?: string
+    channel?: string
+    group?: string
+    display_name?: string
+    'display-name'?: string
+    enabled?: boolean
+    aliases?: string[]
+    price?: ModelCatalogPrice
+    clear_price?: boolean
+}
+
+export type ModelCatalogFieldChange = {
+    current?: unknown
+    default?: unknown
+}
+
+export type ModelCatalogDefaultUpdateChange = {
+    id: string
+    name: string
+    type: 'new_default' | 'changed_default' | 'restore_removed_default' | 'default_removed_upstream'
+    current?: ModelCatalogFileModel
+    default?: ModelCatalogFileModel
+    fields?: Record<string, ModelCatalogFieldChange>
+}
+
+export type ModelCatalogDefaultUpdatePreview = {
+    current_defaults_version: string
+    latest_defaults_version: string
+    changes: ModelCatalogDefaultUpdateChange[]
+}
+
+export type ModelCatalogApplyDecision = {
+    name: string
+    action: 'use_default' | 'restore' | 'adopt' | 'remove_default' | 'keep_current' | 'skip'
+}
+
+export type ModelCatalogApplyResult = {
+    status: string
+    backup_path?: string
+    applied: number
+}
+
+export type ModelCatalogApplyDefaultUpdateResponse = {
+    result: ModelCatalogApplyResult
+    catalog: ModelCatalogResponse
+}
+
 /** Fetch models from an endpoint via apiCall proxy and return a deduplicated list. */
 async function fetchModelList(
     endpoint: string,
     headers: Record<string, string>,
+    proxyUrl?: string,
+    authIndex?: string,
 ): Promise<ReturnType<typeof normalizeModelList>> {
     const result = await apiCallApi.request({
                                                 method: 'GET',
                                                 url: endpoint,
                                                 header: Object.keys(headers).length ? headers : undefined,
+                                                proxyUrl,
+                                                authIndex: authIndex?.trim() || undefined,
                                             })
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -35,12 +123,12 @@ async function fetchModelList(
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
 
-const buildRequestSignature = (url: string, headers: Record<string, string>) => {
+const buildRequestSignature = (url: string, headers: Record<string, string>, proxyUrl?: string, authIndex?: string) => {
     const headerSignature = Object.entries(headers)
                                   .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
                                   .map(([key, value]) => `${key}:${value}`)
                                   .join('|')
-    return `${url}||${headerSignature}`
+    return `${url}||${proxyUrl ?? ''}||${authIndex ?? ''}||${headerSignature}`
 }
 
 const buildModelsEndpoint = (baseUrl: string): string => {
@@ -118,6 +206,8 @@ const fetchModelsViaApiCallWithEndpoint = async (
     endpoint: string,
     apiKey?: string,
     headers: Record<string, string> = {},
+    proxyUrl?: string,
+    authIndex?: string,
 ) => {
     if (!endpoint) {
         throw new Error('Invalid base url')
@@ -129,10 +219,42 @@ const fetchModelsViaApiCallWithEndpoint = async (
         resolvedHeaders.Authorization = `Bearer ${apiKey}`
     }
 
-    return fetchModelList(endpoint, resolvedHeaders)
+    return fetchModelList(endpoint, resolvedHeaders, proxyUrl, authIndex)
 }
 
 export const modelsApi = {
+    async fetchRuntimeModels() {
+        const response = await apiClient.get<{ models?: unknown[]; data?: unknown[] } | unknown[]>('/runtime-models')
+        return normalizeModelList(response, { dedupe: true })
+    },
+
+    async fetchModelCatalog() {
+        return apiClient.get<ModelCatalogResponse>('/model-catalog')
+    },
+
+    async saveModelCatalog(models: ModelCatalogFileModel[]) {
+        return apiClient.put<ModelCatalogResponse>('/model-catalog', { models })
+    },
+
+    async patchModelCatalogModel(request: ModelCatalogPatchRequest) {
+        return apiClient.patch<ModelCatalogResponse>('/model-catalog', request)
+    },
+
+    async deleteModelCatalogModel(name: string) {
+        return apiClient.delete<ModelCatalogResponse>('/model-catalog', { params: { name } })
+    },
+
+    async fetchDefaultUpdatePreview() {
+        return apiClient.get<ModelCatalogDefaultUpdatePreview>('/model-catalog/default-update')
+    },
+
+    async applyDefaultUpdate(decisions: ModelCatalogApplyDecision[]) {
+        return apiClient.post<ModelCatalogApplyDefaultUpdateResponse>(
+            '/model-catalog/default-update/apply',
+            { decisions },
+        )
+    },
+
     /**
      * Fetch available models from /v1/models endpoint (for system info page)
      */
@@ -158,15 +280,27 @@ export const modelsApi = {
      * Fetch models from /v1/models endpoint via api-call.
      * Useful when the configured baseUrl is the upstream host root (e.g. https://api.example.com).
      */
-    async fetchV1ModelsViaApiCall(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
-        return fetchModelsViaApiCallWithEndpoint(buildV1ModelsEndpoint(baseUrl), apiKey, headers)
+    async fetchV1ModelsViaApiCall(
+        baseUrl: string,
+        apiKey?: string,
+        headers: Record<string, string> = {},
+        proxyUrl?: string,
+        authIndex?: string,
+    ) {
+        return fetchModelsViaApiCallWithEndpoint(buildV1ModelsEndpoint(baseUrl), apiKey, headers, proxyUrl, authIndex)
     },
 
     /**
      * Fetch models from /models endpoint via api-call (for OpenAI provider discovery)
      */
-    async fetchModelsViaApiCall(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
-        return fetchModelsViaApiCallWithEndpoint(buildModelsEndpoint(baseUrl), apiKey, headers)
+    async fetchModelsViaApiCall(
+        baseUrl: string,
+        apiKey?: string,
+        headers: Record<string, string> = {},
+        proxyUrl?: string,
+        authIndex?: string,
+    ) {
+        return fetchModelsViaApiCallWithEndpoint(buildModelsEndpoint(baseUrl), apiKey, headers, proxyUrl, authIndex)
     },
 
     buildV1ModelsEndpoint(baseUrl: string) {
@@ -185,7 +319,12 @@ export const modelsApi = {
      * Fetch Claude models from /v1/models via api-call.
      * Anthropic requires `x-api-key` and `anthropic-version` headers.
      */
-    async fetchClaudeModelsViaApiCall(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
+    async fetchClaudeModelsViaApiCall(
+        baseUrl: string,
+        apiKey?: string,
+        headers: Record<string, string> = {},
+        proxyUrl?: string,
+    ) {
         const endpoint = buildClaudeModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
@@ -204,13 +343,13 @@ export const modelsApi = {
             resolvedHeaders['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
         }
 
-        const signature = buildRequestSignature(endpoint, resolvedHeaders)
+        const signature = buildRequestSignature(endpoint, resolvedHeaders, proxyUrl)
         const existing  = CLAUDE_MODELS_IN_FLIGHT.get(signature)
         if (existing) {
             return existing
         }
 
-        const request = fetchModelList(endpoint, resolvedHeaders)
+        const request = fetchModelList(endpoint, resolvedHeaders, proxyUrl)
 
         CLAUDE_MODELS_IN_FLIGHT.set(signature, request)
         try {
@@ -224,7 +363,12 @@ export const modelsApi = {
      * Fetch Gemini models from /v1beta/models via api-call.
      * Gemini API accepts API key via query param or `x-goog-api-key` header.
      */
-    async fetchGeminiModelsViaApiCall(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
+    async fetchGeminiModelsViaApiCall(
+        baseUrl: string,
+        apiKey?: string,
+        headers: Record<string, string> = {},
+        proxyUrl?: string,
+    ) {
         const endpoint = buildGeminiModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
@@ -232,11 +376,13 @@ export const modelsApi = {
 
         const resolvedHeaders = { ...headers }
         const resolvedApiKey  = String(apiKey ?? '').trim()
-        if (resolvedApiKey && !hasHeader(resolvedHeaders, 'x-goog-api-key')) {
+        if (resolvedApiKey &&
+            !hasHeader(resolvedHeaders, 'x-goog-api-key') &&
+            !hasHeader(resolvedHeaders, 'authorization')) {
             resolvedHeaders['x-goog-api-key'] = resolvedApiKey
         }
 
-        const signature = buildRequestSignature(endpoint, resolvedHeaders)
+        const signature = buildRequestSignature(endpoint, resolvedHeaders, proxyUrl)
         const existing  = GEMINI_MODELS_IN_FLIGHT.get(signature)
         if (existing) {
             return existing
@@ -259,6 +405,7 @@ export const modelsApi = {
                                                             header: Object.keys(resolvedHeaders).length ?
                                                                     resolvedHeaders :
                                                                     undefined,
+                                                            proxyUrl,
                                                         })
 
                 if (result.statusCode < 200 || result.statusCode >= 300) {
