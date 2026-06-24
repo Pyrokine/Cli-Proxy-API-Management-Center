@@ -1,27 +1,31 @@
 @use 'sass:color';
 @use './variables.scss' as *;
+@use './mixins.scss' as *;
 
 .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
     gap: $spacing-sm;
+    min-height: $control-height-md;
     border: 1px solid transparent;
     border-radius: $radius-md;
-    padding: 10px 14px;
+    padding: 0 14px;
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
+    line-height: 1;
     cursor: pointer;
     transition: all $transition-fast;
     background-color: var(--bg-secondary);
     color: var(--text-primary);
 
-    // .btn 内层 span 在 flex 容器中被 blockify(display:block)后高度按 line-box 算,
-    // 比 inline-flex 内容高 ~3.5px,导致内容贴顶视觉偏上.改 inline-flex 让自身高度
-    // 收敛到内容高度,父 .btn 的 align-items:center 即可正确居中.
     > .btn-content {
         display: inline-flex;
         align-items: center;
+        justify-content: center;
+        gap: $spacing-xs;
+        line-height: 1;
     }
 
     &.btn-primary {
@@ -72,8 +76,15 @@
     }
 
     &.btn-sm {
-        padding: 8px 10px;
+        min-height: $control-height-sm;
+        padding: 0 10px;
         font-size: $font-size-sm;
+    }
+
+    &.btn-xs {
+        min-height: $control-height-xs;
+        padding: 0 8px;
+        font-size: $font-size-xs;
     }
 
     &:disabled {
@@ -94,9 +105,10 @@
 .input,
 textarea {
     width: 100%;
+    min-height: $control-height-md;
     border: 1px solid var(--border-color);
     border-radius: $radius-md;
-    padding: 10px 12px;
+    padding: 0 12px;
     font-size: $font-size-sm;
     font-weight: $font-weight-normal;
     background-color: var(--bg-secondary);
@@ -109,6 +121,12 @@ textarea {
         border-color: var(--primary-color);
         box-shadow: 0 0 0 3px rgba($primary-color, 0.18);
     }
+}
+
+textarea {
+    min-height: 96px;
+    padding: 10px 12px;
+    line-height: $line-height-base;
 }
 
 .form-group {
@@ -158,12 +176,8 @@ textarea {
 }
 
 .status-badge {
-    display: inline-flex;
-    align-items: center;
+    @include token-base(24px, 10px, $font-size-xs);
     gap: 6px;
-    padding: 4px 10px;
-    border-radius: $radius-full;
-    font-size: $font-size-xs;
     border: 1px solid var(--border-color);
     margin-bottom: $spacing-md;
 
@@ -348,12 +362,14 @@ textarea {
 }
 
 .pill {
-    padding: 4px 10px;
-    border-radius: $radius-full;
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    font-size: $font-size-xs;
+    @include token-soft(
+        var(--text-secondary),
+        var(--bg-secondary),
+        var(--border-color),
+        24px,
+        10px,
+        $font-size-xs
+    );
 }
 
 .loading-spinner {
@@ -536,6 +552,22 @@ textarea {
     justify-content: flex-end;
     gap: $spacing-sm;
     background: var(--bg-primary);
+}
+
+.confirmation-message {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}
+
+.confirmation-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: $spacing-sm;
+    margin-top: $spacing-lg;
 }
 
 .request-log-modal {

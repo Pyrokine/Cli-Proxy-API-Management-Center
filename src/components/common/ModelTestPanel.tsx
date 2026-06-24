@@ -26,6 +26,8 @@ interface ModelTestPanelProps {
     testButtonLabel?: string
     /** HTML title attribute for the test button */
     testButtonTitle?: string
+    /** Allows providers with an implicit default model to test when no custom models are configured */
+    allowEmptyModelTest?: boolean
 }
 
 /**
@@ -47,8 +49,10 @@ export function ModelTestPanel({
                                    testButtonDisabled,
                                    testButtonLabel,
                                    testButtonTitle,
+                                   allowEmptyModelTest = false,
                                }: ModelTestPanelProps) {
-    const { t } = useTranslation()
+    const { t }     = useTranslation()
+    const hasModels = availableModels.length > 0
 
     return (
         <>
@@ -67,13 +71,13 @@ export function ModelTestPanel({
                             setTestMessage('')
                         }}
                         placeholder={
-                            availableModels.length
+                            hasModels
                             ? t(`${i18nPrefix}_test_select_placeholder`)
                             : t(`${i18nPrefix}_test_select_empty`)
                         }
                         className={styles.openaiTestSelect}
                         ariaLabel={t(`${i18nPrefix}_test_title`)}
-                        disabled={disabled || isTesting || testStatus === 'loading' || availableModels.length === 0}
+                        disabled={disabled || isTesting || testStatus === 'loading' || !hasModels}
                     />
                     <Button
                         variant={testStatus === 'error' ? 'danger' : 'secondary'}
@@ -85,7 +89,7 @@ export function ModelTestPanel({
                             isTesting ||
                             testStatus === 'loading' ||
                             testButtonDisabled ||
-                            availableModels.length === 0
+                            (!allowEmptyModelTest && !hasModels)
                         }
                         title={testButtonTitle}
                         className={styles.modelTestAllButton}

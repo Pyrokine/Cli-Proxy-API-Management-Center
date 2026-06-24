@@ -45,7 +45,7 @@
 
 .aboutTitle {
     width: min(100%, 920px);
-    font-size: clamp(28px, 4.2vw, 44px);
+    font-size: clamp($font-size-display-md, 4.2vw, $font-size-display-xl);
     font-weight: $font-weight-semibold;
     line-height: 1.12;
     color: var(--text-primary);
@@ -291,6 +291,42 @@
     font-size: $font-size-sm;
     color: var(--text-secondary);
     margin: 0 0 $spacing-md 0;
+}
+
+.emptyStatePanel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: $spacing-md;
+    border: 1px dashed var(--border-color);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+}
+
+.emptyStateTitle {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.emptyStateText {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.inlineActionLink {
+    width: fit-content;
+    color: var(--primary-color);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    text-decoration: none;
+
+    &:hover,
+    &:focus-visible {
+        text-decoration: underline;
+    }
 }
 
 .clearLoginActions {
@@ -582,7 +618,7 @@
 
     .aboutTitle {
         width: min(100%, 24ch);
-        font-size: clamp(22px, 6.6vw, 34px);
+        font-size: clamp($font-size-display-sm, 6.6vw, $font-size-display-lg);
         font-weight: $font-weight-semibold;
         line-height: 1.18;
         letter-spacing: -0.012em;
@@ -592,17 +628,11 @@
 @media (max-width: 520px) {
     .aboutTitle {
         width: min(100%, 19ch);
-        font-size: clamp($font-size-xl, 7.2vw, 28px);
+        font-size: clamp($font-size-xl, 7.2vw, $font-size-display-md);
         font-weight: $font-weight-semibold;
         line-height: 1.22;
         letter-spacing: -0.006em;
     }
-}
-
-.emptyStateText {
-    font-size: $font-size-sm;
-    color: var(--text-secondary);
-    margin: 0;
 }
 
 .rateLimitTable {
@@ -635,6 +665,16 @@
     flex: 1;
     text-align: left;
     padding-left: $spacing-md;
+
+    > div + div {
+        margin-top: 4px;
+    }
+}
+
+.rateLimitReason {
+    color: var(--text-primary);
+    font-weight: $font-weight-medium;
+    line-height: 1.4;
 }
 
 .rateLimitHistory {

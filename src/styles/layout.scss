@@ -549,8 +549,6 @@
     scrollbar-gutter: stable;
     height: 100%;
     background: var(--bg-secondary);
-    // 隔离内容区 reflow，避免页面切换时侧边栏跳动
-    contain: layout style;
 
     &::before {
         content: '';
@@ -579,7 +577,7 @@
     display: flex;
     flex-direction: column;
     gap: $spacing-md;
-    overflow-x: hidden;
+    overflow-x: clip;
 
     &.main-content-logs {
         flex: 1 1 auto;

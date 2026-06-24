@@ -1,4 +1,5 @@
 import {CardSkeleton, type CardSkeletonProps} from '@/components/common/CardSkeleton'
+import {Button} from '@/components/ui/Button'
 import type {ReactNode} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './DataStatusCard.module.scss'
@@ -83,9 +84,9 @@ export function DataStatusCard({
                 {errorMessage && <div className={styles.statusHint}>{errorMessage}</div>}
                 {onRetry && (
                     <div className={styles.statusActions}>
-                        <button type='button' className={styles.retryButton} onClick={onRetry} disabled={retrying}>
-                            {retrying ? t('common.loading', '加载中...') : t('common.retry', '重试')}
-                        </button>
+                        <Button type='button' variant='secondary' size='sm' onClick={onRetry} loading={retrying}>
+                            {t('common.retry', '重试')}
+                        </Button>
                     </div>
                 )}
             </div>
@@ -108,9 +109,9 @@ export function DataStatusCard({
             {emptyHint && <div className={styles.statusHint}>{emptyHint}</div>}
             {onRetry && (
                 <div className={styles.statusActions}>
-                    <button type='button' className={styles.retryButton} onClick={onRetry} disabled={retrying}>
-                        {retrying ? t('common.loading', '加载中...') : t('common.refresh', '刷新')}
-                    </button>
+                    <Button type='button' variant='secondary' size='sm' onClick={onRetry} loading={retrying}>
+                        {t('common.refresh', '刷新')}
+                    </Button>
                 </div>
             )}
         </div>

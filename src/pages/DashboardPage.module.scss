@@ -264,7 +264,7 @@
 
 .configGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
     gap: $spacing-sm;
 }
 
@@ -280,9 +280,11 @@
 }
 
 .configLabel {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
     font-size: $font-size-base;
     font-weight: $font-weight-medium;
-    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .configValue {

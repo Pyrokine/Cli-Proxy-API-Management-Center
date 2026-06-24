@@ -35,6 +35,8 @@
     display: inline-flex;
     align-items: center;
     gap: $spacing-xs;
-    font-weight: $font-weight-semibold;
     color: var(--text-primary);
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    line-height: 1.4;
 }

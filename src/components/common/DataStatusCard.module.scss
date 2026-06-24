@@ -38,23 +38,3 @@
     justify-content: center;
     align-items: center;
 }
-
-.retryButton {
-    padding: 6px 14px;
-    border-radius: 6px;
-    border: 1px solid var(--border-default, #d0d4dc);
-    background: var(--surface-elevated, #fff);
-    color: var(--text-primary, #333);
-    font-size: $font-size-sm;
-    cursor: pointer;
-    transition: background 0.15s ease;
-
-    &:hover {
-        background: var(--surface-hover, #f5f6f8);
-    }
-
-    &:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-}

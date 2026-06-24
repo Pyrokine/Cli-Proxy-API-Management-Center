@@ -754,7 +754,13 @@ export function SystemPage() {
                     {modelsLoading ? (
                         <div className='hint'>{t('common.loading')}</div>
                     ) : models.length === 0 ? (
-                        <div className='hint'>{t('system_info.models_empty')}</div>
+                        <div className={styles.emptyStatePanel}>
+                            <div className={styles.emptyStateTitle}>{t('system_info.models_empty')}</div>
+                            <p className={styles.emptyStateText}>{t('system_info.models_empty_reason')}</p>
+                            <Link to='/models' className={styles.inlineActionLink}>
+                                {t('credentials.model_management_manage', { defaultValue: '前往模型管理' })}
+                            </Link>
+                        </div>
                     ) : (
                             <div className='item-list'>
                                 {groupedModels.map((group) => {
@@ -934,7 +940,9 @@ export function SystemPage() {
                 >
                     <p className={styles.sectionDescription}>{t('system_info.rate_limit_desc')}</p>
                     {rateLimitLoading ? null : bannedIPs.length === 0 ? (
-                        <p className={styles.emptyStateText}>{t('system_info.rate_limit_no_banned')}</p>
+                        <div className={styles.emptyStatePanel}>
+                            <div className={styles.emptyStateTitle}>{t('system_info.rate_limit_no_banned')}</div>
+                        </div>
                     ) : (
                                                    <table className={styles.rateLimitTable}>
                                                        <tbody>

@@ -40,60 +40,15 @@
 }
 
 .sheetTable {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: $font-size-sm;
-
-    th,
-    td {
-        padding: 10px 12px;
-        text-align: left;
-        border-bottom: 1px solid var(--border-color);
-        vertical-align: middle;
-    }
-
-    th {
-        font-weight: $font-weight-medium;
-        color: var(--text-tertiary);
-        background-color: var(--bg-secondary);
-        white-space: nowrap;
-    }
-
-    td {
-        color: var(--text-primary);
-    }
-
-    tbody tr:hover {
-        background-color: var(--bg-tertiary);
-    }
+    @include data-table-base;
 }
 
 .sortableHeader {
-    user-select: none;
-    transition: color 0.15s ease;
-
-    &:hover {
-        color: var(--text-primary);
-    }
+    @include sortable-header;
 }
 
 .sortHeaderButton {
-    display: inline-flex;
-    align-items: center;
-    width: 100%;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-
-    &:focus-visible {
-        outline: 2px solid var(--primary-color);
-        outline-offset: 2px;
-        border-radius: $radius-sm;
-    }
+    @include sort-header-button;
 }
 
 .busyShell {

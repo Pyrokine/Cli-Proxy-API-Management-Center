@@ -78,7 +78,6 @@ export function PageTransition({
                                           layers[layers.length - 1]
     const currentLayerKey               = currentLayer?.key ?? getLayerKey(location)
     const currentLayerPathname          = currentLayer?.location.pathname
-    const currentLayerSearch            = currentLayer?.location.search ?? ''
     const currentLayerHash              = currentLayer?.location.hash ?? ''
 
     const resolveScrollContainer = useCallback(() => {
@@ -92,14 +91,15 @@ export function PageTransition({
     }, [scrollContainerRef])
 
     useLayoutEffect(() => {
+        const scrollContainer = resolveScrollContainer()
+        scrollContainer?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+    }, [resolveScrollContainer])
+
+    useLayoutEffect(() => {
         if (isAnimating) {
             return
         }
-        const isSameLocation =
-                  currentLayerPathname === location.pathname &&
-                  currentLayerSearch === location.search &&
-                  currentLayerHash === location.hash
-        if (isSameLocation) {
+        if (currentLayerPathname === location.pathname && currentLayerHash === location.hash) {
             return
         }
         const scrollContainer       = resolveScrollContainer()
@@ -194,7 +194,6 @@ export function PageTransition({
                         location,
                         currentLayerKey,
                         currentLayerPathname,
-                        currentLayerSearch,
                         currentLayerHash,
                         getRouteOrder,
                         getTransitionVariant,
@@ -401,6 +400,7 @@ export function PageTransition({
 
                 return layers.map((layer, index) => {
                     const shouldKeepStacked = layer.status === 'stacked' && index === keepStackedIndex
+                    const renderLocation    = layer.status === 'current' ? location : layer.location
                     return (
                         <div
                             key={layer.key}
@@ -423,7 +423,7 @@ export function PageTransition({
                             }
                         >
                             <PageTransitionLayerContext.Provider value={{ status: layer.status }}>
-                                {render(layer.location)}
+                                {render(renderLocation)}
                             </PageTransitionLayerContext.Provider>
                         </div>
                     )

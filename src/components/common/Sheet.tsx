@@ -1,7 +1,7 @@
 import {Input} from '@/components/ui/Input'
 import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import {Pagination} from '@/components/ui/Pagination'
-import {type ReactNode, useMemo, useState} from 'react'
+import {Fragment, type ReactNode, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {DataStatusCard, type DataStatusValue} from './DataStatusCard'
 import styles from './Sheet.module.scss'
@@ -40,7 +40,14 @@ interface SheetProps<T> {
     pageSizeOptions?: number[]
     toolbarContent?: ReactNode
     summaryContent?: ReactNode
+    footerContent?: ReactNode
     className?: string
+    scrollClassName?: string
+    tableWrapClassName?: string
+    tableClassName?: string
+    rowClassName?: (row: T, index: number) => string | undefined
+    renderRow?: (row: T, index: number) => ReactNode
+    colGroup?: ReactNode
     refreshing?: boolean
     refreshingText?: string
 }
@@ -50,6 +57,11 @@ function compareSortValue(left: string | number, right: string | number): number
         return left - right
     }
     return String(left ?? '').localeCompare(String(right ?? ''))
+}
+
+function mergeClassNames(...classNames: Array<string | undefined | false>): string | undefined {
+    const merged = classNames.filter(Boolean).join(' ')
+    return merged || undefined
 }
 
 export function Sheet<T>({
@@ -76,7 +88,14 @@ export function Sheet<T>({
                              pageSizeOptions = [10, 25, 50, 100],
                              toolbarContent,
                              summaryContent,
+                             footerContent,
                              className,
+                             scrollClassName,
+                             tableWrapClassName,
+                             tableClassName,
+                             rowClassName,
+                             renderRow,
+                             colGroup,
                              refreshing = false,
                              refreshingText,
                          }: SheetProps<T>) {
@@ -169,7 +188,25 @@ export function Sheet<T>({
         )
     }
 
-    const rootClassName = className ? `${styles.sheetRoot} ${className}` : styles.sheetRoot
+    const rootClassName      = mergeClassNames(styles.sheetRoot, className)
+    const scrollClasses      = mergeClassNames(styles.sheetScroll, scrollClassName)
+    const tableWrapClasses   = mergeClassNames(styles.sheetTableWrap, tableWrapClassName)
+    const tableClasses       = mergeClassNames(styles.sheetTable, tableClassName)
+    const renderDefaultRow   = (row: T, index: number) => (
+        <tr key={rowKey(row, index)} className={rowClassName?.(row, index)}>
+            {columns.map((column) => (
+                <td key={column.key} className={column.className}>
+                    {column.cell(row)}
+                </td>
+            ))}
+        </tr>
+    )
+    const renderSheetBodyRow = (row: T, index: number) => {
+        if (renderRow) {
+            return <Fragment key={rowKey(row, index)}>{renderRow(row, index)}</Fragment>
+        }
+        return renderDefaultRow(row, index)
+    }
 
     return (
         <div className={rootClassName}>
@@ -219,23 +256,14 @@ export function Sheet<T>({
                             </div>
                         </div>
                     )}
-                    <div className={styles.sheetScroll}>
-                        <div className={styles.sheetTableWrap}>
-                            <table className={styles.sheetTable}>
+                    <div className={scrollClasses}>
+                        <div className={tableWrapClasses}>
+                            <table className={tableClasses}>
+                                {colGroup}
                                 <thead>
                                 <tr>{columns.map((column) => renderHeader(column))}</tr>
                                 </thead>
-                                <tbody>
-                                {pagedRows.map((row, index) => (
-                                    <tr key={rowKey(row, index)}>
-                                        {columns.map((column) => (
-                                            <td key={column.key} className={column.className}>
-                                                {column.cell(row)}
-                                            </td>
-                                        ))}
-                                    </tr>
-                                ))}
-                                </tbody>
+                                <tbody>{pagedRows.map((row, index) => renderSheetBodyRow(row, index))}</tbody>
                             </table>
                         </div>
                     </div>
@@ -254,6 +282,7 @@ export function Sheet<T>({
                             />
                         </div>
                     )}
+                    {footerContent && <div className={styles.paginationWrap}>{footerContent}</div>}
                 </div>
             </DataStatusCard>
         </div>

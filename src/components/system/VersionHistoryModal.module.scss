@@ -1,5 +1,14 @@
 @use '../../styles/variables' as *;
 
+.historyModal {
+    max-height: calc(100vh - 48px);
+
+    :global(.modal-body) {
+        max-height: calc(100vh - 180px);
+        overflow: auto;
+    }
+}
+
 .unofficialWarning {
     display: flex;
     align-items: center;
@@ -212,7 +221,7 @@
     line-height: $line-height-base;
     white-space: pre-line;
     overflow-wrap: break-word;
-    max-height: 200px;
+    max-height: 320px;
     overflow-y: auto;
     padding: $spacing-sm;
     border-radius: $radius-sm;

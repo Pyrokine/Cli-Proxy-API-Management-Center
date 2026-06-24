@@ -70,20 +70,178 @@
     }
 }
 
-// 警告徽章
-@mixin warning-badge {
+@mixin chip-base(
+    $min-height: 24px,
+    $padding-x: 9px,
+    $font-size: $font-size-xs,
+    $font-weight: $font-weight-medium,
+    $radius: $radius-full
+) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
+    min-height: $min-height;
+    padding: 2px $padding-x 0;
+    border-radius: $radius;
+    font-size: $font-size;
+    font-weight: $font-weight;
+    line-height: 1;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+@mixin chip-soft(
+    $color: var(--text-secondary),
+    $background: color-mix(in srgb, var(--bg-secondary) 72%, transparent),
+    $border-color: color-mix(in srgb, var(--border-color) 84%, transparent),
+    $min-height: 24px,
+    $padding-x: 9px,
+    $font-size: $font-size-xs,
+    $font-weight: $font-weight-medium,
+    $radius: $radius-full
+) {
+    @include chip-base($min-height, $padding-x, $font-size, $font-weight, $radius);
+    border: 1px solid $border-color;
+    background: $background;
+    color: $color;
+}
+
+@mixin token-base(
+    $min-height: 24px,
+    $padding-x: 9px,
+    $font-size: $font-size-xs,
+    $font-weight: $font-weight-medium,
+    $radius: $radius-full
+) {
+    @include chip-base($min-height, $padding-x, $font-size, $font-weight, $radius);
+}
+
+@mixin token-soft(
+    $color: var(--text-secondary),
+    $background: color-mix(in srgb, var(--bg-secondary) 72%, transparent),
+    $border-color: color-mix(in srgb, var(--border-color) 84%, transparent),
+    $min-height: 24px,
+    $padding-x: 9px,
+    $font-size: $font-size-xs,
+    $font-weight: $font-weight-medium,
+    $radius: $radius-full
+) {
+    @include chip-soft($color, $background, $border-color, $min-height, $padding-x, $font-size, $font-weight, $radius);
+}
+
+// 警告徽章
+@mixin warning-badge {
+    @include token-soft(
+        var(--warning-text),
+        var(--warning-bg),
+        var(--warning-border),
+        28px,
+        10px,
+        $font-size-xs,
+        $font-weight-semibold
+    );
     min-width: 28px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
-    color: var(--warning-text);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-semibold;
+}
+
+@mixin data-table-base {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: $font-size-sm;
+
+    th,
+    td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+        vertical-align: middle;
+    }
+
+    th {
+        font-weight: $font-weight-medium;
+        color: var(--text-tertiary);
+        background-color: var(--bg-secondary);
+        white-space: nowrap;
+    }
+
+    td {
+        color: var(--text-primary);
+    }
+
+    tbody tr:hover {
+        background-color: var(--bg-tertiary);
+    }
+}
+
+@mixin sortable-header {
+    user-select: none;
+    transition: color 0.15s ease;
+
+    &:hover {
+        color: var(--text-primary);
+    }
+}
+
+@mixin sort-header-button {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+        border-radius: $radius-sm;
+    }
+}
+
+@mixin management-page-shell {
+    .page {
+        display: flex;
+        flex-direction: column;
+        gap: $spacing-md;
+    }
+
+    .header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: $spacing-md;
+
+        h1 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: $font-size-xl;
+            font-weight: $font-weight-semibold;
+        }
+
+        p {
+            margin: 6px 0 0;
+            color: var(--text-secondary);
+            font-size: $font-size-sm;
+            line-height: $line-height-base;
+        }
+
+        @include mobile {
+            flex-direction: column;
+        }
+    }
+
+    .statsGrid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: $spacing-md;
+
+        @include mobile {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
 }
 
 // 按钮重置

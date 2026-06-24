@@ -407,7 +407,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                 target: targetLabel,
                 defaultValue: `${targetLabel} history`,
             })}
-            width={680}
+            width='min(1120px, calc(100vw - 48px))'
+            className={styles.historyModal}
         >
             {isNonOfficial && (
                 <div className={styles.unofficialWarning}>
