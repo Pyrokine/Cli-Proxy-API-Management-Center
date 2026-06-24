@@ -11,6 +11,7 @@ import type {
     CodexQuotaState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    XaiQuotaState,
 } from '@/types'
 import {formatQuotaResetTime} from '@/utils/quota/formatters'
 import {useMemo} from 'react'
@@ -78,6 +79,21 @@ function fromKimi(state: KimiQuotaState): QuotaItem[] {
                 }))
 }
 
+function fromXai(state: XaiQuotaState): QuotaItem[] {
+    if (state.status !== 'success' || !state.billing || state.billing.usedPercent === null) {
+        return []
+    }
+    return [
+        {
+            model: 'xAI Billing',
+            percent: Math.round(Math.max(0, 100 - state.billing.usedPercent)),
+            resetLabel: state.billing.billingPeriodEnd ?
+                        formatQuotaResetTime(state.billing.billingPeriodEnd) :
+                        undefined,
+        },
+    ]
+}
+
 interface CredentialQuotaResult {
     items?: QuotaItem[]
     error?: string
@@ -95,9 +111,10 @@ export function useCredentialQuota(fileName: string): CredentialQuotaResult {
     const codex       = useQuotaStore((s) => s.codexQuota[fileName])
     const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[fileName])
     const kimi        = useQuotaStore((s) => s.kimiQuota[fileName])
+    const xai         = useQuotaStore((s) => s.xaiQuota[fileName])
 
     return useMemo(() => {
-        const states = [antigravity, claude, codex, geminiCli, kimi]
+        const states = [antigravity, claude, codex, geminiCli, kimi, xai]
         const active = states.find((s) => s != null)
         if (!active) {
             return {}
@@ -127,7 +144,10 @@ export function useCredentialQuota(fileName: string): CredentialQuotaResult {
         if (kimi?.status === 'success') {
             return { items: fromKimi(kimi) }
         }
+        if (xai?.status === 'success') {
+            return { items: fromXai(xai) }
+        }
 
         return {}
-    }, [antigravity, claude, codex, geminiCli, kimi])
+    }, [antigravity, claude, codex, geminiCli, kimi, xai])
 }

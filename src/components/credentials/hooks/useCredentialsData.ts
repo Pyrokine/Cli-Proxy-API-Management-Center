@@ -1,3 +1,4 @@
+import {inferProviderFromAuthFileName} from '@/features/authFiles/constants'
 import {authFilesApi} from '@/services/api/authFiles'
 import {useConfigStore} from '@/stores'
 import type {Config} from '@/types'
@@ -25,6 +26,16 @@ const createEmptyVendorData = (): VendorData => ({
     apiKeys: [],
     authFiles: [],
 })
+
+const authFileSupplierTokens = (file: AuthFileItem): string[] =>
+    [file.provider, file.type, inferProviderFromAuthFileName(file.name)]
+        .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+        .map((item) => item.trim().toLowerCase())
+
+const authFileBelongsToVendor = (file: AuthFileItem, vendor: VendorDefinition): boolean => {
+    const vendorTypes = new Set([...vendor.authFileTypes, ...vendor.oauthProviders].map((item) => item.toLowerCase()))
+    return authFileSupplierTokens(file).some((token) => vendorTypes.has(token))
+}
 
 /**
  * Aggregate credentials data from config store, auth files API, and usage stats.
@@ -91,8 +102,8 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
             }
 
             // Auth files matching this vendor
-            if (vendor.authFileTypes.length > 0) {
-                data.authFiles = authFiles.filter((f) => f.type && vendor.authFileTypes.includes(f.type))
+            if (vendor.authFileTypes.length > 0 || vendor.oauthProviders.length > 0) {
+                data.authFiles = authFiles.filter((file) => authFileBelongsToVendor(file, vendor))
             }
 
             map.set(vendor.id, data)

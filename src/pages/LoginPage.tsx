@@ -7,8 +7,9 @@ import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {isSecureStorageProtected, secureStorage} from '@/services/storage/secureStorage'
 import {useAuthStore, useLanguageStore, useNotificationStore} from '@/stores'
 import type {ApiError} from '@/types'
-import {detectApiBaseFromLocation, normalizeApiBase} from '@/utils/connection'
+import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
+import {isEncodedStorageValue} from '@/utils/encryption'
 import {isSupportedLanguage} from '@/utils/language'
 import React, {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -20,11 +21,53 @@ import styles from './LoginPage.module.scss'
  */
 type RedirectState = { from?: { pathname?: string } }
 
+const isErrorRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+
+const firstTextValue = (...values: unknown[]) => {
+    for (const value of values) {
+        if (typeof value === 'string' || typeof value === 'number') {
+            const text = String(value).trim()
+            if (text) {
+                return text
+            }
+        }
+    }
+    return ''
+}
+
+const readBackendErrorDetail = (value: unknown): string => {
+    const direct = firstTextValue(value)
+    if (direct) {
+        return direct
+    }
+    if (!isErrorRecord(value)) {
+        return ''
+    }
+
+    const errorValue = value.error
+    if (isErrorRecord(errorValue)) {
+        const nested = firstTextValue(errorValue.message, errorValue.details, errorValue.detail, errorValue.reason)
+        if (nested) {
+            return nested
+        }
+    }
+
+    return firstTextValue(errorValue, value.message, value.details, value.detail, value.reason)
+}
+
+const appendBackendDetail = (baseMessage: string, detail: string) => {
+    if (!detail || baseMessage.includes(detail)) {
+        return baseMessage
+    }
+    return `${baseMessage}: ${detail}`
+}
+
 function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): string {
-    const apiError = error as Partial<ApiError>
-    const status   = typeof apiError.status === 'number' ? apiError.status : undefined
-    const code     = typeof apiError.code === 'string' ? apiError.code : undefined
-    const message  =
+    const apiError      = error as Partial<ApiError>
+    const status        = typeof apiError.status === 'number' ? apiError.status : undefined
+    const code          = typeof apiError.code === 'string' ? apiError.code : undefined
+    const message       =
               error instanceof Error
               ? error.message
               : typeof apiError.message === 'string'
@@ -32,39 +75,36 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
                 : typeof error === 'string'
                   ? error
                   : ''
+    const backendDetail = readBackendErrorDetail(apiError.details) || readBackendErrorDetail(apiError.data) || message
 
-    // 根据 HTTP 状态码判断
     if (status === 401) {
-        return t('login.error_unauthorized')
+        return appendBackendDetail(t('login.error_unauthorized'), backendDetail)
     }
     if (status === 403) {
-        return t('login.error_forbidden')
+        return appendBackendDetail(t('login.error_forbidden'), backendDetail)
     }
     if (status === 404) {
-        return t('login.error_not_found')
+        return appendBackendDetail(t('login.error_not_found'), backendDetail)
     }
     if (status && status >= 500) {
-        return t('login.error_server')
+        return appendBackendDetail(t('login.error_server'), backendDetail)
     }
 
-    // 根据 axios 错误码判断
     if (code === 'ECONNABORTED' || message.toLowerCase().includes('timeout')) {
-        return t('login.error_timeout')
+        return appendBackendDetail(t('login.error_timeout'), backendDetail)
     }
     if (code === 'ERR_NETWORK' || message.toLowerCase().includes('network error')) {
-        return t('login.error_network')
+        return appendBackendDetail(t('login.error_network'), backendDetail)
     }
     if (code === 'ERR_CERT_AUTHORITY_INVALID' || message.toLowerCase().includes('certificate')) {
-        return t('login.error_ssl')
+        return appendBackendDetail(t('login.error_ssl'), backendDetail)
     }
 
-    // 检查 CORS 错误
     if (message.toLowerCase().includes('cors') || message.toLowerCase().includes('cross-origin')) {
-        return t('login.error_cors')
+        return appendBackendDetail(t('login.error_cors'), backendDetail)
     }
 
-    // 默认错误消息
-    return t('login.error_invalid')
+    return appendBackendDetail(t('login.error_invalid'), backendDetail)
 }
 
 export function LoginPage() {
@@ -116,8 +156,13 @@ export function LoginPage() {
         const init = async () => {
             let autoLoggedIn = false
             try {
-                autoLoggedIn = await restoreSession()
+                autoLoggedIn        = await restoreSession()
+                const restoredState = useAuthStore.getState()
                 if (autoLoggedIn) {
+                    if (restoredState.storageRestoreFailed) {
+                        showNotification(t('login.storage_restore_failed'), 'warning')
+                        useAuthStore.setState({ storageRestoreFailed: false })
+                    }
                     setAutoLoginSuccess(true)
                     // 延迟跳转，让用户看到成功动画
                     setTimeout(() => {
@@ -127,15 +172,24 @@ export function LoginPage() {
                     return
                 }
 
-                const restoredState = useAuthStore.getState()
-                setApiBase(restoredState.apiBase || storedBase || detectedBase)
-                setManagementKey(restoredState.managementKey || storedKey || '')
-                setRememberPassword(restoredState.rememberPassword || storedRememberPassword || Boolean(storedKey))
-                const authRaw = await secureStorage.getItem<string>('cli-proxy-auth', {
+                const restoredBase = resolveApiBase(restoredState.apiBase, storedBase, detectedBase)
+                const restoredKey  = [restoredState.managementKey, storedKey].find(
+                    (key) => key && !isEncodedStorageValue(key),
+                ) || ''
+                setApiBase(restoredBase || detectedBase)
+                setManagementKey(restoredKey)
+                setRememberPassword(restoredState.rememberPassword || storedRememberPassword || Boolean(restoredKey))
+                let invalidStoredAuth = false
+                const authRaw         = await secureStorage.getItem<string>('cli-proxy-auth', {
                     encrypt: true,
                     persistent: false,
+                    onInvalidEncryptedValue: () => {
+                        invalidStoredAuth = true
+                    },
                 })
-                if (authRaw && insecureStorage) {
+                if (invalidStoredAuth || restoredState.storageRestoreFailed) {
+                    setStorageWarning(t('login.storage_restore_failed'))
+                } else if (authRaw && insecureStorage) {
                     setStorageWarning(t('login.storage_warning'))
                 }
             } finally {
@@ -155,7 +209,7 @@ export function LoginPage() {
             return
         }
 
-        const baseToUse = apiBase ? normalizeApiBase(apiBase) : detectedBase
+        const baseToUse = normalizeApiBase(apiBase) || detectedBase
         setLoading(true)
         setError('')
         try {

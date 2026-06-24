@@ -2,10 +2,11 @@ import {Button} from '@/components/ui/Button'
 import {IconChevronDown, IconChevronUp, IconKey, IconLogIn, IconPlus, IconUpload} from '@/components/ui/icons'
 import {Pagination} from '@/components/ui/Pagination'
 import {AuthFilesPrefixProxyEditorModal} from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal'
-import {formatAuthFileDisplayName, formatModified} from '@/features/authFiles/constants'
+import {formatAuthFileDisplayName, formatModified, inferProviderFromAuthFileName} from '@/features/authFiles/constants'
 import {useAuthFilesPrefixProxyEditor} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 import {useCredentialQuota} from '@/hooks/useCredentialQuota'
 import type {OAuthProvider} from '@/services/api/oauth'
+import type {SummaryApiKeyStats} from '@/services/api/usage'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {maskApiKey} from '@/utils/format'
@@ -49,6 +50,7 @@ interface VendorSectionProps {
     onSelectVendorFiles?: (fileNames: string[], selected: boolean) => void
     onVisibleAuthFilesChange?: (vendorId: string, fileNames: string[]) => void
     quotaStatusMap?: Record<string, string>
+    apiKeyUsageStats?: Record<string, SummaryApiKeyStats>
     scheduler: QuotaSchedulerLike
 }
 
@@ -69,6 +71,58 @@ const matchesSearchQuery = (value: string, query: string, wildcard: RegExp | nul
     }
     return wildcard ? wildcard.test(value) : value.toLowerCase().includes(query)
 }
+
+const joinSearchTokens = (items: Array<string | number | null | undefined | false>): string =>
+    items
+        .flatMap((item) => String(item ?? '').split(/\s+/))
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(' ')
+
+const authFileProviderLabel = (file: AuthFileItem): string =>
+    String(file.provider || file.type || inferProviderFromAuthFileName(file.name) || '').trim()
+
+const modelSearchTokens = (models?: GeminiKeyConfig['models']): string[] =>
+    Array.isArray(models)
+    ? models
+        .flatMap((model) => [model.name, model.alias, model.testModel])
+        .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : []
+
+type SearchableKeyConfig = Partial<GeminiKeyConfig & ProviderKeyConfig & OpenAIProviderConfig> & {
+    upstreamApiKey?: string
+}
+
+const backendMaskedApiKey = (key: string): string => {
+    if (key.length > 8) {
+        return `${key.slice(0, 4)}...${key.slice(-4)}`
+    }
+    if (key.length > 4) {
+        return `${key.slice(0, 2)}...${key.slice(-2)}`
+    }
+    if (key.length > 2) {
+        return `${key.slice(0, 1)}...${key.slice(-1)}`
+    }
+    return key
+}
+
+const apiKeyAliasTokens = (apiKey: string | undefined, aliases: Record<string, string>): string[] => {
+    const trimmed = apiKey?.trim()
+    if (!trimmed) {
+        return []
+    }
+    return [trimmed, maskApiKey(trimmed), backendMaskedApiKey(trimmed), aliases[trimmed]].filter(
+        (item): item is string => typeof item === 'string' && item.trim() !== '',
+    )
+}
+
+const apiKeySearchTokens = (key: SearchableKeyConfig, aliases: Record<string, string>): string[] => [
+    ...apiKeyAliasTokens(key.apiKey, aliases),
+    ...(Array.isArray(key.apiKeyEntries)
+        ? key.apiKeyEntries.flatMap((entry) => apiKeyAliasTokens(entry.apiKey, aliases))
+        : []),
+    ...apiKeyAliasTokens(key.upstreamApiKey, aliases),
+]
 
 const formatSize = (bytes: number): string => {
     if (bytes < 1024) {
@@ -104,10 +158,11 @@ function comparePlanRank(current: string, next: string): 'upgrade' | 'downgrade'
         free: 0,
         standard: 1,
         plus: 2,
-        pro: 3,
-        team: 4,
-        max: 5,
-        ultra: 6,
+        prolite: 3,
+        pro: 4,
+        team: 5,
+        max: 6,
+        ultra: 7,
     }
     const currentRank                   = ranks[current]
     const nextRank                      = ranks[next]
@@ -132,6 +187,7 @@ export function VendorSection({
                                   onSelectVendorFiles,
                                   onVisibleAuthFilesChange,
                                   quotaStatusMap = {},
+                                  apiKeyUsageStats = {},
                                   scheduler,
                               }: VendorSectionProps) {
     const { t }                         = useTranslation()
@@ -178,12 +234,19 @@ export function VendorSection({
             return data.apiKeys
         }
         return data.apiKeys.filter((key) => {
-            const pk         = key as GeminiKeyConfig & ProviderKeyConfig & OpenAIProviderConfig
-            const alias      = pk.apiKey ? aliases[pk.apiKey] : undefined
-            const searchable = [pk.apiKey, pk.name, pk.baseUrl, pk.prefix, alias].filter(Boolean).join(' ')
+            const pk         = key as SearchableKeyConfig
+            const searchable = joinSearchTokens([
+                                                    vendor.label,
+                                                    vendor.id,
+                                                    pk.name,
+                                                    pk.baseUrl,
+                                                    pk.prefix,
+                                                    ...apiKeySearchTokens(pk, aliases),
+                                                    ...modelSearchTokens(pk.models),
+                                                ])
             return matchesSearchQuery(searchable, query, wildcardQuery)
         })
-    }, [data.apiKeys, query, statusFilter, typeFilter, aliases, wildcardQuery])
+    }, [data.apiKeys, query, statusFilter, typeFilter, aliases, wildcardQuery, vendor.id, vendor.label])
 
     const filteredAuthFiles = useMemo(() => {
         if (typeFilter === 'api-key') {
@@ -192,8 +255,23 @@ export function VendorSection({
         let files = data.authFiles
         if (query) {
             files = files.filter((file) => {
-                const searchable = [file.name, file.type, file.provider, file.note, file.priority].filter(Boolean).join(
-                    ' ')
+                const displayName   = formatAuthFileDisplayName(file.name)
+                const providerLabel = authFileProviderLabel(file)
+                const searchable    = joinSearchTokens([
+                                                           vendor.label,
+                                                           vendor.id,
+                                                           file.name,
+                                                           displayName,
+                                                           file.type,
+                                                           file.provider,
+                                                           providerLabel,
+                                                           file.note,
+                                                           file.priority,
+                                                           file.disabled ?
+                                                           t('credentials.filter_disabled') :
+                                                           t('credentials.filter_available'),
+                                                           quotaStatusMap[file.name] || file.status,
+                                                       ])
                 return matchesSearchQuery(searchable, query, wildcardQuery)
             })
         }
@@ -221,7 +299,7 @@ export function VendorSection({
             })
         }
         return files
-    }, [data.authFiles, query, statusFilter, typeFilter, quotaStatusMap, wildcardQuery])
+    }, [data.authFiles, query, statusFilter, typeFilter, quotaStatusMap, wildcardQuery, t, vendor.id, vendor.label])
 
     const filteredTotal = filteredApiKeys.length + filteredAuthFiles.length
 
@@ -382,12 +460,45 @@ export function VendorSection({
         [aliases],
     )
 
+    const resolveApiKeyStats = useCallback(
+        (apiKey: string | undefined) => {
+            const trimmed = apiKey?.trim()
+            if (!trimmed) {
+                return undefined
+            }
+            return apiKeyUsageStats[trimmed] ??
+                   apiKeyUsageStats[backendMaskedApiKey(trimmed)] ??
+                   apiKeyUsageStats[maskApiKey(trimmed)]
+        },
+        [apiKeyUsageStats],
+    )
+
+    const mergeApiKeyStats = useCallback(
+        (apiKeys: Array<string | undefined>) => {
+            const merged = apiKeys.reduce(
+                (acc, apiKey) => {
+                    const stats = resolveApiKeyStats(apiKey)
+                    if (!stats) {
+                        return acc
+                    }
+                    acc.success += stats.success
+                    acc.failure += stats.failure
+                    return acc
+                },
+                { success: 0, failure: 0 },
+            )
+            return merged.success || merged.failure ? merged : undefined
+        },
+        [resolveApiKeyStats],
+    )
+
     // --- Render API key card ---
 
     const renderApiKeyCard = (key: GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig, index: number) => {
         // OpenAI Compatible
         if (vendor.id === 'openai') {
-            const oai = key as OpenAIProviderConfig
+            const oai   = key as OpenAIProviderConfig
+            const stats = mergeApiKeyStats(oai.apiKeyEntries?.map((entry) => entry.apiKey) ?? [])
             return (
                 <CredentialCard
                     key={`api-${index}`}
@@ -406,6 +517,7 @@ export function VendorSection({
                             : []),
                     ]}
                     tags={oai.models?.length ? [`${oai.models.length} ${t('credentials.models')}`] : []}
+                    stats={stats}
                     disableControls={disableControls}
                     onEdit={vendor.editRoute ? () => navigate(`${vendor.editRoute}/${index}`) : undefined}
                     onDelete={() => void deleteApiKey(oai.name)}
@@ -437,6 +549,7 @@ export function VendorSection({
         // Generic (Gemini, Claude, Codex, Vertex)
         const pk             = key as GeminiKeyConfig & ProviderKeyConfig
         const tags: string[] = []
+        const stats          = resolveApiKeyStats(pk.apiKey)
         if (pk.models?.length) {
             tags.push(`${pk.models.length} ${t('credentials.models')}`)
         }
@@ -462,6 +575,7 @@ export function VendorSection({
                     ...(pk.baseUrl ? [{ label: t('common.base_url'), value: pk.baseUrl }] : []),
                 ]}
                 tags={tags.length ? tags : undefined}
+                stats={stats}
                 disableControls={disableControls}
                 onEdit={vendor.editRoute ? () => navigate(`${vendor.editRoute}/${index}`) : undefined}
                 onDelete={() => void deleteApiKey(pk.apiKey, pk.baseUrl)}
@@ -799,6 +913,13 @@ function AuthFileCardWithQuota({
 
     const modifiedStr                                = formatModified(file)
     const fields: { label: string; value: string }[] = []
+    const providerLabel                              = authFileProviderLabel(file)
+    const planLabelProvider                          = providerLabel.toLowerCase().includes('codex') ?
+                                                       'codex' :
+                                                       undefined
+    if (providerLabel) {
+        fields.push({ label: t('credentials.inspection_provider', { defaultValue: '供应商' }), value: providerLabel })
+    }
     if (file.priority !== undefined) {
         fields.push({ label: t('auth_files.priority_display'), value: String(file.priority) })
     }
@@ -812,21 +933,23 @@ function AuthFileCardWithQuota({
         fields.push({ label: t('auth_files.file_modified'), value: modifiedStr })
     }
 
-    const resolvedPlan           = resolveCodexPlanType(file)
+    const providerKey            = providerLabel.toLowerCase()
+    const allowAuthFilePlan      = providerKey.includes('codex')
+    const resolvedPlan           = allowAuthFilePlan ? resolveCodexPlanType(file) : null
     const normalizedResolvedPlan = resolvedPlan ? normalizePlanType(resolvedPlan) : null
     const normalizedQuotaPlan    = quotaPlanType ? normalizePlanType(quotaPlanType) : null
     const planChangeDirection    =
               normalizedResolvedPlan && normalizedQuotaPlan
               ? comparePlanRank(normalizedResolvedPlan, normalizedQuotaPlan)
               : null
-    const planChangeTag          =
+    const planComparison         =
               resolvedPlan && quotaPlanType && planChangeDirection
               ?
-              `${t(`version_history.${planChangeDirection}`)}: ${formatPlanLabel(
-                  resolvedPlan,
-                  t,
-                  'codex',
-              )} → ${formatPlanLabel(quotaPlanType, t, 'codex')}`
+                  {
+                      direction: t(`version_history.${planChangeDirection}`),
+                      configured: formatPlanLabel(resolvedPlan, t, planLabelProvider),
+                      quota: formatPlanLabel(quotaPlanType, t, planLabelProvider),
+                  }
               :
               null
 
@@ -849,7 +972,7 @@ function AuthFileCardWithQuota({
                         { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
                     const isPremiumCodexPlan = PREMIUM_CODEX_PLAN_TYPES.has(key)
                     return {
-                        label: formatPlanLabel(quotaPlanType, t, 'codex'),
+                        label: formatPlanLabel(quotaPlanType, t, planLabelProvider),
                         color: colors.color,
                         bgColor: colors.bg,
                         ...(isPremiumCodexPlan
@@ -864,7 +987,7 @@ function AuthFileCardWithQuota({
                         { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
                     const isPremiumCodexPlan = PREMIUM_CODEX_PLAN_TYPES.has(key)
                     return {
-                        label: formatPlanLabel(resolvedPlan, t, 'codex'),
+                        label: formatPlanLabel(resolvedPlan, t, planLabelProvider),
                         color: colors.color,
                         bgColor: colors.bg,
                         ...(isPremiumCodexPlan
@@ -872,22 +995,15 @@ function AuthFileCardWithQuota({
                             : {}),
                     }
                 }
-                // Priority 2: infer from file name
-                const name = file.name.toLowerCase()
-                for (const [tier, colors] of Object.entries(tierColors)) {
-                    if (name.includes(`-${tier}.`) || name.includes(`-${tier}-`)) {
-                        return {
-                            label: tier.charAt(0).toUpperCase() + tier.slice(1),
-                            color: colors.color,
-                            bgColor: colors.bg,
-                        }
-                    }
+                // Priority 2: unknown plan — show a readable unavailable state instead of a symbolic placeholder
+                return {
+                    label: t('credentials.plan_unknown', { defaultValue: '上游接口未返回套餐' }),
+                    color: 'var(--text-tertiary)',
+                    bgColor: 'var(--bg-tertiary)',
                 }
-                // Priority 3: unknown plan — show "?" badge to guide user to refresh
-                return { label: '?', color: 'var(--text-tertiary)', bgColor: 'var(--bg-tertiary)' }
             })()}
             fields={fields.length ? fields : undefined}
-            tags={planChangeTag ? [planChangeTag] : undefined}
+            planComparison={planComparison ?? undefined}
             disabled={file.disabled}
             disableControls={disableControls}
             quotaItems={quotaItems}

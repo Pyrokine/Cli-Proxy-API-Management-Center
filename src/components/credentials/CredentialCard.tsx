@@ -47,6 +47,7 @@ interface CredentialCardProps {
     onAliasChange?: (alias: string) => void
     /** Colored badge (e.g. "API Key", "gemini-cli") */
     badge?: { label: string; color?: string; bgColor?: string; premium?: boolean }
+    planComparison?: { configured: string; quota: string; direction: string }
     /** Key-value metadata */
     fields?: { label: string; value: string }[]
     /** Tags (model count, headers, etc.) */
@@ -102,12 +103,57 @@ function statusRateClass(rate: number): string {
     return styles.statusRateLow
 }
 
+const quotaHttpStatusMessages: Record<string, string> = {
+    '400': 'credentials.quota_status_http_400',
+    '401': 'credentials.quota_status_http_401',
+    '402': 'credentials.quota_status_http_402',
+    '403': 'credentials.quota_status_http_403',
+    '404': 'credentials.quota_status_http_404',
+    '409': 'credentials.quota_status_http_409',
+    '429': 'credentials.quota_status_http_429',
+    '500': 'credentials.quota_status_http_500',
+    '502': 'credentials.quota_status_http_502',
+    '503': 'credentials.quota_status_http_503',
+    '504': 'credentials.quota_status_http_504',
+}
+
+function formatQuotaErrorMessage(error: string, t: ReturnType<typeof useTranslation>['t']): string {
+    const statusMatch = /\bstatus\s+(\d{3})\b/i.exec(error)
+    if (!statusMatch) {
+        return error
+    }
+    const status = statusMatch[1]
+    return t(quotaHttpStatusMessages[status] ?? 'credentials.quota_status_http_default', {
+        status,
+        defaultValue: error,
+    })
+}
+
+function refreshStatusLabel(status: string | undefined, t: ReturnType<typeof useTranslation>['t']): string {
+    switch (status) {
+        case 'loading':
+            return t('credentials.refresh_status_loading', { defaultValue: '刷新中' })
+        case 'success':
+            return t('credentials.refresh_status_success', { defaultValue: '刷新成功' })
+        case 'error':
+            return t('credentials.refresh_status_error', { defaultValue: '刷新失败' })
+        case 'banned':
+            return t('credentials.quota_status_banned', { defaultValue: '账号封禁' })
+        case 'quota_exceeded':
+            return t('credentials.quota_status_exceeded', { defaultValue: '配额耗尽' })
+        default:
+            return ''
+    }
+}
+
 export function CredentialCard({
+                                   category,
                                    title,
                                    highlightTitle,
                                    alias,
                                    onAliasChange,
                                    badge,
+                                   planComparison,
                                    fields,
                                    tags,
                                    disabled,
@@ -128,6 +174,17 @@ export function CredentialCard({
     const { t, i18n }                     = useTranslation()
     const [editingAlias, setEditingAlias] = useState(false)
     const [aliasInput, setAliasInput]     = useState('')
+    const quotaErrorText                  = quotaError ? formatQuotaErrorMessage(quotaError, t) : ''
+    const refreshResultLabel              = refreshStatusLabel(refreshState?.status, t)
+    const quotaStatusReasonShown          = Boolean(
+        quotaErrorText && (refreshState?.status === 'banned' || refreshState?.status === 'quota_exceeded'),
+    )
+    const showQuotaSection                = category ===
+                                            'auth-file' ||
+                                            Boolean(quotaLoading || quotaError || quotaItems?.length || refreshState)
+    const displayStats                    = statusBar
+                                            ? { success: statusBar.totalSuccess, failure: statusBar.totalFailure }
+                                            : stats
 
     const handleAliasEditStart = useCallback(() => {
         setAliasInput(alias || '')
@@ -220,20 +277,46 @@ export function CredentialCard({
                 </div>
             )}
 
+            {planComparison && (
+                <div className={styles.planComparison}>
+                    <span className={styles.planComparisonLabel}>
+                        {t('credentials.plan_comparison_source', { defaultValue: '套餐来源' })}
+                    </span>
+                    <span className={styles.planComparisonItem}>
+                        <span>{t('credentials.plan_comparison_configured', { defaultValue: '配置' })}</span>
+                        <strong>{planComparison.configured}</strong>
+                    </span>
+                    <span className={styles.planComparisonItem}>
+                        <span>{t('credentials.plan_comparison_quota', { defaultValue: '接口' })}</span>
+                        <strong>{planComparison.quota}</strong>
+                    </span>
+                    <span className={`${styles.planComparisonItem} ${styles.planComparisonResult}`}>
+                        <span>{t('credentials.plan_comparison_result', { defaultValue: '比较' })}</span>
+                        <strong>{planComparison.direction}</strong>
+                    </span>
+                    <span className={styles.planComparisonHint}>
+                        {t('credentials.plan_comparison_hint', { defaultValue: '前端按配置套餐与接口套餐等级比较' })}
+                    </span>
+                </div>
+            )}
+
             {/* Request statistics: badges + status blocks */}
             {(stats || statusBar) && (
                 <div className={styles.statsSection}>
+                    <div className={styles.sectionLabel}>
+                        {t('credentials.request_stats_section', { defaultValue: '请求统计' })}
+                    </div>
                     {/* Badges read from statusBar so the left counts share the same
                      4h rolling window as the right-side success rate %. Previously
                      the left badges were cumulative while the right was windowed,
                      which made operators second-guess which number was current. */}
-                    {statusBar && statusBar.totalSuccess + statusBar.totalFailure > 0 && (
+                    {displayStats && displayStats.success + displayStats.failure > 0 && (
                         <div className={styles.statsBadges}>
                             <span className={styles.statsBadgeSuccess}>
-                                {t('common.success')}: {statusBar.totalSuccess}
+                                {t('common.success')}: {displayStats.success}
                             </span>
                             <span className={styles.statsBadgeFailure}>
-                                {t('common.failure')}: {statusBar.totalFailure}
+                                {t('common.failure')}: {displayStats.failure}
                             </span>
                         </div>
                     )}
@@ -250,17 +333,14 @@ export function CredentialCard({
                                         i18n.language,
                                     )} – ${formatDateTime(new Date(detail.endTime), i18n.language)}`
                                     const tooltip  = isIdle
-                                                     ?
-                                                     `${rangeStr}\n${t(
-                                                         'credentials.status_block_idle',
-                                                         { defaultValue: 'No requests' },
-                                                     )}`
-                                                     :
-                                                     `${rangeStr}\n${t('common.success')}: ${detail.success}  ${t(
-                                                         'common.failure')}: ${detail.failure}\n${t(
-                                                         'credentials.status_block_tokens',
-                                                         { defaultValue: 'Tokens' },
-                                                     )}: ${detail.totalTokens}`
+                                                     ? `${rangeStr}\n${t('credentials.status_block_idle', {
+                                            defaultValue: 'No requests',
+                                        })}`
+                                                     : `${rangeStr}\n${t('common.success')}: ${detail.success}  ${t(
+                                            'common.failure',
+                                        )}: ${detail.failure}\n${t('credentials.status_block_tokens', {
+                                            defaultValue: 'Tokens',
+                                        })}: ${detail.totalTokens}`
                                     return (
                                         <div key={idx} className={styles.statusBlockWrapper} title={tooltip}>
                                             <div
@@ -285,90 +365,135 @@ export function CredentialCard({
                 </div>
             )}
 
-            {/* Quota section: always visible for auth files */}
-            <div className={styles.quotaSection}>
-                {/* Status warnings from backend scheduler */}
-                {refreshState?.status === 'banned' && (
-                    <div className={styles.quotaStatusBanned}>
-                        {t('credentials.quota_status_banned', { defaultValue: 'Account banned' })}
+            {/* Quota section */}
+            {showQuotaSection && (
+                <div className={styles.quotaSection}>
+                    <div className={styles.quotaHeader}>
+                        <span className={styles.sectionLabel}>
+                            {t('credentials.quota_section_title', { defaultValue: '配额信息' })}
+                        </span>
                     </div>
-                )}
-                {refreshState?.status === 'quota_exceeded' && (
-                    <div className={styles.quotaStatusExceeded}>
-                        {t('credentials.quota_status_exceeded', { defaultValue: 'Quota exceeded' })}
-                    </div>
-                )}
-                {refreshState?.status === 'error' && !quotaError && (
-                    <div className={styles.quotaStatusError}>
-                        {t('credentials.quota_status_error', { defaultValue: 'Refresh failed' })}
-                    </div>
-                )}
-                {/* Quota data */}
-                {quotaLoading ? (
-                    <div className={styles.quotaLoading}>{t('common.loading')}</div>
-                ) : quotaError ? (
-                    <div className={styles.quotaError} title={quotaError}>
-                        {quotaError}
-                    </div>
-                ) : quotaItems && quotaItems.length > 0 ? (
-                    quotaItems.map((item) => (
-                        <div key={item.model} className={styles.quotaRow}>
-                            <div className={styles.quotaRowHeader}>
-                                <span className={styles.quotaModel}>{item.model}</span>
-                                <span className={styles.quotaMeta}>
-                                    <span className={styles.quotaPercent}>{Math.round(item.percent)}%</span>
-                                    {/* resetLabel 缺失时也保留占位,这样所有 quota 行视觉对齐
-                                     (issue 12: 同一张卡里有的 reset 显示有的不显示,看起来像数据残缺). */}
-                                    <span className={styles.quotaReset}>{item.resetLabel || '—'}</span>
-                                </span>
-                            </div>
-                            <div className={styles.quotaBar}>
-                                <div
-                                    className={`${styles.quotaBarFill} ${quotaBarClass(item.percent)}`}
-                                    style={{ width: `${Math.min(item.percent, 100)}%` }}
-                                />
-                            </div>
+                    {/* Status warnings from backend scheduler */}
+                    {refreshState?.status === 'banned' && (
+                        <div className={styles.quotaStatusBanned}>
+                            <span className={styles.quotaStatusTitle}>
+                                {t('credentials.quota_status_banned', { defaultValue: 'Account banned' })}
+                            </span>
+                            <span className={styles.quotaStatusReason}>
+                                {quotaErrorText ||
+                                 t('credentials.quota_status_banned_reason', {
+                                     defaultValue: 'Backend reported this account as unavailable for quota refresh',
+                                 })}
+                            </span>
                         </div>
-                    ))
-                ) : refreshState && !refreshState.lastRefreshTime ? (
-                    <div className={styles.quotaLoading}>{t('credentials.quota_click_refresh')}</div>
-                ) : quotaItems && quotaItems.length === 0 ? (
-                    <div className={styles.quotaLoading}>
-                        {t('credentials.quota_empty', { defaultValue: 'No quota data returned' })}
-                    </div>
-                ) : (
-                        <div className={styles.quotaLoading}>{t('credentials.quota_pending')}</div>
                     )}
-            </div>
+                    {refreshState?.status === 'quota_exceeded' && (
+                        <div className={styles.quotaStatusExceeded}>
+                            <span className={styles.quotaStatusTitle}>
+                                {t('credentials.quota_status_exceeded', { defaultValue: 'Quota exceeded' })}
+                            </span>
+                            <span className={styles.quotaStatusReason}>
+                                {quotaErrorText ||
+                                 t('credentials.quota_status_exceeded_reason', {
+                                     defaultValue: 'Backend reported HTTP 402 or an equivalent quota exhaustion signal',
+                                 })}
+                            </span>
+                        </div>
+                    )}
+                    {refreshState?.status === 'error' && !quotaError && (
+                        <div className={styles.quotaStatusError}>
+                            {t('credentials.quota_status_error', { defaultValue: 'Refresh failed' })}
+                        </div>
+                    )}
+                    {/* Quota data */}
+                    {quotaLoading ? (
+                        <div className={styles.quotaLoading}>{t('common.loading')}</div>
+                    ) : quotaError && !quotaStatusReasonShown ? (
+                        <div className={styles.quotaError} title={quotaErrorText}>
+                            {quotaErrorText}
+                        </div>
+                    ) : quotaItems && quotaItems.length > 0 ? (
+                        quotaItems.map((item) => (
+                            <div key={item.model} className={styles.quotaRow}>
+                                <div className={styles.quotaRowHeader}>
+                                    <span className={styles.quotaModel}>{item.model}</span>
+                                    <span className={styles.quotaMeta}>
+                                        <span className={styles.quotaPercent}>
+                                            {t('credentials.quota_remaining_value', {
+                                                percent: Math.round(item.percent),
+                                                defaultValue: '{{percent}}% remaining',
+                                            })}
+                                        </span>
+                                        <span className={styles.quotaReset}>
+                                            {item.resetLabel
+                                             ? t('credentials.quota_reset_value', {
+                                                    value: item.resetLabel,
+                                                    defaultValue: 'Reset {{value}}',
+                                                })
+                                             : t('credentials.quota_reset_unknown', { defaultValue: 'Reset -' })}
+                                        </span>
+                                    </span>
+                                </div>
+                                <div className={styles.quotaBar}>
+                                    <div
+                                        className={`${styles.quotaBarFill} ${quotaBarClass(item.percent)}`}
+                                        style={{ width: `${Math.min(item.percent, 100)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        ))
+                    ) : refreshState && !refreshState.lastRefreshTime ? (
+                        <div className={styles.quotaLoading}>
+                            {t('credentials.quota_click_refresh_detail', { defaultValue: '点击刷新按钮获取配额信息' })}
+                        </div>
+                    ) : quotaItems && quotaItems.length === 0 ? (
+                        <div className={styles.quotaLoading}>
+                            {t('credentials.quota_empty', { defaultValue: 'No quota data returned' })}
+                        </div>
+                    ) : (
+                            <div className={styles.quotaLoading}>{t('credentials.quota_pending')}</div>
+                        )}
+                </div>
+            )}
 
-            {/* Refresh timestamps: full datetime ("上次刷新 X · 下次刷新 Y") rather than
-             relative shorthand, so operators can diff against server clock at a glance.
-             Refresh button moved to the actions row below for a consistent button group. */}
             {refreshState && (
                 <div className={styles.refreshSection}>
-                    <div className={styles.refreshTimes}>
-                        {refreshState.lastRefreshTime ? (
-                            <span className={styles.refreshTime}>
-                                {t('credentials.last_refresh_at', { defaultValue: 'Last refresh' })}:{' '}
-                                {formatDateTime(refreshState.lastRefreshTime, i18n.language)}
-                            </span>
-                        ) : (
-                             <span className={styles.refreshHint}>{t('credentials.quota_click_refresh')}</span>
-                         )}
-                        {refreshState.isRefreshing ? (
-                            <span className={styles.refreshingHint}>
-                                {t('credentials.refreshing', { defaultValue: 'Refreshing...' })}
-                            </span>
-                        ) : !refreshState.autoRefreshEnabled ? (
-                            <span className={styles.refreshHint}>
-                                {t('credentials.auto_refresh_off', { defaultValue: 'Auto-refresh off' })}
-                            </span>
-                        ) : refreshState.nextRefreshTime ? (
-                            <span className={styles.refreshNext}>
-                                {t('credentials.next_refresh_at', { defaultValue: 'Next refresh' })}:{' '}
-                                {formatDateTime(refreshState.nextRefreshTime, i18n.language)}
-                            </span>
-                        ) : null}
+                    <div className={styles.refreshMetaGroup}>
+                        <span className={styles.refreshMetaLine}>
+                            {refreshState.lastRefreshTime ? (
+                                <span className={styles.refreshMetaItem}>
+                                    <span className={styles.refreshMetaLabel}>
+                                        {t('credentials.last_refresh_at', { defaultValue: 'Last refresh' })}
+                                    </span>
+                                    <span className={styles.refreshTime}>
+                                        {formatDateTime(refreshState.lastRefreshTime, i18n.language)}
+                                    </span>
+                                </span>
+                            ) : null}
+                            {refreshResultLabel ? (
+                                <span className={styles.refreshResult}>{refreshResultLabel}</span>
+                            ) : null}
+                        </span>
+                        <span className={styles.refreshMetaLine}>
+                            {refreshState.isRefreshing ? (
+                                <span className={`${styles.refreshMetaItem} ${styles.refreshingHint}`}>
+                                    {t('credentials.refreshing', { defaultValue: 'Refreshing...' })}
+                                </span>
+                            ) : !refreshState.autoRefreshEnabled ? (
+                                <span className={`${styles.refreshMetaItem} ${styles.refreshHint}`}>
+                                    {t('credentials.auto_refresh_off', { defaultValue: 'Auto-refresh off' })}
+                                </span>
+                            ) : refreshState.nextRefreshTime ? (
+                                <span className={styles.refreshMetaItem}>
+                                    <span className={styles.refreshMetaLabel}>
+                                        {t('credentials.next_refresh_at', { defaultValue: 'Next refresh' })}
+                                    </span>
+                                    <span className={styles.refreshNext}>
+                                        {formatDateTime(refreshState.nextRefreshTime, i18n.language)}
+                                    </span>
+                                </span>
+                            ) : null}
+                        </span>
                     </div>
                 </div>
             )}

@@ -7,8 +7,9 @@ import {apiClient} from '@/services/api/client'
 import {versionApi} from '@/services/api/version'
 import {secureStorage} from '@/services/storage/secureStorage'
 import type {AuthState, ConnectionStatus, LoginCredentials} from '@/types'
-import {detectApiBaseFromLocation, normalizeApiBase} from '@/utils/connection'
+import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
+import {isEncodedStorageValue} from '@/utils/encryption'
 import {create} from 'zustand'
 import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
 import {useConfigStore} from './useConfigStore'
@@ -19,6 +20,7 @@ interface AuthStoreState extends AuthState {
     connectionError: string | null
     hydrated: boolean
     serverVersionSource: 'header' | 'version' | null
+    storageRestoreFailed: boolean
 
     // 操作
     login: (credentials: LoginCredentials) => Promise<void>
@@ -37,6 +39,11 @@ interface AuthStoreState extends AuthState {
 
 let restoreSessionPromise: Promise<boolean> | null    = null
 let refreshServerVersionPromise: Promise<void> | null = null
+let persistedAuthRestoreFailed                        = false
+
+function markPersistedAuthRestoreFailed(): void {
+    persistedAuthRestoreFailed = true
+}
 
 export const useAuthStore = create<AuthStoreState>()(
     persist(
@@ -50,6 +57,7 @@ export const useAuthStore = create<AuthStoreState>()(
             serverBuildDate: null,
             serverMinPanelVersion: null,
             serverVersionSource: null,
+            storageRestoreFailed: false,
             connectionStatus: 'disconnected',
             connectionError: null,
             hydrated: false,
@@ -63,23 +71,39 @@ export const useAuthStore = create<AuthStoreState>()(
                 restoreSessionPromise = (async () => {
                     await waitForAuthHydration()
 
-                    const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
-                    const legacyBase  =
-                              (await secureStorage.getItem<string>('apiBase')) ||
-                              (await secureStorage.getItem<string>('apiUrl', { encrypt: true }))
-                    const legacyKey   = await secureStorage.getItem<string>('managementKey')
+                    const wasLoggedIn              = localStorage.getItem('isLoggedIn') === 'true'
+                    let storageRestoreFailed       = persistedAuthRestoreFailed
+                    const markStorageRestoreFailed = () => {
+                        storageRestoreFailed = true
+                    }
+                    const legacyBase               =
+                              (await secureStorage.getItem<string>('apiBase', {
+                                  onInvalidEncryptedValue: markStorageRestoreFailed,
+                              })) ||
+                              (await secureStorage.getItem<string>('apiUrl', {
+                                  encrypt: true,
+                                  onInvalidEncryptedValue: markStorageRestoreFailed,
+                              }))
+                    const legacyKey                = await secureStorage.getItem<string>('managementKey', {
+                        onInvalidEncryptedValue: markStorageRestoreFailed,
+                    })
 
                     const { apiBase, managementKey, rememberPassword } = get()
-                    const resolvedBase                                 = normalizeApiBase(apiBase ||
-                                                                                          legacyBase ||
-                                                                                          detectApiBaseFromLocation())
-                    const resolvedKey                                  = managementKey || legacyKey || ''
+                    const resolvedBase                                 = resolveApiBase(
+                        apiBase,
+                        legacyBase,
+                        detectApiBaseFromLocation(),
+                    )
+                    const resolvedKey                                  = [managementKey, legacyKey].find(
+                        (key) => key && !isEncodedStorageValue(key),
+                    ) || ''
                     const resolvedRememberPassword                     = rememberPassword || wasLoggedIn
 
                     set({
                             apiBase: resolvedBase,
                             managementKey: resolvedKey,
                             rememberPassword: resolvedRememberPassword,
+                            storageRestoreFailed,
                         })
                     apiClient.setConfig({ apiBase: resolvedBase, managementKey: resolvedKey })
 
@@ -90,6 +114,9 @@ export const useAuthStore = create<AuthStoreState>()(
                                                   managementKey: resolvedKey,
                                                   rememberPassword: resolvedRememberPassword,
                                               })
+                            if (storageRestoreFailed) {
+                                set({ storageRestoreFailed: true })
+                            }
                             return true
                         } catch (error) {
                             console.warn('Auto login failed:', error)
@@ -140,7 +167,9 @@ export const useAuthStore = create<AuthStoreState>()(
                             rememberPassword,
                             connectionStatus: 'connected',
                             connectionError: null,
+                            storageRestoreFailed: false,
                         })
+                    persistedAuthRestoreFailed = false
                     await Promise.all([
                                           secureStorage.setItem(
                                               'apiBase',
@@ -186,8 +215,10 @@ export const useAuthStore = create<AuthStoreState>()(
                         serverVersionSource: null,
                         connectionStatus: 'disconnected',
                         connectionError: null,
+                        storageRestoreFailed: false,
                         hydrated: true,
                     })
+                persistedAuthRestoreFailed = false
                 secureStorage.removeItem('apiBase', { persistent: true })
                 secureStorage.removeItem('apiBase', { persistent: false })
                 secureStorage.removeItem('apiUrl', { persistent: true })
@@ -291,6 +322,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         const persistentRaw = await secureStorage.getItem<string>(name, {
                             encrypt: true,
                             persistent: true,
+                            onInvalidEncryptedValue: markPersistedAuthRestoreFailed,
                         })
                         if (persistentRaw !== null) {
                             return persistentRaw
@@ -298,6 +330,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         const sessionRaw = await secureStorage.getItem<string>(name, {
                             encrypt: true,
                             persistent: false,
+                            onInvalidEncryptedValue: markPersistedAuthRestoreFailed,
                         })
                         return sessionRaw ?? null
                     },

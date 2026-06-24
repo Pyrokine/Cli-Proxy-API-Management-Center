@@ -1,8 +1,16 @@
 import {DEFAULT_API_PORT, MANAGEMENT_API_PREFIX} from './constants'
+import {isEncodedStorageValue} from './encryption'
 
-export const normalizeApiBase = (input: string): string => {
+function containsEncodedStorageValue(input: string): boolean {
+    return isEncodedStorageValue(input) ||
+           input.includes('enc::v2::') ||
+           input.includes('enc::v1::') ||
+           input.includes('plain::')
+}
+
+export const normalizeApiBase = (input: string | null | undefined): string => {
     let base = (input || '').trim()
-    if (!base) {
+    if (!base || containsEncodedStorageValue(base)) {
         return ''
     }
     base = base.replace(/\/?v0\/management\/?$/i, '')
@@ -12,6 +20,16 @@ export const normalizeApiBase = (input: string): string => {
         base = `http://${base}`
     }
     return base
+}
+
+export const resolveApiBase = (...inputs: Array<string | null | undefined>): string => {
+    for (const input of inputs) {
+        const normalized = normalizeApiBase(input)
+        if (normalized) {
+            return normalized
+        }
+    }
+    return ''
 }
 
 export const computeApiUrl = (base: string): string => {

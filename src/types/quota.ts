@@ -96,3 +96,19 @@ export interface KimiQuotaState {
     error?: string
     errorStatus?: number
 }
+
+export interface XaiBillingSummary {
+    usedCents: number | null
+    monthlyLimitCents: number | null
+    onDemandCapCents: number | null
+    usedPercent: number | null
+    billingPeriodStart?: string | null
+    billingPeriodEnd?: string | null
+}
+
+export interface XaiQuotaState {
+    status: 'idle' | 'loading' | 'success' | 'error'
+    billing: XaiBillingSummary | null
+    error?: string
+    errorStatus?: number
+}

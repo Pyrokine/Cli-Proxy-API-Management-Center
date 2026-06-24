@@ -3,11 +3,12 @@
  * 使用 AES-256-GCM 加密敏感数据，存储到 sessionStorage（关闭 tab 自动清除）
  */
 
-import {decryptData, encryptData, isSecureStorageEncryptionAvailable} from '@/utils/encryption'
+import {decryptData, encryptData, isEncodedStorageValue, isSecureStorageEncryptionAvailable} from '@/utils/encryption'
 
 interface StorageOptions {
     encrypt?: boolean
     persistent?: boolean // true = localStorage (非敏感数据), false = sessionStorage (默认)
+    onInvalidEncryptedValue?: () => void
 }
 
 class SecureStorageService {
@@ -37,7 +38,7 @@ class SecureStorageService {
      * 获取数据
      */
     async getItem<T = unknown>(key: string, options: StorageOptions = {}): Promise<T | null> {
-        const { encrypt = true, persistent = false } = options
+        const { encrypt = true, persistent = false, onInvalidEncryptedValue } = options
 
         // Check both storages for migration compatibility
         const store = this.storage(persistent)
@@ -57,19 +58,24 @@ class SecureStorageService {
             return null
         }
 
+        let decoded: string
         try {
-            const decrypted = encrypt ? await decryptData(raw) : raw
-            return JSON.parse(decrypted) as T
+            decoded = encrypt ? await decryptData(raw) : raw
         } catch {
-            try {
-                if (encrypt && (raw.startsWith('enc::v2::') || raw.startsWith('enc::v1::'))) {
-                    const decrypted = await decryptData(raw)
-                    return decrypted as T
-                }
-                return raw as T
-            } catch {
+            if (encrypt && isEncodedStorageValue(raw)) {
+                onInvalidEncryptedValue?.()
+            }
+            return null
+        }
+
+        try {
+            return JSON.parse(decoded) as T
+        } catch {
+            if (encrypt && isEncodedStorageValue(raw)) {
+                onInvalidEncryptedValue?.()
                 return null
             }
+            return decoded as T
         }
     }
 

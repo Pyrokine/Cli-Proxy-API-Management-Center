@@ -14,6 +14,7 @@ export interface QuotaEntry {
     error?: string
     failure_count: number
     data?: unknown
+    disabled?: boolean
 }
 
 export interface QuotaStatusResponse {

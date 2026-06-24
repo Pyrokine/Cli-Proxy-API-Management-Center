@@ -17,6 +17,11 @@ const PBKDF2_ITER      = 100_000
 
 let cachedKey: CryptoKey | null = null
 
+export function isEncodedStorageValue(payload: string | null | undefined): boolean {
+    const value = (payload || '').trim()
+    return value.startsWith(ENC_V2_PREFIX) || value.startsWith(ENC_V1_PREFIX) || value.startsWith(PLAINTEXT_PREFIX)
+}
+
 export function isSecureStorageEncryptionAvailable(): boolean {
     return (
         typeof window !== 'undefined' &&
@@ -124,7 +129,7 @@ export async function decryptData(payload: string): Promise<string> {
             const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)
             return new TextDecoder().decode(decrypted)
         } catch {
-            return payload
+            throw new Error('Encrypted storage value could not be decrypted')
         }
     }
 
@@ -140,7 +145,7 @@ export async function decryptData(payload: string): Promise<string> {
             }
             return new TextDecoder().decode(result)
         } catch {
-            return payload
+            throw new Error('Encrypted storage value could not be decrypted')
         }
     }
 

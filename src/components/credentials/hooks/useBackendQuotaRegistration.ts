@@ -5,6 +5,7 @@
  * so downstream components (CredentialCard, useCredentialQuota) work without changes.
  */
 
+import i18n from '@/i18n'
 import {quotaApi} from '@/services/api/quota'
 import {useNotificationStore} from '@/stores/useNotificationStore'
 import {useQuotaStore} from '@/stores/useQuotaStore'
@@ -18,6 +19,7 @@ import type {
     GeminiCliQuotaBucketState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    XaiQuotaState,
 } from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
@@ -52,6 +54,7 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
     const setCodexQuota       = useQuotaStore((s) => s.setCodexQuota)
     const setGeminiCliQuota   = useQuotaStore((s) => s.setGeminiCliQuota)
     const setKimiQuota        = useQuotaStore((s) => s.setKimiQuota)
+    const setXaiQuota         = useQuotaStore((s) => s.setXaiQuota)
 
     const poll = useCallback(async () => {
         try {
@@ -64,42 +67,71 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
             setPollIntervalMs(status.enabled ? Math.max(status.interval_seconds, 0) * 1000 : 0)
 
             const newMeta: Record<string, EntryMeta> = {}
+            const setters: Setters                   = {
+                setAntigravityQuota,
+                setClaudeQuota,
+                setCodexQuota,
+                setGeminiCliQuota,
+                setKimiQuota,
+                setXaiQuota,
+            }
             for (const [fileName, entry] of Object.entries(status.credentials)) {
-                let data: unknown = null
-                if (entry.data) {
+                let data: unknown                    = null
+                let parseErrorMessage: string | null = null
+                const hasData                        = entry.data !== undefined && entry.data !== null
+                if (hasData) {
                     try {
                         data = typeof entry.data === 'string' ? JSON.parse(entry.data as string) : entry.data
                     } catch (e) {
-                        console.warn('[QuotaScheduler] skipped unparseable entry:', e)
+                        parseErrorMessage = quotaParseErrorMessage(e)
+                        console.warn('[QuotaScheduler] failed to parse entry data:', fileName, e)
                     }
                 }
-                const entryStatus = resolveEntryStatus(entry.type, entry.status, data)
+                const entryStatus = parseErrorMessage ? 'error' : resolveEntryStatus(entry.type, entry.status, data)
                 newMeta[fileName] = {
                     lastRefresh: entry.last_refresh ? new Date(entry.last_refresh) : null,
                     nextRefresh: status.enabled && entry.next_refresh ? new Date(entry.next_refresh) : null,
                     status: entryStatus,
                 }
 
-                if (entryStatus === 'error') {
-                    mapQuotaError(fileName, entry.type, entry.error || 'Refresh failed', {
-                        setAntigravityQuota,
-                        setClaudeQuota,
-                        setCodexQuota,
-                        setGeminiCliQuota,
-                        setKimiQuota,
-                    })
+                if (parseErrorMessage) {
+                    mapQuotaError(fileName, entry.type, parseErrorMessage, setters)
                     continue
                 }
-                if (!data) {
+                if (
+                    entryStatus === 'error' ||
+                    ((entryStatus === 'banned' || entryStatus === 'quota_exceeded') && entry.error?.trim())
+                ) {
+                    mapQuotaError(
+                        fileName,
+                        entry.type,
+                        entry.error || i18n.t('credentials.refresh_status_error', { defaultValue: '刷新失败' }),
+                        setters,
+                    )
                     continue
                 }
-                mapToStore(fileName, entry.type, data, {
-                    setAntigravityQuota,
-                    setClaudeQuota,
-                    setCodexQuota,
-                    setGeminiCliQuota,
-                    setKimiQuota,
-                })
+                if (data === null || data === undefined) {
+                    if (entryStatus === 'success') {
+                        const errorMessage = quotaParseErrorMessage(invalidQuotaPayload(entry.type || 'unknown'))
+                        newMeta[fileName]  = {
+                            ...newMeta[fileName],
+                            status: 'error',
+                        }
+                        mapQuotaError(fileName, entry.type, errorMessage, setters)
+                    }
+                    continue
+                }
+                try {
+                    mapToStore(fileName, entry.type, data, setters)
+                } catch (e) {
+                    const errorMessage = quotaParseErrorMessage(e)
+                    console.warn('[QuotaScheduler] failed to map entry data:', fileName, e)
+                    newMeta[fileName] = {
+                        ...newMeta[fileName],
+                        status: 'error',
+                    }
+                    mapQuotaError(fileName, entry.type, errorMessage, setters)
+                }
             }
 
             const nextPending: Record<string, RefreshBaseline> = {}
@@ -138,7 +170,7 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
         } catch (e) {
             console.warn('[QuotaScheduler] poll failed:', e)
         }
-    }, [setAntigravityQuota, setClaudeQuota, setCodexQuota, setGeminiCliQuota, setKimiQuota])
+    }, [setAntigravityQuota, setClaudeQuota, setCodexQuota, setGeminiCliQuota, setKimiQuota, setXaiQuota])
 
     useEffect(() => {
         mounted.current = true
@@ -282,6 +314,24 @@ interface Setters {
     setCodexQuota: Setter
     setGeminiCliQuota: Setter
     setKimiQuota: Setter
+    setXaiQuota: Setter
+}
+
+function quotaParseErrorMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+    return message ?
+           i18n.t(
+               'credentials.quota_parse_failed_with_message',
+               { defaultValue: '配额数据解析失败: {{message}}', message },
+           ) :
+           i18n.t('credentials.quota_parse_failed', { defaultValue: '配额数据解析失败' })
+}
+
+function invalidQuotaPayload(provider: string): Error {
+    return new Error(i18n.t(
+        'credentials.quota_invalid_payload',
+        { defaultValue: '{{provider}} 配额数据结构无效', provider },
+    ))
 }
 
 function mapToStore(fileName: string, type: string, data: unknown, s: Setters) {
@@ -301,6 +351,11 @@ function mapToStore(fileName: string, type: string, data: unknown, s: Setters) {
         case 'kimi':
             mapKimi(fileName, data, s.setKimiQuota)
             break
+        case 'xai':
+            mapXai(fileName, data, s.setXaiQuota)
+            break
+        default:
+            throw invalidQuotaPayload(type || 'unknown')
     }
 }
 
@@ -334,6 +389,12 @@ function mapQuotaError(fileName: string, type: string, error: string, s: Setters
             s.setKimiQuota((prev: Record<string, KimiQuotaState>) => ({
                 ...prev,
                 [fileName]: { status: 'error', rows: [], error },
+            }))
+            break
+        case 'xai':
+            s.setXaiQuota((prev: Record<string, XaiQuotaState>) => ({
+                ...prev,
+                [fileName]: { status: 'error', billing: null, error },
             }))
             break
     }
@@ -399,13 +460,16 @@ function extractCloudCodeBuckets(data: unknown): GeminiCliQuotaBucketState[] {
             continue
         }
         const remainingFraction = parseFraction(bucketRecord.remainingFraction ?? bucketRecord.remaining_fraction)
-        const modelId           =
+        if (remainingFraction === null) {
+            continue
+        }
+        const modelId   =
                   typeof bucketRecord.modelId === 'string'
                   ? bucketRecord.modelId
                   : typeof bucketRecord.model_id === 'string'
                     ? bucketRecord.model_id
                     : null
-        const tokenType         =
+        const tokenType =
                   typeof bucketRecord.tokenType === 'string'
                   ? bucketRecord.tokenType
                   : typeof bucketRecord.token_type === 'string'
@@ -440,6 +504,9 @@ function mapAntigravity(fileName: string, data: unknown, setter: Setter) {
             remainingFraction: bucket.remainingFraction ?? 0,
             resetTime: bucket.resetTime,
         }))
+    if (groups.length === 0) {
+        throw invalidQuotaPayload('Antigravity')
+    }
 
     const state: AntigravityQuotaState = {
         status: 'success',
@@ -449,15 +516,35 @@ function mapAntigravity(fileName: string, data: unknown, setter: Setter) {
     setter((prev: Record<string, AntigravityQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
+function parseClaudeExtraUsage(value: unknown): ClaudeExtraUsage | null {
+    const record = asRecord(value)
+    if (!record) {
+        return null
+    }
+    const isEnabled    = record.is_enabled
+    const monthlyLimit = numberValue(record.monthly_limit)
+    const usedCredits  = numberValue(record.used_credits)
+    const utilization  = numberValue(record.utilization)
+    if (typeof isEnabled !== 'boolean' || monthlyLimit === null || usedCredits === null) {
+        return null
+    }
+    return {
+        is_enabled: isEnabled,
+        monthly_limit: monthlyLimit,
+        used_credits: usedCredits,
+        utilization,
+    }
+}
+
 function mapClaude(fileName: string, data: unknown, setter: Setter) {
     const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     if (!d) {
-        return
+        throw invalidQuotaPayload('Claude')
     }
     const usageRaw = typeof d.usage === 'string' ? JSON.parse(d.usage) : d.usage
     const usage    = usageRaw !== null && typeof usageRaw === 'object' ? (usageRaw as Record<string, unknown>) : null
     if (!usage) {
-        return
+        throw invalidQuotaPayload('Claude')
     }
 
     const windows: ClaudeQuotaWindow[] = []
@@ -511,10 +598,15 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
         planType = 'Team'
     }
 
+    const extraUsage = parseClaudeExtraUsage(usage.extra_usage)
+    if (windows.length === 0 && !planType) {
+        throw invalidQuotaPayload('Claude')
+    }
+
     const state: ClaudeQuotaState = {
         status: 'success',
         windows,
-        extraUsage: (usage.extra_usage as ClaudeExtraUsage | null | undefined) ?? null,
+        extraUsage,
         planType,
     }
 
@@ -522,11 +614,17 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
 }
 
 function mapCodex(fileName: string, data: unknown, setter: Setter) {
-    const d                           = data !== null && typeof data === 'object' ?
-                                        (data as Record<string, unknown>) :
-                                        null
+    const d = data !== null && typeof data === 'object' ?
+              (data as Record<string, unknown>) :
+              null
+    if (!d) {
+        throw invalidQuotaPayload('Codex')
+    }
     const windows: CodexQuotaWindow[] = []
-    const planType                    = (d?.plan_type ?? d?.planType ?? null) as string | null
+    const planTypeRaw                 = d?.plan_type ?? d?.planType
+    const planType                    = typeof planTypeRaw === 'string' && planTypeRaw.trim() !== '' ?
+                                        planTypeRaw.trim() :
+                                        null
 
     type RateLimitInfo = Record<string, unknown>
 
@@ -614,17 +712,22 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
                   ? (cuRaw as Record<string, unknown>)
                   : null
         if (cu) {
-            const used       = Number(cu.premium_completions_used ?? cu.completions_used ?? 0)
-            const limit      = Number(cu.premium_completions_limit ?? cu.completions_limit ?? 0)
-            const percent    = limit > 0 ? (used / limit) * 100 : 0
+            const used       = numberValue(cu.premium_completions_used ?? cu.completions_used)
+            const limit      = numberValue(cu.premium_completions_limit ?? cu.completions_limit)
             const resetLabel = typeof cu.reset_date === 'string' ? formatDateTime(new Date(cu.reset_date)) : ''
-            windows.push({
-                             id: 'completions',
-                             label: 'Completions',
-                             usedPercent: percent,
-                             resetLabel,
-                         })
+            if (used !== null && limit !== null && limit > 0) {
+                windows.push({
+                                 id: 'completions',
+                                 label: 'Completions',
+                                 usedPercent: (used / limit) * 100,
+                                 resetLabel,
+                             })
+            }
         }
+    }
+
+    if (windows.length === 0 && !planType) {
+        throw invalidQuotaPayload('Codex')
     }
 
     const state: CodexQuotaState = {
@@ -637,8 +740,11 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
 }
 
 function mapGemini(fileName: string, data: unknown, setter: Setter) {
-    const d        = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
-    const quotaRaw = d ? (typeof d.quota === 'string' ? JSON.parse(d.quota) : d.quota) : null
+    const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    if (!d) {
+        throw invalidQuotaPayload('Gemini')
+    }
+    const quotaRaw = typeof d.quota === 'string' ? JSON.parse(d.quota) : d.quota
     const quota    = quotaRaw !== null && typeof quotaRaw === 'object' ? (quotaRaw as Record<string, unknown>) : null
     const buckets  = extractCloudCodeBuckets(data)
 
@@ -650,12 +756,18 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
             if (!c) {
                 continue
             }
-            const remaining = Number(c.remainingValue ?? c.remaining_value ?? 0)
-            const total     = Number(c.totalValue ?? c.total_value ?? 1)
+            const metricName = typeof (c.metricName ?? c.metric_name) === 'string' ?
+                               String(c.metricName ?? c.metric_name).trim() :
+                               ''
+            const remaining  = numberValue(c.remainingValue ?? c.remaining_value)
+            const total      = numberValue(c.totalValue ?? c.total_value)
+            if (metricName === '' || remaining === null || total === null || total <= 0) {
+                continue
+            }
             buckets.push({
-                             id: String(c.metricName ?? c.metric_name ?? 'unknown'),
-                             label: String(c.metricName ?? 'Quota'),
-                             remainingFraction: total > 0 ? remaining / total : 0,
+                             id: metricName,
+                             label: metricName,
+                             remainingFraction: remaining / total,
                              remainingAmount: remaining,
                              resetTime:
                                  typeof (c.resetTime ?? c.reset_time) === 'string'
@@ -666,7 +778,7 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
         }
     }
 
-    const codeAssistRaw = d ? (typeof d.codeAssist === 'string' ? JSON.parse(d.codeAssist) : d.codeAssist) : null
+    const codeAssistRaw = typeof d.codeAssist === 'string' ? JSON.parse(d.codeAssist) : d.codeAssist
     const codeAssist    =
               codeAssistRaw !== null && typeof codeAssistRaw === 'object' ?
               (codeAssistRaw as Record<string, unknown>) :
@@ -675,6 +787,13 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
     const tierRecord    =
               currentTier !== null && typeof currentTier === 'object' ? (currentTier as Record<string, unknown>) : null
     const tierLabel     = typeof tierRecord?.id === 'string' ? tierRecord.id : null
+
+    if (!quota && !codeAssist) {
+        throw invalidQuotaPayload('Gemini')
+    }
+    if (buckets.length === 0 && !tierLabel) {
+        throw invalidQuotaPayload('Gemini')
+    }
 
     const state: GeminiCliQuotaState = {
         status: 'success',
@@ -686,26 +805,218 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
     setter((prev: Record<string, GeminiCliQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
-interface KimiUsageRow {
-    id?: string
-    label?: string
-    name?: string
-    used?: number
-    limit?: number
-    reset_hint?: string
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (typeof value === 'string' && value.trim() !== '') {
+        try {
+            return asRecord(JSON.parse(value))
+        } catch {
+            return null
+        }
+    }
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, unknown>
+    }
+    return null
+}
+
+function pickRecord(sources: Array<Record<string, unknown> | null>, keys: string[]): Record<string, unknown> | null {
+    for (const source of sources) {
+        if (!source) {
+            continue
+        }
+        for (const key of keys) {
+            const record = asRecord(source[key])
+            if (record) {
+                return record
+            }
+        }
+    }
+    return null
+}
+
+function numberValue(value: unknown): number | null {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().replace(/[$,%\s,]/g, '')
+        if (!normalized) {
+            return null
+        }
+        const parsed = Number(normalized)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
+}
+
+function pickNumber(sources: Array<Record<string, unknown> | null>, keys: string[]): number | null {
+    for (const source of sources) {
+        if (!source) {
+            continue
+        }
+        for (const key of keys) {
+            const parsed = numberValue(source[key])
+            if (parsed !== null) {
+                return parsed
+            }
+        }
+    }
+    return null
+}
+
+function pickString(sources: Array<Record<string, unknown> | null>, keys: string[]): string | null {
+    for (const source of sources) {
+        if (!source) {
+            continue
+        }
+        for (const key of keys) {
+            const value = source[key]
+            if (typeof value === 'string' && value.trim() !== '') {
+                return value
+            }
+        }
+    }
+    return null
+}
+
+function normalizePercent(value: number | null): number | null {
+    if (value === null) {
+        return null
+    }
+    return value >= 0 && value <= 1 ? value * 100 : value
+}
+
+function mapXai(fileName: string, data: unknown, setter: Setter) {
+    const root = asRecord(data)
+    if (!root) {
+        throw invalidQuotaPayload('xAI')
+    }
+
+    const usageRecord         = pickRecord([root], ['usage', 'current_usage', 'billing', 'billing_summary']) ?? root
+    const configRecord        = pickRecord([root], ['config', 'billing_config', 'limits', 'subscription']) ?? root
+    const usedCents           = pickNumber([usageRecord, root], [
+        'used_cents',
+        'usedCents',
+        'usage_cents',
+        'usageCents',
+        'current_usage_cents',
+        'currentUsageCents',
+        'total_usage_cents',
+        'totalUsageCents',
+        'spent_cents',
+        'spentCents',
+        'used',
+        'currentUsage',
+        'totalUsage',
+    ])
+    const monthlyLimitCents   = pickNumber([configRecord, root], [
+        'monthly_limit_cents',
+        'monthlyLimitCents',
+        'monthly_limit',
+        'monthlyLimit',
+        'spending_limit_cents',
+        'spendingLimitCents',
+        'hard_limit_cents',
+        'hardLimitCents',
+        'credit_limit_cents',
+        'creditLimitCents',
+        'limit_cents',
+        'limitCents',
+        'limit',
+    ])
+    const onDemandCapCents    = pickNumber([configRecord, root], [
+        'on_demand_cap_cents',
+        'onDemandCapCents',
+        'on_demand_spend_limit_cents',
+        'onDemandSpendLimitCents',
+        'on_demand_limit_cents',
+        'onDemandLimitCents',
+    ])
+    const usedPercentRaw      = pickNumber([usageRecord, root], [
+        'used_percent',
+        'usedPercent',
+        'usage_percent',
+        'usagePercent',
+        'utilization',
+    ])
+    const remainingPercentRaw = pickNumber([usageRecord, root], ['remaining_percent', 'remainingPercent'])
+    const denominator         =
+              monthlyLimitCents !== null && monthlyLimitCents > 0
+              ? monthlyLimitCents
+              : onDemandCapCents !== null && onDemandCapCents > 0
+                ? onDemandCapCents
+                : null
+    const usedPercent         =
+              usedPercentRaw !== null
+              ? normalizePercent(usedPercentRaw)
+              : remainingPercentRaw !== null
+                ? 100 - (normalizePercent(remainingPercentRaw) ?? 0)
+                : denominator !== null && usedCents !== null
+                  ? (usedCents / denominator) * 100
+                  : null
+
+    if (usedPercent === null) {
+        throw invalidQuotaPayload('xAI')
+    }
+
+    const state: XaiQuotaState = {
+        status: 'success',
+        billing: {
+            usedCents,
+            monthlyLimitCents,
+            onDemandCapCents,
+            usedPercent,
+            billingPeriodStart: pickString([usageRecord, root], [
+                'billing_period_start',
+                'billingPeriodStart',
+                'period_start',
+                'periodStart',
+                'start_time',
+                'startTime',
+            ]),
+            billingPeriodEnd: pickString([usageRecord, root], [
+                'billing_period_end',
+                'billingPeriodEnd',
+                'period_end',
+                'periodEnd',
+                'end_time',
+                'endTime',
+                'next_reset',
+                'nextReset',
+                'reset_at',
+                'resetAt',
+            ]),
+        },
+    }
+
+    setter((prev: Record<string, XaiQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
 function mapKimi(fileName: string, data: unknown, setter: Setter) {
     const d       = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
-    const rowsRaw = Array.isArray(data) ? data : (d?.usages ?? [])
-    const rows    = Array.isArray(rowsRaw) ? (rowsRaw as KimiUsageRow[]) : []
-    const mapped  = rows.map((r) => ({
-        id: r.id ?? r.name ?? 'unknown',
-        label: r.label ?? r.name ?? r.id ?? 'Unknown',
-        used: r.used ?? 0,
-        limit: r.limit ?? 0,
-        resetHint: r.reset_hint,
-    }))
+    const rowsRaw = Array.isArray(data) ? data : (d?.usages ?? null)
+    if (!Array.isArray(rowsRaw)) {
+        throw invalidQuotaPayload('Kimi')
+    }
+    const mapped = rowsRaw.flatMap((row) => {
+        const r = asRecord(row)
+        if (!r) {
+            return []
+        }
+        const id        = pickString([r], ['id', 'name', 'label'])
+        const label     = pickString([r], ['label', 'name', 'id'])
+        const used      = numberValue(r.used)
+        const limit     = numberValue(r.limit)
+        const resetHint = typeof r.reset_hint === 'string' ? r.reset_hint : undefined
+        if (!id || !label || used === null || limit === null || limit <= 0) {
+            return []
+        }
+        return [{ id, label, used, limit, resetHint }]
+    })
+
+    if (mapped.length === 0) {
+        throw invalidQuotaPayload('Kimi')
+    }
 
     const state: KimiQuotaState = {
         status: 'success',

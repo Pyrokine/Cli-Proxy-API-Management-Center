@@ -308,35 +308,37 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
 
                     {supportsCallback && (
                         <div className={styles.callbackArea}>
-                            <Input
-                                label={t(
-                                    provider === 'xai'
-                                    ? 'auth_login.xai_callback_label'
-                                    : 'credentials.oauth_callback_hint',
-                                )}
-                                placeholder={t(
-                                    provider === 'xai'
-                                    ? 'auth_login.xai_callback_placeholder'
-                                    : 'auth_login.oauth_callback_placeholder',
-                                )}
-                                hint={
-                                    provider === 'xai'
-                                    ? t('auth_login.xai_callback_hint')
-                                    : t('auth_login.oauth_callback_hint')
-                                }
-                                value={callbackUrl}
-                                onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
-                                disabled={callbackSubmitting}
-                            />
-                            <Button
-                                variant='primary'
-                                size='sm'
-                                onClick={submitCallback}
-                                loading={callbackSubmitting}
-                                disabled={!callbackUrl.trim()}
-                            >
-                                {t('credentials.oauth_callback_submit')}
-                            </Button>
+                            <div className={styles.callbackInputRow}>
+                                <Input
+                                    label={t(
+                                        provider === 'xai'
+                                        ? 'auth_login.xai_callback_label'
+                                        : 'credentials.oauth_callback_hint',
+                                    )}
+                                    placeholder={t(
+                                        provider === 'xai'
+                                        ? 'auth_login.xai_callback_placeholder'
+                                        : 'auth_login.oauth_callback_placeholder',
+                                    )}
+                                    value={callbackUrl}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
+                                    disabled={callbackSubmitting}
+                                />
+                                <Button
+                                    variant='primary'
+                                    size='sm'
+                                    onClick={submitCallback}
+                                    loading={callbackSubmitting}
+                                    disabled={!callbackUrl.trim()}
+                                >
+                                    {t('credentials.oauth_callback_submit')}
+                                </Button>
+                            </div>
+                            <div className={styles.callbackHint}>
+                                {provider === 'xai'
+                                 ? t('auth_login.xai_callback_hint')
+                                 : t('auth_login.oauth_callback_hint')}
+                            </div>
                         </div>
                     )}
 
