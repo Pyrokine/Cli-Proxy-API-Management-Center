@@ -59,11 +59,14 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                 header: t('usage_stats.requests_count'),
                 sortable: true,
                 sortValue: (row) => row.requests,
+                className: styles.requestCountColumn,
+                headerClassName: styles.requestCountColumn,
                 cell: (row) => (
                     <span className={styles.requestCountCell}>
                         <span>{row.requests.toLocaleString()}</span>
                         <span className={styles.requestBreakdown}>
-                            (<span className={styles.statSuccess}>{row.successCount.toLocaleString()}</span>{' '}
+                            (<span className={styles.statSuccess}>{row.successCount.toLocaleString()}</span>
+                            <span className={styles.requestBreakdownSeparator}>·</span>
                             <span className={styles.statFailure}>{row.failureCount.toLocaleString()}</span>)
                         </span>
                     </span>
@@ -109,6 +112,8 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                            header: t('usage_stats.total_cost'),
                            sortable: true,
                            sortValue: (row) => row.cost,
+                           className: styles.numericColumn,
+                           headerClassName: styles.numericColumn,
                            cell: (row) => (row.cost > 0 ? formatUsd(row.cost) : '--'),
                        })
         }

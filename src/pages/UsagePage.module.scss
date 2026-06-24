@@ -50,6 +50,11 @@
     margin: 0;
 }
 
+.usageTabs {
+    min-height: 34px;
+    margin-bottom: -4px;
+}
+
 .errorBox {
     padding: 10px;
     background-color: rgba($error-color, 0.1);
@@ -632,16 +637,29 @@
     vertical-align: middle;
 }
 
+.requestCountColumn,
+.numericColumn {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 .requestCountCell {
     display: inline-flex;
     align-items: baseline;
+    justify-content: flex-end;
     gap: 6px;
+    width: 100%;
     font-variant-numeric: tabular-nums;
 }
 
 .requestBreakdown {
     color: var(--text-secondary);
     white-space: nowrap;
+}
+
+.requestBreakdownSeparator {
+    margin: 0 4px;
+    color: var(--text-tertiary);
 }
 
 // Pricing Section (80%比例)
@@ -797,6 +815,25 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.migratedSettingsCard {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-md;
+
+    p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        line-height: $line-height-base;
+    }
+
+    @include mobile {
+        align-items: stretch;
+        flex-direction: column;
+    }
 }
 
 .settingsCardsGrid {
@@ -1008,6 +1045,7 @@
 .requestEventsFilterItem {
     display: flex;
     flex-direction: column;
+    justify-content: flex-end;
     gap: 4px;
     min-width: 180px;
 }
@@ -1031,6 +1069,7 @@
     border-radius: $radius-md;
     background: var(--bg-primary);
     color: var(--text-primary);
+    height: $control-height-md;
     font-size: $font-size-sm;
     box-shadow: var(--shadow);
     box-sizing: border-box;
@@ -1106,36 +1145,177 @@
     min-width: 160px;
 }
 
-.requestEventsSourceCell,
-.requestEventsAuthIndex,
-.requestEventsApiKey {
+.requestEventsModelCell {
+    min-width: 150px;
+    max-width: 220px;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsCallerCell {
+    min-width: 220px;
+    max-width: 300px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.requestEventsPrimaryLine,
+.requestEventsRequestId {
     font-family: $font-mono;
     font-size: $font-size-sm;
-    max-width: 180px;
-    word-break: break-all;
+}
+
+.requestEventsPrimaryLine {
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+.requestEventsRequestId {
+    display: block;
+    width: 190px;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsNumericHeader,
+.requestEventsNumericCell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.requestEventsSubline {
+    margin-top: 2px;
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-normal;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+.requestEventsResultCell {
+    min-width: 86px;
+    text-align: center;
+    vertical-align: middle;
+
+    .requestEventsSubline {
+        margin-top: 6px;
+    }
+}
+
+.requestEventsNoUsage {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: 150px;
+    color: var(--warning-text);
+    font-size: $font-size-xs;
+    line-height: 1.3;
+    white-space: normal;
+}
+
+.requestLogActions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 190px;
+}
+
+.requestLogButtonRow {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+
+.requestEventsLogGuide {
+    margin: $spacing-xs 0 $spacing-sm;
+    padding: $spacing-xs $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+}
+
+.requestEventsLogDisabled {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+
+    .requestEventsSubline {
+        margin-top: 0;
+        white-space: normal;
+    }
+}
+
+.requestLogPreviewMeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-xs;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+}
+
+.requestLogPreview {
+    max-height: 520px;
+    overflow: auto;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.requestLogError {
+    margin-bottom: $spacing-xs;
+    padding: $spacing-xs $spacing-sm;
+    border: 1px solid rgba($error-color, 0.2);
+    border-radius: $radius-sm;
+    background: rgba($error-color, 0.1);
+    color: $error-color;
+    font-size: $font-size-sm;
 }
 
 .requestEventsResultSuccess {
     color: var(--success-badge-text, #065f46);
-    background: var(--success-badge-bg, #d1fae5);
-    border: 1px solid var(--success-badge-border, #6ee7b7);
+    background: color-mix(in srgb, var(--success-badge-bg, #d1fae5) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success-badge-border, #6ee7b7) 72%, transparent);
 }
 
 .requestEventsResultFailed {
     color: var(--failure-badge-text);
-    background: var(--failure-badge-bg);
-    border: 1px solid var(--failure-badge-border);
+    background: color-mix(in srgb, var(--failure-badge-bg) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--failure-badge-border) 72%, transparent);
 }
 
 .requestEventsResultSuccess,
 .requestEventsResultFailed,
-.requestEventsThinkingBadge,
-.requestEventsThinkingEmpty {
+.requestEventsThinkingBadge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    min-height: 22px;
+    padding: 0 8px;
     border-radius: $radius-full;
-    font-size: $font-size-sm;
+    font-size: $font-size-xs;
     font-weight: $font-weight-medium;
     white-space: nowrap;
 }
@@ -1146,10 +1326,9 @@
     border: 1px solid color-mix(in srgb, var(--primary-color) 28%, transparent);
 }
 
-.requestEventsThinkingEmpty {
+.requestEventsPlainMissing {
     color: var(--text-tertiary);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    font-size: $font-size-sm;
 }
 
 // Service Health Card
@@ -1472,87 +1651,6 @@
     }
 }
 
-// Events 移动端卡片视图
-.eventCardList {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.eventCard {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-    cursor: pointer;
-    transition: border-color 0.15s,
-    background-color 0.15s;
-    background: var(--bg-primary);
-
-    &:hover {
-        border-color: var(--border-hover);
-        background: var(--bg-tertiary);
-    }
-}
-
-.eventCardExpanded {
-    border-color: var(--border-primary);
-}
-
-.eventCardHeader {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-}
-
-.eventCardTime {
-    font-size: $font-size-sm;
-    color: var(--text-tertiary);
-}
-
-.eventCardBody {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 4px;
-    gap: 8px;
-}
-
-.eventCardModel {
-    font-weight: $font-weight-medium;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.eventCardTokens {
-    font-size: $font-size-sm;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-
-.eventCardDetails {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.eventCardDetailRow {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: $font-size-sm;
-    color: var(--text-secondary);
-}
-
-.eventCardDetailLabel {
-    color: var(--text-tertiary);
-}
-
 .costBarWrapper {
     position: relative;
     display: flex;
@@ -1577,34 +1675,4 @@
     font-size: $font-size-sm;
     color: var(--text-secondary);
     padding-left: 6px;
-}
-
-.tabBar {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 12px;
-    border-bottom: 1px solid var(--border-color, #e5e7eb);
-}
-
-.tabButton {
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary, #6b7280);
-    font-size: $font-size-sm;
-    font-weight: $font-weight-medium;
-    padding: 8px 16px;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s ease,
-    border-color 0.15s ease;
-
-    &:hover {
-        color: var(--text-primary, #111827);
-    }
-}
-
-.tabButtonActive {
-    color: var(--brand-color, #3b82f6);
-    border-bottom-color: var(--brand-color, #3b82f6);
 }

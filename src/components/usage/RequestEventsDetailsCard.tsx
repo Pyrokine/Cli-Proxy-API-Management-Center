@@ -1,29 +1,65 @@
 import {CardSkeleton} from '@/components/common/CardSkeleton'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {EmptyState} from '@/components/ui/EmptyState'
+import {Modal} from '@/components/ui/Modal'
 import {Pagination} from '@/components/ui/Pagination'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useDebounce} from '@/hooks/useDebounce'
-import {useMediaQuery} from '@/hooks/useMediaQuery'
-import styles from '@/pages/UsagePage.module.scss'
-import {type EventsResponse, usageApi, type UsageEvent, type UsageThinking} from '@/services/api/usage'
+import {authFilesApi} from '@/services/api/authFiles'
+import {logsApi} from '@/services/api/logs'
+import {
+    type EventsParams,
+    type EventsResponse,
+    usageApi,
+    type UsageEvent,
+    type UsageThinking,
+} from '@/services/api/usage'
 import {useConfigStore} from '@/stores'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {OAuthModelAliasEntry} from '@/types/oauth'
 import type {CredentialInfo} from '@/types/sourceInfo'
 import {AUTO_REFRESH_INTERVALS, DEFAULT_AUTO_REFRESH_MS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {downloadBlob} from '@/utils/download'
 import {formatDateTime, formatNumber, maskApiKey, toLocalDateTimeSecondsString} from '@/utils/format'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
-import {extractLatencyMs, formatDurationMs, formatThinkingLabel, normalizeUsageThinking} from '@/utils/usage'
+import {
+    extractLatencyMs,
+    formatDurationMs,
+    formatThinkingLabel,
+    isNoThinkingUsage,
+    normalizeUsageThinking,
+} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import styles from './RequestEventsDetailsCard.module.scss'
 
 const STATUS_ALL        = ''
-const STATUS_SUCCESS    = 'success'
-const STATUS_FAILURE    = 'failure'
 const DEFAULT_PAGE_SIZE = 50
+
+function formatRequestThinkingLabel(
+    thinking: UsageThinking | null,
+    reasoningTokens: number | null,
+    lang: string,
+    t: ReturnType<typeof useTranslation>['t'],
+    notRecordedLabel: string,
+): string {
+    if (thinking) {
+        const label = formatThinkingLabel(thinking, lang)
+        if (label !== '-') {
+            return label
+        }
+    }
+    if (reasoningTokens !== null && reasoningTokens > 0) {
+        return t('usage_stats.request_events_thinking_recorded', { defaultValue: 'Recorded' })
+    }
+    if (reasoningTokens === 0) {
+        return t('usage_stats.request_events_reasoning_zero', { defaultValue: '0 reasoning tokens' })
+    }
+    return notRecordedLabel
+}
 
 type RequestEventRow = {
     id: string
@@ -31,6 +67,7 @@ type RequestEventRow = {
     timestampMs: number
     timestampLabel: string
     model: string
+    modelAliasRelations: string[]
     sourceRaw: string
     source: string
     sourceType: string
@@ -39,16 +76,33 @@ type RequestEventRow = {
     apiKey: string
     apiKeyMasked: string
     user: string
+    requestId: string
     latencyMs: number | null
     latencyLabel: string
+    timeToFirstByteMs: number | null
+    timeToFirstByteLabel: string
+    totalDurationMs: number | null
+    totalDurationLabel: string
+    completed: boolean | null
+    cacheHitRate: number | null
+    cacheHitRateLabel: string
+    throughputTokensPerSecond: number | null
+    throughputLabel: string
     thinking: UsageThinking | null
     thinkingLabel: string
+    thinkingRecorded: boolean
+    thinkingNone: boolean
     failed: boolean
-    inputTokens: number
-    outputTokens: number
-    reasoningTokens: number
-    cachedTokens: number
-    totalTokens: number
+    inputTokens: number | null
+    inputTokensLabel: string
+    outputTokens: number | null
+    outputTokensLabel: string
+    reasoningTokens: number | null
+    reasoningTokensLabel: string
+    cachedTokens: number | null
+    cachedTokensLabel: string
+    totalTokens: number | null
+    totalTokensLabel: string
 }
 
 interface RequestEventsDetailsCardProps {
@@ -71,6 +125,8 @@ interface RequestEventsDetailsCardProps {
     selectedModels?: string[]
     selectedCredentials?: string[]
     selectedApiKeys?: string[]
+    selectedStatus?: string
+    onSelectedStatusChange?: (status: string) => void
 }
 
 const encodeCsv = (value: string | number): string => {
@@ -90,10 +146,80 @@ type SortField =
     | 'cachedTokens'
 type SortDir = 'asc' | 'desc'
 
+type ModelAliasRelation = {
+    channel: string
+    name: string
+    alias: string
+    label: string
+}
+
+type ModelAliasLookup = Map<string, ModelAliasRelation[]>
+
+function channelLabel(channel: string): string {
+    const labels: Record<string, string> = {
+        'aistudio': 'AI Studio',
+        'antigravity': 'Antigravity',
+        'claude': 'Claude',
+        'codex': 'Codex',
+        'gemini-cli': 'Gemini CLI',
+        'iflow': 'iFlow',
+        'openai': 'OpenAI',
+        'vertex': 'Vertex',
+    }
+    return labels[channel] ?? channel
+}
+
+function modelKeyCandidates(model: string): string[] {
+    const key = model.trim().toLowerCase()
+    if (!key) {
+        return []
+    }
+    const withoutModels = key.startsWith('models/') ? key.slice('models/'.length) : key
+    return Array.from(new Set([key, withoutModels, `models/${withoutModels}`]))
+}
+
+function addModelAliasLookupEntry(lookup: ModelAliasLookup, key: string, relation: ModelAliasRelation): void {
+    const relations = lookup.get(key) ?? []
+    if (!relations.some((item) => item.channel ===
+                                  relation.channel &&
+                                  item.name ===
+                                  relation.name &&
+                                  item.alias ===
+                                  relation.alias)) {
+        lookup.set(key, [...relations, relation])
+    }
+}
+
+function buildModelAliasLookup(aliases: Record<string, OAuthModelAliasEntry[]>): ModelAliasLookup {
+    const lookup: ModelAliasLookup = new Map()
+    for (const [channel, entries] of Object.entries(aliases)) {
+        for (const entry of entries ?? []) {
+            const name  = entry.name.trim()
+            const alias = entry.alias.trim()
+            if (!name || !alias) {
+                continue
+            }
+            const relation = {
+                channel,
+                name,
+                alias,
+                label: `${channelLabel(channel)}: ${alias} ↔ ${name}`,
+            }
+            modelKeyCandidates(name).forEach((key) => addModelAliasLookupEntry(lookup, key, relation))
+            modelKeyCandidates(alias).forEach((key) => addModelAliasLookupEntry(lookup, key, relation))
+        }
+    }
+    return lookup
+}
+
+function resolveModelAliasRelations(model: string, lookup: ModelAliasLookup): string[] {
+    return (lookup.get(model.trim().toLowerCase()) ?? []).map((item) => item.label)
+}
+
 /** Append shared filter fields to a params object. Multi-value arrays are joined by comma,
  *  matching the summary endpoint convention; the events backend splits them back into a set. */
 function applyFilters(
-    params: Record<string, string | number>,
+    params: EventsParams,
     from: string,
     to: string,
     selectedModels: readonly string[],
@@ -120,9 +246,13 @@ function applyFilters(
     if (searchQuery.trim()) {
         params.search = searchQuery.trim()
     }
-    if (statusFilter) {
+    if (statusFilter === 'success' || statusFilter === 'failure') {
         params.status = statusFilter
     }
+}
+
+function renderFailedNoUsage(t: ReturnType<typeof useTranslation>['t']) {
+    return t('usage_stats.request_events_failed_no_usage', { defaultValue: '失败未返回用量' })
 }
 
 /** Map backend sort field name */
@@ -141,6 +271,94 @@ function toBackendSortField(field: SortField): string {
     }
 }
 
+function numberFromValue(value: number | string | null | undefined): number | null {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
+}
+
+function formatPercent(value: number | null, lang: string, missingText: string): string {
+    if (value === null) {
+        return missingText
+    }
+    return `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(value)}%`
+}
+
+function formatThroughput(value: number | null, lang: string, missingText: string): string {
+    if (value === null) {
+        return missingText
+    }
+    return `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(value)} tok/s`
+}
+
+function formatTokenValue(value: number | null, lang: string, missingText: string): string {
+    if (value === null) {
+        return missingText
+    }
+    return formatNumber(value, lang)
+}
+
+function nonNegativeNumber(value: number | string | null | undefined): number | null {
+    const parsed = numberFromValue(value)
+    return parsed === null ? null : Math.max(parsed, 0)
+}
+
+function maxTokenValue(...values: Array<number | string | null | undefined>): number | null {
+    const parsed = values.map(nonNegativeNumber).filter((value): value is number => value !== null)
+    return parsed.length > 0 ? Math.max(...parsed) : null
+}
+
+function backendMaskedApiKey(key: string): string {
+    if (key.length > 8) {
+        return `${key.slice(0, 4)}...${key.slice(-4)}`
+    }
+    if (key.length > 4) {
+        return `${key.slice(0, 2)}...${key.slice(-2)}`
+    }
+    if (key.length > 2) {
+        return `${key.slice(0, 1)}...${key.slice(-1)}`
+    }
+    return key
+}
+
+function resolveApiKeyAlias(apiKey: string, aliases?: Record<string, string>): string {
+    if (!apiKey || !aliases) {
+        return ''
+    }
+    if (aliases[apiKey]) {
+        return aliases[apiKey]
+    }
+    for (const [rawKey, alias] of Object.entries(aliases)) {
+        if (backendMaskedApiKey(rawKey) === apiKey || maskApiKey(rawKey) === apiKey) {
+            return alias
+        }
+    }
+    return ''
+}
+
+function displayApiKey(apiKey: string, alias: string, noApiKeyLabel: string): string {
+    if (!apiKey) {
+        return noApiKeyLabel
+    }
+    if (alias) {
+        return alias
+    }
+    return apiKey.includes('...') ? apiKey : maskApiKey(apiKey)
+}
+
+function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err || '')
+}
+
+function safeRequestLogFilename(requestId: string): string {
+    return `request-${requestId.replace(/[^a-zA-Z0-9_.-]/g, '_')}.log`
+}
+
 /** Map a UsageEvent from backend to a RequestEventRow */
 function eventToRow(
     event: UsageEvent,
@@ -149,50 +367,98 @@ function eventToRow(
     authFileMap: Map<string, CredentialInfo>,
     lang: string,
     noApiKeyLabel: string,
+    notRecordedLabel: string,
+    modelAliasLookup: ModelAliasLookup,
+    t: ReturnType<typeof useTranslation>['t'],
     aliases?: Record<string, string>,
 ): RequestEventRow {
-    const timestampMs         = Date.parse(event.timestamp)
-    const date                = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
-    const sourceRaw           = event.source || ''
-    const authIndex           = event.auth_index || '-'
-    const sourceInfo          = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
-    const rawApiKey           = event.api_key || ''
-    const alias               = rawApiKey && aliases?.[rawApiKey] ? aliases[rawApiKey] : ''
-    const sourceDisplay       = sourceInfo.displayName.trim()
-    const hasSourceDisplay    = sourceDisplay !== '' && sourceDisplay !== '-'
-    const maskedApiKey        = rawApiKey ? aliases?.[rawApiKey] || maskApiKey(rawApiKey) : noApiKeyLabel
-    const sourceBase          =
+    const timestampMs        = Date.parse(event.timestamp)
+    const date               = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
+    const sourceRaw          = event.source || ''
+    const authIndex          = event.auth_index || '-'
+    const sourceInfo         = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
+    const rawApiKey          = event.api_key || ''
+    const alias              = resolveApiKeyAlias(rawApiKey, aliases)
+    const sourceDisplay      = sourceInfo.displayName.trim()
+    const hasSourceDisplay   = sourceDisplay !== '' && sourceDisplay !== '-'
+    const maskedApiKey       = displayApiKey(rawApiKey, alias, noApiKeyLabel)
+    const sourceBase         =
               hasSourceDisplay && sourceDisplay !== maskedApiKey ?
               sourceDisplay :
               alias || sourceDisplay || noApiKeyLabel
-    const resolvedSourceLabel = sourceInfo.type ? `${sourceBase} (${sourceInfo.type})` : sourceBase
-    const latencyMs           = extractLatencyMs(event)
-    const thinking            = normalizeUsageThinking(event.thinking)
+    const providerLabel      = (sourceInfo.type || event.provider || '').trim()
+    const providerDisplay    = providerLabel ? channelLabel(providerLabel) : ''
+    const latencyMs          = extractLatencyMs(event)
+    const timeToFirstByteMs  = numberFromValue(event.time_to_first_byte_ms)
+    const totalDurationMs    = numberFromValue(event.total_duration_ms)
+    const requestId          = typeof event.request_id === 'string' ? event.request_id.trim() : ''
+    const inputTokens        = nonNegativeNumber(event.tokens?.input_tokens)
+    const outputTokens       = nonNegativeNumber(event.tokens?.output_tokens)
+    const reasoningTokens    = nonNegativeNumber(event.tokens?.reasoning_tokens)
+    const cachedTokens       = maxTokenValue(event.tokens?.cached_tokens, event.tokens?.cache_tokens)
+    const tokenParts         = [inputTokens, outputTokens, reasoningTokens, cachedTokens]
+    const totalTokens        = nonNegativeNumber(event.tokens?.total_tokens) ?? (
+        tokenParts.some((value) => value !== null)
+        ? tokenParts.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+        : null
+    )
+    const cacheHitRate       = inputTokens !== null && cachedTokens !== null && inputTokens > 0
+                               ? (cachedTokens / inputTokens) * 100
+                               : null
+    const throughputTokens   =
+              totalDurationMs !== null && totalDurationMs > 0 && outputTokens !== null
+              ? outputTokens / (totalDurationMs / 1000)
+              : null
+    const thinking           = normalizeUsageThinking(event.thinking)
+    const hasRequestMetadata =
+              event.metadata_recorded === true &&
+              (requestId !== '' ||
+               timeToFirstByteMs !== null ||
+               totalDurationMs !== null ||
+               typeof event.completed === 'boolean')
 
     return {
-        id: `${event.timestamp}-${event.model}-${sourceRaw}-${authIndex}-${index}`,
+        id: `${requestId || event.timestamp}-${event.model}-${sourceRaw}-${authIndex}-${index}`,
         timestamp: event.timestamp,
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
         timestampLabel: date ? formatDateTime(date, lang) : event.timestamp || '-',
         model: event.model || '-',
+        modelAliasRelations: resolveModelAliasRelations(event.model || '', modelAliasLookup),
         sourceRaw: sourceRaw || '-',
         source: sourceInfo.displayName,
-        sourceType: sourceInfo.type,
-        sourceLabel: resolvedSourceLabel,
+        sourceType: providerDisplay,
+        sourceLabel: sourceBase,
         authIndex,
         apiKey: rawApiKey,
         apiKeyMasked: maskedApiKey,
-        user: resolvedSourceLabel,
+        user: sourceBase,
+        requestId,
         latencyMs,
-        latencyLabel: formatDurationMs(latencyMs, { locale: lang }),
+        latencyLabel: formatDurationMs(latencyMs, { locale: lang, invalidText: notRecordedLabel }),
+        timeToFirstByteMs,
+        timeToFirstByteLabel: formatDurationMs(timeToFirstByteMs, { locale: lang, invalidText: notRecordedLabel }),
+        totalDurationMs,
+        totalDurationLabel: formatDurationMs(totalDurationMs, { locale: lang, invalidText: notRecordedLabel }),
+        completed: hasRequestMetadata && typeof event.completed === 'boolean' ? event.completed : null,
+        cacheHitRate,
+        cacheHitRateLabel: formatPercent(cacheHitRate, lang, notRecordedLabel),
+        throughputTokensPerSecond: throughputTokens,
+        throughputLabel: formatThroughput(throughputTokens, lang, notRecordedLabel),
         thinking,
-        thinkingLabel: formatThinkingLabel(thinking, lang),
+        thinkingLabel: formatRequestThinkingLabel(thinking, reasoningTokens, lang, t, notRecordedLabel),
+        thinkingRecorded: Boolean(thinking || reasoningTokens !== null),
+        thinkingNone: isNoThinkingUsage(thinking),
         failed: event.failed,
-        inputTokens: Math.max(event.tokens?.input_tokens ?? 0, 0),
-        outputTokens: Math.max(event.tokens?.output_tokens ?? 0, 0),
-        reasoningTokens: Math.max(event.tokens?.reasoning_tokens ?? 0, 0),
-        cachedTokens: Math.max(event.tokens?.cached_tokens ?? 0, 0),
-        totalTokens: Math.max(event.tokens?.total_tokens ?? 0, 0),
+        inputTokens,
+        inputTokensLabel: formatTokenValue(inputTokens, lang, notRecordedLabel),
+        outputTokens,
+        outputTokensLabel: formatTokenValue(outputTokens, lang, notRecordedLabel),
+        reasoningTokens,
+        reasoningTokensLabel: formatTokenValue(reasoningTokens, lang, notRecordedLabel),
+        cachedTokens,
+        cachedTokensLabel: formatTokenValue(cachedTokens, lang, notRecordedLabel),
+        totalTokens,
+        totalTokensLabel: formatTokenValue(totalTokens, lang, notRecordedLabel),
     }
 }
 
@@ -214,9 +480,10 @@ export function RequestEventsDetailsCard({
                                              selectedModels,
                                              selectedCredentials,
                                              selectedApiKeys,
+                                             selectedStatus,
+                                             onSelectedStatusChange,
                                          }: RequestEventsDetailsCardProps) {
     const { t, i18n } = useTranslation()
-    const isMobile    = useMediaQuery('(max-width: 768px)')
     const config      = useConfigStore((state) => state.config)
 
     // Model / credential / api-key filters come from the top FilterBar via props;
@@ -226,14 +493,13 @@ export function RequestEventsDetailsCard({
     const topCredentials = useMemo(() => selectedCredentials ?? [], [selectedCredentials])
     const topApiKeys     = useMemo(() => selectedApiKeys ?? [], [selectedApiKeys])
 
-    const [statusFilter, setStatusFilter]   = useState(STATUS_ALL)
-    const [searchInput, setSearchInput]     = useState('')
-    const searchQuery                       = useDebounce(searchInput, 300)
-    const [sortField, setSortField]         = useState<SortField>('timestampMs')
-    const [sortDir, setSortDir]             = useState<SortDir>('desc')
-    const [page, setPage]                   = useState(1)
-    const [pageSize, setPageSize]           = useState(DEFAULT_PAGE_SIZE)
-    const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+    const statusFilter                  = selectedStatus ?? STATUS_ALL
+    const [searchInput, setSearchInput] = useState('')
+    const searchQuery                   = useDebounce(searchInput, 300)
+    const [sortField, setSortField]     = useState<SortField>('timestampMs')
+    const [sortDir, setSortDir]         = useState<SortDir>('desc')
+    const [page, setPage]               = useState(1)
+    const [pageSize, setPageSize]       = useState(DEFAULT_PAGE_SIZE)
 
     // Auto-refresh
     const configRefreshMs                                               = useMemo(
@@ -245,13 +511,27 @@ export function RequestEventsDetailsCard({
     const autoRefresh                                                   = autoRefreshOverride ?? configRefreshMs > 0
     const autoRefreshInterval                                           =
               autoRefreshIntervalOverride ?? (configRefreshMs > 0 ? configRefreshMs : DEFAULT_AUTO_REFRESH_MS)
+    const requestLogEnabled                                             = config?.requestLog === true
     const [autoRefreshClockMs, setAutoRefreshClockMs]                   = useState(() => Date.now())
 
     // Server-side data
-    const [eventsData, setEventsData] = useState<EventsResponse | null>(null)
-    const [fetching, setFetching]     = useState(false)
-    const [fetchError, setFetchError] = useState<string>('')
-    const fetchIdRef                  = useRef(0)
+    const [eventsData, setEventsData]                           = useState<EventsResponse | null>(null)
+    const [settledRequestSignature, setSettledRequestSignature] = useState('')
+    const [fetchError, setFetchError]                           = useState<string>('')
+    const [requestLogPreview, setRequestLogPreview]             = useState<{
+                                                                               id: string
+                                                                               content: string
+                                                                               truncated: boolean
+                                                                               totalLines: number
+                                                                           } | null>(null)
+    const [requestLogError, setRequestLogError]                 = useState('')
+    const [requestLogPreviewing, setRequestLogPreviewing]       = useState<Set<string>>(() => new Set())
+    const [requestLogDownloading, setRequestLogDownloading]     = useState<Set<string>>(() => new Set())
+    const [oauthModelAlias, setOauthModelAlias]                 = useState<Record<string, OAuthModelAliasEntry[]>>({})
+    const [modelAliasError, setModelAliasError]                 = useState('')
+    const fetchIdRef                                            = useRef(0)
+    const requestLogPreviewSeqRef                               = useRef(0)
+    const activeRequestLogPreviewRef                            = useRef<string | null>(null)
 
     // 从图表钻取时，同步搜索关键词
     const [prevDrillDown, setPrevDrillDown] = useState(drillDownSearch)
@@ -299,7 +579,7 @@ export function RequestEventsDetailsCard({
         onVisibleDateRangeChange?.(effectiveDateRange)
     }, [effectiveDateRange, onVisibleDateRangeChange])
 
-    const sourceInfoMap = useMemo(
+    const sourceInfoMap    = useMemo(
         () =>
             buildSourceInfoMap({
                                    geminiApiKeys: geminiKeys,
@@ -310,6 +590,28 @@ export function RequestEventsDetailsCard({
                                }),
         [claudeConfigs, codexConfigs, geminiKeys, openaiProviders, vertexConfigs],
     )
+    const modelAliasLookup = useMemo(() => buildModelAliasLookup(oauthModelAlias), [oauthModelAlias])
+
+    useEffect(() => {
+        let cancelled = false
+        authFilesApi
+            .getOauthModelAlias()
+            .then((data) => {
+                if (!cancelled) {
+                    setOauthModelAlias(data)
+                    setModelAliasError('')
+                }
+            })
+            .catch((err) => {
+                console.warn('Failed to load model aliases:', err)
+                if (!cancelled) {
+                    setModelAliasError(errorMessage(err) || t('common.unknown_error'))
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [t])
 
     // Reset page when filters change
     const pageResetSignature                      = [
@@ -330,22 +632,8 @@ export function RequestEventsDetailsCard({
         setPage(1)
     }
 
-    const fetchSignature                  = `${page}|${pageSize}|${pageResetSignature}|${effectiveDateRange.from}|${effectiveDateRange.to}`
-    const [prevFetchSig, setPrevFetchSig] = useState(fetchSignature)
-    if (prevFetchSig !== fetchSignature) {
-        setPrevFetchSig(fetchSignature)
-        setFetching(true)
-    }
-
-    // Fetch events from backend
-    useEffect(() => {
-        if (!enabled) {
-            return
-        }
-
-        const fetchId = ++fetchIdRef.current
-
-        const params: Record<string, string | number> = {
+    const eventsParams           = useMemo<EventsParams>(() => {
+        const params: EventsParams = {
             page,
             page_size: pageSize,
             sort: toBackendSortField(sortField),
@@ -361,9 +649,32 @@ export function RequestEventsDetailsCard({
             searchQuery,
             statusFilter,
         )
+        return params
+    }, [
+                                                             page,
+                                                             pageSize,
+                                                             sortField,
+                                                             sortDir,
+                                                             effectiveDateRange.from,
+                                                             effectiveDateRange.to,
+                                                             topModels,
+                                                             topCredentials,
+                                                             topApiKeys,
+                                                             statusFilter,
+                                                             searchQuery,
+                                                         ])
+    const eventsRequestSignature = useMemo(() => JSON.stringify(eventsParams), [eventsParams])
+
+    // Fetch events from backend
+    useEffect(() => {
+        if (!enabled) {
+            return
+        }
+
+        const fetchId = ++fetchIdRef.current
 
         usageApi
-            .getEvents(params as never)
+            .getEvents(eventsParams)
             .then((data) => {
                 if (fetchIdRef.current === fetchId) {
                     setEventsData(data)
@@ -372,35 +683,21 @@ export function RequestEventsDetailsCard({
             })
             .catch((err: unknown) => {
                 if (fetchIdRef.current === fetchId) {
-                    setEventsData(null)
                     setFetchError(err instanceof Error ? err.message : 'request failed')
                 }
             })
             .finally(() => {
                 if (fetchIdRef.current === fetchId) {
-                    setFetching(false)
+                    setSettledRequestSignature(eventsRequestSignature)
                 }
             })
-    }, [
-                  enabled,
-                  page,
-                  pageSize,
-                  sortField,
-                  sortDir,
-                  effectiveDateRange.from,
-                  effectiveDateRange.to,
-                  topModels,
-                  topCredentials,
-                  topApiKeys,
-                  statusFilter,
-                  searchQuery,
-              ])
+    }, [enabled, eventsParams, eventsRequestSignature])
 
     useEffect(() => {
         const timeoutId = window.setTimeout(() => {
             setAutoRefreshClockMs(Date.now())
         }, 0)
-        if (!autoRefresh || autoRefreshInterval <= 0) {
+        if (!autoRefresh || autoRefreshInterval <= 0 || requestLogPreview !== null) {
             return () => window.clearTimeout(timeoutId)
         }
         const intervalId = window.setInterval(() => {
@@ -410,51 +707,72 @@ export function RequestEventsDetailsCard({
             window.clearTimeout(timeoutId)
             window.clearInterval(intervalId)
         }
-    }, [activePreset, autoRefresh, autoRefreshInterval, dateRange.from, dateRange.to])
+    }, [activePreset, autoRefresh, autoRefreshInterval, dateRange.from, dateRange.to, requestLogPreview])
 
-    const noApiKeyLabel = t('usage_stats.filter_api_key_none')
-    const identityLabel = t('usage_stats.request_events_identity', { defaultValue: 'Identity' })
-    const apiKeyLabel   = t('usage_stats.request_events_api_key', { defaultValue: 'API Key' })
+    const noApiKeyLabel        = t('usage_stats.filter_api_key_none')
+    const identityLabel        = t('usage_stats.request_events_identity', { defaultValue: 'Identity' })
+    const apiKeyLabel          = t('usage_stats.request_events_api_key', { defaultValue: 'API Key' })
+    const requestLogLabel      = t('usage_stats.request_events_request_log', { defaultValue: 'Request log' })
+    const missingMetadataTitle = t('usage_stats.request_events_missing_metadata_hint', {
+        defaultValue: 'Historical events do not contain this metadata',
+    })
+    const notRecordedLabel     = t('usage_stats.request_events_not_recorded', { defaultValue: 'Not recorded' })
 
-    const rows = useMemo<RequestEventRow[]>(() => {
-        if (!enabled || !eventsData?.events) {
-            return []
-        }
-        return eventsData.events.map((event, index) =>
-                                         eventToRow(
-                                             event,
-                                             index,
-                                             sourceInfoMap,
-                                             authFileMap,
-                                             i18n.language,
-                                             noApiKeyLabel,
-                                             aliases,
-                                         ),
-        )
-    }, [enabled, eventsData, sourceInfoMap, authFileMap, i18n.language, noApiKeyLabel, aliases])
-
-    const totalCount = enabled ? (eventsData?.total ?? 0) : 0
-    const isLoading  = !enabled || fetching
-
-    const statusOptions = useMemo(
-        () => [
-            { value: STATUS_ALL, label: t('usage_stats.filter_all') },
-            { value: STATUS_SUCCESS, label: t('stats.success') },
-            { value: STATUS_FAILURE, label: t('stats.failure') },
+    const rows = useMemo<RequestEventRow[]>(
+        () => {
+            if (!enabled || !eventsData?.events) {
+                return []
+            }
+            return eventsData.events.map((event, index) =>
+                                             eventToRow(
+                                                 event,
+                                                 index,
+                                                 sourceInfoMap,
+                                                 authFileMap,
+                                                 i18n.language,
+                                                 noApiKeyLabel,
+                                                 notRecordedLabel,
+                                                 modelAliasLookup,
+                                                 t,
+                                                 aliases,
+                                             ),
+            )
+        },
+        [
+            enabled,
+            eventsData,
+            sourceInfoMap,
+            authFileMap,
+            i18n.language,
+            noApiKeyLabel,
+            notRecordedLabel,
+            modelAliasLookup,
+            t,
+            aliases,
         ],
-        [t],
     )
 
-    const hasActiveFilters = statusFilter !== STATUS_ALL || searchInput.trim() !== ''
+    const totalCount       = enabled ? (eventsData?.total ?? 0) : 0
+    const fetching         = enabled && settledRequestSignature !== eventsRequestSignature
+    const isInitialLoading = fetching && !eventsData
+    const isRefreshingRows = fetching && rows.length > 0
+    const isLoading        = !enabled || fetching
+
+    const hasActiveFilters =
+              statusFilter !== STATUS_ALL ||
+              searchInput.trim() !== '' ||
+              topModels.length > 0 ||
+              topCredentials.length > 0 ||
+              topApiKeys.length > 0
 
     const handleClearFilters = () => {
-        setStatusFilter(STATUS_ALL)
+        onSelectedStatusChange?.(STATUS_ALL)
         setSearchInput('')
     }
 
     const buildExportParams = useCallback(
-        (page: number): Record<string, string | number> => {
-            const params: Record<string, string | number> = {
+        (page: number): EventsParams => {
+            const params: EventsParams = {
                 page,
                 page_size: 500,
                 sort: toBackendSortField(sortField),
@@ -462,8 +780,8 @@ export function RequestEventsDetailsCard({
             }
             applyFilters(
                 params,
-                dateRange.from,
-                dateRange.to,
+                effectiveDateRange.from,
+                effectiveDateRange.to,
                 topModels,
                 topCredentials,
                 topApiKeys,
@@ -472,7 +790,7 @@ export function RequestEventsDetailsCard({
             )
             return params
         },
-        [dateRange, topModels, topCredentials, topApiKeys, statusFilter, searchQuery, sortField, sortDir],
+        [effectiveDateRange, topModels, topCredentials, topApiKeys, statusFilter, searchQuery, sortField, sortDir],
     )
 
     /** Fetch all pages of events for export. Backend caps at 500 per page. */
@@ -481,7 +799,7 @@ export function RequestEventsDetailsCard({
         let currentPage               = 1
 
         while (true) {
-            const data = await usageApi.getEvents(buildExportParams(currentPage) as never)
+            const data = await usageApi.getEvents(buildExportParams(currentPage))
             if (!data?.events?.length) {
                 break
             }
@@ -495,102 +813,161 @@ export function RequestEventsDetailsCard({
         return allEvents
     }, [buildExportParams])
 
-    const handleExportCsv = useCallback(async () => {
-        try {
-            const events = await fetchAllEvents()
-            if (!events.length) {
-                return
-            }
+    const handleExportCsv = useCallback(
+        async () => {
+            try {
+                const events = await fetchAllEvents()
+                if (!events.length) {
+                    return
+                }
 
-            const csvHeader = [
-                'timestamp',
-                'model',
-                'source',
-                'auth_index',
-                'provider',
-                'api_key',
-                'raw_api_key',
-                'user',
-                'result',
-                'latency_ms',
-                'thinking_intensity',
-                'thinking_mode',
-                'thinking_level',
-                'thinking_budget',
-                'input_tokens',
-                'output_tokens',
-                'reasoning_tokens',
-                'cached_tokens',
-                'total_tokens',
-            ]
-            const csvRows   = events.map((e, index) => {
-                const row = eventToRow(e, index, sourceInfoMap, authFileMap, i18n.language, noApiKeyLabel, aliases)
-                return [
-                    e.timestamp,
-                    e.model,
-                    e.source,
-                    e.auth_index ?? '',
-                    e.provider ?? '',
-                    row.apiKeyMasked,
-                    // R-547:raw api_key 与 auth_index 落 CSV,导入时
-                    // fingerprint(timestamp+model+source+auth_index+api_key)
-                    // 才能与原行一致,避免再导入产生重复或丢失，masked
-                    // 列保留给人眼,raw 列保留给机器，
-                    e.api_key ?? '',
-                    row.user,
-                    e.failed ? 'failed' : 'success',
-                    row.latencyMs ?? '',
-                    row.thinking?.intensity ?? '',
-                    row.thinking?.mode ?? '',
-                    row.thinking?.level ?? '',
-                    row.thinking?.budget ?? '',
-                    e.tokens?.input_tokens ?? 0,
-                    e.tokens?.output_tokens ?? 0,
-                    e.tokens?.reasoning_tokens ?? 0,
-                    e.tokens?.cached_tokens ?? 0,
-                    e.tokens?.total_tokens ?? 0,
+                const csvHeader = [
+                    'timestamp',
+                    'model',
+                    'source',
+                    'auth_index',
+                    'provider',
+                    'api_key',
+                    'raw_api_key',
+                    'user',
+                    'request_id',
+                    'result',
+                    'latency_ms',
+                    'time_to_first_byte_ms',
+                    'total_duration_ms',
+                    'completed',
+                    'cache_hit_rate',
+                    'response_throughput_tokens_per_second',
+                    'thinking_intensity',
+                    'thinking_mode',
+                    'thinking_level',
+                    'thinking_budget',
+                    'input_tokens',
+                    'output_tokens',
+                    'reasoning_tokens',
+                    'cached_tokens',
+                    'total_tokens',
                 ]
-                    .map((v) => encodeCsv(v))
-                    .join(',')
-            })
-            const content   = [csvHeader.join(','), ...csvRows].join('\n')
-            const fileTime  = new Date().toISOString().replace(/[:.]/g, '-')
-            downloadBlob({
-                             filename: `usage-events-${fileTime}.csv`,
-                             blob: new Blob([content], { type: 'text/csv;charset=utf-8' }),
-                         })
-        } catch {
-            /* ignore */
-        }
-    }, [fetchAllEvents, sourceInfoMap, authFileMap, i18n.language, noApiKeyLabel, aliases])
-
-    const handleExportJson = useCallback(async () => {
-        try {
-            const events = await fetchAllEvents()
-            if (!events.length) {
-                return
+                const csvRows   = events.map((e, index) => {
+                    const row = eventToRow(
+                        e,
+                        index,
+                        sourceInfoMap,
+                        authFileMap,
+                        i18n.language,
+                        noApiKeyLabel,
+                        notRecordedLabel,
+                        modelAliasLookup,
+                        t,
+                        aliases,
+                    )
+                    return [
+                        e.timestamp,
+                        e.model,
+                        e.source,
+                        e.auth_index ?? '',
+                        e.provider ?? '',
+                        row.apiKeyMasked,
+                        e.api_key ?? '',
+                        row.user,
+                        row.requestId,
+                        e.failed ? 'failed' : 'success',
+                        row.latencyMs ?? '',
+                        row.timeToFirstByteMs ?? '',
+                        row.totalDurationMs ?? '',
+                        row.completed === null ? '' : String(row.completed),
+                        row.cacheHitRate ?? '',
+                        row.throughputTokensPerSecond ?? '',
+                        row.thinking?.intensity ?? '',
+                        row.thinking?.mode ?? '',
+                        row.thinking?.level ?? '',
+                        row.thinking?.budget ?? '',
+                        row.inputTokens ?? '',
+                        row.outputTokens ?? '',
+                        row.reasoningTokens ?? '',
+                        row.cachedTokens ?? '',
+                        row.totalTokens ?? '',
+                    ]
+                        .map((v) => encodeCsv(v))
+                        .join(',')
+                })
+                const content   = [csvHeader.join(','), ...csvRows].join('\n')
+                const fileTime  = new Date().toISOString().replace(/[:.]/g, '-')
+                downloadBlob({
+                                 filename: `usage-events-${fileTime}.csv`,
+                                 blob: new Blob([content], { type: 'text/csv;charset=utf-8' }),
+                             })
+            } catch {
+                /* ignore */
             }
+        },
+        [
+            fetchAllEvents,
+            sourceInfoMap,
+            authFileMap,
+            i18n.language,
+            noApiKeyLabel,
+            notRecordedLabel,
+            modelAliasLookup,
+            t,
+            aliases,
+        ],
+    )
 
-            const content  = JSON.stringify(
-                events.map((event) => {
-                    const thinking = normalizeUsageThinking(event.thinking)
-                    return {
-                        ...event,
-                        thinking: thinking ?? undefined,
-                    }
-                }),
-                null,
-                2,
-            )
-            const fileTime = new Date().toISOString().replace(/[:.]/g, '-')
-            downloadBlob({
-                             filename: `usage-events-${fileTime}.json`,
-                             blob: new Blob([content], { type: 'application/json;charset=utf-8' }),
-                         })
-        } catch {
-            /* ignore */
-        }
-    }, [fetchAllEvents])
+    const handleExportJson = useCallback(
+        async () => {
+            try {
+                const events = await fetchAllEvents()
+                if (!events.length) {
+                    return
+                }
+
+                const content  = JSON.stringify(
+                    events.map((event, index) => {
+                        const thinking = normalizeUsageThinking(event.thinking)
+                        const row      = eventToRow(
+                            event,
+                            index,
+                            sourceInfoMap,
+                            authFileMap,
+                            i18n.language,
+                            noApiKeyLabel,
+                            notRecordedLabel,
+                            modelAliasLookup,
+                            t,
+                            aliases,
+                        )
+                        return {
+                            ...event,
+                            api_key: row.apiKeyMasked,
+                            raw_api_key: event.api_key ?? '',
+                            thinking: thinking ?? undefined,
+                        }
+                    }),
+                    null,
+                    2,
+                )
+                const fileTime = new Date().toISOString().replace(/[:.]/g, '-')
+                downloadBlob({
+                                 filename: `usage-events-${fileTime}.json`,
+                                 blob: new Blob([content], { type: 'application/json;charset=utf-8' }),
+                             })
+            } catch {
+                /* ignore */
+            }
+        },
+        [
+            fetchAllEvents,
+            sourceInfoMap,
+            authFileMap,
+            i18n.language,
+            noApiKeyLabel,
+            notRecordedLabel,
+            modelAliasLookup,
+            t,
+            aliases,
+        ],
+    )
 
     const handleSort = useCallback((field: SortField) => {
         setSortField((prev) => {
@@ -603,42 +980,272 @@ export function RequestEventsDetailsCard({
         })
     }, [])
 
-    const sortArrow = (field: SortField) => {
-        if (sortField !== field) {
-            return ''
+    const previewRequestLog = useCallback(async (requestId: string) => {
+        if (!requestId) {
+            return
         }
-        return sortDir === 'asc' ? ' ↑' : ' ↓'
-    }
-
-    const toggleCard = useCallback((id: string) => {
-        setExpandedCards((prev) => {
-            const next = new Set(prev)
-            if (next.has(id)) {
-                next.delete(id)
-            } else {
-                next.add(id)
+        const seq                          = ++requestLogPreviewSeqRef.current
+        activeRequestLogPreviewRef.current = requestId
+        setRequestLogPreview({ id: requestId, content: '', truncated: false, totalLines: 0 })
+        setRequestLogError('')
+        setRequestLogPreviewing((prev) => new Set(prev).add(requestId))
+        try {
+            const preview = await logsApi.previewRequestLogById(requestId, 300)
+            if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
+                setRequestLogPreview({
+                                         id: requestId,
+                                         content: preview.content,
+                                         truncated: preview.truncated,
+                                         totalLines: preview.total_lines,
+                                     })
             }
-            return next
-        })
+        } catch (err) {
+            if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
+                setRequestLogError(errorMessage(err) || 'request log unavailable')
+            }
+        } finally {
+            setRequestLogPreviewing((prev) => {
+                const next = new Set(prev)
+                next.delete(requestId)
+                return next
+            })
+        }
     }, [])
 
-    const renderSortableHeader = (field: SortField, label: string, title?: string) => (
-        <th
-            key={field}
-            className={styles.sortableHeader}
-            onClick={() => handleSort(field)}
-            aria-sort={sortField === field ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-            title={title}
-        >
+    const downloadRequestLog = useCallback(async (requestId: string) => {
+        if (!requestId) {
+            return
+        }
+        setRequestLogError('')
+        setRequestLogDownloading((prev) => new Set(prev).add(requestId))
+        try {
+            const response = await logsApi.downloadRequestLogById(requestId)
+            downloadBlob({
+                             filename: safeRequestLogFilename(requestId),
+                             blob: new Blob([response.data], { type: 'text/plain' }),
+                         })
+        } catch (err) {
+            setRequestLogError(errorMessage(err) || 'request log download failed')
+            setRequestLogPreview((prev) => prev ?? { id: requestId, content: '', truncated: false, totalLines: 0 })
+        } finally {
+            setRequestLogDownloading((prev) => {
+                const next = new Set(prev)
+                next.delete(requestId)
+                return next
+            })
+        }
+    }, [])
+
+    const renderSortableHeader = useCallback((field: SortField, label: string) => (
+        <button type='button' className={styles.sortHeaderButton} onClick={() => handleSort(field)}>
             {label}
-            {sortArrow(field)}
-        </th>
+            {sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+        </button>
+    ), [handleSort, sortDir, sortField])
+
+    const requestEventColumns = useMemo<SheetColumn<RequestEventRow>[]>(
+        () => [
+            {
+                key: 'timestamp',
+                header: renderSortableHeader('timestampMs', t('usage_stats.request_events_timestamp')),
+                headerClassName: styles.sortableHeader,
+                className: styles.requestEventsTimestamp,
+                cell: (row) => <span title={row.timestamp}>{row.timestampLabel}</span>,
+            },
+            {
+                key: 'model',
+                header: renderSortableHeader('model', t('usage_stats.model_name')),
+                headerClassName: styles.sortableHeader,
+                className: styles.requestEventsModelCell,
+                cell: (row) => (
+                    <div title={[row.model, ...row.modelAliasRelations].join('\n')}>
+                        <div className={styles.requestEventsModelPrimary}>{row.model}</div>
+                        {row.modelAliasRelations.slice(0, 2).map((relation) => (
+                            <div key={relation} className={styles.requestEventsModelAlias}>{relation}</div>
+                        ))}
+                    </div>
+                ),
+            },
+            {
+                key: 'identity',
+                header: `${identityLabel} / ${apiKeyLabel}`,
+                className: styles.requestEventsCallerCell,
+                cell: (row) => (
+                    <div className={styles.requestEventsIdentityStack}
+                         title={`${row.user}\n${apiKeyLabel}: ${row.apiKeyMasked}`}>
+                        <div className={styles.requestEventsIdentityLine}>
+                            {row.sourceType &&
+                             <span className={styles.requestEventsProviderChip}>{row.sourceType}</span>}
+                            <span className={styles.requestEventsSourceText}>{row.user}</span>
+                        </div>
+                        <div className={styles.requestEventsApiKeyLine}>
+                            <span className={styles.requestEventsApiKeyLabel}>{apiKeyLabel}</span>
+                            <span className={styles.requestEventsApiKeyValue}>{row.apiKeyMasked}</span>
+                        </div>
+                    </div>
+                ),
+            },
+            {
+                key: 'result',
+                header: t('usage_stats.request_events_result'),
+                className: styles.requestEventsResultCell,
+                cell: (row) => (
+                    <div className={styles.requestEventsResultStack}>
+                    <span className={row.failed ? styles.requestEventsResultFailed : styles.requestEventsResultSuccess}>
+                        {row.failed ? t('stats.failure') : t('stats.success')}
+                    </span>
+                        <div className={styles.requestEventsResultSubline}
+                             title={row.completed === null ? missingMetadataTitle : undefined}>
+                            {row.completed === null
+                             ? notRecordedLabel
+                             : row.completed
+                               ? t('usage_stats.request_events_completed', { defaultValue: 'Completed' })
+                               : t('usage_stats.request_events_incomplete', { defaultValue: 'Incomplete' })}
+                        </div>
+                    </div>
+                ),
+            },
+            {
+                key: 'tokens',
+                header: renderSortableHeader('totalTokens', t('usage_stats.total_tokens')),
+                headerClassName: `${styles.sortableHeader} ${styles.requestEventsNumericHeader}`,
+                className: `${styles.requestEventsNumericCell} ${styles.requestEventsTokenCell}`,
+                cell: (row) => row.failed && row.totalTokens === 0 ? (
+                    <div className={styles.requestEventsNoUsage}>{renderFailedNoUsage(t)}</div>
+                ) : (
+                                   <>
+                                       <div className={styles.requestEventsMetricPrimary}>{row.totalTokensLabel}</div>
+                                       <div className={styles.requestEventsSubline}>
+                                           {t(
+                                               'usage_stats.request_events_input_short',
+                                               { defaultValue: '输入' },
+                                           )} {row.inputTokensLabel} · {t(
+                                           'usage_stats.request_events_output_short',
+                                           { defaultValue: '输出' },
+                                       )} {row.outputTokensLabel} · {t(
+                                           'usage_stats.request_events_reasoning_short',
+                                           { defaultValue: '思考' },
+                                       )} {row.reasoningTokensLabel} · {t(
+                                           'usage_stats.request_events_cached_short',
+                                           { defaultValue: '缓存' },
+                                       )} {row.cachedTokensLabel}
+                                       </div>
+                                   </>
+                               ),
+            },
+            {
+                key: 'duration',
+                header: t('usage_stats.request_events_duration', { defaultValue: 'Duration' }),
+                headerClassName: styles.requestEventsNumericHeader,
+                className: `${styles.requestEventsNumericCell} ${styles.requestEventsDurationCell}`,
+                cell: (row) => (
+                    <>
+                        {row.totalDurationMs !== null ? (
+                            <div className={styles.requestEventsMetricPrimary}>{t(
+                                'usage_stats.request_events_total_duration')}: {row.totalDurationLabel}</div>
+                        ) : row.latencyMs !== null ? (
+                            <div className={styles.requestEventsMetricPrimary}>{t(
+                                'usage_stats.request_events_recorded_latency',
+                                { defaultValue: 'Recorded' },
+                            )}: {row.latencyLabel}</div>
+                        ) : (
+                                <div className={styles.requestEventsMetricPrimary}
+                                     title={missingMetadataTitle}>{notRecordedLabel}</div>
+                            )}
+                        <div className={styles.requestEventsSubline}>
+                            {t(
+                                'usage_stats.request_events_ttfb',
+                                { defaultValue: 'First byte' },
+                            )}: {row.timeToFirstByteLabel} · {t(
+                            'usage_stats.request_events_throughput',
+                            { defaultValue: 'Throughput' },
+                        )}: {row.throughputLabel}
+                        </div>
+                    </>
+                ),
+            },
+            {
+                key: 'cacheHit',
+                header: t('usage_stats.request_events_cache_hit_rate', { defaultValue: 'Cache hit' }),
+                headerClassName: styles.requestEventsNumericHeader,
+                className: styles.requestEventsNumericCell,
+                cell: (row) => row.cacheHitRateLabel,
+            },
+            {
+                key: 'thinking',
+                header: t('usage_stats.request_events_thinking_column', { defaultValue: 'Thinking record' }),
+                className: styles.requestEventsThinkingCell,
+                cell: (row) => row.thinkingRecorded ? (
+                    <span className={`${styles.requestEventsThinkingBadge} ${row.thinkingNone ?
+                                                                             styles.requestEventsThinkingNone :
+                                                                             ''}`}>{row.thinkingLabel}</span>
+                ) : (
+                                   <span className={styles.requestEventsPlainMissing}
+                                         title={missingMetadataTitle}>{notRecordedLabel}</span>
+                               ),
+            },
+            {
+                key: 'requestLog',
+                header: requestLogLabel,
+                cell: (row) => row.requestId ? (
+                    <div className={styles.requestLogActions}>
+                        <span className={styles.requestEventsRequestId} title={row.requestId}>{row.requestId}</span>
+                        {requestLogEnabled || row.failed ? (
+                            <div className={styles.requestLogButtonRow}>
+                                <Button
+                                    variant='secondary'
+                                    size='xs'
+                                    loading={requestLogPreviewing.has(row.requestId)}
+                                    onClick={() => void previewRequestLog(row.requestId)}
+                                >
+                                    {t('usage_stats.request_events_log_preview', { defaultValue: 'View log' })}
+                                </Button>
+                                <Button
+                                    variant='ghost'
+                                    size='xs'
+                                    loading={requestLogDownloading.has(row.requestId)}
+                                    onClick={() => void downloadRequestLog(row.requestId)}
+                                >
+                                    {t('common.download')}
+                                </Button>
+                            </div>
+                        ) : (
+                             <span
+                                 className={styles.requestEventsLogDisabled}
+                                 title={t('usage_stats.request_events_log_disabled_hint', {
+                                     defaultValue: 'Enable request-log in Logs or Config for new requests',
+                                 })}
+                             >
+                            {t('usage_stats.request_events_log_disabled', { defaultValue: 'Request log off' })}
+                        </span>
+                         )}
+                    </div>
+                ) : (
+                                   <span className={styles.requestEventsPlainMissing}
+                                         title={missingMetadataTitle}>{notRecordedLabel}</span>
+                               ),
+            },
+        ],
+        [
+            apiKeyLabel,
+            downloadRequestLog,
+            identityLabel,
+            missingMetadataTitle,
+            notRecordedLabel,
+            previewRequestLog,
+            renderSortableHeader,
+            requestLogDownloading,
+            requestLogEnabled,
+            requestLogLabel,
+            requestLogPreviewing,
+            t,
+        ],
     )
 
     // First-load skeleton: page=1 + no data + still fetching = haven't shown
     // anything yet. Re-fetches (page change, filter change with prior data)
     // keep the table visible.
-    if (fetching && !eventsData) {
+    if (isInitialLoading) {
         return (
             <Card title={t('usage_stats.request_events_title')}>
                 <CardSkeleton variant='rows' rowCount={6} />
@@ -686,27 +1293,30 @@ export function RequestEventsDetailsCard({
                         onChange={(e) => setSearchInput(e.target.value)}
                     />
                 </div>
-                <div className={styles.requestEventsFilterItem}>
-                    <span className={styles.requestEventsFilterLabel}>{t('usage_stats.request_events_result')}</span>
-                    <Select
-                        value={statusFilter}
-                        options={statusOptions}
-                        onChange={setStatusFilter}
-                        className={styles.requestEventsSelect}
-                        ariaLabel={t('usage_stats.request_events_result')}
-                        fullWidth={false}
-                    />
-                </div>
             </div>
+
+            {modelAliasError && (
+                <div className='error-box'>
+                    {t('usage_stats.request_events_alias_load_failed')}: {modelAliasError}
+                </div>
+            )}
 
             {isLoading && rows.length === 0 ? (
                 <div className={styles.hint}>{t('common.loading')}</div>
-            ) : !isLoading && fetchError ? (
+            ) : !isLoading && fetchError && rows.length === 0 ? (
                 <EmptyState title={t('usage_stats.request_events_error_title', '加载失败')} description={fetchError} />
             ) : totalCount === 0 ? (
                 <EmptyState
-                    title={t('usage_stats.request_events_empty_title')}
-                    description={t('usage_stats.request_events_empty_desc')}
+                    title={t(
+                        hasActiveFilters
+                        ? 'usage_stats.request_events_no_result_title'
+                        : 'usage_stats.request_events_empty_title',
+                    )}
+                    description={t(
+                        hasActiveFilters
+                        ? 'usage_stats.request_events_no_result_desc'
+                        : 'usage_stats.request_events_empty_desc',
+                    )}
                 />
             ) : (
                     <div className={styles.cardLoadingShell}>
@@ -720,7 +1330,7 @@ export function RequestEventsDetailsCard({
                         </span>
                             <span
                                 className={`${styles.requestEventsRefreshingHint} ${
-                                    isLoading && rows.length > 0 ? '' : styles.requestEventsRefreshingHintIdle
+                                    isRefreshingRows ? '' : styles.requestEventsRefreshingHintIdle
                                 }`}
                                 aria-live='polite'
                             >
@@ -728,157 +1338,14 @@ export function RequestEventsDetailsCard({
                         </span>
                         </div>
 
-                        {isMobile ? (
-                            <div className={styles.eventCardList}>
-                                {rows.map((row) => {
-                                    const expanded = expandedCards.has(row.id)
-                                    return (
-                                        <div
-                                            key={row.id}
-                                            className={`${styles.eventCard} ${expanded ?
-                                                                              styles.eventCardExpanded :
-                                                                              ''}`}
-                                            onClick={() => toggleCard(row.id)}
-                                            role='button'
-                                            tabIndex={0}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.preventDefault()
-                                                    toggleCard(row.id)
-                                                }
-                                            }}
-                                        >
-                                            <div className={styles.eventCardHeader}>
-                                                <span className={styles.eventCardTime}>{row.timestampLabel}</span>
-                                                <span
-                                                    className={
-                                                        row.failed
-                                                        ? styles.requestEventsResultFailed
-                                                        : styles.requestEventsResultSuccess
-                                                    }
-                                                >
-                                                {row.failed ? t('stats.failure') : t('stats.success')}
-                                            </span>
-                                            </div>
-                                            <div className={styles.eventCardBody}>
-                                                <span className={styles.eventCardModel}>{row.model}</span>
-                                                <span className={styles.eventCardTokens}>
-                                                {formatNumber(row.totalTokens, i18n.language)} tokens
-                                            </span>
-                                            </div>
-                                            {expanded && (
-                                                <div className={styles.eventCardDetails}>
-                                                    {(
-                                                        [
-                                                            [identityLabel, row.user],
-                                                            [apiKeyLabel, row.apiKeyMasked],
-                                                            [t('usage_stats.time'), row.latencyLabel],
-                                                            [t('usage_stats.thinking_intensity'), row.thinkingLabel],
-                                                            [
-                                                                t('usage_stats.input_tokens'),
-                                                                formatNumber(row.inputTokens, i18n.language),
-                                                            ],
-                                                            [
-                                                                t('usage_stats.output_tokens'),
-                                                                formatNumber(row.outputTokens, i18n.language),
-                                                            ],
-                                                            [
-                                                                t('usage_stats.reasoning_tokens'),
-                                                                formatNumber(row.reasoningTokens, i18n.language),
-                                                            ],
-                                                            [
-                                                                t('usage_stats.cached_tokens'),
-                                                                formatNumber(row.cachedTokens, i18n.language),
-                                                            ],
-                                                        ] as const
-                                                    ).map(([label, value]) => (
-                                                        <div key={label} className={styles.eventCardDetailRow}>
-                                                            <span className={styles.eventCardDetailLabel}>{label}</span>
-                                                            <span>{value}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        ) : (
-                             <div className={styles.requestEventsTableWrapper}>
-                                 <table className={styles.table}>
-                                     <thead>
-                                     <tr>
-                                         {renderSortableHeader(
-                                             'timestampMs',
-                                             t('usage_stats.request_events_timestamp'),
-                                         )}
-                                         {renderSortableHeader('model', t('usage_stats.model_name'))}
-                                         <th>{identityLabel}</th>
-                                         <th>{apiKeyLabel}</th>
-                                         <th>{t('usage_stats.request_events_result')}</th>
-                                         <th>{t('usage_stats.time')}</th>
-                                         <th>{t('usage_stats.thinking_intensity')}</th>
-                                         {renderSortableHeader('inputTokens', t('usage_stats.input_tokens'))}
-                                         {renderSortableHeader('outputTokens', t('usage_stats.output_tokens'))}
-                                         {renderSortableHeader(
-                                             'reasoningTokens',
-                                             t('usage_stats.reasoning_tokens'),
-                                             t('usage_stats.reasoning_tokens_hint', {
-                                                 defaultValue:
-                                                     'Only Claude extended thinking produces reasoning tokens. Other models always show 0.',
-                                             }),
-                                         )}
-                                         {renderSortableHeader('cachedTokens', t('usage_stats.cached_tokens'))}
-                                         {renderSortableHeader('totalTokens', t('usage_stats.total_tokens'))}
-                                     </tr>
-                                     </thead>
-                                     <tbody>
-                                     {rows.map((row) => (
-                                         <tr key={row.id}>
-                                             <td title={row.timestamp} className={styles.requestEventsTimestamp}>
-                                                 {row.timestampLabel}
-                                             </td>
-                                             <td className={styles.modelCell}>{row.model}</td>
-                                             <td className={styles.requestEventsSourceCell} title={row.user}>
-                                                 {row.user}
-                                             </td>
-                                             <td className={styles.requestEventsApiKey} title={row.apiKeyMasked}>
-                                                 {row.apiKeyMasked}
-                                             </td>
-                                             <td>
-                                                <span
-                                                    className={
-                                                        row.failed
-                                                        ? styles.requestEventsResultFailed
-                                                        : styles.requestEventsResultSuccess
-                                                    }
-                                                >
-                                                    {row.failed ? t('stats.failure') : t('stats.success')}
-                                                </span>
-                                             </td>
-                                             <td>{row.latencyLabel}</td>
-                                             <td>
-                                                <span
-                                                    className={
-                                                        row.thinking
-                                                        ? styles.requestEventsThinkingBadge
-                                                        : styles.requestEventsThinkingEmpty
-                                                    }
-                                                >
-                                                    {row.thinkingLabel}
-                                                </span>
-                                             </td>
-                                             <td>{formatNumber(row.inputTokens, i18n.language)}</td>
-                                             <td>{formatNumber(row.outputTokens, i18n.language)}</td>
-                                             <td>{formatNumber(row.reasoningTokens, i18n.language)}</td>
-                                             <td>{formatNumber(row.cachedTokens, i18n.language)}</td>
-                                             <td>{formatNumber(row.totalTokens, i18n.language)}</td>
-                                         </tr>
-                                     ))}
-                                     </tbody>
-                                 </table>
-                             </div>
-                         )}
+                        <Sheet
+                            rows={rows}
+                            columns={requestEventColumns}
+                            rowKey={(row) => row.id}
+                            status='ready'
+                            tableWrapClassName={styles.requestEventsTableWrapper}
+                            tableClassName={styles.table}
+                        />
 
                         <Pagination
                             total={totalCount}
@@ -889,6 +1356,75 @@ export function RequestEventsDetailsCard({
                         />
                     </div>
                 )}
+
+            <Modal
+                open={requestLogPreview !== null}
+                onClose={() => {
+                    ++requestLogPreviewSeqRef.current
+                    activeRequestLogPreviewRef.current = null
+                    setRequestLogPreview(null)
+                    setRequestLogError('')
+                }}
+                title={
+                    requestLogPreview
+                    ? t('usage_stats.request_events_log_title', {
+                        id: requestLogPreview.id,
+                        defaultValue: `Request log ${requestLogPreview.id}`,
+                    })
+                    : ''
+                }
+                width={860}
+                footer={
+                    <>
+                        <Button
+                            variant='secondary'
+                            onClick={() => {
+                                ++requestLogPreviewSeqRef.current
+                                activeRequestLogPreviewRef.current = null
+                                setRequestLogPreview(null)
+                                setRequestLogError('')
+                            }}
+                        >
+                            {t('common.close')}
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (requestLogPreview?.id) {
+                                    void downloadRequestLog(requestLogPreview.id)
+                                }
+                            }}
+                            loading={requestLogPreview ? requestLogDownloading.has(requestLogPreview.id) : false}
+                            disabled={!requestLogPreview?.id}
+                        >
+                            {t('common.download')}
+                        </Button>
+                    </>
+                }
+            >
+                {requestLogError && <div className={styles.requestLogError}>{requestLogError}</div>}
+                {requestLogPreviewing.size > 0 && !requestLogPreview?.content ? (
+                    <div className={styles.hint}>{t('common.loading')}</div>
+                ) : requestLogPreview?.content ? (
+                    <>
+                        <div className={styles.requestLogPreviewMeta}>
+                            <span>
+                                {t('usage_stats.request_events_log_lines', {
+                                    count: requestLogPreview.totalLines,
+                                    defaultValue: `${requestLogPreview.totalLines} lines`,
+                                })}
+                            </span>
+                            {requestLogPreview.truncated && (
+                                <span>
+                                    {t('usage_stats.request_events_log_truncated', {
+                                        defaultValue: 'Preview truncated, download for the full log',
+                                    })}
+                                </span>
+                            )}
+                        </div>
+                        <pre className={styles.requestLogPreview}>{requestLogPreview.content}</pre>
+                    </>
+                ) : null}
+            </Modal>
         </Card>
     )
 }

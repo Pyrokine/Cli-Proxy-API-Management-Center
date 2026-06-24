@@ -1,0 +1,443 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.hint {
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    text-align: center;
+    padding: 16px;
+}
+
+.cardLoadingShell {
+    position: relative;
+}
+
+.table {
+    @include data-table-base;
+}
+
+.sortableHeader {
+    @include sortable-header;
+    white-space: nowrap;
+}
+
+.sortHeaderButton {
+    @include sort-header-button;
+}
+
+.requestEventsActions {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.autoRefreshGroup {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-xs;
+}
+
+.requestEventsToolbar {
+    display: flex;
+    align-items: flex-end;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+    margin-bottom: $spacing-sm;
+}
+
+.requestEventsFilterItem {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 180px;
+}
+
+.requestEventsSearch {
+    width: 100%;
+    min-width: 200px;
+    max-width: 320px;
+    height: $control-height-md;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    box-shadow: var(--shadow);
+    box-sizing: border-box;
+    outline: none;
+
+    &::placeholder {
+        color: var(--text-tertiary);
+    }
+
+    &:focus {
+        border-color: var(--primary-color);
+        box-shadow: var(--shadow),
+        0 0 0 3px rgba($primary-color, 0.18);
+    }
+}
+
+.requestEventsMeta {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: $spacing-xs $spacing-sm;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.requestEventsLimitHint {
+    color: var(--text-tertiary);
+    grid-column: 1;
+}
+
+.requestEventsRefreshingHint {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    justify-self: end;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 56px;
+    justify-content: flex-end;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    white-space: nowrap;
+
+    @include mobile {
+        grid-column: 1;
+        grid-row: auto;
+        justify-self: start;
+        min-width: 0;
+    }
+}
+
+.requestEventsRefreshingHintIdle {
+    visibility: hidden;
+}
+
+.requestEventsTableWrapper {
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    margin-bottom: $spacing-sm;
+    padding-bottom: 8px;
+
+    :global(tbody tr) {
+        min-height: 58px;
+    }
+
+    :global(tbody td) {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        vertical-align: top;
+    }
+}
+
+.requestEventsTimestamp {
+    white-space: nowrap;
+    min-width: 160px;
+}
+
+.requestEventsModelCell {
+    min-width: 170px;
+    max-width: 260px;
+    overflow: hidden;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+
+.requestEventsModelPrimary {
+    overflow: hidden;
+    font-weight: $font-weight-semibold;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsModelAlias {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsCallerCell {
+    min-width: 260px;
+    max-width: 340px;
+    line-height: 1.35;
+}
+
+.requestEventsPrimaryLine,
+.requestEventsRequestId {
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+}
+
+.requestEventsPrimaryLine {
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsIdentityStack {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.requestEventsIdentityLine,
+.requestEventsApiKeyLine {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 6px;
+}
+
+.requestEventsIdentityLine {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.requestEventsApiKeyLine {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.requestEventsProviderChip {
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-secondary) 58%, transparent),
+        color-mix(in srgb, var(--border-color) 72%, transparent),
+        20px,
+        6px
+    );
+    flex-shrink: 0;
+    text-transform: lowercase;
+}
+
+.requestEventsSourceText,
+.requestEventsApiKeyValue {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.requestEventsApiKeyLabel {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    font-weight: $font-weight-medium;
+}
+
+.requestEventsApiKeyValue {
+    font-family: $font-mono;
+}
+
+.requestEventsRequestId {
+    @include token-soft(
+        var(--text-secondary),
+        color-mix(in srgb, var(--bg-secondary) 60%, transparent),
+        color-mix(in srgb, var(--border-color) 70%, transparent),
+        22px,
+        7px,
+        $font-size-xs,
+        $font-weight-normal
+    );
+    max-width: 150px;
+    overflow: hidden;
+    font-family: $font-mono;
+    text-overflow: ellipsis;
+}
+
+.requestEventsNumericHeader,
+.requestEventsNumericCell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.requestEventsTokenCell,
+.requestEventsDurationCell {
+    min-width: 180px;
+    max-width: 240px;
+}
+
+.requestEventsMetricPrimary {
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+    line-height: $line-height-heading;
+}
+
+.requestEventsSubline {
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-normal;
+    line-height: $line-height-base;
+    white-space: normal;
+}
+
+.requestEventsResultCell,
+.requestEventsThinkingCell {
+    min-width: 112px;
+    text-align: center;
+}
+
+.requestEventsResultCell {
+    .requestEventsSubline {
+        margin-top: 6px;
+    }
+}
+
+.requestEventsNoUsage {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: 180px;
+    color: var(--warning-text);
+    font-size: $font-size-xs;
+    line-height: $line-height-base;
+    white-space: normal;
+}
+
+.requestLogActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 230px;
+    flex-wrap: wrap;
+}
+
+.requestLogButtonRow {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+
+    :global(.btn),
+    :global(.btn-content) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+.requestEventsLogDisabled {
+    @include token-soft(
+        var(--warning-text),
+        color-mix(in srgb, var(--warning-bg) 42%, transparent),
+        color-mix(in srgb, var(--warning-border) 58%, transparent),
+        22px,
+        7px
+    );
+}
+
+.requestLogPreviewMeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-xs;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+}
+
+.requestLogPreview {
+    max-height: 520px;
+    overflow: auto;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.requestLogError {
+    margin-bottom: $spacing-xs;
+    padding: $spacing-xs $spacing-sm;
+    border: 1px solid rgba($error-color, 0.2);
+    border-radius: $radius-sm;
+    background: rgba($error-color, 0.1);
+    color: $error-color;
+    font-size: $font-size-sm;
+}
+
+.requestEventsResultSuccess {
+    color: var(--success-badge-text, #065f46);
+    background: color-mix(in srgb, var(--success-badge-bg, #d1fae5) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success-badge-border, #6ee7b7) 72%, transparent);
+}
+
+.requestEventsResultFailed {
+    color: var(--failure-badge-text);
+    background: color-mix(in srgb, var(--failure-badge-bg) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--failure-badge-border) 72%, transparent);
+}
+
+.requestEventsResultSuccess,
+.requestEventsResultFailed,
+.requestEventsThinkingBadge {
+    @include token-base(24px, 8px);
+}
+
+.requestEventsResultStack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.requestEventsResultSubline {
+    width: 100%;
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+    line-height: $line-height-heading;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.requestEventsThinkingBadge {
+    color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 28%, transparent);
+}
+
+.requestEventsThinkingNone {
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg-tertiary) 74%, transparent);
+    border-color: color-mix(in srgb, var(--border-color) 84%, transparent);
+}
+
+.requestEventsPlainMissing {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    line-height: 1;
+}

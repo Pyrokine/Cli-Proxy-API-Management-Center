@@ -148,6 +148,21 @@ const inferLogLevel = (line: string): LogLevel | undefined => {
     return undefined
 }
 
+const normalizeLogPath = (path: string | undefined): string | undefined => {
+    if (!path) {
+        return undefined
+    }
+    const trimmed = path.trim()
+    if (trimmed.length >= 2) {
+        const first = trimmed[0]
+        const last  = trimmed[trimmed.length - 1]
+        if ((first === '"' && last === '"') || (first === '\'' && last === '\'') || (first === '`' && last === '`')) {
+            return trimmed.slice(1, -1)
+        }
+    }
+    return trimmed
+}
+
 const extractHttpMethodAndPath = (text: string): { method?: HttpMethod; path?: string } => {
     const match = text.match(HTTP_METHOD_REGEX)
     if (!match) {
@@ -157,7 +172,7 @@ const extractHttpMethodAndPath = (text: string): { method?: HttpMethod; path?: s
     const method = match.groups!.method as HttpMethod
     const index  = match.index ?? 0
     const after  = text.slice(index + match[0].length).trim()
-    const path   = after ? after.split(/\s+/)[0] : undefined
+    const path   = normalizeLogPath(after ? after.split(/\s+/)[0] : undefined)
     return { method, path }
 }
 

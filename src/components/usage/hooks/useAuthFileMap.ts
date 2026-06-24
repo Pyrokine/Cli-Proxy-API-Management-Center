@@ -33,16 +33,29 @@ export function useAuthFileMap(enabled = true) {
                 if (!Array.isArray(files)) {
                     return
                 }
-                const map = new Map<string, CredentialInfo>()
-                files.forEach((file) => {
-                    const key = normalizeAuthIndex(file['auth_index'] ?? file.authIndex)
-                    if (key) {
-                        map.set(key, {
-                            name: formatAuthFileDisplayName(file.name || key) || key,
-                            rawName: file.name || key,
-                            type: (file.type || file.provider || '').toString(),
-                        })
+                const map      = new Map<string, CredentialInfo>()
+                const register = (key: string | null | undefined, info: CredentialInfo) => {
+                    const normalizedKey = String(key ?? '').trim()
+                    if (normalizedKey && !map.has(normalizedKey)) {
+                        map.set(normalizedKey, info)
                     }
+                }
+                files.forEach((file) => {
+                    const authIndex = normalizeAuthIndex(file['auth_index'] ?? file.authIndex)
+                    const rawName   = String(file.name || authIndex || '').trim()
+                    if (!rawName && !authIndex) {
+                        return
+                    }
+                    const displayName          =
+                              formatAuthFileDisplayName(rawName || authIndex || '') || rawName || authIndex || ''
+                    const info: CredentialInfo = {
+                        name: displayName,
+                        rawName: rawName || authIndex || '',
+                        type: (file.type || file.provider || '').toString(),
+                    }
+                    register(rawName, info)
+                    register(displayName, info)
+                    register(authIndex, info)
                 })
                 setAuthFileMap(map)
             })

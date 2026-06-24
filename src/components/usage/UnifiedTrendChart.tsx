@@ -5,10 +5,12 @@ import type {UsageSummary} from '@/services/api/usage'
 import {formatUnixTimestamp} from '@/utils/format'
 import {
     buildChartDataFromSummary,
+    buildTokenBreakdownChartData,
     type ChartDimension,
     formatCompactNumber,
     formatUsd,
     getSummaryDataStart,
+    type TokenCategory,
 } from '@/utils/usage'
 import {buildChartOptions, getHourChartMinWidth} from '@/utils/usage/chartConfig'
 import type {ChartOptions} from 'chart.js'
@@ -17,7 +19,7 @@ import {Line} from 'react-chartjs-2'
 import {useTranslation} from 'react-i18next'
 import styles from './UnifiedTrendChart.module.scss'
 
-type Metric = 'requests' | 'tokens' | 'cost'
+type Metric = 'requests' | 'tokens' | 'cost' | 'token_breakdown'
 
 interface UnifiedTrendChartProps {
     summary: UsageSummary | null
@@ -38,6 +40,7 @@ const METRIC_ACCENTS: Record<Metric, { border: string; soft: string; labelKey: s
     requests: { border: '#8b8680', soft: 'rgba(139, 134, 128, 0.14)', labelKey: 'usage_stats.requests_trend' },
     tokens: { border: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.14)', labelKey: 'usage_stats.tokens_trend' },
     cost: { border: '#f59e0b', soft: 'rgba(245, 158, 11, 0.14)', labelKey: 'usage_stats.cost_trend' },
+    token_breakdown: { border: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.14)', labelKey: 'usage_stats.token_breakdown' },
 }
 
 export function UnifiedTrendChart({
@@ -85,8 +88,17 @@ export function UnifiedTrendChart({
         if (!summary) {
             return { labels: [], datasets: [] }
         }
+        if (metric === 'token_breakdown') {
+            const categoryLabels: Record<TokenCategory, string> = {
+                input: t('usage_stats.input_tokens'),
+                output: t('usage_stats.output_tokens'),
+                cached: t('usage_stats.cached_tokens'),
+                reasoning: t('usage_stats.reasoning_tokens'),
+            }
+            return buildTokenBreakdownChartData(summary, categoryLabels)
+        }
         return buildChartDataFromSummary(summary, metric, chartDimension)
-    }, [summary, metric, chartDimension])
+    }, [summary, metric, chartDimension, t])
 
     // For the cost card we still want a flat 0 sparkline (parity with requests/
     // tokens) when no priced points exist, so emptiness is signalled by a small
@@ -103,22 +115,21 @@ export function UnifiedTrendChart({
         const zero = metric === 'cost' ? formatUsd(0) : formatCompactNumber(0)
         const fmt  = (v: number) => (metric === 'cost' ? formatUsd(v) : formatCompactNumber(v))
 
-        if (liveSummary) {
-            const totals = liveSummary.totals
+        const totalOf = (source: UsageSummary | null | undefined) => {
+            const totals = source?.totals
+            if (!totals) {
+                return 0
+            }
             if (metric === 'requests') {
-                return { live: fmt(totals.requests) }
+                return totals.requests
             }
-            if (metric === 'tokens') {
-                return { live: fmt(totals.tokens.total) }
+            if (metric === 'tokens' || metric === 'token_breakdown') {
+                return totals.tokens.total
             }
-            return { live: fmt(totals.cost) }
+            return totals.cost
         }
 
-        if (!summary) {
-            return { live: zero }
-        }
-
-        const ts  = summary.time_series
+        const ts  = summary?.time_series ?? []
         const val = (pt: (typeof ts)[number]) => {
             if (!pt) {
                 return 0
@@ -126,14 +137,14 @@ export function UnifiedTrendChart({
             if (metric === 'requests') {
                 return pt.requests
             }
-            if (metric === 'tokens') {
+            if (metric === 'tokens' || metric === 'token_breakdown') {
                 return typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
             }
             return pt.has_cost ? (pt.cost ?? 0) : 0
         }
 
-        let liveSum = 0
-        if (ts?.length) {
+        let liveSum = totalOf(liveSummary)
+        if (!liveSummary && ts.length) {
             const oneHourAgoMs = Date.now() - 3600_000
             for (let i = ts.length - 1; i >= 0; --i) {
                 const ptTime = new Date(ts[i].time).getTime()
@@ -144,7 +155,7 @@ export function UnifiedTrendChart({
             }
         }
 
-        return { live: fmt(liveSum) }
+        return { total: summary ? fmt(totalOf(summary)) : zero, live: fmt(liveSum) }
     }, [summary, liveSummary, metric])
 
     // "Data starts at": earliest point in the series, shown in the card header
@@ -160,6 +171,16 @@ export function UnifiedTrendChart({
 
     const chartOptions = useMemo((): ChartOptions<'line'> => {
         const base = buildChartOptions({ period, labels: chartData.labels, isMobile })
+        if (metric === 'token_breakdown') {
+            return {
+                ...base,
+                scales: {
+                    ...base.scales,
+                    y: { ...base.scales?.y, stacked: true },
+                    x: { ...base.scales?.x, stacked: true },
+                },
+            }
+        }
         if (metric !== 'cost') {
             return base
         }
@@ -209,7 +230,7 @@ export function UnifiedTrendChart({
         }
     }, [chartData, hiddenIndices, metric])
 
-    const metricTabs: Array<{ key: Metric; label: string }> = [
+    const metricTabs: Array<{ key: Exclude<Metric, 'token_breakdown'>; label: string }> = [
         { key: 'requests', label: t('usage_stats.requests_trend') },
         { key: 'tokens', label: t('usage_stats.tokens_trend') },
         { key: 'cost', label: t('usage_stats.cost_trend') },
@@ -295,6 +316,10 @@ export function UnifiedTrendChart({
                 )}
                 <>
                     <div className={styles.summaryBar}>
+                        <span className={styles.summaryTotal}>
+                            {summaryValues.total}
+                            <span className={styles.summaryLabel}>{t('usage_stats.unified_total_label')}</span>
+                        </span>
                         <span className={styles.summaryLive}>
                             <span className={styles.liveDot} />
                             {summaryValues.live}

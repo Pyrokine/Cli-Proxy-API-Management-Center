@@ -128,7 +128,7 @@
     display: flex;
     align-items: baseline;
     gap: 14px;
-    padding: 8px 14px 2px;
+    padding: 6px 18px 2px;
 
     @include mobile {
         flex-direction: column;
@@ -137,6 +137,9 @@
 }
 
 .summaryTotal {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
     font-size: $font-size-xl;
     font-weight: $font-weight-semibold;
     color: var(--text-primary);
@@ -170,7 +173,7 @@
 .chartBody {
     position: relative;
     z-index: 1;
-    padding: 4px 14px 14px;
+    padding: 4px 18px 14px;
 }
 
 @keyframes trendLoadingPulse {

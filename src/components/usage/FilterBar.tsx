@@ -1,6 +1,7 @@
 import {Button} from '@/components/ui/Button'
 import {DateRangePicker} from '@/components/ui/DateRangePicker'
 import {MultiSelect} from '@/components/ui/MultiSelect'
+import {Select} from '@/components/ui/Select'
 import {formatAuthFileDisplayName, inferProviderFromAuthFileName} from '@/features/authFiles/constants'
 import type {UsageSummary} from '@/services/api/usage'
 import type {CredentialInfo} from '@/types/sourceInfo'
@@ -100,6 +101,9 @@ function maskSensitiveKey(key: string): string {
 // 里专门支持 IS NULL 分支(internal/usage/sqlite_query.go),这里把它从
 // 排除名单挪到展示名单，
 const NONE_API_KEY_SENTINEL = '(none)'
+const STATUS_ALL            = ''
+const STATUS_SUCCESS        = 'success'
+const STATUS_FAILURE        = 'failure'
 
 interface FilterBarProps {
     usage: UsagePayload | null
@@ -113,6 +117,8 @@ interface FilterBarProps {
     onSelectedCredentialsChange: (credentials: string[]) => void
     selectedApiKeys?: string[]
     onSelectedApiKeysChange?: (keys: string[]) => void
+    selectedStatus?: string
+    onSelectedStatusChange?: (status: string) => void
     summary?: UsageSummary | null
     // Separate summary without filter params, used to populate option lists.
     // Without this, selecting one option would collapse the dropdown to just that option.
@@ -140,6 +146,8 @@ export function FilterBar({
                               onSelectedCredentialsChange,
                               selectedApiKeys,
                               onSelectedApiKeysChange,
+                              selectedStatus,
+                              onSelectedStatusChange,
                               summary,
                               optionsSummary,
                               aliases,
@@ -174,16 +182,24 @@ export function FilterBar({
         }
 
         if (authFileMap && authFileMap.size > 0) {
-            const options = Array.from(authFileMap.values()).map((info) => {
-                const rawName  = info.rawName || info.name
+            const seen    = new Set<string>()
+            const options = Array.from(authFileMap.values()).reduce<
+                Array<{ value: string; label: string; sortKey: string }>
+            >((result, info) => {
+                const rawName = info.rawName || info.name
+                if (!rawName || seen.has(rawName)) {
+                    return result
+                }
+                seen.add(rawName)
                 const provider = info.type || inferProviderFromAuthFileName(rawName)
                 const source   = formatAuthFileDisplayName(rawName) || info.name
-                return {
-                    value: rawName,
-                    label: formatCredentialOptionLabel(provider, source, aliases),
-                    sortKey: `${normalizeCredentialProviderForDisplay(provider)}::${source.toLowerCase()}`,
-                }
-            })
+                result.push({
+                                value: rawName,
+                                label: formatCredentialOptionLabel(provider, source, aliases),
+                                sortKey: `${normalizeCredentialProviderForDisplay(provider)}::${source.toLowerCase()}`,
+                            })
+                return result
+            }, [])
             return options
                 .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
                 .map(({ value, label }) => ({ value, label }))
@@ -213,12 +229,21 @@ export function FilterBar({
                      }))
     }, [optionsSummary, summary, aliases, t])
 
+    const statusOptions = useMemo(
+        () => [
+            { value: STATUS_ALL, label: t('usage_stats.filter_all') },
+            { value: STATUS_SUCCESS, label: t('stats.success') },
+            { value: STATUS_FAILURE, label: t('stats.failure') },
+        ],
+        [t],
+    )
+
     const earliestDate = useMemo(() => getSummaryDataStart(summary), [summary])
 
     return (
         <div className={styles.filterBar}>
             <div className={styles.filters}>
-                <div className={styles.filterItem}>
+                <div className={`${styles.filterItem} ${styles.rangeFilterItem}`}>
                     <span className={styles.filterLabel}>{t('usage_stats.range_filter')}</span>
                     <DateRangePicker
                         from={dateFrom}
@@ -228,48 +253,63 @@ export function FilterBar({
                         earliestDate={earliestDate}
                     />
                 </div>
-                {modelOptions.length > 0 && (
-                    <div className={styles.filterItem}>
-                        <span className={styles.filterLabel}>{t('usage_stats.request_events_filter_model')}</span>
-                        <MultiSelect
-                            values={selectedModels}
-                            options={modelOptions}
-                            onChange={onSelectedModelsChange}
-                            allLabel={t('usage_stats.filter_all')}
-                            fullWidth={false}
-                            ariaLabel={t('usage_stats.request_events_filter_model')}
-                            className={styles.filterSelect}
-                        />
-                    </div>
-                )}
-                {credentialOptions.length > 0 && (
-                    <div className={styles.filterItem}>
-                        <span className={styles.filterLabel}>{t('usage_stats.credential_name')}</span>
-                        <MultiSelect
-                            values={selectedCredentials}
-                            options={credentialOptions}
-                            onChange={onSelectedCredentialsChange}
-                            allLabel={t('usage_stats.filter_all')}
-                            fullWidth={false}
-                            ariaLabel={t('usage_stats.credential_name')}
-                            className={styles.filterSelect}
-                        />
-                    </div>
-                )}
-                {apiKeyOptions.length > 0 && selectedApiKeys && onSelectedApiKeysChange && (
-                    <div className={styles.filterItem}>
-                        <span className={styles.filterLabel}>{t('usage_stats.filter_api_key')}</span>
-                        <MultiSelect
-                            values={selectedApiKeys}
-                            options={apiKeyOptions}
-                            onChange={onSelectedApiKeysChange}
-                            allLabel={t('usage_stats.filter_all')}
-                            fullWidth={false}
-                            ariaLabel='API Key'
-                            className={styles.filterSelect}
-                        />
-                    </div>
-                )}
+                <div className={styles.criteriaFilters}>
+                    {modelOptions.length > 0 && (
+                        <div className={styles.filterItem}>
+                            <span className={styles.filterLabel}>{t('usage_stats.request_events_filter_model')}</span>
+                            <MultiSelect
+                                values={selectedModels}
+                                options={modelOptions}
+                                onChange={onSelectedModelsChange}
+                                allLabel={t('usage_stats.filter_all')}
+                                fullWidth={false}
+                                ariaLabel={t('usage_stats.request_events_filter_model')}
+                                className={styles.filterSelect}
+                            />
+                        </div>
+                    )}
+                    {credentialOptions.length > 0 && (
+                        <div className={styles.filterItem}>
+                            <span className={styles.filterLabel}>{t('usage_stats.credential_name')}</span>
+                            <MultiSelect
+                                values={selectedCredentials}
+                                options={credentialOptions}
+                                onChange={onSelectedCredentialsChange}
+                                allLabel={t('usage_stats.filter_all')}
+                                fullWidth={false}
+                                ariaLabel={t('usage_stats.credential_name')}
+                                className={styles.filterSelect}
+                            />
+                        </div>
+                    )}
+                    {apiKeyOptions.length > 0 && selectedApiKeys && onSelectedApiKeysChange && (
+                        <div className={styles.filterItem}>
+                            <span className={styles.filterLabel}>{t('usage_stats.filter_api_key')}</span>
+                            <MultiSelect
+                                values={selectedApiKeys}
+                                options={apiKeyOptions}
+                                onChange={onSelectedApiKeysChange}
+                                allLabel={t('usage_stats.filter_all')}
+                                fullWidth={false}
+                                ariaLabel='API Key'
+                                className={styles.filterSelect}
+                            />
+                        </div>
+                    )}
+                    {selectedStatus !== undefined && onSelectedStatusChange && (
+                        <div className={styles.filterItem}>
+                            <span className={styles.filterLabel}>{t('usage_stats.request_events_result')}</span>
+                            <Select
+                                value={selectedStatus}
+                                options={statusOptions}
+                                onChange={onSelectedStatusChange}
+                                fullWidth={false}
+                                ariaLabel={t('usage_stats.request_events_result')}
+                                className={styles.statusSelect}
+                            />
+                        </div>
+                    )}
+                </div>
             </div>
             <div className={styles.actions}>
                 <Button

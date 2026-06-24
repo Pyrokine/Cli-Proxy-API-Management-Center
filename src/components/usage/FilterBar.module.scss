@@ -3,26 +3,32 @@
 
 .filterBar {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
     gap: 16px;
-    flex-wrap: wrap;
-
-    @include mobile {
-        flex-direction: column;
-        gap: 12px;
-    }
 }
 
 .filters {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    width: 100%;
+}
+
+.criteriaFilters {
+    display: grid;
+    grid-template-columns: repeat(4, max-content);
     align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
+    gap: 12px 16px;
+
+    @media (max-width: 1280px) {
+        grid-template-columns: repeat(2, max-content);
+    }
 
     @include mobile {
+        grid-template-columns: 1fr;
         gap: 10px;
-        width: 100%;
     }
 }
 
@@ -30,12 +36,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    min-width: 0;
 
     @include mobile {
-        flex: 1;
-        min-width: 0;
+        width: 100%;
     }
+}
+
+.rangeFilterItem {
+    justify-content: flex-start;
 }
 
 .filterLabel {
@@ -47,8 +56,18 @@
 }
 
 .filterSelect {
-    min-width: 130px;
-    max-width: 200px;
+    min-width: 126px;
+    max-width: 180px;
+
+    @include mobile {
+        min-width: 100px;
+        flex: 1;
+    }
+}
+
+.statusSelect {
+    min-width: 110px;
+    max-width: 140px;
 
     @include mobile {
         min-width: 100px;
@@ -62,11 +81,6 @@
     gap: 8px;
     flex-shrink: 0;
     flex-wrap: wrap;
-
-    @include mobile {
-        width: 100%;
-        justify-content: flex-end;
-    }
 }
 
 .lastRefreshed {

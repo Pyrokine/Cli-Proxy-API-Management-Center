@@ -1,12 +1,15 @@
+import type {DataStatusValue} from '@/components/common/DataStatusCard'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
-import {EmptyState} from '@/components/ui/EmptyState'
 import {
     IconChevronDown,
     IconChevronUp,
     IconCode,
     IconDownload,
     IconEyeOff,
+    IconMaximize2,
+    IconMinimize2,
     IconRefreshCw,
     IconSearch,
     IconSlidersHorizontal,
@@ -18,6 +21,7 @@ import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Pagination} from '@/components/ui/Pagination'
 import {Select} from '@/components/ui/Select'
+import {Tabs} from '@/components/ui/Tabs'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useLocalStorage} from '@/hooks/useLocalStorage'
@@ -28,7 +32,8 @@ import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {copyToClipboard} from '@/utils/clipboard'
 import {MANAGEMENT_API_PREFIX} from '@/utils/constants'
 import {downloadBlob} from '@/utils/download'
-import {formatFileSize, formatLogTimestamp, formatUnixTimestamp} from '@/utils/format'
+import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp} from '@/utils/format'
+import {formatDurationMs, formatThinkingLabel} from '@/utils/usage'
 import type {PointerEvent as ReactPointerEvent} from 'react'
 import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -36,6 +41,7 @@ import {parseLogLine} from './hooks/logParsing'
 import {
     HTTP_METHODS,
     type LogState,
+    type ParsedLogLine,
     type PersistedLogFilters,
     resolveStatusGroup,
     STATUS_GROUPS,
@@ -91,10 +97,48 @@ const getErrorMessage = (err: unknown): string => {
     return typeof message === 'string' ? message : ''
 }
 
+const numberFromValue = (value: number | string | null | undefined): number | null => {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
+}
+
+const formatTraceDuration = (value: number | string | null | undefined, locale: string, missingText: string): string =>
+    formatDurationMs(numberFromValue(value), { locale, invalidText: missingText })
+
+const formatTracePercent = (
+    cachedTokens: number | null,
+    inputTokens: number | null,
+    locale: string,
+    missingText: string,
+): string => {
+    if (cachedTokens === null || inputTokens === null || inputTokens <= 0) {
+        return missingText
+    }
+    const value = (cachedTokens / inputTokens) * 100
+    return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)}%`
+}
+
+const formatTraceToken = (value: number | null, locale: string, missingText: string): string =>
+    value === null ? missingText : formatNumber(value, locale)
+
+const maxTraceTokenValue = (...values: Array<number | string | null | undefined>): number | null => {
+    const parsed = values
+        .map(numberFromValue)
+        .filter((value): value is number => value !== null)
+        .map((value) => Math.max(value, 0))
+    return parsed.length > 0 ? Math.max(...parsed) : null
+}
+
 type TabType = 'logs' | 'errors'
 
 export function LogsPage() {
-    const { t }                                  = useTranslation()
+    const { t, i18n }                            = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
     const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
     const apiBase                                = useAuthStore((state) => state.apiBase)
@@ -160,12 +204,16 @@ export function LogsPage() {
                                                                                    fileCount: number
                                                                                } | null>(null)
     const [totalLogLines, setTotalLogLines]                         = useState(0)
+    const notRecordedLabel                                          = t('usage_stats.request_events_not_recorded', {
+        defaultValue: 'Not recorded',
+    })
 
     // 错误日志预览
     const [previewName, setPreviewName]                     = useState<string | null>(null)
     const [previewContent, setPreviewContent]               = useState('')
     const [previewLoading, setPreviewLoading]               = useState(false)
     const [requestLogDownloading, setRequestLogDownloading] = useState(false)
+    const [logPanelFullscreen, setLogPanelFullscreen]       = useState(false)
 
     const trace = useTraceResolver({
                                        traceScopeKey,
@@ -174,15 +222,26 @@ export function LogsPage() {
                                        requestLogDownloading,
                                    })
 
-    const logScrollerRef        = useRef<HTMLDivElement | null>(null)
-    const longPressRef          = useRef<{
-                                             timer: number | null
-                                             startX: number
-                                             startY: number
-                                             fired: boolean
-                                         } | null>(null)
-    const logRequestInFlightRef = useRef(false)
-    const pendingFullReloadRef  = useRef(false)
+    const logScrollerRef            = useRef<HTMLDivElement | null>(null)
+    const logViewportRef            = useRef({
+                                                 page: 1,
+                                                 pageStart: 0,
+                                                 scrollTop: 0,
+                                                 anchorRaw: '',
+                                             })
+    const pendingViewportRestoreRef = useRef<{
+                                                 anchorRaw: string
+                                                 scrollTop: number
+                                                 targetPage?: number
+                                             } | null>(null)
+    const longPressRef              = useRef<{
+                                                 timer: number | null
+                                                 startX: number
+                                                 startY: number
+                                                 fired: boolean
+                                             } | null>(null)
+    const logRequestInFlightRef     = useRef(false)
+    const pendingFullReloadRef      = useRef(false)
 
     // 保存最新时间戳用于增量获取
     const latestTimestampRef = useRef<number>(0)
@@ -244,6 +303,14 @@ export function LogsPage() {
             const newLines = Array.isArray(data.lines) ? data.lines : []
 
             if (incremental && newLines.length > 0) {
+                const viewport = logViewportRef.current
+                if (!(viewport.page === 1 && viewport.scrollTop <= 2) && viewport.anchorRaw) {
+                    pendingViewportRestoreRef.current = {
+                        anchorRaw: viewport.anchorRaw,
+                        scrollTop: viewport.scrollTop,
+                    }
+                }
+
                 // 增量更新：追加新日志并限制缓冲区大小
                 setLogState((prev) => {
                     const combined  = [...prev.buffer, ...newLines]
@@ -474,6 +541,210 @@ export function LogsPage() {
         [filteredLines, pageStart, pageEnd],
     )
 
+    useEffect(() => {
+        logViewportRef.current = {
+            page: logPage,
+            pageStart,
+            scrollTop: logScrollerRef.current?.scrollTop ?? logViewportRef.current.scrollTop,
+            anchorRaw: pagedParsed[0]?.raw ?? '',
+        }
+    }, [logPage, pageStart, pagedParsed])
+
+    useEffect(() => {
+        const pending = pendingViewportRestoreRef.current
+        if (!pending) {
+            return
+        }
+        const anchorIndex = reversedParsedLines.findIndex((line) => line.raw === pending.anchorRaw)
+        if (anchorIndex < 0) {
+            pendingViewportRestoreRef.current = null
+            return
+        }
+        const targetPage                  = Math.floor(anchorIndex / logPageSize) + 1
+        pendingViewportRestoreRef.current = { ...pending, targetPage }
+        if (logPage !== targetPage) {
+            setLogPage(targetPage)
+            return
+        }
+        window.requestAnimationFrame(() => {
+            logScrollerRef.current?.scrollTo({ top: pending.scrollTop })
+            pendingViewportRestoreRef.current = null
+        })
+    }, [logPage, logPageSize, reversedParsedLines])
+
+    const logSheetStatus: DataStatusValue = loading ? 'loading' : totalFilteredLines > 0 ? 'ready' : 'empty'
+    const logSheetEmptyText               = logState.buffer.length > 0 ?
+                                            t('logs.search_empty_title') :
+                                            t('logs.empty_title')
+    const logSheetEmptyHint               = logState.buffer.length > 0 ?
+                                            t('logs.search_empty_desc') :
+                                            t('logs.empty_desc')
+    const logColumns                      = useMemo<SheetColumn<ParsedLogLine>[]>(() => [
+        {
+            key: 'time',
+            header: t('logs.column_time', { defaultValue: '时间' }),
+            cell: () => null,
+            className: styles.timeColumn,
+            headerClassName: styles.timeColumn,
+        },
+        {
+            key: 'level',
+            header: t('logs.column_level', { defaultValue: '级别' }),
+            cell: () => null,
+            className: styles.levelColumn,
+            headerClassName: styles.levelColumn,
+        },
+        {
+            key: 'method',
+            header: t('logs.column_method', { defaultValue: '方法' }),
+            cell: () => null,
+            className: styles.methodColumn,
+            headerClassName: styles.methodColumn,
+        },
+        {
+            key: 'path',
+            header: t('logs.column_path', { defaultValue: '路径' }),
+            cell: () => null,
+            className: styles.pathColumn,
+            headerClassName: styles.pathColumn,
+        },
+        {
+            key: 'status',
+            header: t('logs.column_status', { defaultValue: '状态' }),
+            cell: () => null,
+            className: styles.statusColumn,
+            headerClassName: styles.statusColumn,
+        },
+        {
+            key: 'latency',
+            header: t('logs.column_latency', { defaultValue: '耗时' }),
+            cell: () => null,
+            className: styles.latencyColumn,
+            headerClassName: styles.latencyColumn,
+        },
+        {
+            key: 'request_id',
+            header: t('logs.column_request_id', { defaultValue: '请求 ID' }),
+            cell: () => null,
+            className: styles.requestIdColumn,
+            headerClassName: styles.requestIdColumn,
+        },
+        {
+            key: 'ip',
+            header: t('logs.column_ip', { defaultValue: 'IP' }),
+            cell: () => null,
+            className: styles.ipColumn,
+            headerClassName: styles.ipColumn,
+        },
+        {
+            key: 'trace',
+            header: t('logs.column_trace', { defaultValue: '追踪' }),
+            cell: () => null,
+            className: styles.traceColumn,
+            headerClassName: styles.traceColumn,
+        },
+    ], [t])
+
+    const renderLogRow = (line: ParsedLogLine) => {
+        const canTraceRequest = isTraceableRequestPath(line.path)
+        const rowClassNames   = [styles.logTableRow]
+        if (line.level === 'warn') {
+            rowClassNames.push(styles.rowWarn)
+        }
+        if (line.level === 'error' || line.level === 'fatal') {
+            rowClassNames.push(styles.rowError)
+        }
+
+        const levelClassName  = [
+            styles.badge,
+            line.level === 'info' ? styles.levelInfo : '',
+            line.level === 'warn' ? styles.levelWarn : '',
+            line.level === 'error' || line.level === 'fatal' ? styles.levelError : '',
+            line.level === 'debug' ? styles.levelDebug : '',
+            line.level === 'trace' ? styles.levelTrace : '',
+        ].filter(Boolean).join(' ')
+        const statusClassName = [
+            styles.badge,
+            styles.statusBadge,
+            typeof line.statusCode === 'number' && line.statusCode >= 200 && line.statusCode < 300
+            ? styles.statusSuccess
+            : typeof line.statusCode === 'number' && line.statusCode >= 300 && line.statusCode < 400
+              ? styles.statusInfo
+              : typeof line.statusCode === 'number' && line.statusCode >= 400 && line.statusCode < 500
+                ? styles.statusWarn
+                : styles.statusError,
+        ].join(' ')
+        const emptyCell       = <span className={styles.emptyCell}>—</span>
+
+        return (
+            <tr
+                className={rowClassNames.join(' ')}
+                onDoubleClick={() => {
+                    void copyLogLine(line.raw)
+                }}
+                onPointerDown={(event) => startLongPress(event, line.requestId)}
+                onPointerUp={cancelLongPress}
+                onPointerLeave={cancelLongPress}
+                onPointerCancel={cancelLongPress}
+                onPointerMove={handleLongPressMove}
+                title={t('logs.double_click_copy_hint', {
+                    defaultValue: 'Double-click to copy',
+                })}
+            >
+                <td className={styles.timestamp}>{formatLogTimestamp(line.timestamp)}</td>
+                <td className={styles.levelCell}>
+                    {line.level ? <span className={levelClassName}>{line.level.toUpperCase()}</span> : emptyCell}
+                </td>
+                <td className={styles.methodCell}>
+                    {line.method ?
+                     <span className={[styles.badge, styles.methodBadge].join(' ')}>{line.method}</span> :
+                     emptyCell}
+                </td>
+                <td className={styles.pathCell}>
+                    {line.path ? (
+                        <span className={styles.path} title={line.path}>
+                            {line.path}
+                        </span>
+                    ) : emptyCell}
+                </td>
+                <td className={styles.statusCell}>
+                    {typeof line.statusCode === 'number' ?
+                     <span className={statusClassName}>{line.statusCode}</span> :
+                     emptyCell}
+                </td>
+                <td className={styles.latencyCell}>
+                    {line.latency ? <span className={styles.pill}>{line.latency}</span> : emptyCell}
+                </td>
+                <td className={styles.requestIdCell}>
+                    {line.requestId ? (
+                        <span className={[styles.badge, styles.requestIdBadge].join(' ')} title={line.requestId}>
+                            {line.requestId}
+                        </span>
+                    ) : emptyCell}
+                </td>
+                <td className={styles.ipCell}>
+                    {line.ip ? <span className={styles.ipText} title={line.ip}>{line.ip}</span> : emptyCell}
+                </td>
+                <td className={styles.traceCell}>
+                    {canTraceRequest ? (
+                        <button
+                            type='button'
+                            className={styles.traceButton}
+                            onClick={(event) => {
+                                event.stopPropagation()
+                                cancelLongPress()
+                                trace.openTraceModal(line)
+                            }}
+                            title={t('logs.trace_button')}
+                        >
+                            {t('logs.trace_short', { defaultValue: '追踪' })}
+                        </button>
+                    ) : emptyCell}
+                </td>
+            </tr>
+        )
+    }
+
     const copyLogLine = async (raw: string) => {
         const ok = await copyToClipboard(raw)
         if (ok) {
@@ -490,7 +761,7 @@ export function LogsPage() {
         }
     }
 
-    const startLongPress = (event: ReactPointerEvent<HTMLDivElement>, id?: string) => {
+    const startLongPress = (event: ReactPointerEvent<HTMLElement>, id?: string) => {
         if (!requestLogEnabled) {
             return
         }
@@ -520,7 +791,7 @@ export function LogsPage() {
         longPressRef.current = null
     }
 
-    const handleLongPressMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const handleLongPressMove = (event: ReactPointerEvent<HTMLElement>) => {
         const current = longPressRef.current
         if (!current || current.timer === null || current.fired) {
             return
@@ -586,26 +857,40 @@ export function LogsPage() {
         }
     }, [])
 
+    useEffect(() => {
+        if (!logPanelFullscreen) {
+            return
+        }
+
+        const previousOverflow = document.body.style.overflow
+        const handleKeyDown    = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setLogPanelFullscreen(false)
+            }
+        }
+
+        document.body.style.overflow = 'hidden'
+        window.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.body.style.overflow = previousOverflow
+            window.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [logPanelFullscreen])
+
     return (
         <div className={styles.container}>
             <h1 className={styles.pageTitle}>{t('logs.title')}</h1>
 
-            <div className={styles.tabBar}>
-                <button
-                    type='button'
-                    className={`${styles.tabItem} ${activeTab === 'logs' ? styles.tabActive : ''}`}
-                    onClick={() => setActiveTab('logs')}
-                >
-                    {t('logs.log_content')}
-                </button>
-                <button
-                    type='button'
-                    className={`${styles.tabItem} ${activeTab === 'errors' ? styles.tabActive : ''}`}
-                    onClick={() => setActiveTab('errors')}
-                >
-                    {t('logs.error_logs_modal_title')}
-                </button>
-            </div>
+            <Tabs
+                className={styles.tabs}
+                items={[
+                    { value: 'logs', label: t('logs.log_content') },
+                    { value: 'errors', label: t('logs.error_logs_modal_title') },
+                ]}
+                activeValue={activeTab}
+                onChange={setActiveTab}
+                ariaLabel={t('logs.title')}
+            />
 
             <div className={styles.content}>
                 {activeTab === 'logs' && (
@@ -625,8 +910,8 @@ export function LogsPage() {
                                                 type='button'
                                                 className={styles.searchClear}
                                                 onClick={() => setSearchQuery('')}
-                                                title='Clear'
-                                                aria-label='Clear'
+                                                title={t('logs.search_clear', { defaultValue: 'Clear search' })}
+                                                aria-label={t('logs.search_clear', { defaultValue: 'Clear search' })}
                                             >
                                                 <IconX size={16} />
                                             </button>
@@ -809,13 +1094,10 @@ export function LogsPage() {
                                             label={
                                                 <span className={styles.switchLabel}>
                                                     <IconTimer size={16} />
-                                                    {t('logs.auto_refresh')}
+                                                    {t('logs.refresh_interval')}
                                                 </span>
                                             }
                                         />
-                                        <span className={styles.autoRefreshIntervalLabel}>
-                                            {t('logs.refresh_interval')}
-                                        </span>
                                         <Select
                                             value={String(refreshInterval)}
                                             options={refreshIntervalOptions}
@@ -857,6 +1139,28 @@ export function LogsPage() {
                                         </span>
                                     </Button>
                                     <Button
+                                        type='button'
+                                        variant='secondary'
+                                        size='sm'
+                                        onClick={() => setLogPanelFullscreen((prev) => !prev)}
+                                        className={styles.actionButton}
+                                        aria-pressed={logPanelFullscreen}
+                                        title={
+                                            logPanelFullscreen
+                                            ? t('logs.fullscreen_exit')
+                                            : t('logs.fullscreen_enter')
+                                        }
+                                    >
+                                        <span className={styles.buttonContent}>
+                                            {logPanelFullscreen ?
+                                             <IconMinimize2 size={16} /> :
+                                             <IconMaximize2 size={16} />}
+                                            {logPanelFullscreen ?
+                                             t('logs.fullscreen_exit') :
+                                             t('logs.fullscreen_enter')}
+                                        </span>
+                                    </Button>
+                                    <Button
                                         variant='danger'
                                         size='sm'
                                         onClick={clearLogs}
@@ -883,179 +1187,72 @@ export function LogsPage() {
                             </div>
                         </div>
 
-                        {loading ? (
-                            <div className='hint'>{t('logs.loading')}</div>
-                        ) : logState.buffer.length > 0 && totalFilteredLines > 0 ? (
-                            <>
-                                <div ref={logScrollerRef} className={styles.logPanel}>
-                                    {removedCount > 0 && (
-                                        <div className={styles.loadMoreBanner}>
-                                            <div className={styles.loadMoreStats}>
-                                                <span>
-                                                    {t('logs.buffered_lines', { count: logState.buffer.length })}
+                        <>
+                            <div
+                                ref={logScrollerRef}
+                                className={`${styles.logPanel} ${logPanelFullscreen ? styles.logPanelFullscreen : ''}`}
+                                onScroll={(event) => {
+                                    logViewportRef.current.scrollTop = event.currentTarget.scrollTop
+                                }}
+                            >
+                                {logPanelFullscreen && (
+                                    <div className={styles.fullscreenExitBar}>
+                                        <Button
+                                            type='button'
+                                            variant='secondary'
+                                            size='sm'
+                                            onClick={() => setLogPanelFullscreen(false)}
+                                        >
+                                            <span className={styles.buttonContent}>
+                                                <IconMinimize2 size={16} />
+                                                {t('logs.fullscreen_exit')}
+                                            </span>
+                                        </Button>
+                                    </div>
+                                )}
+                                {removedCount > 0 && (
+                                    <div className={styles.loadMoreBanner}>
+                                        <div className={styles.loadMoreStats}>
+                                            <span>
+                                                {t('logs.buffered_lines', { count: logState.buffer.length })}
+                                            </span>
+                                            <span className={styles.loadMoreCount}>
+                                                {t('logs.total_lines', { count: totalLogLines })}
+                                            </span>
+                                            <span className={styles.loadMoreCount}>
+                                                {t('logs.filtered_lines', { count: removedCount })}
+                                            </span>
+                                            {hideManagementLogs && removedCount > 0 && (
+                                                <span className={styles.loadMoreNotice}>
+                                                    {t('logs.filtered_timeline_notice')}
                                                 </span>
-                                                <span className={styles.loadMoreCount}>
-                                                    {t('logs.total_lines', { count: totalLogLines })}
-                                                </span>
-                                                <span className={styles.loadMoreCount}>
-                                                    {t('logs.filtered_lines', { count: removedCount })}
-                                                </span>
-                                                {hideManagementLogs && removedCount > 0 && (
-                                                    <span className={styles.loadMoreNotice}>
-                                                        {t('logs.filtered_timeline_notice')}
-                                                    </span>
-                                                )}
-                                            </div>
+                                            )}
                                         </div>
-                                    )}
-                                    {showRawLogs ? (
-                                        <pre className={styles.rawLog} spellCheck={false}>
-                                            {rawVisibleText}
-                                        </pre>
-                                    ) : (
-                                         <div className={styles.logList}>
-                                             {pagedParsed.map((line, index) => {
-                                                 const canTraceRequest = isTraceableRequestPath(line.path)
-                                                 const rowClassNames   = [styles.logRow]
-                                                 if (line.level === 'warn') {
-                                                     rowClassNames.push(styles.rowWarn)
-                                                 }
-                                                 if (line.level === 'error' || line.level === 'fatal') {
-                                                     rowClassNames.push(styles.rowError)
-                                                 }
-                                                 return (
-                                                     <div
-                                                         key={`${pageStart + index}-${line.raw}`}
-                                                         className={rowClassNames.join(' ')}
-                                                         onDoubleClick={() => {
-                                                             void copyLogLine(line.raw)
-                                                         }}
-                                                         onPointerDown={(event) => startLongPress(
-                                                             event,
-                                                             line.requestId,
-                                                         )}
-                                                         onPointerUp={cancelLongPress}
-                                                         onPointerLeave={cancelLongPress}
-                                                         onPointerCancel={cancelLongPress}
-                                                         onPointerMove={handleLongPressMove}
-                                                         title={t('logs.double_click_copy_hint', {
-                                                             defaultValue: 'Double-click to copy',
-                                                         })}
-                                                     >
-                                                         <div className={styles.timestamp}>
-                                                             {formatLogTimestamp(line.timestamp)}
-                                                         </div>
-                                                         <div className={styles.rowMain}>
-                                                             {line.level && (
-                                                                 <span
-                                                                     className={[
-                                                                         styles.badge,
-                                                                         line.level === 'info' ? styles.levelInfo : '',
-                                                                         line.level === 'warn' ? styles.levelWarn : '',
-                                                                         line.level ===
-                                                                         'error' ||
-                                                                         line.level ===
-                                                                         'fatal'
-                                                                         ? styles.levelError
-                                                                         : '',
-                                                                         line.level === 'debug' ?
-                                                                         styles.levelDebug :
-                                                                         '',
-                                                                         line.level === 'trace' ?
-                                                                         styles.levelTrace :
-                                                                         '',
-                                                                     ]
-                                                                         .filter(Boolean)
-                                                                         .join(' ')}
-                                                                 >
-                                                                    {line.level.toUpperCase()}
-                                                                </span>
-                                                             )}
-
-                                                             {line.source && (
-                                                                 <span className={styles.source} title={line.source}>
-                                                                    {line.source}
-                                                                </span>
-                                                             )}
-
-                                                             {line.requestId && (
-                                                                 <span
-                                                                     className={[
-                                                                         styles.badge,
-                                                                         styles.requestIdBadge,
-                                                                     ].join(' ')}
-                                                                     title={line.requestId}
-                                                                 >
-                                                                    {line.requestId}
-                                                                </span>
-                                                             )}
-
-                                                             {typeof line.statusCode === 'number' && (
-                                                                 <span
-                                                                     className={[
-                                                                         styles.badge,
-                                                                         styles.statusBadge,
-                                                                         line.statusCode >= 200 && line.statusCode < 300
-                                                                         ? styles.statusSuccess
-                                                                         : line.statusCode >= 300 &&
-                                                                           line.statusCode < 400
-                                                                           ? styles.statusInfo
-                                                                           : line.statusCode >= 400 &&
-                                                                             line.statusCode < 500
-                                                                             ? styles.statusWarn
-                                                                             : styles.statusError,
-                                                                     ].join(' ')}
-                                                                 >
-                                                                    {line.statusCode}
-                                                                </span>
-                                                             )}
-
-                                                             {line.latency && (
-                                                                 <span className={styles.pill}>{line.latency}</span>
-                                                             )}
-                                                             {line.ip && <span className={styles.pill}>{line.ip}</span>}
-
-                                                             {line.method && (
-                                                                 <span
-                                                                     className={[styles.badge, styles.methodBadge].join(
-                                                                         ' ',
-                                                                     )}
-                                                                 >
-                                                                    {line.method}
-                                                                </span>
-                                                             )}
-
-                                                             {line.path && (
-                                                                 <span className={styles.path} title={line.path}>
-                                                                    {line.path}
-                                                                </span>
-                                                             )}
-
-                                                             {line.message && (
-                                                                 <span className={styles.message}>{line.message}</span>
-                                                             )}
-
-                                                             {canTraceRequest && (
-                                                                 <button
-                                                                     type='button'
-                                                                     className={styles.traceButton}
-                                                                     onClick={(event) => {
-                                                                         event.stopPropagation()
-                                                                         cancelLongPress()
-                                                                         trace.openTraceModal(line)
-                                                                     }}
-                                                                     title={t('logs.trace_button')}
-                                                                 >
-                                                                     {t('logs.trace_button')}
-                                                                 </button>
-                                                             )}
-                                                         </div>
-                                                     </div>
-                                                 )
-                                             })}
-                                         </div>
-                                     )}
-                                </div>
+                                    </div>
+                                )}
+                                {showRawLogs && logSheetStatus === 'ready' ? (
+                                    <pre className={styles.rawLog} spellCheck={false}>
+                                        {rawVisibleText}
+                                    </pre>
+                                ) : (
+                                     <Sheet
+                                         rows={showRawLogs ? [] : pagedParsed}
+                                         columns={logColumns}
+                                         rowKey={(line, index) => `${pageStart + index}-${line.raw}`}
+                                         status={logSheetStatus}
+                                         emptyText={logSheetEmptyText}
+                                         emptyHint={logSheetEmptyHint}
+                                         loadingText={t('logs.loading')}
+                                         skeletonRowCount={6}
+                                         className={styles.logSheet}
+                                         scrollClassName={styles.logSheetScroll}
+                                         tableWrapClassName={styles.logSheetTableWrap}
+                                         tableClassName={styles.logTable}
+                                         renderRow={renderLogRow}
+                                     />
+                                 )}
+                            </div>
+                            {!loading && totalFilteredLines > 0 && (
                                 <Pagination
                                     total={totalFilteredLines}
                                     page={logPage}
@@ -1069,15 +1266,8 @@ export function LogsPage() {
                                         setLogPage(1)
                                     }}
                                 />
-                            </>
-                        ) : logState.buffer.length > 0 ? (
-                            <EmptyState
-                                title={t('logs.search_empty_title')}
-                                description={t('logs.search_empty_desc')}
-                            />
-                        ) : (
-                                <EmptyState title={t('logs.empty_title')} description={t('logs.empty_desc')} />
                             )}
+                        </>
                     </Card>
                 )}
 
@@ -1186,46 +1376,53 @@ export function LogsPage() {
                 {trace.traceLogLine && (
                     <div className={styles.tracePanel}>
                         <div className={styles.traceNotice}>{t('logs.trace_notice')}</div>
+                        <div className={styles.traceNotice}>{t('logs.trace_usage_field_guide')}</div>
 
                         <h3 className={styles.traceSectionTitle}>{t('logs.trace_log_info')}</h3>
                         <div className={styles.traceInfoGrid}>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_request_id')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.requestId || '-'}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.requestId ||
+                                                                         notRecordedLabel}</span>
                             </div>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_method')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.method || '-'}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.method ||
+                                                                         notRecordedLabel}</span>
                             </div>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_path')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.path || '-'}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.path ||
+                                                                         notRecordedLabel}</span>
                             </div>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_status_code')}</span>
                                 <span className={styles.traceInfoValue}>
                                     {typeof trace.traceLogLine.statusCode === 'number'
                                      ? trace.traceLogLine.statusCode
-                                     : '-'}
+                                     : notRecordedLabel}
                                 </span>
                             </div>
                             <div className={styles.traceInfoItem}>
-                                <span className={styles.traceInfoLabel}>{t('logs.trace_latency')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.latency || '-'}</span>
+                                <span className={styles.traceInfoLabel}>{t('logs.trace_proxy_latency')}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.latency ||
+                                                                         notRecordedLabel}</span>
                             </div>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_ip')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.ip || '-'}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.ip ||
+                                                                         notRecordedLabel}</span>
                             </div>
                             <div className={styles.traceInfoItem}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_timestamp')}</span>
                                 <span className={styles.traceInfoValue}>
-                                    {formatLogTimestamp(trace.traceLogLine.timestamp) || '-'}
+                                    {formatLogTimestamp(trace.traceLogLine.timestamp) || notRecordedLabel}
                                 </span>
                             </div>
                             <div className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_message')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.message || '-'}</span>
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.message ||
+                                                                         notRecordedLabel}</span>
                             </div>
                         </div>
 
@@ -1253,17 +1450,47 @@ export function LogsPage() {
                         ) : (
                                 <div className={styles.traceCandidates}>
                                     {trace.traceCandidates.map((candidate) => {
-                                        const sourceInfo = trace.resolveTraceSourceInfo(
-                                            String(candidate.detail.source ?? ''),
-                                            candidate.detail.auth_index,
+                                        const detail          = candidate.detail
+                                        const sourceInfo      = trace.resolveTraceSourceInfo(
+                                            String(detail.source ?? ''),
+                                            detail.auth_index,
                                         )
+                                        const tokens          = detail.tokens
+                                        const inputTokens     = maxTraceTokenValue(tokens?.input_tokens)
+                                        const outputTokens    = maxTraceTokenValue(tokens?.output_tokens)
+                                        const reasoningTokens = maxTraceTokenValue(tokens?.reasoning_tokens)
+                                        const cachedTokens    = maxTraceTokenValue(
+                                            tokens?.cached_tokens,
+                                            tokens?.cache_tokens,
+                                        )
+                                        const thinking        = detail.thinking ??
+                                                                (detail.reasoning_effort ?
+                                                                    { intensity: detail.reasoning_effort } :
+                                                                 null)
+                                        const thinkingLabel   = thinking
+                                                                ? formatThinkingLabel(thinking, i18n.language)
+                                                                : notRecordedLabel
+                                        const completedLabel  =
+                                                  typeof detail.completed === 'boolean'
+                                                  ? detail.completed
+                                                    ?
+                                                    t(
+                                                        'usage_stats.request_events_completed',
+                                                        { defaultValue: 'Completed' },
+                                                    )
+                                                    :
+                                                    t(
+                                                        'usage_stats.request_events_incomplete',
+                                                        { defaultValue: 'Incomplete' },
+                                                    )
+                                                  : notRecordedLabel
                                         return (
                                             <div
                                                 key={[
-                                                    candidate.detail.__endpoint,
-                                                    candidate.detail.__modelName,
-                                                    candidate.detail.timestamp,
-                                                    candidate.detail.source,
+                                                    detail.__endpoint,
+                                                    detail.__modelName,
+                                                    detail.timestamp,
+                                                    detail.source,
                                                 ].join('-')}
                                                 className={styles.traceCandidate}
                                             >
@@ -1287,7 +1514,7 @@ export function LogsPage() {
                                                         {t('logs.trace_endpoint')}
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.detail.__endpoint}
+                                                        {detail.__endpoint}
                                                     </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
@@ -1295,7 +1522,7 @@ export function LogsPage() {
                                                         {t('logs.trace_model')}
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.detail.__modelName || '-'}
+                                                        {detail.__modelName || notRecordedLabel}
                                                     </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
@@ -1304,9 +1531,9 @@ export function LogsPage() {
                                                     </span>
                                                         <span
                                                             className={styles.traceInfoValue}
-                                                            title={String(candidate.detail.source || '-')}
+                                                            title={String(detail.source || notRecordedLabel)}
                                                         >
-                                                        <span>{sourceInfo.displayName}</span>
+                                                        <span>{sourceInfo.displayName || notRecordedLabel}</span>
                                                             {sourceInfo.type && (
                                                                 <span className={styles.traceSourceType}>
                                                                 {sourceInfo.type}
@@ -1319,7 +1546,7 @@ export function LogsPage() {
                                                         {t('logs.trace_auth_index')}
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.detail.auth_index ?? '-'}
+                                                        {detail.auth_index ?? notRecordedLabel}
                                                     </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
@@ -1327,7 +1554,7 @@ export function LogsPage() {
                                                         {t('logs.trace_timestamp')}
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatLogTimestamp(candidate.detail.timestamp) || '-'}
+                                                        {formatLogTimestamp(detail.timestamp) || notRecordedLabel}
                                                     </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
@@ -1335,10 +1562,123 @@ export function LogsPage() {
                                                         {t('logs.trace_result')}
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.detail.failed
+                                                        {detail.failed
                                                          ? t('stats.failure')
                                                          : t('stats.success')}
                                                     </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_usage_request_id')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {detail.request_id || notRecordedLabel}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_usage_total_duration')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceDuration(
+                                                            detail.total_duration_ms,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_recorded_latency')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceDuration(
+                                                            detail.latency_ms,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_time_to_first_byte')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceDuration(
+                                                            detail.time_to_first_byte_ms,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_input_tokens')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceToken(inputTokens, i18n.language, notRecordedLabel)}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_output_tokens')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceToken(
+                                                            outputTokens,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_reasoning_tokens')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceToken(
+                                                            reasoningTokens,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_cached_tokens')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceToken(
+                                                            cachedTokens,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_cache_hit')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTracePercent(
+                                                            cachedTokens,
+                                                            inputTokens,
+                                                            i18n.language,
+                                                            notRecordedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_thinking')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>{thinkingLabel}</span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_completed')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>{completedLabel}</span>
                                                     </div>
                                                 </div>
                                             </div>

@@ -72,6 +72,11 @@ export function resolveSourceDisplay(
         return matched
     }
 
+    const sourceInfo = authFileMap.get(source)
+    if (sourceInfo) {
+        return { displayName: sourceInfo.name || source, type: sourceInfo.type }
+    }
+
     const authIndexKey = normalizeAuthIndex(authIndex)
     if (authIndexKey) {
         const authInfo = authFileMap.get(authIndexKey)

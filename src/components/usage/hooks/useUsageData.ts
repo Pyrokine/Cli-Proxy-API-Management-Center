@@ -1,4 +1,3 @@
-import defaultPricesJson from '@/data/defaultModelPrices.json'
 import {usageApi} from '@/services/api/usage'
 import {USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore} from '@/stores'
 import type {NotificationType} from '@/types'
@@ -75,10 +74,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
             let message: string
             let type: NotificationType = 'success'
 
-            if (result === null) {
-                message = t('usage_stats.model_price_saved_local')
-                type    = 'warning'
-            } else if (result.recalculation_error) {
+            if (result.recalculation_error) {
                 const base =
                           result.status === 'busy' ?
                           t('usage_stats.recalculate_busy') :
@@ -104,10 +100,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
     }, [loadUsageStats])
 
     const handleAfterPricesSaved = useCallback(
-        async (result: Awaited<ReturnType<typeof saveModelPrices>>) => {
-            if (result === null) {
-                return
-            }
+        async () => {
             if (enabled) {
                 await loadUsageStats({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS })
             }
@@ -128,27 +121,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         }
         void loadModelPrices()
             .then((loaded) => {
-                const defaults: Record<string, ModelPrice> = {}
-                for (const [model, p] of Object.entries(defaultPricesJson)) {
-                    defaults[model] = p as ModelPrice
-                }
-
-                if (!loaded || Object.keys(loaded).length === 0) {
-                    setModelPrices(defaults)
-                    void saveModelPrices(defaults).then(async (result) => {
-                        await handleAfterPricesSaved(result)
-                    })
-                    return
-                }
-
-                const merged: Record<string, ModelPrice> = { ...defaults, ...loaded }
-                setModelPrices(merged)
-
-                if (Object.keys(merged).length !== Object.keys(loaded).length) {
-                    void saveModelPrices(merged).then(async (result) => {
-                        await handleAfterPricesSaved(result)
-                    })
-                }
+                setModelPrices(loaded)
             })
             .catch(() => {
             })
@@ -268,7 +241,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                 const feedback = buildPriceSaveFeedback(result)
                 setPriceSaveFeedback(feedback)
                 showNotification(feedback.message, feedback.type)
-                await handleAfterPricesSaved(result)
+                await handleAfterPricesSaved()
             } catch (err: unknown) {
                 const message                     = err instanceof Error ? err.message : ''
                 const feedback: PriceSaveFeedback = {

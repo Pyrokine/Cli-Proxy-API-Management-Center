@@ -14,16 +14,13 @@ const USAGE_TIMEOUT_MS = 60 * 1000
  * 已经带时区后缀(toISOString 输出或手动带 ±hh:mm)的字符串透传,
  * 让 hook 的 reload({from: precomputedIso}) 这类用法不被双转换
  *
- * 末尾统一去掉小数秒:Date.toISOString() 永远输出 3 位毫秒,Go 的
- * time.Parse(time.RFC3339, ...) 实测兼容,但 server 日志里 from/to 用
- * RFC3339 不带小数秒打印,这里跟它对齐避免视觉割裂
  */
 function localToIsoUtc(value: string): string {
     if (!value) {
         return value
     }
     if (/Z$|[+-]\d{2}:?\d{2}$/.test(value)) {
-        return stripFractional(value)
+        return value
     }
     // datetime-local input 没有秒,补 :00 或 T00:00 让 Date 解析稳定
     const normalized = value.includes('T') ? value : `${value}T00:00`
@@ -31,11 +28,7 @@ function localToIsoUtc(value: string): string {
     if (Number.isNaN(d.getTime())) {
         return value
     }
-    return stripFractional(d.toISOString())
-}
-
-function stripFractional(iso: string): string {
-    return iso.replace(/\.\d+(?<tz>Z|[+-]\d{2}:?\d{2})$/, '$<tz>')
+    return d.toISOString()
 }
 
 interface UsageExportPayload {
@@ -160,6 +153,7 @@ export interface EventTokens {
     input_tokens: number
     output_tokens: number
     cached_tokens: number
+    cache_tokens?: number | string | null
     reasoning_tokens: number
     total_tokens: number
 }
@@ -179,12 +173,18 @@ export interface UsageEvent {
     api_key: string
     provider?: string
     latency_ms?: number | string | null
+    request_id?: string | null
+    time_to_first_byte_ms?: number | string | null
+    total_duration_ms?: number | string | null
+    completed?: boolean | null
+    metadata_recorded?: boolean | null
+    reasoning_effort?: string | null
     thinking?: UsageThinking | null
     tokens: EventTokens
     failed: boolean
 }
 
-interface EventsParams {
+export interface EventsParams {
     from?: string
     to?: string
     page?: number

@@ -3,6 +3,8 @@
  * 迁移自基线 utils/models.js
  */
 
+import {getModelProvider, sortModelProviders} from './modelTree'
+
 export interface ModelInfo {
     name: string
     alias?: string
@@ -10,15 +12,15 @@ export interface ModelInfo {
 }
 
 const MODEL_CATEGORIES = [
-    { id: 'gpt', label: 'GPT', patterns: [/gpt/i, /\bo\d\b/i, /\bo\d+\.?/i, /\bchatgpt/i] },
-    { id: 'claude', label: 'Claude', patterns: [/claude/i] },
-    { id: 'gemini', label: 'Gemini', patterns: [/gemini/i, /\bgai\b/i] },
-    { id: 'kimi', label: 'Kimi', patterns: [/kimi/i] },
-    { id: 'qwen', label: 'Qwen', patterns: [/qwen/i] },
-    { id: 'glm', label: 'GLM', patterns: [/glm/i, /chatglm/i] },
-    { id: 'grok', label: 'Grok', patterns: [/grok/i] },
-    { id: 'deepseek', label: 'DeepSeek', patterns: [/deepseek/i] },
-    { id: 'minimax', label: 'MiniMax', patterns: [/minimax/i, /abab/i] },
+    { id: 'gpt', label: 'GPT' },
+    { id: 'claude', label: 'Claude' },
+    { id: 'gemini', label: 'Gemini' },
+    { id: 'kimi', label: 'Kimi' },
+    { id: 'qwen', label: 'Qwen' },
+    { id: 'glm', label: 'GLM' },
+    { id: 'grok', label: 'Grok' },
+    { id: 'deepseek', label: 'DeepSeek' },
+    { id: 'minimax', label: 'MiniMax' },
 ]
 
 type Translator = (key: string, opts?: Record<string, unknown>) => string
@@ -31,13 +33,12 @@ function localizeCategoryLabel(id: string, fallback: string, t?: Translator): st
     return t(`models.category_${id}`, { defaultValue: fallback })
 }
 
+const providerCategoryId = (provider: string) => provider.toLowerCase().replace(/\s+/g, '-')
+
 const matchCategory = (text: string) => {
-    for (const category of MODEL_CATEGORIES) {
-        if (category.patterns.some((pattern) => pattern.test(text))) {
-            return category.id
-        }
-    }
-    return null
+    const provider   = getModelProvider(text)
+    const categoryId = providerCategoryId(provider)
+    return MODEL_CATEGORIES.some((category) => category.id === categoryId) ? categoryId : null
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -136,7 +137,9 @@ export function classifyModels(
         }
     })
 
-    const populatedGroups = groups.filter((group) => group.items.length > 0)
+    const populatedGroups = groups
+        .filter((group) => group.items.length > 0)
+        .sort((left, right) => sortModelProviders(left.label, right.label))
     if (otherGroup.items.length) {
         populatedGroups.push(otherGroup)
     }

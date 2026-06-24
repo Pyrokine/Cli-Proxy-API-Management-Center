@@ -1,10 +1,9 @@
-import {authFilesApi} from '@/services/api/authFiles'
-import {USAGE_STATS_STALE_TIME_MS, useUsageStatsStore} from '@/stores'
+import {authFilesApi, usageApi, type UsageEvent} from '@/services/api'
 import type {AuthFileItem, Config} from '@/types'
 import type {CredentialInfo, SourceInfo} from '@/types/sourceInfo'
 import {getErrorMessage} from '@/utils/helpers'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
-import {collectUsageDetailsWithEndpoint, normalizeAuthIndex, type UsageDetailWithEndpoint} from '@/utils/usage'
+import {normalizeAuthIndex, type UsageDetailWithEndpoint} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import type {ParsedLogLine} from './logTypes'
@@ -12,11 +11,14 @@ import type {ParsedLogLine} from './logTypes'
 type TraceCandidate = {
     detail: UsageDetailWithEndpoint
     modelMatched: boolean
+    requestIdMatched: boolean
     timeDeltaMs: number | null
 }
 
-const TRACE_AUTH_CACHE_MS  = 60 * 1000
-const TRACE_MAX_CANDIDATES = 5
+const TRACE_AUTH_CACHE_MS    = 60 * 1000
+const TRACE_MAX_CANDIDATES   = 5
+const TRACE_LOOKUP_WINDOW_MS = 2 * 60 * 1000
+const TRACE_EVENT_PAGE_SIZE  = 500
 
 const TRACEABLE_EXACT_PATHS  = new Set(['/v1/chat/completions', '/v1/messages', '/v1/responses'])
 const TRACEABLE_PREFIX_PATHS = ['/v1beta/models']
@@ -56,11 +58,36 @@ const extractModelFromMessage = (message?: string): string | undefined => {
     return match?.groups?.model || undefined
 }
 
-const isPathMatch = (logPath: string, detailPath: string): boolean => {
-    if (!logPath || !detailPath) {
-        return false
+const buildEndpointLabel = (line: ParsedLogLine, logPath: string): string => {
+    if (line.method && logPath) {
+        return `${line.method} ${logPath}`
     }
-    return logPath === detailPath || logPath.startsWith(detailPath) || detailPath.startsWith(logPath)
+    return logPath || line.method || '-'
+}
+
+const eventToTraceDetail = (event: UsageEvent, line: ParsedLogLine, logPath: string): UsageDetailWithEndpoint => {
+    const timestampMs = Date.parse(event.timestamp)
+    return {
+        timestamp: event.timestamp,
+        source: event.source,
+        auth_index: event.auth_index,
+        request_id: event.request_id,
+        latency_ms: event.latency_ms,
+        time_to_first_byte_ms: event.time_to_first_byte_ms,
+        total_duration_ms: event.total_duration_ms,
+        completed: event.completed,
+        metadata_recorded: event.metadata_recorded,
+        reasoning_effort: event.reasoning_effort,
+        thinking: event.thinking,
+        tokens: event.tokens,
+        failed: event.failed,
+        __modelName: event.model,
+        __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+        __apiKey: event.api_key,
+        __endpoint: buildEndpointLabel(line, logPath),
+        __endpointMethod: line.method,
+        __endpointPath: logPath,
+    }
 }
 
 interface UseTraceResolverOptions {
@@ -86,53 +113,77 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     const { traceScopeKey, connectionStatus, config, requestLogDownloading } = options
     const { t }                                                              = useTranslation()
 
-    const usageSnapshot  = useUsageStatsStore((state) => state.usage)
-    const usageScopeKey  = useUsageStatsStore((state) => state.scopeKey)
-    const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats)
-
-    const [traceLogLine, setTraceLogLine]         = useState<ParsedLogLine | null>(null)
-    const [traceAuthFileMap, setTraceAuthFileMap] = useState<Map<string, CredentialInfo>>(new Map())
-    const [traceLoading, setTraceLoading]         = useState(false)
-    const [traceError, setTraceError]             = useState('')
+    const [traceLogLine, setTraceLogLine]           = useState<ParsedLogLine | null>(null)
+    const [traceUsageDetails, setTraceUsageDetails] = useState<UsageDetailWithEndpoint[]>([])
+    const [traceAuthFileMap, setTraceAuthFileMap]   = useState<Map<string, CredentialInfo>>(new Map())
+    const [traceLoading, setTraceLoading]           = useState(false)
+    const [traceError, setTraceError]               = useState('')
 
     const traceAuthLoadedAtRef = useRef(0)
     const traceScopeKeyRef     = useRef('')
-
-    const scopedUsageSnapshot = usageScopeKey === traceScopeKey ? usageSnapshot : null
-    const traceUsageDetails   = useMemo<UsageDetailWithEndpoint[]>(
-        () => collectUsageDetailsWithEndpoint(scopedUsageSnapshot),
-        [scopedUsageSnapshot],
-    )
+    const traceRequestIdRef    = useRef(0)
 
     const traceSourceInfoMap = useMemo(() => buildSourceInfoMap(config ?? {}), [config])
 
     const loadTraceUsageDetailsInternal = useCallback(
-        async (forceUsage: boolean) => {
+        async (line: ParsedLogLine | null) => {
             if (traceScopeKeyRef.current !== traceScopeKey) {
                 traceScopeKeyRef.current     = traceScopeKey
                 traceAuthLoadedAtRef.current = 0
                 setTraceAuthFileMap(new Map())
+                setTraceUsageDetails([])
                 setTraceError('')
             }
 
-            if (traceLoading) {
+            if (!line) {
                 return
             }
 
+            const logTimestampMs = line.timestamp ? Date.parse(line.timestamp) : Number.NaN
+            if (Number.isNaN(logTimestampMs)) {
+                setTraceUsageDetails([])
+                setTraceError(t(
+                    'logs.trace_timestamp_required',
+                    { defaultValue: '日志时间缺失，不能安全匹配 usage 事件' },
+                ))
+                return
+            }
+
+            const currentRequestId    = traceRequestIdRef.current + 1
+            traceRequestIdRef.current = currentRequestId
+
             const now       = Date.now()
-            const authFresh =
-                      traceAuthLoadedAtRef.current > 0 && now - traceAuthLoadedAtRef.current < TRACE_AUTH_CACHE_MS
+            const authFresh = traceAuthLoadedAtRef.current >
+                              0 &&
+                              now -
+                              traceAuthLoadedAtRef.current <
+                              TRACE_AUTH_CACHE_MS
+            const from      = new Date(logTimestampMs - TRACE_LOOKUP_WINDOW_MS).toISOString()
+            const to        = new Date(logTimestampMs + TRACE_LOOKUP_WINDOW_MS).toISOString()
+            const logPath   = normalizeTracePath(line.path)
 
             setTraceLoading(true)
             setTraceError('')
             try {
-                const usagePromise          = loadUsageStats({
-                                                                 force: forceUsage,
-                                                                 staleTimeMs: USAGE_STATS_STALE_TIME_MS,
-                                                             })
-                // noinspection ES6MissingAwait — awaited via Promise.all below
-                const authPromise           = authFresh ? Promise.resolve(null) : authFilesApi.list().catch(() => null)
-                const [, authFilesResponse] = await Promise.all([usagePromise, authPromise])
+                const eventsPromise                       = usageApi.getEvents({
+                                                                                   from,
+                                                                                   to,
+                                                                                   page: 1,
+                                                                                   page_size: TRACE_EVENT_PAGE_SIZE,
+                                                                                   sort: 'timestamp',
+                                                                                   order: 'desc',
+                                                                               })
+                const authPromise                         = authFresh ?
+                                                            Promise.resolve(null) :
+                                                            authFilesApi.list().catch(() => null)
+                const [eventsResponse, authFilesResponse] = await Promise.all([eventsPromise, authPromise])
+
+                if (traceRequestIdRef.current !== currentRequestId) {
+                    return
+                }
+
+                const events = Array.isArray(eventsResponse?.events) ? eventsResponse.events : []
+                setTraceUsageDetails(events.map((event) => eventToTraceDetail(event, line, logPath)))
 
                 if (authFilesResponse !== null) {
                     const files = Array.isArray(authFilesResponse)
@@ -155,21 +206,26 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                     }
                 }
             } catch (err: unknown) {
-                setTraceError(getErrorMessage(err) || t('logs.trace_usage_load_error'))
+                if (traceRequestIdRef.current === currentRequestId) {
+                    setTraceUsageDetails([])
+                    setTraceError(getErrorMessage(err) || t('logs.trace_usage_load_error'))
+                }
             } finally {
-                setTraceLoading(false)
+                if (traceRequestIdRef.current === currentRequestId) {
+                    setTraceLoading(false)
+                }
             }
         },
-        [loadUsageStats, t, traceLoading, traceScopeKey],
+        [t, traceScopeKey],
     )
 
     const loadTraceUsageDetails = useCallback(async () => {
-        await loadTraceUsageDetailsInternal(false)
-    }, [loadTraceUsageDetailsInternal])
+        await loadTraceUsageDetailsInternal(traceLogLine)
+    }, [loadTraceUsageDetailsInternal, traceLogLine])
 
     const refreshTraceUsageDetails = useCallback(async () => {
-        await loadTraceUsageDetailsInternal(true)
-    }, [loadTraceUsageDetailsInternal])
+        await loadTraceUsageDetailsInternal(traceLogLine)
+    }, [loadTraceUsageDetailsInternal, traceLogLine])
 
     useEffect(() => {
         if (connectionStatus !== 'connected') {
@@ -179,6 +235,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             traceScopeKeyRef.current     = traceScopeKey
             traceAuthLoadedAtRef.current = 0
             setTraceAuthFileMap(new Map())
+            setTraceUsageDetails([])
             setTraceLoading(false)
             setTraceError('')
         })
@@ -189,33 +246,22 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             return []
         }
 
-        const logPath = normalizeTracePath(traceLogLine.path)
-        if (!logPath) {
-            return []
-        }
-
         const logTimestampMs = traceLogLine.timestamp ? Date.parse(traceLogLine.timestamp) : Number.NaN
+        const requestId      = traceLogLine.requestId?.trim().toLowerCase()
+        const requestMatched = requestId
+                               ?
+                               traceUsageDetails.filter((detail) => detail.request_id?.trim().toLowerCase() ===
+                                                                    requestId)
+                               :
+            []
+        const requestScoped  = requestMatched.length > 0 ? requestMatched : traceUsageDetails
 
-        // Step 1: filter by path match
-        const pathMatched = traceUsageDetails.filter((detail) =>
-                                                         isPathMatch(
-                                                             logPath,
-                                                             normalizeTracePath(detail.__endpointPath),
-                                                         ),
-        )
-        if (pathMatched.length === 0) {
-            return []
-        }
-
-        // Step 2: try to extract model from log message, then filter by model
         const logModel     = extractModelFromMessage(traceLogLine.message)
         const modelMatched = logModel
-                             ? pathMatched.filter((d) => d.__modelName?.toLowerCase() === logModel.toLowerCase())
+                             ? requestScoped.filter((d) => d.__modelName?.toLowerCase() === logModel.toLowerCase())
                              : []
-
-        // Step 3: prefer model-matched set; fall back to path-matched
-        const useModelSet = modelMatched.length > 0
-        const source      = useModelSet ? modelMatched : pathMatched
+        const useModelSet  = modelMatched.length > 0
+        const source       = useModelSet ? modelMatched : requestScoped
 
         return source
             .map((detail) => {
@@ -223,9 +269,24 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                           !Number.isNaN(logTimestampMs) && detail.__timestampMs > 0
                           ? Math.abs(logTimestampMs - detail.__timestampMs)
                           : null
-                return { detail, modelMatched: useModelSet, timeDeltaMs } satisfies TraceCandidate
+                return {
+                    detail,
+                    modelMatched: useModelSet,
+                    requestIdMatched: requestMatched.includes(detail),
+                    timeDeltaMs,
+                } satisfies TraceCandidate
             })
-            .sort((a, b) => (b.detail.__timestampMs || 0) - (a.detail.__timestampMs || 0))
+            .sort((a, b) => {
+                if (a.requestIdMatched !== b.requestIdMatched) {
+                    return a.requestIdMatched ? -1 : 1
+                }
+                const aDelta = a.timeDeltaMs ?? Number.MAX_SAFE_INTEGER
+                const bDelta = b.timeDeltaMs ?? Number.MAX_SAFE_INTEGER
+                if (aDelta !== bDelta) {
+                    return aDelta - bDelta
+                }
+                return (b.detail.__timestampMs || 0) - (a.detail.__timestampMs || 0)
+            })
             .slice(0, TRACE_MAX_CANDIDATES)
     }, [traceLogLine, traceUsageDetails])
 
@@ -241,10 +302,11 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                 return
             }
             setTraceError('')
+            setTraceUsageDetails([])
             setTraceLogLine(line)
-            void loadTraceUsageDetails()
+            void loadTraceUsageDetailsInternal(line)
         },
-        [loadTraceUsageDetails],
+        [loadTraceUsageDetailsInternal],
     )
 
     const closeTraceModal = useCallback(() => {
@@ -252,6 +314,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             return
         }
         setTraceLogLine(null)
+        setTraceUsageDetails([])
     }, [requestLogDownloading])
 
     return {

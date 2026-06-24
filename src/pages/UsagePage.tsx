@@ -1,4 +1,5 @@
 import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
+import {Tabs} from '@/components/ui/Tabs'
 import {EventsTab, FilterBar, OverviewTab, SettingsTab, useUsageData, useUsageSummary} from '@/components/usage'
 import {useAuthFileMap} from '@/components/usage/hooks/useAuthFileMap'
 import type {UsagePayload} from '@/components/usage/hooks/useUsageData'
@@ -82,6 +83,7 @@ export function UsagePage() {
     const [selectedModels, setSelectedModels]                   = useState<string[]>([])
     const [selectedCredentials, setSelectedCredentials]         = useState<string[]>([])
     const [selectedApiKeys, setSelectedApiKeys]                 = useState<string[]>([])
+    const [selectedEventStatus, setSelectedEventStatus]         = useState('')
     const [aliases, setAliases]                                 = useState<Record<string, string>>({})
     const [activeTab, setActiveTabState]                        = useState<UsageTab>(() => initActiveTab())
     const usageStatsTabActive                                   = activeTab !== 'settings'
@@ -108,8 +110,6 @@ export function UsagePage() {
               error,
               lastRefreshedAt,
               modelPrices,
-              priceSaveFeedback,
-              setModelPrices,
               loadUsage,
               handleExport,
               handleImport,
@@ -384,24 +384,39 @@ export function UsagePage() {
         enabled: usageStatsTabActive && effectiveRangeReady,
     })
 
+    const liveSummaryRange = useMemo(() => {
+        const fromMs = new Date(effectiveDateFrom).getTime()
+        const toMs   = new Date(effectiveDateTo).getTime()
+        if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+            return {
+                from: toLocalDateTimeString(new Date(liveWindowAnchorMs - 60 * 60 * 1000)),
+                to: toLocalDateTimeString(new Date(liveWindowAnchorMs)),
+            }
+        }
+        return {
+            from: toLocalDateTimeString(new Date(Math.max(fromMs, toMs - 60 * 60 * 1000))),
+            to: toLocalDateTimeString(new Date(toMs)),
+        }
+    }, [effectiveDateFrom, effectiveDateTo, liveWindowAnchorMs])
+
     const liveSummaryParams = useMemo(
         () => ({
-            from: toLocalDateTimeString(new Date(liveWindowAnchorMs - 60 * 60 * 1000)),
-            to: toLocalDateTimeString(new Date(liveWindowAnchorMs)),
+            from: liveSummaryRange.from,
+            to: liveSummaryRange.to,
             granularity: 'hourly' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
             api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
             groups: chartDimension === 'total' ? ('none' as const) : ('all' as const),
         }),
-        [liveWindowAnchorMs, selectedModels, selectedApiKeys, selectedCredentials, chartDimension],
+        [liveSummaryRange, selectedModels, selectedApiKeys, selectedCredentials, chartDimension],
     )
     const {
               summary: liveSummary,
               loading: liveSummaryLoading,
               reload: reloadLiveSummary,
           }                 = useUsageSummary(liveSummaryParams, {
-        enabled: usageStatsTabActive,
+        enabled: usageStatsTabActive && effectiveRangeReady,
     })
 
     // Filtered usage: date range → model/credential selection
@@ -529,20 +544,16 @@ export function UsagePage() {
                 <h1 className={styles.pageTitle}>{t('usage_stats.title')}</h1>
             </div>
 
-            <div className={styles.tabBar} role='tablist'>
-                {(['overview', 'events', 'settings'] as const).map((tab) => (
-                    <button
-                        key={tab}
-                        type='button'
-                        role='tab'
-                        aria-selected={activeTab === tab}
-                        className={`${styles.tabButton} ${activeTab === tab ? styles.tabButtonActive : ''}`}
-                        onClick={() => setActiveTab(tab)}
-                    >
-                        {t(`usage_stats.tab_${tab}`)}
-                    </button>
-                ))}
-            </div>
+            <Tabs
+                className={styles.usageTabs}
+                items={(['overview', 'events', 'settings'] as const).map((tab) => ({
+                    value: tab,
+                    label: t(`usage_stats.tab_${tab}`),
+                }))}
+                activeValue={activeTab}
+                onChange={setActiveTab}
+                ariaLabel={t('usage_stats.title')}
+            />
 
             {activeTab !== 'settings' && (
                 <FilterBar
@@ -559,6 +570,8 @@ export function UsagePage() {
                     onSelectedCredentialsChange={setSelectedCredentials}
                     selectedApiKeys={selectedApiKeys}
                     onSelectedApiKeysChange={setSelectedApiKeys}
+                    selectedStatus={activeTab === 'events' ? selectedEventStatus : undefined}
+                    onSelectedStatusChange={activeTab === 'events' ? setSelectedEventStatus : undefined}
                     summary={summary}
                     optionsSummary={hasSelectionFilters ? filterOptionsSummary : summary}
                     aliases={aliases}
@@ -642,17 +655,12 @@ export function UsagePage() {
                     selectedModels={selectedModels}
                     selectedCredentials={selectedCredentials}
                     selectedApiKeys={selectedApiKeys}
+                    selectedStatus={selectedEventStatus}
+                    onSelectedStatusChange={setSelectedEventStatus}
                 />
             )}
 
-            {activeTab === 'settings' && (
-                <SettingsTab
-                    modelNames={Object.keys(modelPrices).sort((a, b) => a.localeCompare(b))}
-                    modelPrices={modelPrices}
-                    priceSaveFeedback={priceSaveFeedback}
-                    onPricesChange={setModelPrices}
-                />
-            )}
+            {activeTab === 'settings' && <SettingsTab />}
         </div>
     )
 }

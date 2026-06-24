@@ -31,7 +31,7 @@ interface LogSizeResponse {
     file_count: number
 }
 
-interface ErrorLogPreview {
+export interface ErrorLogPreview {
     content: string
     truncated: boolean
     total_lines: number
@@ -63,6 +63,12 @@ export const logsApi = {
     downloadRequestLogById: (id: string) =>
         apiClient.getRaw(`/request-log-by-id/${encodeURIComponent(id)}`, {
             responseType: 'blob',
+            timeout: LOGS_TIMEOUT_MS,
+        }),
+
+    previewRequestLogById: (id: string, lines = 200): Promise<ErrorLogPreview> =>
+        apiClient.get(`/request-log-by-id/${encodeURIComponent(id)}`, {
+            params: { lines },
             timeout: LOGS_TIMEOUT_MS,
         }),
 }

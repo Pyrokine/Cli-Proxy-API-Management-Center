@@ -18,15 +18,21 @@ export interface ModelPrice {
 export interface UsageDetail {
     timestamp: string
     source: string
-    auth_index: number
+    auth_index: number | string
+    request_id?: string | null
     latency_ms?: number | string | null
+    time_to_first_byte_ms?: number | string | null
+    total_duration_ms?: number | string | null
+    completed?: boolean | null
+    metadata_recorded?: boolean | null
+    reasoning_effort?: string | null
     thinking?: UsageThinking | null
     tokens: {
         input_tokens: number
         output_tokens: number
         reasoning_tokens: number
         cached_tokens: number
-        cache_tokens?: number
+        cache_tokens?: number | string | null
         total_tokens: number
     }
     failed: boolean
@@ -42,8 +48,6 @@ export interface UsageDetailWithEndpoint extends UsageDetail {
     __timestampMs: number
 }
 
-const MODEL_PRICE_STORAGE_KEY     = 'cli-proxy-model-prices-v2'
-const MODEL_PRICE_MIGRATED_KEY    = 'cli-proxy-model-prices-migrated'
 const USAGE_ENDPOINT_METHOD_REGEX = /^(?<method>GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(?<path>\S+)/i
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -64,7 +68,10 @@ const parseTimestamp = (input: unknown): number => {
     if (!trimmed) {
         return Number.NaN
     }
-    const normalized = trimmed.replace(/(?<time>T\d{2}:\d{2}:\d{2})\.(?<ms>\d{3})\d+(?<tz>[Zz]|[+-]\d{2}:?\d{2})$/, '$<time>.$<ms>$<tz>')
+    const normalized = trimmed.replace(
+        /(?<time>T\d{2}:\d{2}:\d{2})\.(?<ms>\d{3})\d+(?<tz>[Zz]|[+-]\d{2}:?\d{2})$/,
+        '$<time>.$<ms>$<tz>',
+    )
     return Date.parse(normalized)
 }
 
@@ -492,13 +499,30 @@ export function formatDurationMs(value: number | null | undefined, options: Dura
         .join(' ')
 }
 
+const NO_THINKING_VALUES = new Set(['none', 'off', 'disabled', 'no', 'false', 'no_thinking', 'without_thinking'])
+
+function normalizeThinkingText(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : ''
+}
+
+function noThinkingLabel(locale?: string): string {
+    const lower = (locale ?? '').toLowerCase()
+    if (lower.startsWith('zh')) {
+        return '无思考'
+    }
+    if (lower.startsWith('ru')) {
+        return 'No thinking'
+    }
+    return 'No thinking'
+}
+
 export function normalizeUsageThinking(value: unknown): UsageThinking | null {
     if (!isRecord(value)) {
         return null
     }
-    const intensity = typeof value.intensity === 'string' ? value.intensity.trim() : ''
-    const mode      = typeof value.mode === 'string' ? value.mode.trim() : ''
-    const level     = typeof value.level === 'string' ? value.level.trim() : ''
+    const intensity = normalizeThinkingText(value.intensity)
+    const mode      = normalizeThinkingText(value.mode)
+    const level     = normalizeThinkingText(value.level)
     const rawBudget = Number(value.budget)
     const hasBudget = value.budget !== undefined && value.budget !== null && Number.isFinite(rawBudget)
     if (!intensity && !mode && !level && !hasBudget) {
@@ -512,20 +536,34 @@ export function normalizeUsageThinking(value: unknown): UsageThinking | null {
     }
 }
 
+export function isNoThinkingUsage(thinking: UsageThinking | null | undefined): boolean {
+    if (!thinking) {
+        return false
+    }
+    const intensity = normalizeThinkingText(thinking.intensity).toLowerCase()
+    const level     = normalizeThinkingText(thinking.level).toLowerCase()
+    const mode      = normalizeThinkingText(thinking.mode).toLowerCase()
+    const budget    = typeof thinking.budget === 'number' && Number.isFinite(thinking.budget) ? thinking.budget : null
+    return [intensity, level, mode].some((value) => NO_THINKING_VALUES.has(value)) || budget === 0
+}
+
 export function formatThinkingLabel(thinking: UsageThinking | null | undefined, locale?: string): string {
     if (!thinking) {
         return '-'
     }
 
-    const intensity   = typeof thinking.intensity === 'string' ? thinking.intensity.trim() : ''
-    const level       = typeof thinking.level === 'string' ? thinking.level.trim() : ''
-    const mode        = typeof thinking.mode === 'string' ? thinking.mode.trim() : ''
+    const intensity   = normalizeThinkingText(thinking.intensity)
+    const level       = normalizeThinkingText(thinking.level)
+    const mode        = normalizeThinkingText(thinking.mode)
     const budget      = typeof thinking.budget === 'number' && Number.isFinite(thinking.budget) ? thinking.budget : null
     const label       = intensity || level || (budget !== null ? String(budget) : mode)
     const budgetLabel = budget !== null ? budget.toLocaleString(locale) : null
 
     if (!label) {
         return '-'
+    }
+    if (isNoThinkingUsage(thinking)) {
+        return noThinkingLabel(locale)
     }
     if (budgetLabel !== null && label === String(budget)) {
         return budgetLabel
@@ -605,7 +643,17 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
                                  timestamp,
                                  source: normalizeSource(detailRaw.source),
                                  auth_index: detailRaw.auth_index as unknown as number,
+                                 request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id : null,
                                  latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
+                                 time_to_first_byte_ms: detailRaw.time_to_first_byte_ms as UsageDetail['time_to_first_byte_ms'],
+                                 total_duration_ms: detailRaw.total_duration_ms as UsageDetail['total_duration_ms'],
+                                 completed: typeof detailRaw.completed === 'boolean' ? detailRaw.completed : null,
+                                 metadata_recorded:
+                                     typeof detailRaw.metadata_recorded === 'boolean' ?
+                                     detailRaw.metadata_recorded :
+                                     null,
+                                 reasoning_effort:
+                                     typeof detailRaw.reasoning_effort === 'string' ? detailRaw.reasoning_effort : null,
                                  thinking: normalizeUsageThinking(detailRaw.thinking),
                                  tokens: tokensRaw as unknown as UsageDetail['tokens'],
                                  failed: detailRaw.failed === true,
@@ -691,7 +739,17 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
                                  timestamp,
                                  source: normalizeSource(detailRaw.source),
                                  auth_index: detailRaw.auth_index as unknown as number,
+                                 request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id : null,
                                  latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
+                                 time_to_first_byte_ms: detailRaw.time_to_first_byte_ms as UsageDetail['time_to_first_byte_ms'],
+                                 total_duration_ms: detailRaw.total_duration_ms as UsageDetail['total_duration_ms'],
+                                 completed: typeof detailRaw.completed === 'boolean' ? detailRaw.completed : null,
+                                 metadata_recorded:
+                                     typeof detailRaw.metadata_recorded === 'boolean' ?
+                                     detailRaw.metadata_recorded :
+                                     null,
+                                 reasoning_effort:
+                                     typeof detailRaw.reasoning_effort === 'string' ? detailRaw.reasoning_effort : null,
                                  thinking: normalizeUsageThinking(detailRaw.thinking),
                                  tokens: tokensRaw as unknown as UsageDetail['tokens'],
                                  failed: detailRaw.failed === true,
@@ -760,116 +818,19 @@ export function getModelNamesFromUsage(usageData: unknown): string[] {
 }
 
 /**
- * 从 localStorage 加载模型价格
+ * 从服务端统一模型文件加载模型价格
  */
 export async function loadModelPrices(): Promise<Record<string, ModelPrice>> {
-    try {
-        const { modelPricesApi } = await import('@/services/api/modelPrices')
-        const serverPrices       = await modelPricesApi.get()
-
-        // Migrate localStorage data to server on first load
-        if (
-            Object.keys(serverPrices).length === 0 &&
-            typeof localStorage !== 'undefined' &&
-            !localStorage.getItem(MODEL_PRICE_MIGRATED_KEY)
-        ) {
-            const localPrices = loadModelPricesFromLocalStorage()
-            if (Object.keys(localPrices).length > 0) {
-                try {
-                    await modelPricesApi.put(localPrices)
-                } catch {
-                    // Migration failed, will retry next time
-                }
-                localStorage.setItem(MODEL_PRICE_MIGRATED_KEY, 'true')
-                return localPrices
-            }
-            localStorage.setItem(MODEL_PRICE_MIGRATED_KEY, 'true')
-        }
-
-        return serverPrices
-    } catch {
-        // Fallback to localStorage when server is unreachable
-        return loadModelPricesFromLocalStorage()
-    }
+    const { modelPricesApi } = await import('@/services/api/modelPrices')
+    return modelPricesApi.get()
 }
 
 /**
- * 保存模型价格到服务端
+ * 保存模型价格到服务端统一模型文件
  */
-export async function saveModelPrices(prices: Record<string, ModelPrice>): Promise<PutModelPricesResponse | null> {
-    try {
-        const { modelPricesApi } = await import('@/services/api/modelPrices')
-        return await modelPricesApi.put(prices)
-    } catch {
-        // Fallback to localStorage when server is unreachable
-        saveModelPricesToLocalStorage(prices)
-        return null
-    }
-}
-
-/**
- * 从 localStorage 加载模型价格（fallback）
- */
-function loadModelPricesFromLocalStorage(): Record<string, ModelPrice> {
-    try {
-        if (typeof localStorage === 'undefined') {
-            return {}
-        }
-        const raw = localStorage.getItem(MODEL_PRICE_STORAGE_KEY)
-        if (!raw) {
-            return {}
-        }
-        const parsed: unknown = JSON.parse(raw)
-        if (!isRecord(parsed)) {
-            return {}
-        }
-        const normalized: Record<string, ModelPrice> = {}
-        Object.entries(parsed).forEach(([model, price]: [string, unknown]) => {
-            if (!model) {
-                return
-            }
-            const priceRecord   = isRecord(price) ? price : null
-            const promptRaw     = Number(priceRecord?.prompt)
-            const completionRaw = Number(priceRecord?.completion)
-            const cacheRaw      = Number(priceRecord?.cache)
-
-            if (!Number.isFinite(promptRaw) && !Number.isFinite(completionRaw) && !Number.isFinite(cacheRaw)) {
-                return
-            }
-
-            const prompt     = Number.isFinite(promptRaw) && promptRaw >= 0 ? promptRaw : 0
-            const completion = Number.isFinite(completionRaw) && completionRaw >= 0 ? completionRaw : 0
-            const cache      =
-                      Number.isFinite(cacheRaw) && cacheRaw >= 0
-                      ? cacheRaw
-                      : Number.isFinite(promptRaw) && promptRaw >= 0
-                        ? promptRaw
-                        : prompt
-
-            normalized[model] = {
-                prompt,
-                completion,
-                cache,
-            }
-        })
-        return normalized
-    } catch {
-        return {}
-    }
-}
-
-/**
- * 保存模型价格到 localStorage（fallback）
- */
-function saveModelPricesToLocalStorage(prices: Record<string, ModelPrice>): void {
-    try {
-        if (typeof localStorage === 'undefined') {
-            return
-        }
-        localStorage.setItem(MODEL_PRICE_STORAGE_KEY, JSON.stringify(prices))
-    } catch {
-        console.warn('保存模型价格失败')
-    }
+export async function saveModelPrices(prices: Record<string, ModelPrice>): Promise<PutModelPricesResponse> {
+    const { modelPricesApi } = await import('@/services/api/modelPrices')
+    return modelPricesApi.put(prices)
 }
 
 /**
@@ -893,6 +854,7 @@ function formatDayLabel(date: Date): string {
 }
 
 export type ChartDimension = 'total' | 'model' | 'credential' | 'api_key'
+export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning'
 
 export interface ChartDataset {
     label: string
@@ -922,6 +884,15 @@ const CHART_COLORS = [
     { borderColor: '#84cc16', backgroundColor: 'rgba(132, 204, 22, 0.15)' },
     { borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.15)' },
 ]
+
+const TOKEN_BREAKDOWN_COLORS: Record<TokenCategory, { borderColor: string; backgroundColor: string }> = {
+    input: { borderColor: '#8b8680', backgroundColor: 'rgba(139, 134, 128, 0.25)' },
+    output: { borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.25)' },
+    cached: { borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.25)' },
+    reasoning: { borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.25)' },
+}
+
+const TOKEN_BREAKDOWN_CATEGORIES: TokenCategory[] = ['input', 'output', 'cached', 'reasoning']
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -1021,6 +992,47 @@ function buildMultiGroupChartData(
     })
 
     return { labels, datasets }
+}
+
+export function buildTokenBreakdownChartData(
+    summary: ApiUsageSummary,
+    categoryLabels: Record<TokenCategory, string>,
+): ChartData {
+    const points = summary.time_series
+    if (!points || points.length === 0) {
+        return { labels: [], datasets: [] }
+    }
+
+    const formatLabel = (iso: string): string => {
+        const parsed = parseTimestamp(iso)
+        if (!Number.isFinite(parsed)) {
+            return iso
+        }
+        const d       = new Date(parsed)
+        const hasHour = iso.includes('T') && !iso.endsWith('T00:00:00Z')
+        return hasHour ? formatHourLabel(d) : formatDayLabel(d)
+    }
+
+    return {
+        labels: points.map((pt) => formatLabel(pt.time)),
+        datasets: TOKEN_BREAKDOWN_CATEGORIES.map((category) => {
+            const style = TOKEN_BREAKDOWN_COLORS[category]
+            return {
+                label: categoryLabels[category],
+                data: points.map((pt) => {
+                    const tokens = typeof pt.tokens === 'object' && pt.tokens ? pt.tokens : undefined
+                    return tokens?.[category] ?? 0
+                }),
+                borderColor: style.borderColor,
+                backgroundColor: style.backgroundColor,
+                pointBackgroundColor: style.borderColor,
+                pointBorderColor: style.borderColor,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.35,
+            }
+        }),
+    }
 }
 
 export function getSummaryDataStart(summary?: ApiUsageSummary | null): Date | undefined {
@@ -1227,8 +1239,6 @@ export interface ServiceHealthData {
     rows: number
     cols: number
 }
-
-export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning'
 
 /**
  * Extract unique credential source identifiers from usage data.

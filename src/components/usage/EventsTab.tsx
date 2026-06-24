@@ -20,6 +20,8 @@ interface EventsTabProps {
     selectedModels?: string[]
     selectedCredentials?: string[]
     selectedApiKeys?: string[]
+    selectedStatus?: string
+    onSelectedStatusChange?: (status: string) => void
 }
 
 export function EventsTab({
@@ -40,6 +42,8 @@ export function EventsTab({
                               selectedModels,
                               selectedCredentials,
                               selectedApiKeys,
+                              selectedStatus,
+                              onSelectedStatusChange,
                           }: EventsTabProps) {
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -61,6 +65,8 @@ export function EventsTab({
                 selectedModels={selectedModels}
                 selectedCredentials={selectedCredentials}
                 selectedApiKeys={selectedApiKeys}
+                selectedStatus={selectedStatus}
+                onSelectedStatusChange={onSelectedStatusChange}
             />
         </div>
     )
