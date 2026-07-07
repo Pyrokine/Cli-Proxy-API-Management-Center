@@ -3,10 +3,11 @@ import {IconChevronLeft, IconDownload, IconExternalLink} from '@/components/ui/i
 import {Modal} from '@/components/ui/Modal'
 import type {Release, ReleasesTarget} from '@/services/api/releases'
 import {releasesApi} from '@/services/api/releases'
-import type {UpdateStatus} from '@/services/api/update'
+import type {UpdateCompatibility, UpdateStatus} from '@/services/api/update'
 import {updateApi} from '@/services/api/update'
-import {useNotificationStore} from '@/stores'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import {formatDateTime} from '@/utils/format'
+import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VersionHistoryModal.module.scss'
@@ -18,6 +19,7 @@ const OFFICIAL_REPOSITORIES: Record<ReleasesTarget, string> = {
     panel: 'Pyrokine/Cli-Proxy-API-Management-Center',
 }
 const BREAKING_PATTERN                                      = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
+const COMPATIBILITY_PATTERN                                 = /\b(?:required|requires|compatib|breaking|migration|migrate|incompatible)\b|要求|兼容|相容|不兼容|迁移|遷移|⚠/i
 const UPDATE_POLL_INTERVAL                                  = 2000
 const PAGE_SIZE                                             = 10
 
@@ -139,6 +141,61 @@ function collectBreakingBetween(releases: Release[], currentTag: string, targetT
     return hints
 }
 
+function cleanReleaseLine(line: string): string {
+    return line
+        .replace(/^#+\s*/, '')
+        .replace(/^[-*•]\s*/, '')
+        .trim()
+}
+
+function uniqueNonEmpty(lines: string[]): string[] {
+    const seen = new Set<string>()
+    return lines.filter((line) => {
+        const cleaned = cleanReleaseLine(line)
+        if (!cleaned || seen.has(cleaned)) {
+            return false
+        }
+        seen.add(cleaned)
+        return true
+    }).map(cleanReleaseLine)
+}
+
+function extractCompatibilityHints(body: string): string[] {
+    if (!body) {
+        return []
+    }
+    return uniqueNonEmpty(body.split('\n').filter((line) => COMPATIBILITY_PATTERN.test(line))).slice(0, 6)
+}
+
+function extractRequiredServerVersion(body: string): string | null {
+    if (!body) {
+        return null
+    }
+    const patterns = [
+        /Required\s+server\s*[:：]\s*(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
+        /requires\s+(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
+        /要求的后端版本\s*[:：]\s*(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
+        /要求的後端版本\s*[:：]\s*(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
+        /要求.*(?:后端|後端|server|CLIProxyAPI).*v?(?<version>[0-9][\w.-]*)/i,
+    ]
+    for (const pattern of patterns) {
+        const match = body.match(pattern)
+        if (match?.groups?.version) {
+            return `v${match.groups.version.replace(/^v/i, '')}`
+        }
+    }
+    return null
+}
+
+function compareVersionStrings(current: string | null | undefined, required: string | null | undefined): number | null {
+    const currentParsed  = parseVersion(current || '')
+    const requiredParsed = parseVersion(required || '')
+    if (!currentParsed || !requiredParsed) {
+        return null
+    }
+    return compareSemver(currentParsed, requiredParsed)
+}
+
 /** Format ISO date to locale date-time. */
 function formatDate(iso: string, locale: string): string {
     const formatted = formatDateTime(iso, locale)
@@ -150,6 +207,8 @@ function formatDate(iso: string, locale: string): string {
 export function VersionHistoryModal({ open, onClose, currentVersion, target, repository }: VersionHistoryModalProps) {
     const { t, i18n }                            = useTranslation()
     const { showConfirmation, showNotification } = useNotificationStore()
+    const serverVersion                          = useAuthStore((state) => state.serverVersion)
+    const refreshServerVersion                   = useAuthStore((state) => state.refreshServerVersion)
 
     const [releases, setReleases]   = useState<Release[]>([])
     const [loading, setLoading]     = useState(false)
@@ -159,6 +218,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     // Update progress
     const [updateStatus, setUpdateStatus]       = useState<UpdateStatus | null>(null)
     const [updatingVersion, setUpdatingVersion] = useState<string | null>(null)
+    const [checkingVersion, setCheckingVersion] = useState<string | null>(null)
     const pollTimerRef                          = useRef<ReturnType<typeof setInterval> | null>(null)
 
     // Fetch releases when modal opens
@@ -313,86 +373,213 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         }, UPDATE_POLL_INTERVAL)
     }
 
-    const handleUpdate = (tag: string) => {
+    const handleUpdate = async (tag: string) => {
         const direction = getUpdateDirection(tag)
-        if (!direction) {
+        if (!direction || checkingVersion) {
             return
         }
 
-        const isDowngrade   = direction === 'downgrade'
-        const breakingHints = isDowngrade ? collectBreakingBetween(releases, currentVersion, tag) : []
+        setCheckingVersion(tag)
+        try {
+            const isDowngrade       = direction === 'downgrade'
+            const release           = releases.find((item) => item.tag_name === tag)
+            const breakingHints     = isDowngrade ? collectBreakingBetween(releases, currentVersion, tag) : []
+            const compatibilityTips = release ? extractCompatibilityHints(release.body) : []
+            const currentPanel      = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : currentVersion
 
-        const messageLines = [
-            t(isDowngrade ? 'version_history.confirm_downgrade_target' : 'version_history.confirm_upgrade_target', {
-                version: tag,
-                target: targetLabel,
-            }),
-        ]
-        if (breakingHints.length > 0) {
-            messageLines.push('', t('version_history.downgrade_risk'), ...breakingHints.slice(0, 5))
-        }
+            let compatibility: UpdateCompatibility | null = null
+            let requiredServerVersion: string | null      = null
+            let serverVersionForCheck: string | null      = serverVersion || null
+            const compatibilityMessages: string[]         = []
+            let confirmDisabled                           = false
 
-        showConfirmation({
-                             title: t(isDowngrade ? 'version_history.downgrade' : 'version_history.upgrade'),
-                             message: messageLines.join('\n'),
-                             variant: isDowngrade ? 'danger' : 'primary',
-                             confirmText: t('common.confirm'),
-                             onConfirm: async () => {
-                                 setUpdatingVersion(tag)
-                                 setUpdateStatus({
-                                                     status: 'downloading',
-                                                     message: '',
-                                                     target_version: tag,
-                                                     percent: 0,
-                                                     current_version: currentVersion,
-                                                 })
-                                 try {
-                                     if (target === 'panel') {
-                                         await updateApi.panelUpdate(tag)
-                                         setUpdatingVersion(null)
-                                         setUpdateStatus({
-                                                             status: 'done',
-                                                             message: t(
-                                                                 'version_switcher.panel_updated',
-                                                                 { version: tag },
-                                                             ),
-                                                             target_version: tag,
-                                                             percent: 100,
-                                                             current_version: currentVersion,
-                                                         })
-                                         showNotification(
-                                             t('version_switcher.panel_updated', { version: tag }),
-                                             'success',
-                                         )
-                                         return
-                                     }
-                                     const compatibility = await updateApi.compatibility(tag)
-                                     if (!compatibility.compatible) {
-                                         showNotification(
-                                             compatibility.warnings && compatibility.warnings.length > 0
-                                             ? compatibility.warnings.join(' | ')
-                                             : t('version_switcher.compatibility_blocked'),
-                                             'error',
-                                         )
-                                         setUpdatingVersion(null)
-                                         setUpdateStatus(null)
-                                         return
-                                     }
-                                     await updateApi.trigger(tag)
-                                     startPolling()
-                                 } catch (err) {
-                                     const msg = err instanceof Error ? err.message : String(err)
+            if (target === 'cpa') {
+                compatibility   = await updateApi.compatibility(tag)
+                confirmDisabled = !compatibility.compatible
+                compatibilityMessages.push(
+                    compatibility.compatible
+                    ? t('version_history.confirm_compatibility_ok')
+                    : t('version_history.confirm_compatibility_blocked'),
+                )
+                compatibilityMessages.push(...(compatibility.warnings ?? []))
+            } else {
+                requiredServerVersion = release ? extractRequiredServerVersion(release.body) : null
+                if (requiredServerVersion) {
+                    try {
+                        await refreshServerVersion()
+                        serverVersionForCheck = useAuthStore.getState().serverVersion || serverVersionForCheck
+                    } catch {
+                        serverVersionForCheck = useAuthStore.getState().serverVersion || serverVersionForCheck
+                    }
+                    const serverCompare = compareVersionStrings(serverVersionForCheck, requiredServerVersion)
+                    if (serverCompare !== null && serverCompare < 0) {
+                        confirmDisabled = true
+                        compatibilityMessages.push(t('version_history.confirm_compatibility_blocked'))
+                    } else if (serverCompare !== null) {
+                        compatibilityMessages.push(t('version_history.confirm_compatibility_ok'))
+                    } else {
+                        compatibilityMessages.push(t('version_history.confirm_compatibility_unknown'))
+                    }
+                }
+            }
+
+            const rows = [
+                { label: t('version_history.confirm_target_version'), value: tag },
+                {
+                    label: t('version_history.confirm_published_at'),
+                    value: release?.published_at ? formatDate(release.published_at, i18n.language) : '-',
+                },
+                {
+                    label: t('version_history.confirm_impact'),
+                    value: t(target === 'panel'
+                             ? 'version_history.confirm_panel_impact'
+                             : 'version_history.confirm_backend_impact'),
+                },
+                ...(target === 'panel'
+                    ? [
+                        {
+                            label: t('version_history.confirm_current_server'),
+                            value: serverVersionForCheck || '-',
+                        },
+                        {
+                            label: t('version_history.confirm_required_server'),
+                            value: requiredServerVersion || '-',
+                        },
+                    ]
+                    : [
+                        {
+                            label: t('version_history.confirm_current_panel'),
+                            value: currentPanel,
+                        },
+                        {
+                            label: t('version_history.confirm_required_panel'),
+                            value: compatibility?.min_panel_version || '-',
+                        },
+                    ]),
+            ]
+
+            const confirmTitle = t(isDowngrade
+                                   ? 'version_history.confirm_downgrade_target'
+                                   : 'version_history.confirm_upgrade_target', {
+                                       version: tag,
+                                       target: targetLabel,
+                                   })
+
+            showConfirmation({
+                                 title: t(isDowngrade ? 'version_history.downgrade' : 'version_history.upgrade'),
+                                 message: (
+                                     <div className={styles.updateConfirm}>
+                                         <p className={styles.confirmIntro}>{confirmTitle}</p>
+                                         <div className={styles.confirmRows}>
+                                             {rows.map((row) => (
+                                                 <div key={row.label} className={styles.confirmRow}>
+                                                     <span className={styles.confirmLabel}>{row.label}</span>
+                                                     <span className={styles.confirmValue}>{row.value}</span>
+                                                 </div>
+                                             ))}
+                                         </div>
+                                         {target === 'cpa' && compatibility?.requires_restart && (
+                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                                 {t('version_history.confirm_requires_restart')}
+                                             </div>
+                                         )}
+                                         {compatibilityMessages.length > 0 && (
+                                             <div
+                                                 className={`${styles.confirmNotice} ${
+                                                     confirmDisabled ? styles.confirmDanger : styles.confirmInfo
+                                                 }`}
+                                             >
+                                                 <div className={styles.confirmNoticeTitle}>
+                                                     {t('version_history.confirm_compatibility')}
+                                                 </div>
+                                                 <ul className={styles.confirmList}>
+                                                     {compatibilityMessages.map((item, idx) => (
+                                                         <li key={idx}>{item}</li>
+                                                     ))}
+                                                 </ul>
+                                             </div>
+                                         )}
+                                         {compatibilityTips.length > 0 && (
+                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                                 <div className={styles.confirmNoticeTitle}>
+                                                     {t('version_history.confirm_release_notes')}
+                                                 </div>
+                                                 <ul className={styles.confirmList}>
+                                                     {compatibilityTips.map((item, idx) => (
+                                                         <li key={idx}>{item}</li>
+                                                     ))}
+                                                 </ul>
+                                             </div>
+                                         )}
+                                         {breakingHints.length > 0 && (
+                                             <div className={`${styles.confirmNotice} ${styles.confirmDanger}`}>
+                                                 <div className={styles.confirmNoticeTitle}>
+                                                     {t('version_history.downgrade_risk')}
+                                                 </div>
+                                                 <ul className={styles.confirmList}>
+                                                     {breakingHints.slice(0, 5).map((item, idx) => (
+                                                         <li key={idx}>{cleanReleaseLine(item)}</li>
+                                                     ))}
+                                                 </ul>
+                                             </div>
+                                         )}
+                                     </div>
+                                 ),
+                                 variant: isDowngrade ? 'danger' : 'primary',
+                                 confirmDisabled,
+                                 confirmText: t(isDowngrade
+                                                ? 'version_history.confirm_downgrade_to'
+                                                : 'version_history.confirm_upgrade_to', { version: tag }),
+                                 onConfirm: async () => {
+                                     setUpdatingVersion(tag)
                                      setUpdateStatus({
-                                                         status: 'error',
-                                                         message: msg,
+                                                         status: 'downloading',
+                                                         message: '',
                                                          target_version: tag,
                                                          percent: 0,
                                                          current_version: currentVersion,
                                                      })
-                                     showNotification(msg, 'error')
-                                 }
-                             },
-                         })
+                                     try {
+                                         if (target === 'panel') {
+                                             await updateApi.panelUpdate(tag)
+                                             setUpdatingVersion(null)
+                                             setUpdateStatus({
+                                                                 status: 'done',
+                                                                 message: t(
+                                                                     'version_switcher.panel_updated',
+                                                                     { version: tag },
+                                                                 ),
+                                                                 target_version: tag,
+                                                                 percent: 100,
+                                                                 current_version: currentVersion,
+                                                             })
+                                             showNotification(
+                                                 t('version_switcher.panel_updated', { version: tag }),
+                                                 'success',
+                                             )
+                                             return
+                                         }
+                                         await updateApi.trigger(tag)
+                                         startPolling()
+                                     } catch (err) {
+                                         const msg = err instanceof Error ? err.message : String(err)
+                                         setUpdateStatus({
+                                                             status: 'error',
+                                                             message: msg,
+                                                             target_version: tag,
+                                                             percent: 0,
+                                                             current_version: currentVersion,
+                                                         })
+                                         showNotification(msg, 'error')
+                                     }
+                                 },
+                             })
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            showNotification(msg, 'error')
+        } finally {
+            setCheckingVersion(null)
+        }
     }
 
     const goPage = (delta: number) => {
@@ -461,6 +648,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                             const isPrerelease   = release.prerelease
                             const direction      = getUpdateDirection(release.tag_name)
                             const isThisUpdating = updatingVersion === release.tag_name && isUpdating
+                            const isChecking     = checkingVersion === release.tag_name
+                            const releaseURL     = safeExternalUrl(release.html_url)
 
                             return (
                                 <div
@@ -574,20 +763,22 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                     )}
 
                                     <div className={styles.releaseActions}>
-                                        <a
-                                            href={release.html_url}
-                                            target='_blank'
-                                            rel='noopener noreferrer'
-                                            className={styles.ghLink}
-                                        >
-                                            GitHub <IconExternalLink size={12} />
-                                        </a>
+                                        {releaseURL && (
+                                            <a
+                                                href={releaseURL}
+                                                target='_blank'
+                                                rel='noopener noreferrer'
+                                                className={styles.ghLink}
+                                            >
+                                                GitHub <IconExternalLink size={12} />
+                                            </a>
+                                        )}
                                         {direction && (
                                             <Button
                                                 variant={direction === 'downgrade' ? 'danger' : 'primary'}
                                                 size='sm'
-                                                disabled={isUpdating}
-                                                loading={isThisUpdating}
+                                                disabled={isUpdating || Boolean(checkingVersion)}
+                                                loading={isThisUpdating || isChecking}
                                                 onClick={() => handleUpdate(release.tag_name)}
                                             >
                                                 <IconDownload size={13} />

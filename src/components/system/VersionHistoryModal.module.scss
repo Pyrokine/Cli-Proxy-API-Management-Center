@@ -256,6 +256,87 @@
     }
 }
 
+/* ---------- update confirmation ---------- */
+
+.updateConfirm {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+.confirmIntro {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.confirmRows {
+    display: grid;
+    gap: $spacing-xs;
+    padding: $spacing-sm $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+}
+
+.confirmRow {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: $spacing-md;
+    align-items: start;
+    font-size: $font-size-sm;
+
+    @media (max-width: $breakpoint-mobile) {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+}
+
+.confirmLabel {
+    color: var(--text-tertiary);
+}
+
+.confirmValue {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.confirmNotice {
+    padding: $spacing-sm $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.confirmInfo {
+    border-color: color-mix(in srgb, var(--success-color) 30%, transparent);
+    background: color-mix(in srgb, var(--success-color) 8%, transparent);
+}
+
+.confirmWarning {
+    border-color: color-mix(in srgb, var(--warning-color) 30%, transparent);
+    background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+}
+
+.confirmDanger {
+    border-color: color-mix(in srgb, var(--error-color) 30%, transparent);
+    background: color-mix(in srgb, var(--error-color) 8%, transparent);
+}
+
+.confirmNoticeTitle {
+    margin-bottom: $spacing-xs;
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+}
+
+.confirmList {
+    margin: 0;
+    padding-left: $spacing-lg;
+    color: var(--text-secondary);
+}
+
 /* ---------- actions ---------- */
 
 .releaseActions {

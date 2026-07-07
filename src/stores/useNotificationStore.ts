@@ -16,6 +16,7 @@ interface ConfirmationOptions {
     confirmText?: string
     cancelText?: string
     variant?: 'danger' | 'primary' | 'secondary'
+    confirmDisabled?: boolean
     onConfirm: () => void | Promise<void>
     onCancel?: () => void
 }
@@ -29,6 +30,11 @@ export interface PersistentNotification {
     read: boolean
     /** 来源标识，见 utils/notifications.ts NotificationSourceId */
     source: NotificationSourceId
+    dedupeKey?: string
+}
+
+interface PersistentNotificationOptions {
+    dedupeKey?: string
 }
 
 interface NotificationState {
@@ -50,7 +56,12 @@ interface NotificationState {
     // 持久通知中心
     persistentNotifications: PersistentNotification[]
     panelOpen: boolean
-    addPersistentNotification: (message: string, type: NotificationType, source: NotificationSourceId) => void
+    addPersistentNotification: (
+        message: string,
+        type: NotificationType,
+        source: NotificationSourceId,
+        options?: PersistentNotificationOptions,
+    ) => void
     markAsRead: (id: string) => void
     markAllAsRead: () => void
     clearAllPersistent: () => void
@@ -128,7 +139,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     },
 
     // 持久通知中心
-    addPersistentNotification: (message, type, source) => {
+    addPersistentNotification: (message, type, source, options) => {
         const notification: PersistentNotification = {
             id: generateId(),
             message,
@@ -136,10 +147,27 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
             timestamp: Date.now(),
             read: false,
             source,
+            dedupeKey: options?.dedupeKey,
         }
-        set((state) => ({
-            persistentNotifications: [notification, ...state.persistentNotifications].slice(0, 100),
-        }))
+        set((state) => {
+            if (options?.dedupeKey) {
+                const index = state.persistentNotifications.findIndex((item) => item.dedupeKey === options.dedupeKey)
+                if (index >= 0) {
+                    const next  = [...state.persistentNotifications]
+                    next[index] = {
+                        ...next[index],
+                        ...notification,
+                        id: next[index].id,
+                        read: next[index].read,
+                        timestamp: next[index].timestamp,
+                    }
+                    return { persistentNotifications: next }
+                }
+            }
+            return {
+                persistentNotifications: [notification, ...state.persistentNotifications].slice(0, 100),
+            }
+        })
     },
 
     markAsRead: (id) => {

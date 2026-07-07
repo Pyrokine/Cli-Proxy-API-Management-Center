@@ -25,6 +25,7 @@ import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useT
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
 import {formatDateTime, normalizeApiKeyList} from '@/utils/format'
 import {classifyModels, getLocalizedOtherLabel} from '@/utils/models'
+import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
@@ -117,8 +118,9 @@ export function SystemPage() {
     const [rateLimitLoading, setRateLimitLoading]         = useState(false)
     const [unbanning, setUnbanning]                       = useState<string | null>(null)
 
-    const apiKeysCache         = useRef<string[]>([])
-    const versionCheckInFlight = useRef<Promise<void> | null>(null)
+    const apiKeysCache               = useRef<string[]>([])
+    const versionCheckInFlight       = useRef<Promise<void> | null>(null)
+    const notifiedRateLimitEventKeys = useRef<Set<string>>(new Set())
 
     const otherLabel     = useMemo(() => getLocalizedOtherLabel(t), [t])
     const groupedModels  = useMemo(() => classifyModels(models, { otherLabel, t }), [models, otherLabel, t])
@@ -133,14 +135,20 @@ export function SystemPage() {
         if (sources.length === 0) {
             return '-'
         }
-        return sources.map((source, index) => (
-            <span key={source}>
-                {index > 0 && ', '}
-                <a href={source} target='_blank' rel='noopener noreferrer' className={styles.inlineSourceLink}>
-                    {source}
-                </a>
-            </span>
-        ))
+        return sources.map((source, index) => {
+            const sourceURL = safeExternalUrl(source)
+            return (
+                <span key={source}>
+                    {index > 0 && ', '}
+                    {sourceURL ? (
+                        <a href={sourceURL} target='_blank' rel='noopener noreferrer'
+                           className={styles.inlineSourceLink}>
+                            {source}
+                        </a>
+                    ) : source}
+                </span>
+            )
+        })
     }
 
     const appVersion           = __APP_VERSION__ || t('system_info.version_unknown')
@@ -262,15 +270,50 @@ export function SystemPage() {
     const fetchRateLimitStatus = useCallback(async () => {
         setRateLimitLoading(true)
         try {
-            const data = await rateLimitsApi.getStatus()
-            setBannedIPs(data.banned_ips ?? [])
-            setUnbanHistory(data.unban_history ?? [])
+            const data         = await rateLimitsApi.getStatus()
+            const nextBanned   = data.banned_ips ?? []
+            const nextUnbanned = data.unban_history ?? []
+            nextBanned
+                .map((entry) => ({ entry, key: `security:ip-banned:${entry.ip}:${entry.banned_until}` }))
+                .filter(({ key }) => !notifiedRateLimitEventKeys.current.has(key))
+                .slice(0, 5)
+                .forEach(({ entry, key }) => {
+                    notifiedRateLimitEventKeys.current.add(key)
+                    addPersistentNotification(
+                        t('notifications.security_ip_banned_notice', {
+                            ip: entry.ip,
+                            count: entry.ban_count,
+                            defaultValue: '管理登录来源 {{ip}} 已被临时限制，累计 {{count}} 次触发限制',
+                        }),
+                        'warning',
+                        'security',
+                        { dedupeKey: key },
+                    )
+                })
+            nextUnbanned
+                .map((entry) => ({ entry, key: `security:ip-unbanned:${entry.ip}:${entry.unbanned_at}` }))
+                .filter(({ key }) => !notifiedRateLimitEventKeys.current.has(key))
+                .slice(0, 5)
+                .forEach(({ entry, key }) => {
+                    notifiedRateLimitEventKeys.current.add(key)
+                    addPersistentNotification(
+                        t('notifications.security_ip_unbanned_notice', {
+                            ip: entry.ip,
+                            defaultValue: '管理登录来源 {{ip}} 已解除限制',
+                        }),
+                        'info',
+                        'security',
+                        { dedupeKey: key },
+                    )
+                })
+            setBannedIPs(nextBanned)
+            setUnbanHistory(nextUnbanned)
         } catch {
             showNotification(t('system_info.rate_limit_refresh_failed'), 'error')
         } finally {
             setRateLimitLoading(false)
         }
-    }, [showNotification, t])
+    }, [addPersistentNotification, showNotification, t])
 
     const handleUnban = useCallback(
         (ip: string) => {

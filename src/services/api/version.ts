@@ -4,11 +4,16 @@
 
 import {apiClient} from './client'
 
+export interface ServerFeatureFlags {
+    plugins?: boolean
+}
+
 export interface ServerVersionInfo {
     version: string
     build_time: string
     commit: string
     min_panel_version: string
+    features?: ServerFeatureFlags
 }
 
 let inflightVersionRequest: Promise<ServerVersionInfo> | null = null

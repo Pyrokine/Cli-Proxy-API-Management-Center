@@ -9,7 +9,14 @@
  * operators have a written definition of what the panel is supposed to surface.
  */
 
-export type NotificationSourceId = 'version' | 'model-update' | 'quota' | 'import' | 'connection' | 'release'
+export type NotificationSourceId =
+    'version'
+    | 'model-update'
+    | 'quota'
+    | 'import'
+    | 'connection'
+    | 'release'
+    | 'security'
 
 export interface NotificationSourceDef {
     /** Stable id passed to addPersistentNotification(source) */
@@ -58,5 +65,11 @@ export const PERSISTENT_NOTIFICATION_SOURCES: Record<NotificationSourceId, Notif
         trigger: 'Release switch, upgrade or deploy action result',
         defaultType: 'info',
         labelKey: 'notifications.sources.release',
+    },
+    security: {
+        id: 'security',
+        trigger: 'Management authentication failures, bans or other security events',
+        defaultType: 'warning',
+        labelKey: 'notifications.sources.security',
     },
 }
