@@ -1,4 +1,3 @@
-import iconAmp from '@/assets/icons/amp.svg'
 import iconClaude from '@/assets/icons/claude.svg'
 import iconCodexDark from '@/assets/icons/codex_dark.svg'
 import iconCodexLight from '@/assets/icons/codex_light.svg'
@@ -148,7 +147,6 @@ export default function CredentialsPage() {
                                      Codex: makeThemedIconComponent(iconCodexLight, iconCodexDark, 'Codex'),
                                      Vertex: makeIconComponent(iconVertex, 'Vertex'),
                                      OpenAI: makeThemedIconComponent(iconOpenaiLight, iconOpenaiDark, 'OpenAI'),
-                                     Ampcode: makeIconComponent(iconAmp, 'Ampcode'),
                                      Kimi: makeThemedIconComponent(iconKimiLight, iconKimiDark, 'Kimi'),
                                      Qwen: makeIconComponent(iconQwen, 'Qwen'),
                                      IFlow: makeIconComponent(iconIflow, 'iFlow'),

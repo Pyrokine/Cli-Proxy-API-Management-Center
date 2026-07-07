@@ -15,9 +15,21 @@ export function ConfirmationModal() {
         return null
     }
 
-    const { title, message, onConfirm, onCancel, confirmText, cancelText, variant = 'primary' } = options
+    const {
+              title,
+              message,
+              onConfirm,
+              onCancel,
+              confirmText,
+              cancelText,
+              variant         = 'primary',
+              confirmDisabled = false,
+          } = options
 
     const handleConfirm = async () => {
+        if (confirmDisabled) {
+            return
+        }
         try {
             setConfirmationLoading(true)
             await onConfirm()
@@ -52,7 +64,7 @@ export function ConfirmationModal() {
                 <Button variant='ghost' onClick={handleCancel} disabled={isLoading}>
                     {cancelText || t('common.cancel')}
                 </Button>
-                <Button variant={variant} onClick={handleConfirm} loading={isLoading}>
+                <Button variant={variant} onClick={handleConfirm} loading={isLoading} disabled={confirmDisabled}>
                     {confirmText || t('common.confirm')}
                 </Button>
             </div>

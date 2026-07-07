@@ -240,22 +240,22 @@ function modelSubtitle(row: ModelRow): string {
     return uniqueSorted(labels).join(' · ')
 }
 
-function notRequestableFallback(reason: string): string {
+function notRequestableFallback(reason: string, t: (key: string) => string): string {
     const labels: Record<string, string> = {
-        disabled: '已停用',
-        not_runtime: '当前服务暂不可请求',
+        disabled: t('model_management.not_requestable_disabled'),
+        not_runtime: t('model_management.not_requestable_not_runtime'),
     }
     return labels[reason] ?? reason
 }
 
-function fieldFallback(field: string): string {
+function fieldFallback(field: string, t: (key: string) => string): string {
     const labels: Record<string, string> = {
-        provider: '供应商',
-        channel: '接入类型',
-        group: '分组',
-        display_name: '页面显示名',
-        aliases: '别名',
-        price: '价格',
+        provider: t('model_management.field_provider'),
+        channel: t('model_management.field_channel'),
+        group: t('model_management.field_group'),
+        display_name: t('model_management.field_display_name'),
+        aliases: t('model_management.field_aliases'),
+        price: t('model_management.field_price'),
     }
     return labels[field] ?? field
 }
@@ -750,7 +750,7 @@ export function ModelManagementPage() {
                                         ?
                                         t(
                                             `model_management.not_requestable_${row.notRequestableReason}`,
-                                            { defaultValue: notRequestableFallback(row.notRequestableReason) },
+                                            { defaultValue: notRequestableFallback(row.notRequestableReason, t) },
                                         )
                                         :
                                         ''
@@ -1343,7 +1343,7 @@ export function ModelManagementPage() {
                                         <div className={styles.fieldChange} key={field}>
                                             <span className={styles.fieldName}>{t(
                                                 `model_management.field_${field}`,
-                                                { defaultValue: fieldFallback(field) },
+                                                { defaultValue: fieldFallback(field, t) },
                                             )}</span>
                                             <pre>{stringifyValue(change.current)}</pre>
                                             <pre>{stringifyValue(change.default)}</pre>

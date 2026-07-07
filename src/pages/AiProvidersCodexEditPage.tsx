@@ -1,24 +1,34 @@
+import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import type {ProviderFormState} from '@/components/providers'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
 import {Input} from '@/components/ui/Input'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useModelDiscovery} from '@/hooks/useModelDiscovery'
+import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {modelsApi, providersApi} from '@/services/api'
+import {apiCallApi, getApiCallErrorMessage, modelsApi, providersApi} from '@/services/api'
+import {useNotificationStore} from '@/stores'
 import type {ProviderKeyConfig} from '@/types'
-import {buildHeaderObject, headersToEntries} from '@/utils/headers'
+import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
+import {useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
 import {HeadersField, PrefixField, PriorityField, ProviderModelSection} from './ProviderFormFields'
 
 // ---- Form helpers ----
+
+const CODEX_TEST_TIMEOUT_MS    = 30000
+const DEFAULT_CODEX_TEST_MODEL = 'gpt-5.4-mini'
+
+const buildCodexChatCompletionsEndpoint = (baseUrl: string) =>
+    modelsApi.buildV1ModelsEndpoint(baseUrl).replace(/\/models$/i, '/chat/completions')
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
@@ -131,14 +141,138 @@ export function AiProvidersCodexEditPage() {
         },
     )
 
-    const canOpenDiscovery = discovery.canOpen && Boolean((form.baseUrl ?? '').trim())
+    const [testModel, setTestModel]     = useState('')
+    const [testStatus, setTestStatus]   = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+    const [testMessage, setTestMessage] = useState('')
+    const [isTesting, setIsTesting]     = useState(false)
+    const { showNotification }          = useNotificationStore()
+    const controlsDisabled              = disabled || isTesting
+
+    const modelSelectOptions = useModelSelectOptions(form.modelEntries)
+    const availableModels    = useMemo(() => modelSelectOptions.map((option) => option.value), [modelSelectOptions])
+    const canOpenDiscovery   = discovery.canOpen && Boolean((form.baseUrl ?? '').trim())
+
+    const connectivityConfigSignature = useMemo(() => {
+        const headersSignature = form.headers.map((entry) => `${entry.key.trim()}:${entry.value.trim()}`).join('|')
+        const modelsSignature  = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
+                                     .join('|')
+        return [
+            form.apiKey.trim(),
+            form.baseUrl?.trim() ?? '',
+            form.proxyUrl?.trim() ?? '',
+            testModel.trim(),
+            headersSignature,
+            modelsSignature,
+        ].join('||')
+    }, [form.apiKey, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
+
+    const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
+
+    useEffect(() => {
+        if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
+            return
+        }
+        previousConnectivityConfigRef.current = connectivityConfigSignature
+        setTestStatus('idle')
+        setTestMessage('')
+    }, [connectivityConfigSignature])
+
+    const runCodexConnectivityTest = async () => {
+        if (isTesting) {
+            return
+        }
+
+        const baseUrl = (form.baseUrl ?? '').trim()
+        if (!baseUrl) {
+            const message = t('notification.codex_base_url_required')
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
+            return
+        }
+
+        const modelName     = testModel.trim() || availableModels[0] || DEFAULT_CODEX_TEST_MODEL
+        const customHeaders = buildHeaderObject(form.headers)
+        const apiKey        = form.apiKey.trim()
+        const hasAuth       = hasHeader(customHeaders, 'authorization')
+        if (!apiKey && !hasAuth) {
+            const message = t('ai_providers.codex_test_key_required')
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
+            return
+        }
+
+        const endpoint = buildCodexChatCompletionsEndpoint(baseUrl)
+        if (!endpoint) {
+            const message = t('notification.codex_base_url_required')
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
+            return
+        }
+
+        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...customHeaders }
+        if (apiKey && !hasAuth) {
+            headers.Authorization = `Bearer ${apiKey}`
+        }
+
+        setIsTesting(true)
+        setTestStatus('loading')
+        setTestMessage(t('ai_providers.codex_test_running'))
+
+        try {
+            const result = await apiCallApi.request(
+                {
+                    method: 'POST',
+                    url: endpoint,
+                    header: headers,
+                    data: JSON.stringify({
+                                             model: modelName,
+                                             messages: [{ role: 'user', content: 'Hi' }],
+                                             max_tokens: 8,
+                                         }),
+                    proxyUrl: form.proxyUrl?.trim() || undefined,
+                },
+                { timeout: CODEX_TEST_TIMEOUT_MS },
+            )
+
+            if (result.statusCode < 200 || result.statusCode >= 300) {
+                const detail  = getApiCallErrorMessage(result) || t('common.unknown_error')
+                const message = `${t('ai_providers.codex_test_failed')}: ${detail}`
+                setTestStatus('error')
+                setTestMessage(message)
+                showNotification(message, 'error')
+            } else {
+                const message = t('ai_providers.codex_test_success')
+                setTestStatus('success')
+                setTestMessage(message)
+                showNotification(message, 'success')
+            }
+        } catch (err: unknown) {
+            const message         = getErrorMessage(err)
+            const errorCode       =
+                      typeof err === 'object' && err !== null && 'code' in err ?
+                      String((err as { code?: string }).code) :
+                      ''
+            const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
+            const resolvedMessage = isTimeout
+                                    ? t('ai_providers.codex_test_timeout', { seconds: CODEX_TEST_TIMEOUT_MS / 1000 })
+                                    : `${t('ai_providers.codex_test_failed')}: ${message || t('common.unknown_error')}`
+            setTestStatus('error')
+            setTestMessage(resolvedMessage)
+            showNotification(resolvedMessage, 'error')
+        } finally {
+            setIsTesting(false)
+        }
+    }
 
     return (
         <ProviderEditShell
             title={title}
             loading={loading}
             saving={saving}
-            canSave={canSave}
+            canSave={canSave && !isTesting}
             error={error}
             invalidIndexParam={invalidIndexParam}
             invalidIndex={invalidIndex}
@@ -150,23 +284,23 @@ export function AiProvidersCodexEditPage() {
                 label={t('ai_providers.codex_add_modal_key_label')}
                 value={form.apiKey}
                 onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-                disabled={disabled}
+                disabled={controlsDisabled}
                 secret
             />
-            <PriorityField form={form} setForm={setForm} disabled={disabled} />
-            <PrefixField form={form} setForm={setForm} disabled={disabled} />
+            <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
+            <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
             <Input
                 label={t('ai_providers.codex_add_modal_url_label')}
                 value={form.baseUrl ?? ''}
                 onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                disabled={disabled}
+                disabled={controlsDisabled}
             />
             <div className='form-group'>
                 <label>{t('ai_providers.codex_websockets_label')}</label>
                 <ToggleSwitch
                     checked={Boolean(form.websockets)}
                     onChange={(value) => setForm((prev) => ({ ...prev, websockets: value }))}
-                    disabled={disabled}
+                    disabled={controlsDisabled}
                     ariaLabel={t('ai_providers.codex_websockets_label')}
                 />
                 <div className='hint'>{t('ai_providers.codex_websockets_hint')}</div>
@@ -175,21 +309,37 @@ export function AiProvidersCodexEditPage() {
                 label={t('ai_providers.codex_add_modal_proxy_label')}
                 value={form.proxyUrl ?? ''}
                 onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-                disabled={disabled}
+                disabled={controlsDisabled}
             />
             <HeadersField
                 entries={form.headers}
                 onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-                disabled={disabled}
+                disabled={controlsDisabled}
             />
             <ProviderModelSection
                 form={form}
                 setForm={setForm}
-                disabled={disabled}
+                disabled={controlsDisabled}
                 discovery={discovery}
                 discoveryDisabled={!canOpenDiscovery}
                 i18nPrefix='codex'
-            />
+            >
+                <ModelTestPanel
+                    testModel={testModel}
+                    setTestModel={setTestModel}
+                    testStatus={testStatus}
+                    setTestStatus={setTestStatus}
+                    testMessage={testMessage}
+                    setTestMessage={setTestMessage}
+                    modelSelectOptions={modelSelectOptions}
+                    availableModels={availableModels}
+                    isTesting={isTesting}
+                    disabled={controlsDisabled}
+                    i18nPrefix='ai_providers.codex'
+                    onTest={() => void runCodexConnectivityTest()}
+                    allowEmptyModelTest
+                />
+            </ProviderModelSection>
         </ProviderEditShell>
     )
 }

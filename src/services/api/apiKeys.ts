@@ -32,5 +32,5 @@ export const apiKeyAliasApi = {
 
     set: (key: string, alias: string) => apiClient.patch('/api-key-aliases', { key, alias }),
 
-    remove: (key: string) => apiClient.delete(`/api-key-aliases?key=${encodeURIComponent(key)}`),
+    remove: (key: string) => apiClient.delete('/api-key-aliases', { data: { key } }),
 }

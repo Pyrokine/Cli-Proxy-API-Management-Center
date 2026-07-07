@@ -4,7 +4,7 @@
  */
 
 import {apiClient} from '@/services/api/client'
-import {versionApi} from '@/services/api/version'
+import {type ServerFeatureFlags, versionApi} from '@/services/api/version'
 import {secureStorage} from '@/services/storage/secureStorage'
 import type {AuthState, ConnectionStatus, LoginCredentials} from '@/types'
 import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
@@ -33,6 +33,7 @@ interface AuthStoreState extends AuthState {
         buildDate?: string | null,
         source?: 'header' | 'version',
         minPanelVersion?: string | null,
+        features?: ServerFeatureFlags,
     ) => void
     updateConnectionStatus: (status: ConnectionStatus, error?: string | null) => void
 }
@@ -56,6 +57,7 @@ export const useAuthStore = create<AuthStoreState>()(
             serverVersion: null,
             serverBuildDate: null,
             serverMinPanelVersion: null,
+            serverFeatures: {},
             serverVersionSource: null,
             storageRestoreFailed: false,
             connectionStatus: 'disconnected',
@@ -142,6 +144,7 @@ export const useAuthStore = create<AuthStoreState>()(
                             serverVersion: null,
                             serverBuildDate: null,
                             serverMinPanelVersion: null,
+                            serverFeatures: {},
                             serverVersionSource: null,
                         })
 
@@ -212,6 +215,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         serverVersion: null,
                         serverBuildDate: null,
                         serverMinPanelVersion: null,
+                        serverFeatures: {},
                         serverVersionSource: null,
                         connectionStatus: 'disconnected',
                         connectionError: null,
@@ -277,6 +281,7 @@ export const useAuthStore = create<AuthStoreState>()(
                             info?.build_time || null,
                             'version',
                             info?.min_panel_version || null,
+                            info?.features ?? {},
                         )
                     })
                     .catch((error: unknown) => {
@@ -293,7 +298,7 @@ export const useAuthStore = create<AuthStoreState>()(
             },
 
             // 更新服务器版本
-            updateServerVersion: (version, buildDate, source = 'header', minPanelVersion = null) => {
+            updateServerVersion: (version, buildDate, source = 'header', minPanelVersion = null, features = {}) => {
                 const currentSource = get().serverVersionSource
                 if (source === 'header' && currentSource === 'version') {
                     return
@@ -302,6 +307,7 @@ export const useAuthStore = create<AuthStoreState>()(
                     serverVersion: version || null,
                     serverBuildDate: buildDate || null,
                     serverMinPanelVersion: source === 'version' ? minPanelVersion || null : state.serverMinPanelVersion,
+                    serverFeatures: source === 'version' ? features : state.serverFeatures,
                     serverVersionSource: version || buildDate ? source : null,
                 }))
             },

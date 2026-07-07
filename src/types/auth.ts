@@ -19,6 +19,9 @@ export interface AuthState {
     serverVersion: string | null
     serverBuildDate: string | null
     serverMinPanelVersion: string | null
+    serverFeatures: {
+        plugins?: boolean
+    }
 }
 
 // 连接状态

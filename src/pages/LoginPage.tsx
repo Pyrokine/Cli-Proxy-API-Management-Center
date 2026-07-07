@@ -4,6 +4,7 @@ import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
+import {rateLimitsApi} from '@/services/api/rateLimits'
 import {isSecureStorageProtected, secureStorage} from '@/services/storage/secureStorage'
 import {useAuthStore, useLanguageStore, useNotificationStore} from '@/stores'
 import type {ApiError} from '@/types'
@@ -108,18 +109,18 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
 }
 
 export function LoginPage() {
-    const { t }                  = useTranslation()
-    const navigate               = useNavigate()
-    const location               = useLocation()
-    const { showNotification }   = useNotificationStore()
-    const language               = useLanguageStore((state) => state.language)
-    const setLanguage            = useLanguageStore((state) => state.setLanguage)
-    const isAuthenticated        = useAuthStore((state) => state.isAuthenticated)
-    const login                  = useAuthStore((state) => state.login)
-    const restoreSession         = useAuthStore((state) => state.restoreSession)
-    const storedBase             = useAuthStore((state) => state.apiBase)
-    const storedKey              = useAuthStore((state) => state.managementKey)
-    const storedRememberPassword = useAuthStore((state) => state.rememberPassword)
+    const { t }                                           = useTranslation()
+    const navigate                                        = useNavigate()
+    const location                                        = useLocation()
+    const { showNotification, addPersistentNotification } = useNotificationStore()
+    const language                                        = useLanguageStore((state) => state.language)
+    const setLanguage                                     = useLanguageStore((state) => state.setLanguage)
+    const isAuthenticated                                 = useAuthStore((state) => state.isAuthenticated)
+    const login                                           = useAuthStore((state) => state.login)
+    const restoreSession                                  = useAuthStore((state) => state.restoreSession)
+    const storedBase                                      = useAuthStore((state) => state.apiBase)
+    const storedKey                                       = useAuthStore((state) => state.managementKey)
+    const storedRememberPassword                          = useAuthStore((state) => state.rememberPassword)
 
     const [apiBase, setApiBase]                   = useState('')
     const [managementKey, setManagementKey]       = useState('')
@@ -203,32 +204,77 @@ export function LoginPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    const handleSubmit = useCallback(async () => {
-        if (!managementKey.trim()) {
-            setError(t('login.error_required'))
-            return
-        }
+    const handleSubmit = useCallback(
+        async () => {
+            if (!managementKey.trim()) {
+                setError(t('login.error_required'))
+                return
+            }
 
-        const baseToUse = normalizeApiBase(apiBase) || detectedBase
-        setLoading(true)
-        setError('')
-        try {
-            await login({
-                            apiBase: baseToUse,
-                            managementKey: managementKey.trim(),
-                            rememberPassword,
-                        })
-            setStorageWarning(insecureStorage ? t('login.storage_warning') : '')
-            showNotification(t('common.connected_status'), 'success')
-            navigate('/', { replace: true })
-        } catch (err: unknown) {
-            const message = getLocalizedErrorMessage(err, t)
-            setError(message)
-            showNotification(`${t('notification.login_failed')}: ${message}`, 'error')
-        } finally {
-            setLoading(false)
-        }
-    }, [apiBase, detectedBase, insecureStorage, login, managementKey, navigate, rememberPassword, showNotification, t])
+            const baseToUse = normalizeApiBase(apiBase) || detectedBase
+            setLoading(true)
+            setError('')
+            try {
+                await login({
+                                apiBase: baseToUse,
+                                managementKey: managementKey.trim(),
+                                rememberPassword,
+                            })
+                setStorageWarning(insecureStorage ? t('login.storage_warning') : '')
+                showNotification(t('common.connected_status'), 'success')
+                const rateLimitStatus    = await rateLimitsApi.getStatus({ consumeFailedLoginNotices: true })
+                                                              .catch(() => null)
+                const failedLoginNotices = rateLimitStatus?.failed_login_notices ?? []
+                const failedLoginCount   = failedLoginNotices.reduce(
+                    (sum, item) => sum + Math.max(0, item.count || 0),
+                    0,
+                )
+                if (failedLoginCount > 0) {
+                    const latestFailure = failedLoginNotices
+                        .map((item) => Date.parse(item.last_failure_at || ''))
+                        .filter((time) => Number.isFinite(time))
+                        .sort((a, b) => b - a)[0]
+                    addPersistentNotification(
+                        t('notifications.security_failed_login_notice', {
+                            count: failedLoginCount,
+                            sources: failedLoginNotices.length,
+                            latest: latestFailure ? new Date(latestFailure).toLocaleString() : '-',
+                        }),
+                        'warning',
+                        'security',
+                        { dedupeKey: `security:failed-login:${failedLoginCount}:${latestFailure || 0}` },
+                    )
+                }
+                navigate('/', { replace: true })
+            } catch (err: unknown) {
+                const message = getLocalizedErrorMessage(err, t)
+                setError(message)
+                showNotification(`${t('notification.login_failed')}: ${message}`, 'error')
+                addPersistentNotification(
+                    t('notifications.security_login_failed', {
+                        defaultValue: '登录失败，请检查管理密钥或访问限制',
+                    }),
+                    'error',
+                    'security',
+                    { dedupeKey: 'security:login-failed:current' },
+                )
+            } finally {
+                setLoading(false)
+            }
+        },
+        [
+            addPersistentNotification,
+            apiBase,
+            detectedBase,
+            insecureStorage,
+            login,
+            managementKey,
+            navigate,
+            rememberPassword,
+            showNotification,
+            t,
+        ],
+    )
 
     const handleSubmitKeyDown = useCallback(
         (event: React.KeyboardEvent) => {

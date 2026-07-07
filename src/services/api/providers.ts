@@ -23,11 +23,13 @@ const extractArrayPayload = (data: unknown, key: string): unknown[] => {
     return Array.isArray(candidate) ? candidate : []
 }
 
-const buildProviderDeleteQuery = (apiKey: string, baseUrl?: string) => {
-    const params = new URLSearchParams()
-    params.set('api-key', apiKey.trim())
-    params.set('base-url', (baseUrl ?? '').trim())
-    return `?${params.toString()}`
+const providerDeleteBody = (apiKey: string, baseUrl?: string) => {
+    const payload: Record<string, string> = { 'api-key': apiKey.trim() }
+    const trimmedBaseUrl                  = (baseUrl ?? '').trim()
+    if (trimmedBaseUrl) {
+        payload['base-url'] = trimmedBaseUrl
+    }
+    return payload
 }
 
 const serializeModelAliases = (models?: ModelAlias[]) =>
@@ -209,7 +211,7 @@ export const providersApi = {
         ),
 
     deleteGeminiKey: (apiKey: string, baseUrl?: string) =>
-        apiClient.delete(`/gemini-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
+        apiClient.delete('/gemini-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
 
     async getCodexConfigs(): Promise<ProviderKeyConfig[]> {
         const data = await apiClient.get('/codex-api-key')
@@ -224,7 +226,7 @@ export const providersApi = {
         ),
 
     deleteCodexConfig: (apiKey: string, baseUrl?: string) =>
-        apiClient.delete(`/codex-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
+        apiClient.delete('/codex-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
 
     async getClaudeConfigs(): Promise<ProviderKeyConfig[]> {
         const data = await apiClient.get('/claude-api-key')
@@ -239,7 +241,7 @@ export const providersApi = {
         ),
 
     deleteClaudeConfig: (apiKey: string, baseUrl?: string) =>
-        apiClient.delete(`/claude-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
+        apiClient.delete('/claude-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
 
     async getVertexConfigs(): Promise<ProviderKeyConfig[]> {
         const data = await apiClient.get('/vertex-api-key')
@@ -254,7 +256,7 @@ export const providersApi = {
         ),
 
     deleteVertexConfig: (apiKey: string, baseUrl?: string) =>
-        apiClient.delete(`/vertex-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
+        apiClient.delete('/vertex-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
 
     async getOpenAIProviders(): Promise<OpenAIProviderConfig[]> {
         const data = await apiClient.get('/openai-compatibility')
@@ -268,5 +270,5 @@ export const providersApi = {
             providers.map((item) => serializeOpenAIProvider(item)),
         ),
 
-    deleteOpenAIProvider: (name: string) => apiClient.delete(`/openai-compatibility?name=${encodeURIComponent(name)}`),
+    deleteOpenAIProvider: (name: string) => apiClient.delete('/openai-compatibility', { data: { name } }),
 }

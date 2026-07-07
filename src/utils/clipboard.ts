@@ -1,3 +1,7 @@
+interface LegacyClipboardDocument {
+    execCommand(commandId: string): boolean
+}
+
 export async function copyToClipboard(text: string): Promise<boolean> {
     try {
         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -35,8 +39,8 @@ export async function copyToClipboard(text: string): Promise<boolean> {
         textarea.focus()
         textarea.select()
         textarea.setSelectionRange(0, textarea.value.length)
-        // execCommand is deprecated but needed as Clipboard API fallback
-        const copied = document.execCommand('copy')
+        const legacyDocument = document as unknown as LegacyClipboardDocument
+        const copied         = legacyDocument.execCommand('copy')
         document.body.removeChild(textarea)
 
         if (activeElement?.focus) {

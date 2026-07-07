@@ -75,17 +75,17 @@ export function getModelProvider(model: string): string {
 }
 
 function claudeGeneration(lower: string): string | null {
-    const direct = lower.match(/^claude-(?:opus|sonnet|haiku|fable)-(.+)$/)
-    if (direct) {
-        const parts = direct[1].split('-').filter((part) => /^\d+$/.test(part))
+    const direct = lower.match(/^claude-(?:opus|sonnet|haiku|fable)-(?<version>.+)$/)
+    if (direct?.groups?.version) {
+        const parts = direct.groups.version.split('-').filter((part) => /^\d+$/.test(part))
         if (parts.length > 0) {
             const version = parts.length > 1 && parts[1].length <= 2 ? `${parts[0]}.${parts[1]}` : parts[0]
             return `Claude ${version}`
         }
     }
-    const legacy = lower.match(/^claude-(\d+)-(\d+)-(?:opus|sonnet|haiku|fable)/)
-    if (legacy) {
-        return `Claude ${legacy[1]}.${legacy[2]}`
+    const legacy = lower.match(/^claude-(?<major>\d+)-(?<minor>\d+)-(?:opus|sonnet|haiku|fable)/)
+    if (legacy?.groups) {
+        return `Claude ${legacy.groups.major}.${legacy.groups.minor}`
     }
     return null
 }
@@ -116,9 +116,9 @@ function gptGeneration(lower: string): string | null {
     if (lower.startsWith('codex-')) {
         return 'Codex Tools'
     }
-    const gpt = lower.match(/^gpt-(\d+(?:\.\d+)?)/)
-    if (gpt) {
-        return `GPT-${gpt[1]}`
+    const gpt = lower.match(/^gpt-(?<version>\d+(?:\.\d+)?)/)
+    if (gpt?.groups?.version) {
+        return `GPT-${gpt.groups.version}`
     }
     if (/^o\d/.test(lower)) {
         return 'OpenAI o-series'
@@ -127,15 +127,15 @@ function gptGeneration(lower: string): string | null {
 }
 
 function gptFamily(lower: string): string | null {
-    const gpt = lower.match(/^gpt-(\d+(?:\.\d+)?)/)
+    const gpt = lower.match(/^gpt-(?<version>\d+(?:\.\d+)?)/)
     if (lower.startsWith('gpt-image-')) {
         return 'GPT Image'
     }
     if (lower.startsWith('gpt-oss-')) {
         return 'GPT OSS'
     }
-    if (gpt) {
-        return lower.includes('mini') ? `GPT-${gpt[1]} Mini` : `GPT-${gpt[1]}`
+    if (gpt?.groups?.version) {
+        return lower.includes('mini') ? `GPT-${gpt.groups.version} Mini` : `GPT-${gpt.groups.version}`
     }
     if (lower.startsWith('codex-')) {
         return 'Codex Tools'
@@ -147,13 +147,13 @@ function gptFamily(lower: string): string | null {
 }
 
 function geminiGeneration(lower: string): string | null {
-    const gemini = lower.match(/^gemini-(\d+(?:\.\d+)?)/)
-    if (gemini) {
-        return `Gemini ${gemini[1]}`
+    const gemini = lower.match(/^gemini-(?<version>\d+(?:\.\d+)?)/)
+    if (gemini?.groups?.version) {
+        return `Gemini ${gemini.groups.version}`
     }
-    const imagen = lower.match(/^imagen-(\d+(?:\.\d+)?)/)
-    if (imagen) {
-        return `Imagen ${imagen[1]}`
+    const imagen = lower.match(/^imagen-(?<version>\d+(?:\.\d+)?)/)
+    if (imagen?.groups?.version) {
+        return `Imagen ${imagen.groups.version}`
     }
     if (lower.includes('latest')) {
         return 'Gemini latest'
@@ -178,9 +178,9 @@ function geminiFamily(lower: string): string | null {
 }
 
 function qwenGeneration(lower: string): string | null {
-    const qwen = lower.match(/^qwen(\d+)/)
-    if (qwen) {
-        return `Qwen ${qwen[1]}`
+    const qwen = lower.match(/^qwen(?<version>\d+)/)
+    if (qwen?.groups?.version) {
+        return `Qwen ${qwen.groups.version}`
     }
     if (lower === 'coder-model') {
         return 'Qwen Coder'
@@ -246,7 +246,7 @@ export function getModelMetadata(model: string): ModelMetadata {
         }
     }
     if (provider === 'Grok') {
-        const generation = lower.match(/^grok-(\d+(?:\.\d+)?)/)?.[1]
+        const generation = lower.match(/^grok-(?<version>\d+(?:\.\d+)?)/)?.groups?.version
         return {
             provider,
             generation: generation ? `Grok ${generation}` : 'Grok',
@@ -291,8 +291,8 @@ function generationGroupLabel(provider: string, generation: string, family: stri
     return `${provider} Other`
 }
 
-function compareModelLabels(left: string, right: string): number {
-    return modelLabelCollator.compare(left, right)
+function compareModelLabels(firstLabel: string, secondLabel: string): number {
+    return modelLabelCollator.compare(firstLabel, secondLabel)
 }
 
 export function buildModelTree(models: Array<string | {

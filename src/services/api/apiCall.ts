@@ -51,12 +51,15 @@ const REDACTED = '[redacted]'
 
 const redactApiCallMessage = (input: string): string =>
     input
-        .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, `$1${REDACTED}`)
+        .replace(/(?<prefix>Bearer\s+)(?:[A-Za-z0-9._~+/=-]+)/gi, `$<prefix>${REDACTED}`)
         .replace(
-            /(["']?(?:authorization|x-goog-api-key|x-api-key|api[-_ ]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|cookie|set-cookie)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)/gi,
-            `$1${REDACTED}`,
+            /(?<prefix>["']?(?:authorization|x-goog-api-key|x-api-key|api[-_ ]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|cookie|set-cookie)["']?\s*[:=]\s*["']?)(?:[^"'\s,;}]+)/gi,
+            `$<prefix>${REDACTED}`,
         )
-        .replace(/([?&](?:key|api_key|apiKey|x-goog-api-key|access_token|token)=)([^&#\s"']+)/gi, `$1${REDACTED}`)
+        .replace(
+            /(?<prefix>[?&](?:key|api_key|apiKey|x-goog-api-key|access_token|token)=)(?:[^&#\s"']+)/gi,
+            `$<prefix>${REDACTED}`,
+        )
 
 export const getApiCallErrorMessage = (result: ApiCallResult): string => {
     const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'

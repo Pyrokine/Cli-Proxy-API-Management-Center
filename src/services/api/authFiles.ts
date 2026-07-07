@@ -109,6 +109,12 @@ const normalizeAuthFileItem = (value: unknown): AuthFileItem | null => {
             : typeof entry.lastRefresh === 'string' || typeof entry.lastRefresh === 'number'
               ? (entry.lastRefresh as string | number)
               : undefined,
+        nextRetryAfter:
+            typeof entry.next_retry_after === 'string' || typeof entry.next_retry_after === 'number'
+            ? (entry.next_retry_after as string | number)
+            : typeof entry.nextRetryAfter === 'string' || typeof entry.nextRetryAfter === 'number'
+              ? (entry.nextRetryAfter as string | number)
+              : undefined,
         modified: normalizeNumber(entry.modtime ?? entry.modified),
         priority: normalizeNumber(entry.priority),
         note: normalizeString(entry.note ?? entry.description ?? entry.comment),
@@ -361,19 +367,28 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
                 if (!name || !alias) {
                     return null
                 }
+                const forceMapping                          = entry['force-mapping'] ===
+                                                              true ||
+                                                              entry.forceMapping ===
+                                                              true
+                const normalizedEntry: OAuthModelAliasEntry = { name, alias }
                 if (entry.fork === false) {
-                    return { name, alias, fork: false }
+                    normalizedEntry.fork = false
                 }
                 if (entry.fork === true) {
-                    return { name, alias, fork: true }
+                    normalizedEntry.fork = true
                 }
-                return { name, alias }
+                if (forceMapping) {
+                    normalizedEntry['force-mapping'] = true
+                }
+                return normalizedEntry
             })
             .filter(Boolean)
             .filter((entry) => {
-                const aliasEntry = entry as OAuthModelAliasEntry
-                const forkFlag   = aliasEntry.fork ? '1' : '0'
-                const dedupeKey  = `${aliasEntry.name.toLowerCase()}::${aliasEntry.alias.toLowerCase()}::${forkFlag}`
+                const aliasEntry       = entry as OAuthModelAliasEntry
+                const forkFlag         = aliasEntry.fork ? '1' : '0'
+                const forceMappingFlag = aliasEntry['force-mapping'] || aliasEntry.forceMapping ? '1' : '0'
+                const dedupeKey        = `${aliasEntry.name.toLowerCase()}::${aliasEntry.alias.toLowerCase()}::${forkFlag}::${forceMappingFlag}`
                 if (seen.has(dedupeKey)) {
                     return false
                 }
