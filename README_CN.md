@@ -6,7 +6,7 @@
 
 **主项目**: https://github.com/Pyrokine/CLIProxyAPI
 **示例地址**: https://remote.router-for.me/
-**最低版本要求**: ≥ 7.1.0（推荐最新）
+**最低版本要求**: CLIProxyAPI ≥ v7.2.50-aug.1（推荐最新）
 
 从6.0.19版本开始，Web UI 随主程序一起提供；服务运行后，通过 API 端口上的"/management.html"访问它。
 
@@ -84,7 +84,6 @@ remote-management:
 - **AI 提供商**：
     - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
     - OpenAI 兼容提供商（多 Key、Header、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
-    - Ampcode 集成（上游地址/密钥、强制映射、模型映射表）。
 - **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；查看最近请求分桶；管理
   OAuth
   排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。

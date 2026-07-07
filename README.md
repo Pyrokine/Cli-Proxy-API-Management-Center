@@ -7,7 +7,7 @@ API** (config, credentials, logs, and usage).
 
 **Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: ≥ 7.1.0 (recommended latest)
+**Minimum Required Version**: CLIProxyAPI ≥ v7.2.50-aug.1 (recommended latest)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the
 service is running.
@@ -92,7 +92,6 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
     - Gemini/Codex/Claude/Vertex key entries (base URL, headers, proxy, model aliases, excluded models, prefix).
     - OpenAI-compatible providers (multiple API keys, custom headers, model alias import via `/v1/models`, optional
       browser-side "chat/completions" test).
-    - Ampcode integration (upstream URL/key, force mappings, model mapping table).
 - **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view
   supported models per credential (when the server supports it), recent request buckets, manage OAuth excluded models
   (supports `*` wildcards), and configure OAuth model alias mappings.

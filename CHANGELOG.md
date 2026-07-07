@@ -1,5 +1,57 @@
 # Changelog
 
+## v1.17.10-aug.1 - 2026-07-07
+
+### Release Basis
+
+- Upstream: v1.17.10
+- Previous local release: v1.15.3-aug.1
+- Local release: v1.17.10-aug.1
+- Required server: CLIProxyAPI v7.2.50-aug.1 or newer
+
+### What's Changed
+
+- chore(deps): Upgrade frontend dependencies and keep the Bun/Vite single-file build current
+- feat(plugins): Add plugin store and plugin resource pages with management API integration
+- feat(config): Redesign the visual config editor with searchable indexed fields, collapsible sections, and expanded validation
+- feat(credentials): Add provider health summaries, quota-aware credential cards, iFlow Cookie secret input, and richer account inspection states
+- feat(logs): Add request-log cursor support, trace resolution, redacted table/filter/copy/raw/download output, and request detail improvements
+- feat(system): Improve version history, update checks, notification dedupe, and security/quota notification handling
+- refactor(ui): Update shared components, provider utilities, model tree handling, styles, and locale coverage
+- refactor(ampcode): Remove Ampcode management UI, service client, type definitions, and icon
+
+### Breaking Changes
+
+- The panel now requires CLIProxyAPI v7.2.50-aug.1 or newer for the expanded management API surface
+- Ampcode management UI is removed in this release
+- The release asset remains `management.html`; deployment paths do not change
+
+---
+
+### 版本依据
+
+- 上游版本：v1.17.10
+- 上一个本地版本：v1.15.3-aug.1
+- 本地发布版本：v1.17.10-aug.1
+- 要求的后端版本：CLIProxyAPI v7.2.50-aug.1 或更新
+
+### 更新内容
+
+- chore(deps)：升级前端依赖，并保持 Bun/Vite 单文件构建链路更新
+- feat(plugins)：新增插件商店和插件资源页面，并接入管理 API
+- feat(config)：重设计可视化配置编辑器，新增可搜索字段索引、折叠分区和更完整校验
+- feat(credentials)：新增 provider 健康汇总、quota 感知凭证卡片、iFlow Cookie 密文输入和更完整账号巡检状态
+- feat(logs)：新增请求日志游标、trace 解析、表格/filter/copy/raw/download 脱敏和请求详情改进
+- feat(system)：改进版本历史、更新检查、通知去重和安全/quota 通知处理
+- refactor(ui)：更新共享组件、provider 工具、模型树处理、样式和多语言覆盖
+- refactor(ampcode)：移除 Ampcode 管理界面、service client、类型定义和图标
+
+### 不兼容变更
+
+- 面板现在要求 CLIProxyAPI v7.2.50-aug.1 或更新，以使用扩展后的管理 API
+- 本版本移除 Ampcode 管理界面
+- release 资产仍为 `management.html`，部署路径不变
+
 ## v1.15.3-aug.1 - 2026-06-24
 
 ### Release Basis
@@ -11,11 +63,14 @@
 
 ### What's Changed
 
-- chore(tooling): Switch release builds to Bun and make tag releases consume the matching changelog entry as release notes
+- chore(tooling): Switch release builds to Bun and make tag releases consume the matching changelog entry as release
+  notes
 - feat(management): Add model management and plugin management pages with routing and API clients
 - feat(config): Expand the visual configuration editor, source configuration coverage, validation, and save/reload flows
-- feat(credentials): Add account inspection, quota state handling, credential metadata editing, and provider-specific credential actions
-- feat(usage): Improve request analytics, request event details, log parsing, token breakdown, model pricing, and usage filters
+- feat(credentials): Add account inspection, quota state handling, credential metadata editing, and provider-specific
+  credential actions
+- feat(usage): Improve request analytics, request event details, log parsing, token breakdown, model pricing, and usage
+  filters
 - docs: Update management-center copy and README content for the expanded panel behavior
 - refactor(ui): Update shared components, table/status patterns, tabs, inputs, layout styles, and model tree utilities
 
@@ -62,7 +117,8 @@
 - feat(credentials): Add prefix proxy editor modal for inline prefix/proxy_url editing
 - feat(dashboard): Update logs, auth files, quota hooks, and dashboard views with new data flows
 - feat(config): Improve the visual config editor with payload validation, stable item IDs, visual save, and reload flows
-- feat(system): Replace version switcher with a unified version card and inline version history with augmented tag support
+- feat(system): Replace version switcher with a unified version card and inline version history with augmented tag
+  support
 - feat(usage): Expand analytics, rate-limit display, pricing data, and service health views
 - refactor(ui): Rebuild shared components, Sheet table, DataStatusCard, stores, and routing
 - chore(build): Upgrade Vite, TypeScript, CI workflow, and dependencies
@@ -137,7 +193,8 @@
 - feat(logs): Match request logs by path and model, and refactor log parsing into composable hooks
 - feat(config): Add source-preserving visual YAML editing, redesigned diff modal, and config reload fixes
 - feat(usage): Expand per-model and per-credential stats, health grid, pricing data, and rate-limit display
-- feat(credentials): Add backend-driven quota management, auth-file inline viewer, Codex WebSocket toggle, and health cleanup
+- feat(credentials): Add backend-driven quota management, auth-file inline viewer, Codex WebSocket toggle, and health
+  cleanup
 - feat(providers): Add floating action controls, trace refresh, and xAI/Grok OAuth/model discovery scaffolding
 - refactor(ui): Rebuild shared layout, presentation components, Sheet table, and DataStatusCard
 
@@ -167,10 +224,12 @@
 
 ### What's Changed
 
-- feat(usage): Add dashboard panels for request trends, token breakdown, model and credential stats, time-range filtering, and CSV export
+- feat(usage): Add dashboard panels for request trends, token breakdown, model and credential stats, time-range
+  filtering, and CSV export
 - feat(pricing): Fetch model prices from the server API with localStorage fallback and a visual editor
 - feat(security): Add AES-256-GCM credential storage, sessionStorage migration, and XSS hardening
-- feat(credentials): Consolidate provider management with a unified editor layout, modal forms, and redesigned credential cards
+- feat(credentials): Consolidate provider management with a unified editor layout, modal forms, and redesigned
+  credential cards
 - refactor(ui): Rebuild the component library, visual config editor, and layout system
 - refactor(styles): Extract SCSS mixins, deduplicate global styles, and add font linting
 - chore(build): Upgrade Vite, TypeScript, ESLint config, and dependencies
