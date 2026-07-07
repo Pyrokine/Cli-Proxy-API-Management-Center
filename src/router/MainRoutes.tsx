@@ -1,4 +1,3 @@
-import {AiProvidersAmpcodeEditPage} from '@/pages/AiProvidersAmpcodeEditPage'
 import {AiProvidersClaudeEditLayout} from '@/pages/AiProvidersClaudeEditLayout'
 import {AiProvidersClaudeEditPage} from '@/pages/AiProvidersClaudeEditPage'
 import {AiProvidersClaudeModelsPage} from '@/pages/AiProvidersClaudeModelsPage'
@@ -15,16 +14,33 @@ import {LogsPage} from '@/pages/LogsPage'
 import {ModelManagementPage} from '@/pages/ModelManagementPage'
 import {NotFoundPage} from '@/pages/NotFoundPage'
 import {PluginManagementPage} from '@/pages/PluginManagementPage'
+import {PluginResourcePage} from '@/pages/PluginResourcePage'
+import {PluginStorePage} from '@/pages/PluginStorePage'
 import {SystemPage} from '@/pages/SystemPage'
 import {UsagePage} from '@/pages/UsagePage'
-import {type Location, useRoutes} from 'react-router-dom'
+import {type Location, Navigate, useLocation, useParams, useRoutes} from 'react-router-dom'
 
-const mainRoutes = [
+const LEGACY_PROVIDER_IDS = new Set(['gemini', 'codex', 'claude', 'vertex', 'openai'])
+
+function LegacyAiProviderRedirect() {
+    const location     = useLocation()
+    const { provider } = useParams<{ provider?: string }>()
+    const normalized   = provider?.trim().toLowerCase() ?? ''
+    const suffix       = location.pathname.replace(/^\/ai-providers\/?/i, '')
+    const target       = normalized && LEGACY_PROVIDER_IDS.has(normalized) && suffix !== normalized
+                         ? `/credentials/${suffix}`
+                         : '/credentials'
+    return <Navigate to={`${target}${location.search}`} replace />
+}
+
+const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
     { path: '/', element: <DashboardPage /> },
     { path: '/dashboard', element: <DashboardPage /> },
 
     // Unified credentials page
     { path: '/credentials', element: <CredentialsPage /> },
+    { path: '/ai-providers', element: <Navigate to='/credentials' replace /> },
+    { path: '/ai-providers/:provider/*', element: <LegacyAiProviderRedirect /> },
 
     // Credential edit sub-routes
     { path: '/credentials/gemini/new', element: <AiProvidersGeminiEditPage /> },
@@ -65,10 +81,13 @@ const mainRoutes = [
             { path: 'models', element: <AiProvidersOpenAIModelsPage /> },
         ],
     },
-    { path: '/credentials/ampcode', element: <AiProvidersAmpcodeEditPage /> },
 
     { path: '/models', element: <ModelManagementPage /> },
-    { path: '/plugins', element: <PluginManagementPage /> },
+    ...(pluginsFeatureEnabled ? [
+        { path: '/plugin-store', element: <PluginStorePage /> },
+        { path: '/plugins', element: <PluginManagementPage /> },
+        { path: '/plugin-pages/:pluginId/:resourceKey', element: <PluginResourcePage /> },
+    ] : []),
     { path: '/usage', element: <UsagePage /> },
     { path: '/config', element: <ConfigPage /> },
     { path: '/logs', element: <LogsPage /> },
@@ -76,6 +95,9 @@ const mainRoutes = [
     { path: '*', element: <NotFoundPage /> },
 ]
 
-export function MainRoutes({ location }: { location?: Location }) {
-    return useRoutes(mainRoutes, location)
+export function MainRoutes({ location, pluginsFeatureEnabled }: {
+    location?: Location;
+    pluginsFeatureEnabled: boolean
+}) {
+    return useRoutes(buildMainRoutes(pluginsFeatureEnabled), location)
 }

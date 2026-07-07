@@ -199,9 +199,10 @@ export function MainLayout() {
     const { showNotification } = useNotificationStore()
     const location             = useLocation()
 
-    const apiBase          = useAuthStore((state) => state.apiBase)
-    const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const logout           = useAuthStore((state) => state.logout)
+    const apiBase               = useAuthStore((state) => state.apiBase)
+    const connectionStatus      = useAuthStore((state) => state.connectionStatus)
+    const pluginsFeatureEnabled = useAuthStore((state) => state.serverFeatures.plugins === true)
+    const logout                = useAuthStore((state) => state.logout)
 
     const config      = useConfigStore((state) => state.config)
     const fetchConfig = useConfigStore((state) => state.fetchConfig)
@@ -477,12 +478,15 @@ export function MainLayout() {
             { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
             { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
             { path: '/models', label: t('nav.model_management'), icon: sidebarIcons.models },
-            { path: '/plugins', label: t('nav.plugin_management'), icon: sidebarIcons.plugins },
+            ...(pluginsFeatureEnabled ? [
+                { path: '/plugin-store', label: t('nav.plugin_store'), icon: sidebarIcons.plugins },
+                { path: '/plugins', label: t('nav.plugin_management'), icon: sidebarIcons.plugins },
+            ] : []),
             { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
             ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
             { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
         ],
-        [t, config?.loggingToFile],
+        [t, config?.loggingToFile, pluginsFeatureEnabled],
     )
     const getRouteOrder = useCallback((pathname: string) => {
         const navOrder       = navItems.map((item) => item.path)
@@ -506,9 +510,6 @@ export function MainLayout() {
                 }
                 if (normalizedPath.startsWith('/credentials/vertex')) {
                     return credentialsIndex + 0.4
-                }
-                if (normalizedPath.startsWith('/credentials/ampcode')) {
-                    return credentialsIndex + 0.5
                 }
                 if (normalizedPath.startsWith('/credentials/openai')) {
                     return credentialsIndex + 0.6
@@ -759,7 +760,8 @@ export function MainLayout() {
                 <div className={`content${isLogsPage ? ' content-logs' : ''}`} ref={contentRef}>
                     <main className={`main-content${isLogsPage ? ' main-content-logs' : ''}`}>
                         <PageTransition
-                            render={(location) => <MainRoutes location={location} />}
+                            render={(location) => <MainRoutes location={location}
+                                                              pluginsFeatureEnabled={pluginsFeatureEnabled} />}
                             getRouteOrder={getRouteOrder}
                             getTransitionVariant={getTransitionVariant}
                             scrollContainerRef={contentRef}

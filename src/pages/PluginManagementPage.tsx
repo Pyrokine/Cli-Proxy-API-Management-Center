@@ -10,15 +10,15 @@ import {
     type PluginConfigObject,
     type PluginConfigValue,
     type PluginEntry,
-    type PluginMenu,
     pluginsApi,
 } from '@/services/api/plugins'
-import {useAuthStore, useNotificationStore} from '@/stores'
-import {normalizeApiBase} from '@/utils/connection'
+import {useNotificationStore} from '@/stores'
+import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Link} from 'react-router-dom'
+import {Link, useNavigate} from 'react-router-dom'
 import styles from './PluginManagementPage.module.scss'
+import {buildPluginResourceRoute} from './pluginResources'
 
 type PluginPageStatus = 'loading' | 'ready' | 'empty' | 'error'
 
@@ -87,21 +87,23 @@ function Badge({ tone, children }: { tone: PluginBadgeTone; children: string }) 
 
 export function PluginManagementPage() {
     const { t }                = useTranslation()
-    const auth                 = useAuthStore()
+    const navigate             = useNavigate()
     const { showNotification } = useNotificationStore()
 
-    const [data, setData]                         = useState<Awaited<ReturnType<typeof pluginsApi.list>> | null>(null)
-    const [status, setStatus]                     = useState<PluginPageStatus>('loading')
-    const [error, setError]                       = useState<string | null>(null)
-    const [refreshing, setRefreshing]             = useState(false)
-    const [savingPluginID, setSavingPluginID]     = useState<string | null>(null)
-    const [openingMenuPath, setOpeningMenuPath]   = useState<string | null>(null)
-    const [expandedPluginID, setExpandedPluginID] = useState<string | null>(null)
-    const [editingPlugin, setEditingPlugin]       = useState<PluginEntry | null>(null)
-    const [configDraft, setConfigDraft]           = useState<PluginConfigObject>({})
-    const [jsonDraft, setJsonDraft]               = useState<Record<string, string>>({})
-    const [configError, setConfigError]           = useState<string | null>(null)
-    const [savingConfig, setSavingConfig]         = useState(false)
+    const [data, setData]                             = useState<Awaited<ReturnType<typeof pluginsApi.list>> | null>(
+        null)
+    const [status, setStatus]                         = useState<PluginPageStatus>('loading')
+    const [error, setError]                           = useState<string | null>(null)
+    const [refreshing, setRefreshing]                 = useState(false)
+    const [savingPluginID, setSavingPluginID]         = useState<string | null>(null)
+    const [deletingPluginID, setDeletingPluginID]     = useState<string | null>(null)
+    const [deletePluginTarget, setDeletePluginTarget] = useState<PluginEntry | null>(null)
+    const [expandedPluginID, setExpandedPluginID]     = useState<string | null>(null)
+    const [editingPlugin, setEditingPlugin]           = useState<PluginEntry | null>(null)
+    const [configDraft, setConfigDraft]               = useState<PluginConfigObject>({})
+    const [jsonDraft, setJsonDraft]                   = useState<Record<string, string>>({})
+    const [configError, setConfigError]               = useState<string | null>(null)
+    const [savingConfig, setSavingConfig]             = useState(false)
 
     const plugins        = data?.plugins ?? []
     const pluginsEnabled = data?.plugins_enabled ?? false
@@ -133,37 +135,6 @@ export function PluginManagementPage() {
         }, 0)
         return () => window.clearTimeout(timer)
     }, [fetchPlugins])
-
-    const openPluginMenu = useCallback(async (menu: PluginMenu) => {
-        const base        = normalizeApiBase(auth.apiBase) || window.location.origin
-        const resourceURL = new URL(menu.path, base)
-        if (resourceURL.origin !== new URL(base).origin || !resourceURL.pathname.startsWith('/v0/resource/plugins/')) {
-            window.open(resourceURL.toString(), '_blank', 'noopener,noreferrer')
-            return
-        }
-
-        const headers = auth.managementKey ? { Authorization: `Bearer ${auth.managementKey}` } : undefined
-        const opened  = window.open('about:blank', '_blank')
-        if (!opened) {
-            showNotification(t('plugin_management.open_menu_blocked'), 'error')
-            return
-        }
-        opened.opener = null
-        setOpeningMenuPath(menu.path)
-        try {
-            const response = await fetch(resourceURL.toString(), { credentials: 'include', headers })
-            if (!response.ok) {
-                throw new Error(`${response.status} ${response.statusText}`.trim())
-            }
-            opened.location.href = resourceURL.toString()
-        } catch (err: unknown) {
-            opened.close()
-            const message = err instanceof Error ? err.message : String(err ?? '')
-            showNotification(`${t('plugin_management.open_menu_failed')}${message ? `: ${message}` : ''}`, 'error')
-        } finally {
-            setOpeningMenuPath(null)
-        }
-    }, [auth.apiBase, auth.managementKey, showNotification, t])
 
     const openConfig = useCallback((plugin: PluginEntry) => {
         const nextConfig                       = { ...(plugin.config ?? {}) }
@@ -205,6 +176,34 @@ export function PluginManagementPage() {
         },
         [fetchPlugins, showNotification, t],
     )
+
+    const closeDelete = useCallback(() => {
+        if (deletingPluginID) {
+            return
+        }
+        setDeletePluginTarget(null)
+    }, [deletingPluginID])
+
+    const handleDeletePlugin = useCallback(async () => {
+        if (!deletePluginTarget) {
+            return
+        }
+        setDeletingPluginID(deletePluginTarget.id)
+        try {
+            const result = await pluginsApi.deletePlugin(deletePluginTarget.id)
+            showNotification(t('plugin_management.delete_success'), 'success')
+            if (result.restart_required) {
+                showNotification(t('plugin_management.delete_restart_required'), 'warning')
+            }
+            setDeletePluginTarget(null)
+            await fetchPlugins({ silent: true })
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err ?? '')
+            showNotification(`${t('plugin_management.delete_failed')}${message ? `: ${message}` : ''}`, 'error')
+        } finally {
+            setDeletingPluginID(null)
+        }
+    }, [deletePluginTarget, fetchPlugins, showNotification, t])
 
     const handleConfigValueChange = useCallback((field: string, value: PluginConfigValue) => {
         setConfigDraft((prev) => ({ ...prev, [field]: value }))
@@ -363,8 +362,7 @@ export function PluginManagementPage() {
                                 type='button'
                                 className={styles.menuLink}
                                 title={menu.description || menu.path}
-                                disabled={openingMenuPath === menu.path}
-                                onClick={() => void openPluginMenu(menu)}
+                                onClick={() => navigate(buildPluginResourceRoute(plugin.id, menu.path))}
                             >
                                 {menu.menu || menu.path}
                             </button>
@@ -394,66 +392,83 @@ export function PluginManagementPage() {
                         >
                             {expandedPluginID === plugin.id ? t('common.collapse') : t('common.expand')}
                         </Button>
+                        <Button
+                            type='button'
+                            variant='danger'
+                            size='sm'
+                            onClick={() => setDeletePluginTarget(plugin)}
+                            loading={deletingPluginID === plugin.id}
+                            disabled={Boolean(deletingPluginID && deletingPluginID !== plugin.id)}
+                        >
+                            {t('common.delete')}
+                        </Button>
                     </div>
                 ),
             },
         ],
         [
+            deletingPluginID,
             expandedPluginID,
             handleTogglePlugin,
+            navigate,
             openConfig,
-            openingMenuPath,
-            openPluginMenu,
             pluginsEnabled,
             savingPluginID,
             t,
         ],
     )
 
-    const renderExpandedRow = (plugin: PluginEntry) => (
-        <>
-            <tr className={styles.mainRow}>
-                {columns.map((column) => (
-                    <td key={column.key} className={column.className}>{column.cell(plugin)}</td>
-                ))}
-            </tr>
-            {expandedPluginID === plugin.id && (
-                <tr className={styles.detailRow}>
-                    <td colSpan={columns.length}>
-                        <div className={styles.detailGrid}>
-                            <div>
-                                <div className={styles.detailLabel}>{t('plugin_management.metadata')}</div>
-                                <div className={styles.detailText}>
-                                    {plugin.metadata?.version &&
-                                     <span>{t('plugin_management.version')}: {plugin.metadata.version}</span>}
-                                    {plugin.metadata?.author &&
-                                     <span>{t('plugin_management.author')}: {plugin.metadata.author}</span>}
-                                    {plugin.metadata?.github_repository && (
-                                        <a href={plugin.metadata.github_repository} target='_blank'
-                                           rel='noopener noreferrer'>
-                                            {plugin.metadata.github_repository}
-                                        </a>
-                                    )}
-                                </div>
-                            </div>
-                            <div>
-                                <div className={styles.detailLabel}>{t('plugin_management.config_fields')}</div>
-                                <div className={styles.fieldPills}>
-                                    {plugin.config_fields.length === 0 ? (
-                                        <span className={styles.muted}>{t('plugin_management.no_config_fields')}</span>
-                                    ) : plugin.config_fields.map((field) => (
-                                        <span key={field.name} className={styles.fieldPill} title={field.description}>
-                                            {field.name}<span>{field.type}</span>
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </td>
+    const renderExpandedRow = (plugin: PluginEntry) => {
+        const repository     = plugin.metadata?.github_repository
+        const repositoryURL  = safeExternalUrl(repository)
+        const repositoryLink = repositoryURL ? (
+            <a href={repositoryURL} target='_blank' rel='noopener noreferrer'>
+                {repository}
+            </a>
+        ) : repository ? <span>{repository}</span> : null
+
+        return (
+            <>
+                <tr className={styles.mainRow}>
+                    {columns.map((column) => (
+                        <td key={column.key} className={column.className}>{column.cell(plugin)}</td>
+                    ))}
                 </tr>
-            )}
-        </>
-    )
+                {expandedPluginID === plugin.id && (
+                    <tr className={styles.detailRow}>
+                        <td colSpan={columns.length}>
+                            <div className={styles.detailGrid}>
+                                <div>
+                                    <div className={styles.detailLabel}>{t('plugin_management.metadata')}</div>
+                                    <div className={styles.detailText}>
+                                        {plugin.metadata?.version &&
+                                         <span>{t('plugin_management.version')}: {plugin.metadata.version}</span>}
+                                        {plugin.metadata?.author &&
+                                         <span>{t('plugin_management.author')}: {plugin.metadata.author}</span>}
+                                        {repositoryLink}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className={styles.detailLabel}>{t('plugin_management.config_fields')}</div>
+                                    <div className={styles.fieldPills}>
+                                        {plugin.config_fields.length === 0 ? (
+                                            <span
+                                                className={styles.muted}>{t('plugin_management.no_config_fields')}</span>
+                                        ) : plugin.config_fields.map((field) => (
+                                            <span key={field.name} className={styles.fieldPill}
+                                                  title={field.description}>
+                                                {field.name}<span>{field.type}</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                )}
+            </>
+        )
+    }
 
     return (
         <div className={styles.page}>
@@ -569,6 +584,34 @@ export function PluginManagementPage() {
                             </div>
                         ))}
                         {configError && <div className='error-box'>{configError}</div>}
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                open={deletePluginTarget !== null}
+                onClose={closeDelete}
+                closeDisabled={Boolean(deletingPluginID)}
+                title={deletePluginTarget ?
+                       t('plugin_management.delete_title', { id: deletePluginTarget.id }) :
+                       undefined}
+                footer={(
+                    <div className={styles.modalActions}>
+                        <Button type='button' variant='ghost' onClick={closeDelete}
+                                disabled={Boolean(deletingPluginID)}>
+                            {t('common.cancel')}
+                        </Button>
+                        <Button type='button' variant='danger' onClick={() => void handleDeletePlugin()}
+                                loading={Boolean(deletingPluginID)}>
+                            {t('common.delete')}
+                        </Button>
+                    </div>
+                )}
+            >
+                {deletePluginTarget && (
+                    <div className={styles.configForm}>
+                        <p>{t('plugin_management.delete_confirm', { name: pluginTitle(deletePluginTarget) })}</p>
+                        {deletePluginTarget.path && <div className={styles.pluginPath}>{deletePluginTarget.path}</div>}
                     </div>
                 )}
             </Modal>

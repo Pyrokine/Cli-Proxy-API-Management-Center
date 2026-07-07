@@ -113,6 +113,7 @@ textarea {
     font-weight: $font-weight-normal;
     background-color: var(--bg-secondary);
     color: var(--text-primary);
+    color-scheme: light;
     transition: border-color $transition-fast,
     box-shadow $transition-fast;
 
@@ -123,10 +124,31 @@ textarea {
     }
 }
 
+[data-theme='dark'] .input,
+[data-theme='dark'] textarea {
+    color-scheme: dark;
+}
+
+.input[type='number'] {
+    appearance: textfield;
+}
+
+.input[type='number']::-webkit-inner-spin-button,
+.input[type='number']::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+}
+
 textarea {
     min-height: 96px;
     padding: 10px 12px;
     line-height: $line-height-base;
+    scrollbar-color: var(--border-color) var(--bg-secondary);
+
+    &::-webkit-scrollbar-corner,
+    &::-webkit-resizer {
+        background: var(--bg-secondary);
+    }
 }
 
 .form-group {

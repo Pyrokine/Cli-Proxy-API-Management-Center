@@ -44,6 +44,11 @@ body.modal-open .content {
     }
 }
 
+::-webkit-scrollbar-corner,
+::-webkit-resizer {
+    background: var(--bg-secondary);
+}
+
 // 通用工具类
 .container {
     width: 100%;

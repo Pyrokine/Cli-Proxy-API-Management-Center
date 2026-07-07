@@ -1,0 +1,313 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+@include management-page-shell;
+
+.header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: $spacing-md;
+
+    h1 {
+        margin: 0 0 6px;
+        color: var(--text-primary);
+        font-size: $font-size-display-md;
+        font-weight: $font-weight-semibold;
+    }
+
+    p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        line-height: $line-height-base;
+    }
+
+    @include mobile {
+        flex-direction: column;
+    }
+}
+
+.securityBanner,
+.warningBox {
+    display: flex;
+    gap: $spacing-sm;
+    padding: $spacing-md;
+    border: 1px solid color-mix(in srgb, var(--warning-color) 28%, var(--border-color));
+    border-radius: $radius-lg;
+    background: color-mix(in srgb, var(--warning-color) 8%, var(--bg-secondary));
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-primary);
+        font-weight: $font-weight-semibold;
+    }
+
+    p {
+        margin: 0;
+    }
+}
+
+.warningBox {
+    flex-direction: column;
+}
+
+.statsGrid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: $spacing-md;
+
+    @include tablet {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.statCard {
+    strong {
+        display: block;
+        margin-bottom: 4px;
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: $font-size-xl;
+        font-weight: $font-weight-semibold;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    span {
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+    }
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+
+    > :first-child {
+        flex: 1 1 360px;
+        margin: 0;
+    }
+
+    @include tablet {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+.filterChips,
+.tagRow,
+.badges,
+.metaRow,
+.cardActions,
+.links,
+.modalActions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.filterChips {
+    justify-content: flex-end;
+}
+
+.filterChip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-full;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    transition: all $transition-fast;
+
+    span {
+        color: var(--text-tertiary);
+        font-size: $font-size-xs;
+    }
+
+    &:hover,
+    &:focus-visible {
+        border-color: color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+        color: var(--text-primary);
+    }
+}
+
+.filterChipActive {
+    border-color: color-mix(in srgb, var(--primary-color) 54%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-secondary));
+    color: var(--primary-color);
+}
+
+.loadingState {
+    padding: $spacing-xl;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.cardGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: $spacing-md;
+}
+
+.storeCard {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+.cardTop {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: $spacing-sm;
+
+    .badges {
+        grid-column: 1 / -1;
+    }
+}
+
+.logoBox {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-lg;
+    background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+    color: var(--text-secondary);
+
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+}
+
+.cardTitleBlock {
+    min-width: 0;
+
+    h2 {
+        margin: 0 0 4px;
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: $font-size-lg;
+        font-weight: $font-weight-semibold;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    span {
+        overflow: hidden;
+        color: var(--text-tertiary);
+        font-family: $font-mono;
+        font-size: $font-size-xs;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.description {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.metaRow,
+.tagRow {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.metaRow span,
+.tagRow span,
+.badgeSuccess,
+.badgeWarning {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-full;
+    background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+    line-height: 1.2;
+}
+
+.badgeSuccess {
+    border-color: color-mix(in srgb, var(--success-color) 36%, var(--border-color));
+    color: var(--success-color);
+}
+
+.badgeWarning {
+    border-color: color-mix(in srgb, var(--warning-color) 36%, var(--border-color));
+    color: var(--warning-color);
+}
+
+.cardFooter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    margin-top: auto;
+}
+
+.links a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: $radius-full;
+    color: var(--text-secondary);
+    text-decoration: none;
+
+    &:hover,
+    &:focus-visible {
+        background: var(--bg-tertiary);
+        color: var(--primary-color);
+    }
+}
+
+.modalActions {
+    justify-content: flex-end;
+}
+
+.installForm,
+.gateBody {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+
+    p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+        line-height: $line-height-base;
+    }
+
+    strong {
+        color: var(--text-primary);
+        font-weight: $font-weight-semibold;
+    }
+}
