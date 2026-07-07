@@ -3,7 +3,6 @@
  * 与基线 /config 返回结构保持一致（内部使用驼峰形式）
  */
 
-import type {AmpcodeConfig} from './ampcode'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from './provider'
 
 export interface QuotaExceededConfig {
@@ -66,7 +65,6 @@ export interface Config {
     routingSessionAffinity?: boolean
     routingSessionAffinityTTL?: string
     apiKeys?: string[]
-    ampcode?: AmpcodeConfig
     geminiApiKeys?: GeminiKeyConfig[]
     codexApiKeys?: ProviderKeyConfig[]
     claudeApiKeys?: ProviderKeyConfig[]
@@ -96,7 +94,6 @@ export type RawConfigSection =
     | 'force-model-prefix'
     | 'routing/strategy'
     | 'api-keys'
-    | 'ampcode'
     | 'gemini-api-key'
     | 'codex-api-key'
     | 'claude-api-key'

@@ -11,3 +11,19 @@ export function isValidApiKey(key: string): boolean {
     }
     return /^[\x21-\x7E]+$/.test(key)
 }
+
+export function safeExternalUrl(value: string | null | undefined): string | null {
+    const trimmed = value?.trim() ?? ''
+    if (!trimmed) {
+        return null
+    }
+    try {
+        const url = new URL(trimmed)
+        if (url.protocol === 'http:' || url.protocol === 'https:') {
+            return url.toString()
+        }
+    } catch {
+        return null
+    }
+    return null
+}

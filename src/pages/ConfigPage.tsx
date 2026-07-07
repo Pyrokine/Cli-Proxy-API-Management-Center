@@ -304,7 +304,19 @@ export function ConfigPage() {
             if (tab === 'source') {
                 // Only rewrite YAML when there are pending visual changes; otherwise preserve raw YAML + comments.
                 if (visualDirty) {
-                    const nextContent = applyVisualChangesToYaml(content)
+                    let nextContent: string
+                    try {
+                        nextContent = applyVisualChangesToYaml(content)
+                    } catch (err: unknown) {
+                        const message = err instanceof Error ?
+                                        err.message :
+                                        t('config_management.visual_mode_save_blocked')
+                        showNotification(
+                            t('config_management.visual_mode_unavailable_detail', { message }),
+                            'error',
+                        )
+                        return
+                    }
                     if (nextContent !== content) {
                         setContent(nextContent)
                         setDirty(true)

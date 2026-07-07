@@ -1,4 +1,8 @@
+export type VisualConfigEditorMode = 'simple' | 'full'
+
 export type PayloadParamValueType = 'string' | 'number' | 'boolean' | 'json'
+export type PluginStoreAuthType = 'none' | 'bearer' | 'basic' | 'header' | 'github-token'
+export type PluginStoreAuthApplyTo = 'registry' | 'metadata' | 'artifact'
 export type PayloadParamValidationErrorCode =
     | 'payload_invalid_number'
     | 'payload_invalid_boolean'
@@ -90,6 +94,19 @@ export type ApiKeyModelRule = {
     blockedModels: string[]
 }
 
+export type PluginStoreAuthRule = {
+    id: string
+    match: string
+    applyTo: PluginStoreAuthApplyTo[]
+    type: PluginStoreAuthType
+    tokenEnv: string
+    usernameEnv: string
+    passwordEnv: string
+    headerName: string
+    headerValueEnv: string
+    allowInsecure: boolean
+}
+
 export type VisualConfigValues = {
     host: string
     port: string
@@ -113,6 +130,8 @@ export type VisualConfigValues = {
     usageStatisticsFile: string
     pluginsEnabled: boolean
     pluginsDir: string
+    pluginStoreSources: string[]
+    pluginStoreAuth: PluginStoreAuthRule[]
     pluginConfigsText: string
     apiKeysText: string
     apiKeyAliasesText: string
@@ -136,7 +155,7 @@ export type VisualConfigValues = {
     forceModelPrefix: boolean
     enableGeminiCliEndpoint: boolean
     passthroughHeaders: boolean
-    disableImageGeneration: 'off' | 'all' | 'chat'
+    disableImageGeneration: 'off' | 'all' | 'chat' | 'passthrough'
     gptImage2BaseModel: string
     authAutoRefreshWorkers: string
     requestRetry: string
@@ -161,7 +180,6 @@ export type VisualConfigValues = {
     codexIdentityConfuse: boolean
     codexHeaderDefaultsText: string
     claudeHeaderDefaultsText: string
-    ampcodeText: string
     payloadDefaultRules: PayloadRule[]
     payloadDefaultRawRules: PayloadRule[]
     payloadOverrideRules: PayloadRule[]
@@ -200,6 +218,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     usageStatisticsFile: '',
     pluginsEnabled: false,
     pluginsDir: 'plugins',
+    pluginStoreSources: [],
+    pluginStoreAuth: [],
     pluginConfigsText: '',
     apiKeysText: '',
     apiKeyAliasesText: '',
@@ -248,7 +268,6 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     codexIdentityConfuse: false,
     codexHeaderDefaultsText: '',
     claudeHeaderDefaultsText: '',
-    ampcodeText: '',
     payloadDefaultRules: [],
     payloadDefaultRawRules: [],
     payloadOverrideRules: [],

@@ -73,6 +73,7 @@ proxy-url: ""
 force-model-prefix: false
 enable-gemini-cli-endpoint: false
 passthrough-headers: false
+# off/all/chat/passthrough
 disable-image-generation: "off"
 gpt-image-2-base-model: "gpt-5.4-mini"
 request-retry: 3
@@ -124,14 +125,6 @@ claude-header-defaults:
   os: ""
   arch: ""
   timeout: ""
-ampcode:
-  upstream-url: ""
-  upstream-api-key: ""
-  upstream-api-keys: []
-  restrict-management-to-localhost: false
-  model-mappings: []
-  force-model-mappings: false
-
 # ── 载荷规则 ────────────────────────
 payload:
   default: []
