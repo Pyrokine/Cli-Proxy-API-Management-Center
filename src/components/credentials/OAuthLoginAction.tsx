@@ -3,6 +3,7 @@ import {IconCheck, IconCopy, IconExternalLink, IconX} from '@/components/ui/icon
 import {Input} from '@/components/ui/Input'
 import {oauthApi, type OAuthProvider} from '@/services/api/oauth'
 import {copyToClipboard} from '@/utils/clipboard'
+import {safeExternalUrl} from '@/utils/validation'
 import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './OAuthLoginAction.module.scss'
@@ -143,21 +144,13 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             setUrl(response.url)
             setStatus('waiting')
 
-            // Validate URL scheme to prevent javascript: URI injection (XSS-VULN-01)
-            let parsedUrl: URL | undefined
-            try {
-                parsedUrl = new URL(response.url)
-            } catch {
+            const authUrl = safeExternalUrl(response.url)
+            if (!authUrl) {
                 setError('Invalid OAuth URL received from server')
                 setStatus('error')
                 return
             }
-            if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-                setError('Invalid OAuth URL received from server')
-                setStatus('error')
-                return
-            }
-            window.open(response.url, '_blank', 'noopener,noreferrer')
+            window.open(authUrl, '_blank', 'noopener,noreferrer')
 
             if (response.state) {
                 const stateValue = response.state
@@ -289,13 +282,9 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                                     variant='secondary'
                                     size='sm'
                                     onClick={() => {
-                                        try {
-                                            const parsed = new URL(url)
-                                            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-                                                window.open(url, '_blank', 'noopener,noreferrer')
-                                            }
-                                        } catch {
-                                            /* invalid URL, ignore */
+                                        const authUrl = safeExternalUrl(url)
+                                        if (authUrl) {
+                                            window.open(authUrl, '_blank', 'noopener,noreferrer')
                                         }
                                     }}
                                     title={t('credentials.oauth_open_url')}

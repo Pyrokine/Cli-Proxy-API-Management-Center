@@ -6,12 +6,16 @@ import {formatAuthFileDisplayName, formatModified, inferProviderFromAuthFileName
 import {useAuthFilesPrefixProxyEditor} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 import {useCredentialQuota} from '@/hooks/useCredentialQuota'
 import type {OAuthProvider} from '@/services/api/oauth'
+import {quotaApi} from '@/services/api/quota'
 import type {SummaryApiKeyStats} from '@/services/api/usage'
+import {useNotificationStore} from '@/stores/useNotificationStore'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
-import {maskApiKey} from '@/utils/format'
+import {formatDateTime, maskApiKey} from '@/utils/format'
+import {quotaCredentialKey} from '@/utils/quota/credentialKey'
+import {formatShanghaiDateTime} from '@/utils/quota/formatters'
 import {normalizePlanType} from '@/utils/quota/parsers'
-import {resolveCodexPlanType} from '@/utils/quota/resolvers'
+import {resolveCodexPlanType, resolveCodexSubscriptionActiveUntil} from '@/utils/quota/resolvers'
 import {calculateStatusBarDataFromRecentRequests} from '@/utils/usage'
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -82,6 +86,11 @@ const joinSearchTokens = (items: Array<string | number | null | undefined | fals
 const authFileProviderLabel = (file: AuthFileItem): string =>
     String(file.provider || file.type || inferProviderFromAuthFileName(file.name) || '').trim()
 
+const authFileQuotaProvider = (file: AuthFileItem): string =>
+    String(file.type || inferProviderFromAuthFileName(file.name) || file.provider || '').trim()
+
+const authFileQuotaKey = (file: AuthFileItem): string => quotaCredentialKey(authFileQuotaProvider(file), file.name)
+
 const modelSearchTokens = (models?: GeminiKeyConfig['models']): string[] =>
     Array.isArray(models)
     ? models
@@ -134,7 +143,20 @@ const formatSize = (bytes: number): string => {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
-const PREMIUM_CODEX_PLAN_TYPES = new Set(['pro', 'prolite'])
+function formatDateLike(value: string | number | null | undefined, language: string): string | null {
+    if (value === null || value === undefined || value === '') {
+        return null
+    }
+    const date = typeof value === 'number' ?
+                 new Date(value > 1_000_000_000_000 ? value : value * 1000) :
+                 new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        return null
+    }
+    return formatDateTime(date, language)
+}
+
+const PREMIUM_CODEX_PLAN_TYPES = new Set(['pro', 'prolite', 'supergrokheavy'])
 
 function formatPlanLabel(plan: string, t: ReturnType<typeof useTranslation>['t'], provider?: string): string {
     const normalized = normalizePlanType(plan)
@@ -144,6 +166,19 @@ function formatPlanLabel(plan: string, t: ReturnType<typeof useTranslation>['t']
 
     if (provider === 'codex') {
         const translated = t(`codex_quota.plan_${normalized}`, { defaultValue: '' })
+        if (translated) {
+            return translated
+        }
+    }
+    if (provider === 'xai') {
+        const translated = t(`xai_quota.plan_${normalized}`, { defaultValue: '' })
+        if (translated) {
+            return translated
+        }
+    }
+    if (provider === 'antigravity') {
+        const translated = t(`antigravity_quota.plan_${normalized}`, { defaultValue: '' }) ||
+                           t(`antigravity_quota.plan_${normalized.replace(/lite$/, '_lite')}`, { defaultValue: '' })
         if (translated) {
             return translated
         }
@@ -270,7 +305,7 @@ export function VendorSection({
                                                            file.disabled ?
                                                            t('credentials.filter_disabled') :
                                                            t('credentials.filter_available'),
-                                                           quotaStatusMap[file.name] || file.status,
+                                                           quotaStatusMap[authFileQuotaKey(file)] || file.status,
                                                        ])
                 return matchesSearchQuery(searchable, query, wildcardQuery)
             })
@@ -293,7 +328,10 @@ export function VendorSection({
                     return failure > 0 && success === 0
                 }
                 if (statusFilter === 'exhausted') {
-                    return file.status === 'quota_exceeded' || quotaStatusMap[file.name] === 'quota_exceeded'
+                    return file.status ===
+                           'quota_exceeded' ||
+                           quotaStatusMap[authFileQuotaKey(file)] ===
+                           'quota_exceeded'
                 }
                 return true
             })
@@ -521,27 +559,6 @@ export function VendorSection({
                     disableControls={disableControls}
                     onEdit={vendor.editRoute ? () => navigate(`${vendor.editRoute}/${index}`) : undefined}
                     onDelete={() => void deleteApiKey(oai.name)}
-                />
-            )
-        }
-
-        // Ampcode
-        if (vendor.id === 'ampcode') {
-            const amp = key as unknown as { upstreamUrl?: string; upstreamApiKey?: string }
-            return (
-                <CredentialCard
-                    key={`api-${index}`}
-                    category='api-key'
-                    title='Ampcode'
-                    badge={{ label: 'Config', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
-                    fields={[
-                        ...(amp.upstreamUrl ? [{ label: 'URL', value: amp.upstreamUrl }] : []),
-                        ...(amp.upstreamApiKey
-                            ? [{ label: t('common.api_key'), value: maskApiKey(amp.upstreamApiKey) }]
-                            : []),
-                    ]}
-                    disableControls={disableControls}
-                    onEdit={vendor.editRoute ? () => navigate(vendor.editRoute!) : undefined}
                 />
             )
         }
@@ -826,6 +843,7 @@ export function VendorSection({
                                             scheduler={scheduler}
                                             disableControls={disableControls}
                                             onToggle={toggleAuthFile}
+                                            onRefresh={onRefresh}
                                             selected={selectedItems?.has(file.name)}
                                             onSelect={onToggleSelect ? () => onToggleSelect(file.name) : undefined}
                                             onEdit={openPrefixProxyEditor}
@@ -863,6 +881,7 @@ interface AuthFileCardWithQuotaProps {
     scheduler: QuotaSchedulerLike
     disableControls: boolean
     onToggle: (name: string, disabled: boolean) => Promise<void>
+    onRefresh: () => Promise<void>
     onEdit: (file: AuthFileItem) => void | Promise<void>
     onDelete: (name: string) => void
     onDownload: (name: string) => Promise<void>
@@ -875,47 +894,118 @@ function AuthFileCardWithQuota({
                                    scheduler,
                                    disableControls,
                                    onToggle,
+                                   onRefresh,
                                    onEdit,
                                    onDelete,
                                    onDownload,
                                    selected,
                                    onSelect,
                                }: AuthFileCardWithQuotaProps) {
-    const { t }           = useTranslation()
+    const { t, i18n }               = useTranslation()
+    const showNotification          = useNotificationStore((s) => s.showNotification)
+    const showConfirmation          = useNotificationStore((s) => s.showConfirmation)
+    const [resetting, setResetting] = useState(false)
+    const quotaProvider             = authFileQuotaProvider(file)
     const {
               items: quotaItems,
               error: quotaError,
               loading: quotaLoading,
               planType: quotaPlanType,
-          }               = useCredentialQuota(file.name)
-    const recentStatusBar = useMemo(
+              premium: quotaPremium,
+              subscriptionActiveUntil: quotaSubscriptionActiveUntil,
+              manualResetCount: quotaManualResetCount,
+              resetCreditExpiries: quotaResetCreditExpiries,
+              resetCreditExpiriesError: quotaResetCreditExpiriesError,
+          }                         = useCredentialQuota(quotaProvider, file.name)
+    const recentStatusBar           = useMemo(
         () => calculateStatusBarDataFromRecentRequests(file.recentRequests ?? []),
         [file.recentRequests],
     )
-    const success         = Number(file.success ?? 0)
-    const failure         = Number(file.failed ?? 0)
-    const stats           = success > 0 || failure > 0 ? { success, failure } : undefined
-    const statusBar       = recentStatusBar
+    const success                   = Number(file.success ?? 0)
+    const failure                   = Number(file.failed ?? 0)
+    const stats                     = success > 0 || failure > 0 ? { success, failure } : undefined
+    const statusBar                 = recentStatusBar
 
-    const lastRefreshTime = scheduler.getLastRefreshTime(file.name)
-    const nextRefreshTime = scheduler.getNextRefreshTime(file.name)
-    const isRefreshing    = scheduler.isRefreshing(file.name)
-    const schedulerStatus = scheduler.getStatus(file.name)
+    const quotaKey        = authFileQuotaKey(file)
+    const lastRefreshTime = scheduler.getLastRefreshTime(quotaKey)
+    const nextRefreshTime = scheduler.getNextRefreshTime(quotaKey)
+    const isRefreshing    = scheduler.isRefreshing(quotaKey)
+    const schedulerStatus = scheduler.getStatus(quotaKey)
+    const authIndex       = String(file.authIndex ?? file['auth_index'] ?? '').trim()
+    const providerLabel   = authFileProviderLabel(file)
+    const isCodexProvider = providerLabel.toLowerCase().includes('codex')
+
+    const handleResetQuota = useCallback(() => {
+        if (!authIndex) {
+            showNotification(t('credentials.quota_reset_manual_missing_auth_index'), 'error')
+            return
+        }
+        showConfirmation({
+                             title: t('credentials.quota_reset_manual_title'),
+                             message: isCodexProvider ?
+                                      t(
+                                          'credentials.quota_reset_codex_confirm',
+                                          { name: formatAuthFileDisplayName(file.name) },
+                                      ) :
+                                      t(
+                                          'credentials.quota_reset_manual_confirm',
+                                          { name: formatAuthFileDisplayName(file.name) },
+                                      ),
+                             confirmText: t('credentials.quota_reset_manual_confirm_button'),
+                             onConfirm: async () => {
+                                 setResetting(true)
+                                 try {
+                                     await quotaApi.reset(authIndex)
+                                     await onRefresh()
+                                     showNotification(
+                                         t('credentials.quota_reset_manual_success', {
+                                             name: formatAuthFileDisplayName(file.name),
+                                         }),
+                                         'success',
+                                     )
+                                 } catch (error) {
+                                     const message = error instanceof Error ? error.message : String(error)
+                                     showNotification(
+                                         t('credentials.quota_reset_manual_failed', {
+                                             name: formatAuthFileDisplayName(file.name),
+                                             message,
+                                         }),
+                                         'error',
+                                     )
+                                     throw error
+                                 } finally {
+                                     setResetting(false)
+                                 }
+                             },
+                         })
+    }, [authIndex, file.name, isCodexProvider, onRefresh, showConfirmation, showNotification, t])
 
     const refreshState = {
         lastRefreshTime,
         nextRefreshTime,
-        isRefreshing,
+        isRefreshing: isRefreshing || resetting,
         autoRefreshEnabled: scheduler.isAutoRefreshEnabled(),
-        status: schedulerStatus,
-        onRefresh: () => void scheduler.refreshNow(file.name),
+        status: resetting ? 'loading' : schedulerStatus,
+        onRefresh: () => void scheduler.refreshNow(quotaKey),
+        onResetQuota: handleResetQuota,
+        resetQuotaDisabled: !authIndex || resetting || (isCodexProvider && quotaManualResetCount === 0),
+        resetQuotaTitle: isCodexProvider ?
+                         t(
+                             'credentials.quota_reset_codex_hint',
+                             { defaultValue: 'Consume one Codex manual reset credit' },
+                         ) :
+                         undefined,
     }
 
     const modifiedStr                                = formatModified(file)
     const fields: { label: string; value: string }[] = []
-    const providerLabel                              = authFileProviderLabel(file)
     const planLabelProvider                          = providerLabel.toLowerCase().includes('codex') ?
                                                        'codex' :
+                                                       providerLabel.toLowerCase().includes('xai') ||
+                                                       providerLabel.toLowerCase().includes('grok') ?
+                                                       'xai' :
+                                                       providerLabel.toLowerCase().includes('antigravity') ?
+                                                       'antigravity' :
                                                        undefined
     if (providerLabel) {
         fields.push({ label: t('credentials.inspection_provider', { defaultValue: '供应商' }), value: providerLabel })
@@ -931,6 +1021,50 @@ function AuthFileCardWithQuota({
     }
     if (modifiedStr !== '-') {
         fields.push({ label: t('auth_files.file_modified'), value: modifiedStr })
+    }
+    if (providerLabel.toLowerCase().includes('codex')) {
+        const subscriptionActiveUntil = quotaSubscriptionActiveUntil ?? resolveCodexSubscriptionActiveUntil(file)
+        const subscriptionLabel       = formatDateLike(subscriptionActiveUntil, i18n.language)
+        if (subscriptionLabel) {
+            fields.push({
+                            label: t('credentials.subscription_active_until', { defaultValue: 'Subscription until' }),
+                            value: subscriptionLabel,
+                        })
+        }
+        if (quotaManualResetCount !== null && quotaManualResetCount !== undefined) {
+            fields.push({
+                            label: t('codex_quota.reset_credits_label', { defaultValue: 'Manual resets' }),
+                            value: String(quotaManualResetCount),
+                        })
+        }
+        if (quotaResetCreditExpiries && quotaResetCreditExpiries.length > 0) {
+            quotaResetCreditExpiries.forEach((credit, index) => {
+                const expiresAt = formatShanghaiDateTime(credit.expiresAt)
+                if (!expiresAt) {
+                    return
+                }
+                const creditLabel = t('codex_quota.reset_credit_number', {
+                    index: index + 1,
+                    defaultValue: 'Reset {{index}}',
+                })
+                fields.push({
+                                label: t('codex_quota.reset_credits_expiry_label', {
+                                    defaultValue: 'Manual reset expiry (GMT+8)',
+                                }),
+                                value: `${creditLabel} ${expiresAt}`,
+                            })
+            })
+        } else if (quotaResetCreditExpiriesError) {
+            fields.push({
+                            label: t('codex_quota.reset_credits_expiry_label', {
+                                defaultValue: 'Manual reset expiry (GMT+8)',
+                            }),
+                            value: t('codex_quota.reset_credits_expiry_failed', {
+                                message: quotaResetCreditExpiriesError,
+                                defaultValue: 'Failed to load manual reset expiry: {{message}}',
+                            }),
+                        })
+        }
     }
 
     const providerKey            = providerLabel.toLowerCase()
@@ -963,19 +1097,29 @@ function AuthFileCardWithQuota({
                     plus: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' },
                     team: { color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' },
                     max: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+                    supergrok: { color: '#16a34a', bg: 'rgba(22, 163, 74, 0.15)' },
+                    supergrokheavy: { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' },
+                    ultra: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+                    ultralite: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
                     free: { color: 'var(--text-tertiary)', bg: 'var(--bg-tertiary)' },
                 }
                 // Priority 0: use plan/tier from quota query
                 if (quotaPlanType) {
-                    const key                = normalizePlanType(quotaPlanType) ?? quotaPlanType.toLowerCase()
-                    const colors             = tierColors[key] ??
+                    const key           = normalizePlanType(quotaPlanType) ?? quotaPlanType.toLowerCase()
+                    const colors        = tierColors[key] ??
                         { color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' }
-                    const isPremiumCodexPlan = PREMIUM_CODEX_PLAN_TYPES.has(key)
+                    const isPremiumPlan = quotaPremium ===
+                                          true ||
+                                          PREMIUM_CODEX_PLAN_TYPES.has(key) ||
+                                          key ===
+                                          'ultra' ||
+                                          key ===
+                                          'ultralite'
                     return {
                         label: formatPlanLabel(quotaPlanType, t, planLabelProvider),
                         color: colors.color,
                         bgColor: colors.bg,
-                        ...(isPremiumCodexPlan
+                        ...(isPremiumPlan
                             ? { color: '#a855f7', bgColor: 'rgba(168, 85, 247, 0.15)', premium: true }
                             : {}),
                     }

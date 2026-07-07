@@ -45,6 +45,7 @@ export function CookieAuthFlow({ disableControls, onSuccess, onCancel }: CookieA
                 value={cookie}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setCookie(e.target.value)}
                 disabled={disableControls || loading}
+                secret
             />
             <div className={styles.flowButtons}>
                 <Button variant='primary' size='xs' onClick={handleSubmit} loading={loading} disabled={!cookie.trim()}>

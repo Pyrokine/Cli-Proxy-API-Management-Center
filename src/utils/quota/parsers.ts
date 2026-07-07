@@ -45,11 +45,26 @@ export function normalizePlanType(value: unknown): string | null {
     if (compact === 'standard') {
         return 'standard'
     }
-    if (compact === 'ultra') {
+    if (compact === 'freetier') {
+        return 'free'
+    }
+    if (compact === 'g1protier') {
+        return 'pro'
+    }
+    if (compact === 'ultra' || compact === 'g1ultratier') {
         return 'ultra'
+    }
+    if (compact === 'ultralite' || compact === 'g1ultralitetier') {
+        return 'ultralite'
     }
     if (compact === 'max') {
         return 'max'
+    }
+    if (compact === 'supergrok') {
+        return 'supergrok'
+    }
+    if (compact === 'supergrokheavy') {
+        return 'supergrokheavy'
     }
 
     return compact

@@ -38,6 +38,7 @@ export interface AuthFileItem {
     status?: string
     statusMessage?: string
     lastRefresh?: string | number
+    nextRetryAfter?: string | number
     modified?: number
     priority?: number
     note?: string

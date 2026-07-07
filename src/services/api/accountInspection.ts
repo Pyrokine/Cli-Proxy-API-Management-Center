@@ -21,6 +21,19 @@ export interface AccountInspectionSummary {
     disabled: number
 }
 
+export interface AccountInspectionReasonCount {
+    reason: string
+    count: number
+}
+
+export interface AccountInspectionProviderSummary extends AccountInspectionSummary {
+    provider: string
+    unavailable: number
+    unknown: number
+    last_checked_at?: string
+    top_reasons?: AccountInspectionReasonCount[]
+}
+
 export interface AccountInspectionRun {
     id: string
     started_at: string
@@ -43,6 +56,7 @@ export interface AccountInspectionStatusResponse {
     status: AccountInspectionStatus
     schedule: AccountInspectionSchedule
     summary: AccountInspectionSummary
+    summary_by_provider?: Record<string, AccountInspectionProviderSummary>
     refresh_queue: AccountInspectionRefreshQueue
     current_run?: AccountInspectionRun
     last_run?: AccountInspectionRun

@@ -1,5 +1,5 @@
 import {Button} from '@/components/ui/Button'
-import {IconDownload, IconPencil, IconRefreshCw, IconTrash2} from '@/components/ui/icons'
+import {IconDownload, IconPencil, IconRefreshCw, IconTimer, IconTrash2} from '@/components/ui/icons'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {formatDateTime} from '@/utils/format'
@@ -15,6 +15,8 @@ export interface QuotaItem {
     model: string
     /** Usage percentage 0-100 */
     percent: number
+    /** Additional quota details, such as remaining credits */
+    detail?: string
     /** Human-readable reset label (e.g. "3h" or "2026-03-10 08:00") */
     resetLabel?: string
 }
@@ -32,6 +34,9 @@ interface RefreshState {
     /** Backend scheduler status: idle/loading/success/error/banned/quota_exceeded */
     status?: string
     onRefresh: () => void
+    onResetQuota?: () => void
+    resetQuotaDisabled?: boolean
+    resetQuotaTitle?: string
 }
 
 interface CredentialCardProps {
@@ -118,11 +123,11 @@ const quotaHttpStatusMessages: Record<string, string> = {
 }
 
 function formatQuotaErrorMessage(error: string, t: ReturnType<typeof useTranslation>['t']): string {
-    const statusMatch = /\bstatus\s+(\d{3})\b/i.exec(error)
-    if (!statusMatch) {
+    const statusMatch = /\bstatus\s+(?<status>\d{3})\b/i.exec(error)
+    if (!statusMatch?.groups) {
         return error
     }
-    const status = statusMatch[1]
+    const status = statusMatch.groups.status
     return t(quotaHttpStatusMessages[status] ?? 'credentials.quota_status_http_default', {
         status,
         defaultValue: error,
@@ -416,7 +421,10 @@ export function CredentialCard({
                         quotaItems.map((item) => (
                             <div key={item.model} className={styles.quotaRow}>
                                 <div className={styles.quotaRowHeader}>
-                                    <span className={styles.quotaModel}>{item.model}</span>
+                                    <span className={styles.quotaModel}>
+                                        <span>{item.model}</span>
+                                        {item.detail && <span className={styles.quotaDetail}>{item.detail}</span>}
+                                    </span>
                                     <span className={styles.quotaMeta}>
                                         <span className={styles.quotaPercent}>
                                             {t('credentials.quota_remaining_value', {
@@ -428,9 +436,9 @@ export function CredentialCard({
                                             {item.resetLabel
                                              ? t('credentials.quota_reset_value', {
                                                     value: item.resetLabel,
-                                                    defaultValue: 'Reset {{value}}',
+                                                    defaultValue: 'Renewal time {{value}}',
                                                 })
-                                             : t('credentials.quota_reset_unknown', { defaultValue: 'Reset -' })}
+                                             : t('credentials.quota_reset_unknown', { defaultValue: 'Renewal time -' })}
                                         </span>
                                     </span>
                                 </div>
@@ -539,6 +547,19 @@ export function CredentialCard({
                                     {t('credentials.refreshing', { defaultValue: 'Refreshing...' })}
                                 </span>
                             )}
+                        </Button>
+                    )}
+                    {refreshState?.onResetQuota && (
+                        <Button
+                            variant='secondary'
+                            size='sm'
+                            onClick={refreshState.onResetQuota}
+                            disabled={refreshState.isRefreshing || refreshState.resetQuotaDisabled}
+                            title={refreshState.resetQuotaTitle ?? t('credentials.quota_reset_manual_hint', {
+                                defaultValue: 'Clear backend quota and cooldown state for this credential',
+                            })}
+                        >
+                            <IconTimer size={14} />
                         </Button>
                     )}
                     {onDownload && (

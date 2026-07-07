@@ -4,15 +4,18 @@
  */
 
 import type {QuotaItem} from '@/components/credentials/CredentialCard'
+import i18n from '@/i18n'
 import {useQuotaStore} from '@/stores/useQuotaStore'
 import type {
     AntigravityQuotaState,
     ClaudeQuotaState,
     CodexQuotaState,
+    CodexRateLimitResetCredit,
     GeminiCliQuotaState,
     KimiQuotaState,
     XaiQuotaState,
 } from '@/types'
+import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {formatQuotaResetTime} from '@/utils/quota/formatters'
 import {useMemo} from 'react'
 
@@ -79,18 +82,58 @@ function fromKimi(state: KimiQuotaState): QuotaItem[] {
                 }))
 }
 
+function formatUsdCents(value: number | null | undefined): string | null {
+    if (value === null || value === undefined) {
+        return null
+    }
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value / 100)
+}
+
 function fromXai(state: XaiQuotaState): QuotaItem[] {
     if (state.status !== 'success' || !state.billing || state.billing.usedPercent === null) {
         return []
     }
+    const limit                  = formatUsdCents(state.billing.monthlyLimitCents)
+    const includedUsed           = state.billing.includedUsedCents ?? state.billing.usedCents ?? 0
+    const remaining              = state.billing.monthlyLimitCents !== null ?
+                                   formatUsdCents(Math.max(0, state.billing.monthlyLimitCents - includedUsed)) :
+                                   null
+    const monthlyItem: QuotaItem = {
+        model: i18n.t('xai_quota.monthly_credits', { defaultValue: 'Monthly credits' }),
+        percent: Math.round(Math.max(0, 100 - state.billing.usedPercent)),
+        detail: remaining && limit ? `${remaining} / ${limit}` : undefined,
+        resetLabel: state.billing.billingPeriodEnd ?
+                    formatQuotaResetTime(state.billing.billingPeriodEnd) :
+                    undefined,
+    }
+
+    if (state.billing.onDemandCapCents === null || state.billing.onDemandCapCents <= 0) {
+        monthlyItem.detail = [
+                                 monthlyItem.detail,
+                                 state.billing.onDemandCapCents === 0 ?
+                                 i18n.t(
+                                     'xai_quota.pay_as_you_go_disabled',
+                                     { defaultValue: 'Pay-as-you-go disabled' },
+                                 ) :
+                                 null,
+                             ].filter(Boolean).join(' · ') || undefined
+        return [monthlyItem]
+    }
+
+    const onDemandCap       = formatUsdCents(state.billing.onDemandCapCents)
+    const onDemandUsed      = state.billing.onDemandUsedCents ?? 0
+    const onDemandRemaining = formatUsdCents(Math.max(0, state.billing.onDemandCapCents - onDemandUsed))
+    const onDemandPercent   = state.billing.onDemandUsedPercent === null ?
+                              100 :
+                              Math.max(0, 100 - state.billing.onDemandUsedPercent)
+
     return [
         {
-            model: 'xAI Billing',
-            percent: Math.round(Math.max(0, 100 - state.billing.usedPercent)),
-            resetLabel: state.billing.billingPeriodEnd ?
-                        formatQuotaResetTime(state.billing.billingPeriodEnd) :
-                        undefined,
+            model: i18n.t('xai_quota.pay_as_you_go_label', { defaultValue: 'Pay as you go' }),
+            percent: Math.round(onDemandPercent),
+            detail: onDemandRemaining && onDemandCap ? `${onDemandRemaining} / ${onDemandCap}` : undefined,
         },
+        monthlyItem,
     ]
 }
 
@@ -99,19 +142,25 @@ interface CredentialQuotaResult {
     error?: string
     loading?: boolean
     planType?: string | null
+    premium?: boolean | null
+    subscriptionActiveUntil?: string | number | null
+    manualResetCount?: number | null
+    resetCreditExpiries?: CodexRateLimitResetCredit[]
+    resetCreditExpiriesError?: string
 }
 
 /**
- * Returns quota state for a given auth file name by checking all quota stores.
+ * Returns quota state for a given provider and auth file name by checking all quota stores.
  * Includes items on success, error message on failure, and loading flag.
  */
-export function useCredentialQuota(fileName: string): CredentialQuotaResult {
-    const antigravity = useQuotaStore((s) => s.antigravityQuota[fileName])
-    const claude      = useQuotaStore((s) => s.claudeQuota[fileName])
-    const codex       = useQuotaStore((s) => s.codexQuota[fileName])
-    const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[fileName])
-    const kimi        = useQuotaStore((s) => s.kimiQuota[fileName])
-    const xai         = useQuotaStore((s) => s.xaiQuota[fileName])
+export function useCredentialQuota(provider: string | undefined, fileName: string): CredentialQuotaResult {
+    const key         = quotaCredentialKey(provider, fileName)
+    const antigravity = useQuotaStore((s) => s.antigravityQuota[key])
+    const claude      = useQuotaStore((s) => s.claudeQuota[key])
+    const codex       = useQuotaStore((s) => s.codexQuota[key])
+    const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[key])
+    const kimi        = useQuotaStore((s) => s.kimiQuota[key])
+    const xai         = useQuotaStore((s) => s.xaiQuota[key])
 
     return useMemo(() => {
         const states = [antigravity, claude, codex, geminiCli, kimi, xai]
@@ -130,13 +179,20 @@ export function useCredentialQuota(fileName: string): CredentialQuotaResult {
         }
 
         if (antigravity?.status === 'success') {
-            return { items: fromAntigravity(antigravity) }
+            return { items: fromAntigravity(antigravity), planType: antigravity.planType, premium: antigravity.premium }
         }
         if (claude?.status === 'success') {
             return { items: fromClaude(claude), planType: claude.planType }
         }
         if (codex?.status === 'success') {
-            return { items: fromCodex(codex), planType: codex.planType }
+            return {
+                items: fromCodex(codex),
+                planType: codex.planType,
+                subscriptionActiveUntil: codex.subscriptionActiveUntil,
+                manualResetCount: codex.rateLimitResetCreditsAvailableCount,
+                resetCreditExpiries: codex.rateLimitResetCredits,
+                resetCreditExpiriesError: codex.rateLimitResetCreditsError,
+            }
         }
         if (geminiCli?.status === 'success') {
             return { items: fromGeminiCli(geminiCli), planType: geminiCli.tierLabel }
@@ -145,7 +201,7 @@ export function useCredentialQuota(fileName: string): CredentialQuotaResult {
             return { items: fromKimi(kimi) }
         }
         if (xai?.status === 'success') {
-            return { items: fromXai(xai) }
+            return { items: fromXai(xai), planType: xai.planType }
         }
 
         return {}

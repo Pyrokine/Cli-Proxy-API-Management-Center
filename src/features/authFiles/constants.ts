@@ -2,7 +2,7 @@ import type {AuthFileItem} from '@/types'
 import {formatDateTime} from '@/utils/format'
 
 const AUTH_FILE_PREFIX_REGEX =
-          /^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow|ampcode)-(?<rest>.+)$/i
+          /^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow)-(?<rest>.+)$/i
 const AUTH_FILE_SUFFIX_HINTS = new Set(['plus', 'pro', 'free', 'team', 'max', 'ultra', 'sonnet', 'opus', 'haiku'])
 const INTEGER_STRING_PATTERN = /^[+-]?\d+$/
 

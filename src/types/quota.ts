@@ -39,6 +39,10 @@ export interface AntigravityQuotaGroup {
 export interface AntigravityQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error'
     groups: AntigravityQuotaGroup[]
+    planType?: string | null
+    tierName?: string | null
+    tierId?: string | null
+    premium?: boolean | null
     error?: string
     errorStatus?: number
 }
@@ -72,10 +76,21 @@ export interface CodexQuotaWindow {
     resetLabel: string
 }
 
+export interface CodexRateLimitResetCredit {
+    id: string
+    status: string
+    grantedAt: string
+    expiresAt: string
+}
+
 export interface CodexQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error'
     windows: CodexQuotaWindow[]
     planType?: string | null
+    subscriptionActiveUntil?: string | number | null
+    rateLimitResetCreditsAvailableCount?: number | null
+    rateLimitResetCredits?: CodexRateLimitResetCredit[]
+    rateLimitResetCreditsError?: string
     error?: string
     errorStatus?: number
 }
@@ -99,8 +114,11 @@ export interface KimiQuotaState {
 
 export interface XaiBillingSummary {
     usedCents: number | null
+    includedUsedCents: number | null
     monthlyLimitCents: number | null
     onDemandCapCents: number | null
+    onDemandUsedCents: number | null
+    onDemandUsedPercent: number | null
     usedPercent: number | null
     billingPeriodStart?: string | null
     billingPeriodEnd?: string | null
@@ -109,6 +127,7 @@ export interface XaiBillingSummary {
 export interface XaiQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error'
     billing: XaiBillingSummary | null
+    planType?: string | null
     error?: string
     errorStatus?: number
 }

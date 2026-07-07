@@ -15,14 +15,18 @@ import type {
 } from '@/services/api/accountInspection'
 import {accountInspectionApi} from '@/services/api/accountInspection'
 import {authFilesApi} from '@/services/api/authFiles'
-import type {QuotaConfig} from '@/services/api/quota'
+import type {QuotaConfig, QuotaStatusResponse} from '@/services/api/quota'
 import {quotaApi} from '@/services/api/quota'
+import type {UsageSummary} from '@/services/api/usage'
+import {usageApi} from '@/services/api/usage'
 import {useNotificationStore} from '@/stores/useNotificationStore'
+import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import styles from './AccountInspectionPanel.module.scss'
+import {buildProviderHealthRows} from './providerHealth'
 
 const UI_STATE_KEY      = 'cpa-account-inspection-ui-state'
 const DEFAULT_PAGE_SIZE = 25
@@ -173,6 +177,19 @@ function statusClass(status: string): string {
     }
 }
 
+function providerStatusClass(status: string): string {
+    switch (status) {
+        case 'healthy':
+            return styles.statusNormal
+        case 'warning':
+            return styles.statusRunning
+        case 'error':
+            return styles.statusUnavailable
+        default:
+            return styles.statusUnknown
+    }
+}
+
 function targetFor(result: AccountInspectionResult) {
     return {
         id: result.id || undefined,
@@ -194,41 +211,41 @@ function formatInspectionLogMessage(
     t: ReturnType<typeof useTranslation>['t'],
 ): string {
     const message = entry.message.trim()
-    let match     = /^account inspection started trigger=(\S+)$/.exec(message)
-    if (match) {
+    let match     = /^account inspection started trigger=(?<trigger>\S+)$/.exec(message)
+    if (match?.groups) {
         return t('credentials.inspection_log_started', {
-            trigger: translateLogToken('credentials.inspection_log_trigger_', match[1], t),
+            trigger: translateLogToken('credentials.inspection_log_trigger_', match.groups.trigger, t),
             defaultValue: 'Account inspection started, trigger: {{trigger}}',
         })
     }
 
-    match = /^checked (.+) result=(\S+) reason=(\S+)$/.exec(message)
-    if (match) {
+    match = /^checked (?<account>.+) result=(?<result>\S+) reason=(?<reason>\S+)$/.exec(message)
+    if (match?.groups) {
         return t('credentials.inspection_log_checked', {
-            account: match[1],
-            result: translateLogToken('credentials.inspection_status_', match[2], t),
-            reason: translateLogToken('credentials.inspection_reason_', match[3], t),
+            account: match.groups.account,
+            result: translateLogToken('credentials.inspection_status_', match.groups.result, t),
+            reason: translateLogToken('credentials.inspection_reason_', match.groups.reason, t),
             defaultValue: '{{account}} checked, result: {{result}}, reason: {{reason}}',
         })
     }
 
-    match = /^account inspection (\S+) checked=(\d+)$/.exec(message)
-    if (match) {
+    match = /^account inspection (?<status>\S+) checked=(?<count>\d+)$/.exec(message)
+    if (match?.groups) {
         return t('credentials.inspection_log_finished', {
-            status: translateLogToken('credentials.inspection_status_', match[1], t),
-            count: match[2],
+            status: translateLogToken('credentials.inspection_status_', match.groups.status, t),
+            count: match.groups.count,
             defaultValue: 'Account inspection {{status}}, checked {{count}} accounts',
         })
     }
 
-    match = /^account inspection schedule updated enabled=(\S+) interval=(\S+)$/.exec(message)
-    if (match) {
+    match = /^account inspection schedule updated enabled=(?<enabled>\S+) interval=(?<interval>\S+)$/.exec(message)
+    if (match?.groups) {
         return t('credentials.inspection_log_schedule_updated', {
             enabled:
-                match[1] === 'true'
+                match.groups.enabled === 'true'
                 ? t('credentials.inspection_log_schedule_enabled', { defaultValue: 'enabled' })
                 : t('credentials.inspection_log_schedule_disabled', { defaultValue: 'disabled' }),
-            interval: match[2],
+            interval: match.groups.interval,
             defaultValue: 'Inspection schedule updated, status: {{enabled}}, interval: {{interval}}',
         })
     }
@@ -254,6 +271,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const { t, i18n }                                             = useTranslation()
     const navigate                                                = useNavigate()
     const showNotification                                        = useNotificationStore((s) => s.showNotification)
+    const addPersistentNotification                               = useNotificationStore((s) => s.addPersistentNotification)
     const [initialUIState]                                        = useState(loadUIState)
     const [issuesOnly, setIssuesOnly]                             = useState(initialUIState.issuesOnly ?? true)
     const [includeDisabled, setIncludeDisabled]                   = useState(false)
@@ -265,6 +283,9 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const [status, setStatus]                                     = useState<AccountInspectionStatusResponse>(
         emptyStatus)
     const [quotaConfig, setQuotaConfig]                           = useState<QuotaConfig>(emptyQuotaConfig)
+    const [quotaStatus, setQuotaStatus]                           = useState<QuotaStatusResponse | null>(null)
+    const [usageSummary, setUsageSummary]                         = useState<UsageSummary | null>(null)
+    const [authFiles, setAuthFiles]                               = useState<AuthFileItem[]>([])
     const [quotaConfigLoaded, setQuotaConfigLoaded]               = useState(false)
     const [scheduleDraft, setScheduleDraft]                       = useState(() => scheduleDraftFrom(emptySchedule()))
     const [inspectionScheduleLoaded, setInspectionScheduleLoaded] = useState(false)
@@ -283,23 +304,37 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const fetchData = useCallback(async () => {
         setLoading(true)
         try {
-            const [statusRes, resultsRes, logsRes, quotaConfigRes] = await Promise.all([
-                                                                                           accountInspectionApi.getStatus(),
-                                                                                           accountInspectionApi.getResults(
-                                                                                               {
-                                                                                                   status: statusFilter,
-                                                                                                   issuesOnly,
-                                                                                                   includeDisabled,
-                                                                                                   page,
-                                                                                                   pageSize,
-                                                                                               }),
-                                                                                           accountInspectionApi.getLogs(),
-                                                                                           quotaApi.getConfig(),
-                                                                                       ])
-            const nextStatus                                       = normalizeStatusResponse(statusRes)
-            const nextQuotaConfig                                  = { ...emptyQuotaConfig(), ...quotaConfigRes }
+            const [
+                      statusRes,
+                      resultsRes,
+                      logsRes,
+                      quotaConfigRes,
+                      quotaStatusRes,
+                      usageSummaryRes,
+                      authFilesRes,
+                  ]               = await Promise.all([
+                                                          accountInspectionApi.getStatus(),
+                                                          accountInspectionApi.getResults(
+                                                              {
+                                                                  status: statusFilter,
+                                                                  issuesOnly,
+                                                                  includeDisabled,
+                                                                  page,
+                                                                  pageSize,
+                                                              }),
+                                                          accountInspectionApi.getLogs(),
+                                                          quotaApi.getConfig(),
+                                                          quotaApi.getStatus().catch(() => null),
+                                                          usageApi.getSummary({ groups: 'all' }).catch(() => null),
+                                                          authFilesApi.list().catch(() => ({ files: [] })),
+                                                      ])
+            const nextStatus      = normalizeStatusResponse(statusRes)
+            const nextQuotaConfig = { ...emptyQuotaConfig(), ...quotaConfigRes }
             setStatus(nextStatus)
             setQuotaConfig(nextQuotaConfig)
+            setQuotaStatus(quotaStatusRes)
+            setUsageSummary(usageSummaryRes)
+            setAuthFiles(authFilesRes.files)
             setQuotaConfigLoaded(true)
             setScheduleDraft(scheduleDraftFrom(nextStatus.schedule))
             setInspectionScheduleLoaded(true)
@@ -393,13 +428,21 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     )
 
     const formatTime = useCallback(
-        (value?: string) => {
+        (value?: string | number | null) => {
             if (!value) {
                 return '-'
             }
             const date = new Date(value)
-            return Number.isNaN(date.getTime()) ? value : formatDateTime(date, i18n.language)
+            return Number.isNaN(date.getTime()) ? String(value) : formatDateTime(date, i18n.language)
         },
+        [i18n.language],
+    )
+
+    const formatPercent = useCallback(
+        (value: number) => new Intl.NumberFormat(i18n.language, {
+            maximumFractionDigits: value > 0 && value < 0.1 ? 1 : 0,
+            style: 'percent',
+        }).format(value),
         [i18n.language],
     )
 
@@ -553,6 +596,10 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                                  ? 'empty'
                                                  : 'ready'
     const visibleLogs                      = useMemo(() => logs.slice(-80), [logs])
+    const providerHealthRows               = useMemo(
+        () => buildProviderHealthRows({ inspectionStatus: status, quotaStatus, usageSummary, authFiles }),
+        [authFiles, quotaStatus, status, usageSummary],
+    )
     const lastRunResultLabel               = status.last_run
                                              ? t('credentials.inspection_last_run_result', {
             checked: status.last_run.checked,
@@ -598,6 +645,23 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                   defaultValue: '{{count}} disabled accounts are hidden by the current filter',
               })
               : undefined
+
+    useEffect(() => {
+        providerHealthRows
+            .filter((row) => row.quotaError + row.quotaBanned + row.quotaExceeded > 0)
+            .forEach((row) => {
+                addPersistentNotification(
+                    t('notifications.quota_provider_issue_notice', {
+                        provider: row.provider,
+                        count: row.quotaError + row.quotaBanned + row.quotaExceeded,
+                        defaultValue: '{{provider}} 有 {{count}} 个 quota 轮询异常账号',
+                    }),
+                    'warning',
+                    'quota',
+                    { dedupeKey: `quota:provider:${row.provider}:${row.quotaError}:${row.quotaBanned}:${row.quotaExceeded}` },
+                )
+            })
+    }, [addPersistentNotification, providerHealthRows, t])
 
     return (
         <div className={styles.panel}>
@@ -701,6 +765,106 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             {t('common.refresh')}
                         </Button>
                     </div>
+                </div>
+
+                <div className={styles.providerHealthSection}>
+                    <div className={styles.sectionHeaderCompact}>
+                        <div>
+                            <div className={styles.sectionTitle}>
+                                {t('credentials.provider_health_title', { defaultValue: 'Provider 健康概览' })}
+                            </div>
+                            <div className={styles.statusHint}>
+                                {t('credentials.provider_health_hint', {
+                                    defaultValue: '汇总账号巡检、quota 轮询、运行请求和冷却时间，详情仍以巡检结果为准',
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    {providerHealthRows.length === 0 ? (
+                        <div className={styles.providerHealthEmpty}>
+                            {t('credentials.provider_health_empty', { defaultValue: '暂无 provider 健康数据' })}
+                        </div>
+                    ) : (
+                         <div className={styles.providerHealthGrid}>
+                             {providerHealthRows.map((row) => (
+                                 <div className={styles.providerHealthCard} key={row.provider}>
+                                     <div className={styles.providerHealthHeader}>
+                                         <strong>{row.provider}</strong>
+                                         <span className={`${styles.statusBadge} ${providerStatusClass(row.status)}`}>
+                                             {t(`credentials.provider_health_status_${row.status}`, {
+                                                 defaultValue: row.status,
+                                             })}
+                                         </span>
+                                     </div>
+                                     <div className={styles.providerHealthMetrics}>
+                                         <span>
+                                             {t('credentials.provider_health_accounts', { defaultValue: '账号' })}:{' '}
+                                             <strong>{row.accountTotal}</strong>
+                                         </span>
+                                         <span>
+                                             {t('credentials.provider_health_abnormal', { defaultValue: '异常' })}:{' '}
+                                             <strong>{row.abnormal}</strong>
+                                         </span>
+                                         <span>
+                                             {t('credentials.inspection_disabled', { defaultValue: '已禁用' })}:{' '}
+                                             <strong>{row.disabled}</strong>
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.inspection_status_unavailable',
+                                                 { defaultValue: '不可用' },
+                                             )}:{' '}
+                                             <strong>{row.unavailable}</strong>
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.inspection_token_invalid',
+                                                 { defaultValue: 'Token 失效' },
+                                             )}:{' '}
+                                             <strong>{row.tokenInvalid}</strong>
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.inspection_refresh_failed',
+                                                 { defaultValue: '刷新失败' },
+                                             )}:{' '}
+                                             <strong>{row.refreshFailed}</strong>
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.provider_health_quota',
+                                                 { defaultValue: 'Quota 异常' },
+                                             )}:{' '}
+                                             <strong>{row.quotaError + row.quotaBanned + row.quotaExceeded}</strong>
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.provider_health_error_rate',
+                                                 { defaultValue: '错误率' },
+                                             )}:{' '}
+                                             <strong>{formatPercent(row.errorRate)}</strong>
+                                         </span>
+                                     </div>
+                                     <div className={styles.providerHealthMeta}>
+                                         <span>
+                                             {t(
+                                                 'credentials.provider_health_last_checked',
+                                                 { defaultValue: '最近巡检' },
+                                             )}:{' '}
+                                             {formatTime(row.lastCheckedAt)}
+                                         </span>
+                                         <span>
+                                             {t(
+                                                 'credentials.provider_health_next_retry',
+                                                 { defaultValue: '下次恢复/轮询' },
+                                             )}:{' '}
+                                             {formatTime(row.nextRetryAfter ?? row.nextRefreshAt)}
+                                         </span>
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                     )}
                 </div>
 
                 <div className={styles.settingsGrid}>
