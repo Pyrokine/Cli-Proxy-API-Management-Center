@@ -1,4 +1,4 @@
-import type {AmpcodeUpstreamApiKeyMapping, ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
+import type {ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
 import type {HeaderEntry} from '@/utils/headers'
 
 export interface ModelEntry {
@@ -18,21 +18,6 @@ export interface OpenAIFormState {
     apiKeyEntries: ApiKeyEntry[]
     disabled?: boolean
 }
-
-export interface AmpcodeUpstreamApiKeyEntry {
-    upstreamApiKey: string
-    clientApiKeysText: string
-}
-
-export interface AmpcodeFormState {
-    upstreamUrl: string
-    upstreamApiKey: string
-    upstreamApiKeyEntries: AmpcodeUpstreamApiKeyEntry[]
-    forceModelMappings: boolean
-    mappingEntries: ModelEntry[]
-}
-
-export type NormalizedAmpcodeUpstreamApiKeyEntry = AmpcodeUpstreamApiKeyMapping
 
 export type GeminiFormState = Omit<GeminiKeyConfig, 'headers' | 'models'> & {
     headers: HeaderEntry[]

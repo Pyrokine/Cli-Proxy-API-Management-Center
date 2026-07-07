@@ -44,7 +44,6 @@ export function createVendorRegistry(icons: {
     Codex: ComponentType<{ size?: number }>
     Vertex: ComponentType<{ size?: number }>
     OpenAI: ComponentType<{ size?: number }>
-    Ampcode: ComponentType<{ size?: number }>
     Kimi: ComponentType<{ size?: number }>
     Qwen: ComponentType<{ size?: number }>
     IFlow: ComponentType<{ size?: number }>
@@ -114,24 +113,6 @@ export function createVendorRegistry(icons: {
             oauthProviders: [],
             editRoute: '/credentials/openai',
             createRoute: '/credentials/openai/new',
-            supportsFileUpload: false,
-            supportsJsonImport: false,
-            supportsCookieAuth: false,
-        },
-        {
-            id: 'ampcode',
-            label: 'Ampcode',
-            icon: icons.Ampcode,
-            configExtractor: (c) => {
-                if (c.ampcode?.upstreamUrl || c.ampcode?.upstreamApiKey) {
-                    return [c.ampcode as unknown as ProviderKeyConfig]
-                }
-                return []
-            },
-            authFileTypes: [],
-            oauthProviders: [],
-            editRoute: '/credentials/ampcode',
-            createRoute: '/credentials/ampcode',
             supportsFileUpload: false,
             supportsJsonImport: false,
             supportsCookieAuth: false,
