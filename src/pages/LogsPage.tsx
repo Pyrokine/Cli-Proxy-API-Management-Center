@@ -26,13 +26,14 @@ import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useLocalStorage} from '@/hooks/useLocalStorage'
 import {configApi} from '@/services/api/config'
-import {logsApi} from '@/services/api/logs'
+import {logsApi, type LogsQuery} from '@/services/api/logs'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {copyToClipboard} from '@/utils/clipboard'
 import {MANAGEMENT_API_PREFIX} from '@/utils/constants'
 import {downloadBlob} from '@/utils/download'
 import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp} from '@/utils/format'
+import {redactSensitiveText} from '@/utils/redaction'
 import {formatDurationMs, formatThinkingLabel} from '@/utils/usage'
 import type {PointerEvent as ReactPointerEvent} from 'react'
 import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react'
@@ -61,6 +62,7 @@ const MAX_BUFFER_LINES          = 10000
 const DEFAULT_LOG_PAGE_SIZE     = 50
 const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
+const LOG_LINE_TIMESTAMP_REGEX  = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/
 
 const REFRESH_INTERVAL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = AUTO_REFRESH_INTERVALS
 const DEFAULT_PERSISTED_LOG_FILTERS: PersistedLogFilters                        = {
@@ -97,6 +99,16 @@ const getErrorMessage = (err: unknown): string => {
     return typeof message === 'string' ? message : ''
 }
 
+const responseDataToText = async (data: unknown): Promise<string> => {
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        return data.text()
+    }
+    if (typeof data === 'string') {
+        return data
+    }
+    return String(data ?? '')
+}
+
 const numberFromValue = (value: number | string | null | undefined): number | null => {
     if (typeof value === 'number') {
         return Number.isFinite(value) ? value : null
@@ -106,6 +118,78 @@ const numberFromValue = (value: number | string | null | undefined): number | nu
         return Number.isFinite(parsed) ? parsed : null
     }
     return null
+}
+
+const overlapAfterValue = (value: number | string | undefined): number | string | undefined => {
+    if (typeof value === 'number') {
+        return Math.max(0, value - 1)
+    }
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value)
+        return Number.isFinite(parsed) ? new Date(Math.max(0, parsed - 1000)).toISOString() : value
+    }
+    return undefined
+}
+
+const cursorSeconds = (value: number | string | undefined): number | null => {
+    const numeric = numberFromValue(value)
+    if (numeric !== null) {
+        return numeric
+    }
+    if (typeof value !== 'string') {
+        return null
+    }
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null
+}
+
+const lineTimestampSeconds = (line: string): number | null => {
+    const timestamp = line.match(LOG_LINE_TIMESTAMP_REGEX)?.groups?.ts
+    if (!timestamp) {
+        return null
+    }
+    const parsed = Date.parse(timestamp.replace(' ', 'T'))
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null
+}
+
+const overlapLineLimit = (buffer: string[], requestAfter: number | string | undefined): number => {
+    const after = cursorSeconds(requestAfter)
+    if (after === null) {
+        return 0
+    }
+    let count                = 0
+    let pendingContinuations = 0
+    for (let index = buffer.length - 1; index >= 0; --index) {
+        const lineSeconds = lineTimestampSeconds(buffer[index])
+        if (lineSeconds === null) {
+            ++pendingContinuations
+            continue
+        }
+        if (lineSeconds > after) {
+            count += pendingContinuations + 1
+            pendingContinuations = 0
+            continue
+        }
+        break
+    }
+    return count
+}
+
+const dropOverlappingLogLines = (buffer: string[], lines: string[], maxOverlap: number): string[] => {
+    const overlap = Math.min(buffer.length, lines.length, maxOverlap)
+    for (let size = overlap; size > 0; --size) {
+        let matched = true
+        for (let index = 0; index < size; ++index) {
+            if (buffer[buffer.length - size + index] !== lines[index]) {
+                matched = false
+                break
+            }
+        }
+        if (matched) {
+            return lines.slice(size)
+        }
+    }
+    return lines
 }
 
 const formatTraceDuration = (value: number | string | null | undefined, locale: string, missingText: string): string =>
@@ -136,6 +220,11 @@ const maxTraceTokenValue = (...values: Array<number | string | null | undefined>
 }
 
 type TabType = 'logs' | 'errors'
+
+type LogPosition = {
+    after?: number | string
+    cursor?: string
+}
 
 export function LogsPage() {
     const { t, i18n }                            = useTranslation()
@@ -243,8 +332,9 @@ export function LogsPage() {
     const logRequestInFlightRef     = useRef(false)
     const pendingFullReloadRef      = useRef(false)
 
-    // 保存最新时间戳用于增量获取
-    const latestTimestampRef = useRef<number>(0)
+    // 保存最新读取位置用于增量获取
+    const logPositionRef          = useRef<LogPosition>({})
+    const requestLogHomeIpByIdRef = useRef<Record<string, string>>({})
 
     const disableControls = connectionStatus !== 'connected'
 
@@ -273,36 +363,64 @@ export function LogsPage() {
         setError('')
 
         try {
-            const params =
-                      incremental && latestTimestampRef.current > 0
-                      ? { after: latestTimestampRef.current }
-                      : { limit: MAX_BUFFER_LINES }
-            const [data] = await Promise.all([
-                                                 logsApi.fetchLogs(params),
-                                                 // 非增量加载时同步刷新磁盘占用
-                                                 incremental
-                                                 ? Promise.resolve(null)
-                                                 : logsApi
-                                                     .fetchLogSize()
-                                                     .then((res) => {
-                                                         setLogDiskSize({
-                                                                            totalBytes: res.total_bytes,
-                                                                            fileCount: res.file_count,
-                                                                        })
-                                                         return res
-                                                     })
-                                                     .catch(() => null),
-                                             ])
+            const position          = logPositionRef.current
+            const overlapAfter      = incremental && !position.cursor && position.after !== undefined
+            const requestAfter      = overlapAfter ? overlapAfterValue(position.after) : position.after
+            const params: LogsQuery = incremental
+                                      ? {
+                    limit: MAX_BUFFER_LINES,
+                    ...(requestAfter !== undefined ? { after: requestAfter } : {}),
+                    ...(position.cursor ? { cursor: position.cursor } : {}),
+                }
+                                      : { limit: MAX_BUFFER_LINES }
+            const [data]            = await Promise.all([
+                                                            logsApi.fetchLogs(params),
+                                                            // 非增量加载时同步刷新磁盘占用
+                                                            incremental
+                                                            ? Promise.resolve(null)
+                                                            : logsApi
+                                                                .fetchLogSize()
+                                                                .then((res) => {
+                                                                    setLogDiskSize({
+                                                                                       totalBytes: res.total_bytes,
+                                                                                       fileCount: res.file_count,
+                                                                                   })
+                                                                    return res
+                                                                })
+                                                                .catch(() => null),
+                                                        ])
 
-            // 更新时间戳
-            if (data['latest-timestamp']) {
-                latestTimestampRef.current = data['latest-timestamp']
+            // 更新读取位置
+            const nextPosition: LogPosition = incremental ? { ...logPositionRef.current } : {}
+            if (data.latestAfter !== undefined) {
+                nextPosition.after = data.latestAfter
             }
-            setTotalLogLines(typeof data['line-count'] === 'number' ? data['line-count'] : 0)
+            if (typeof data.nextCursor === 'string') {
+                nextPosition.cursor = data.nextCursor
+            } else if (!incremental || data.logBackendKind === 'home-db') {
+                delete nextPosition.cursor
+            }
+            logPositionRef.current = nextPosition
 
-            const newLines = Array.isArray(data.lines) ? data.lines : []
+            if (data.requestLogHomeIpById) {
+                requestLogHomeIpByIdRef.current = incremental
+                                                  ? {
+                        ...requestLogHomeIpByIdRef.current,
+                        ...data.requestLogHomeIpById,
+                    }
+                                                  : data.requestLogHomeIpById
+            } else if (!incremental) {
+                requestLogHomeIpByIdRef.current = {}
+            }
+            setTotalLogLines(data.lineCount)
 
-            if (incremental && newLines.length > 0) {
+            const newLines    = Array.isArray(data.lines) ? data.lines : []
+            const cursorReset = data.cursorReset === true
+
+            if (incremental && cursorReset) {
+                setLogState({ buffer: newLines.slice(-MAX_BUFFER_LINES) })
+                setLogPage(1)
+            } else if (incremental && newLines.length > 0) {
                 const viewport = logViewportRef.current
                 if (!(viewport.page === 1 && viewport.scrollTop <= 2) && viewport.anchorRaw) {
                     pendingViewportRestoreRef.current = {
@@ -313,9 +431,18 @@ export function LogsPage() {
 
                 // 增量更新：追加新日志并限制缓冲区大小
                 setLogState((prev) => {
-                    const combined  = [...prev.buffer, ...newLines]
-                    const dropCount = Math.max(combined.length - MAX_BUFFER_LINES, 0)
-                    const buffer    = dropCount > 0 ? combined.slice(dropCount) : combined
+                    const linesToAppend = overlapAfter
+                                          ?
+                                          dropOverlappingLogLines(
+                                              prev.buffer,
+                                              newLines,
+                                              overlapLineLimit(prev.buffer, requestAfter),
+                                          )
+                                          :
+                                          newLines
+                    const combined      = [...prev.buffer, ...linesToAppend]
+                    const dropCount     = Math.max(combined.length - MAX_BUFFER_LINES, 0)
+                    const buffer        = dropCount > 0 ? combined.slice(dropCount) : combined
                     return { buffer }
                 })
             } else if (!incremental) {
@@ -350,7 +477,8 @@ export function LogsPage() {
                                  try {
                                      await logsApi.clearLogs()
                                      setLogState({ buffer: [] })
-                                     latestTimestampRef.current = 0
+                                     logPositionRef.current          = {}
+                                     requestLogHomeIpByIdRef.current = {}
                                      setLogPage(1)
                                      showNotification(t('logs.clear_success'), 'success')
                                      logsApi
@@ -372,7 +500,7 @@ export function LogsPage() {
     }
 
     const downloadLogs = () => {
-        const text = logState.buffer.join('\n')
+        const text = logState.buffer.map(redactSensitiveText).join('\n')
         downloadBlob({ filename: 'logs.txt', blob: new Blob([text], { type: 'text/plain' }) })
         showNotification(t('logs.download_success'), 'success')
     }
@@ -404,7 +532,8 @@ export function LogsPage() {
     const downloadErrorLog = async (name: string) => {
         try {
             const response = await logsApi.downloadErrorLog(name)
-            downloadBlob({ filename: name, blob: new Blob([response.data], { type: 'text/plain' }) })
+            const text     = redactSensitiveText(await responseDataToText(response.data))
+            downloadBlob({ filename: name, blob: new Blob([text], { type: 'text/plain' }) })
             showNotification(t('logs.error_log_download_success'), 'success')
         } catch (err: unknown) {
             const message = getErrorMessage(err)
@@ -418,7 +547,7 @@ export function LogsPage() {
         setPreviewLoading(true)
         try {
             const result = await logsApi.previewErrorLog(name, 500)
-            setPreviewContent(result.content)
+            setPreviewContent(redactSensitiveText(result.content))
         } catch (err: unknown) {
             setPreviewContent(getErrorMessage(err) || 'Failed to load preview')
         } finally {
@@ -428,7 +557,8 @@ export function LogsPage() {
 
     useEffect(() => {
         if (connectionStatus === 'connected') {
-            latestTimestampRef.current = 0
+            logPositionRef.current          = {}
+            requestLogHomeIpByIdRef.current = {}
             void loadLogs(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -537,7 +667,7 @@ export function LogsPage() {
         [showRawLogs, reversedParsedLines, pageStart, pageEnd],
     )
     const rawVisibleText = useMemo(
-        () => filteredLines.slice(pageStart, pageEnd).join('\n'),
+        () => filteredLines.slice(pageStart, pageEnd).map(redactSensitiveText).join('\n'),
         [filteredLines, pageStart, pageEnd],
     )
 
@@ -674,6 +804,7 @@ export function LogsPage() {
                 ? styles.statusWarn
                 : styles.statusError,
         ].join(' ')
+        const redactedPath    = line.path ? redactSensitiveText(line.path) : ''
         const emptyCell       = <span className={styles.emptyCell}>—</span>
 
         return (
@@ -701,9 +832,9 @@ export function LogsPage() {
                      emptyCell}
                 </td>
                 <td className={styles.pathCell}>
-                    {line.path ? (
-                        <span className={styles.path} title={line.path}>
-                            {line.path}
+                    {redactedPath ? (
+                        <span className={styles.path} title={redactedPath}>
+                            {redactedPath}
                         </span>
                     ) : emptyCell}
                 </td>
@@ -746,7 +877,7 @@ export function LogsPage() {
     }
 
     const copyLogLine = async (raw: string) => {
-        const ok = await copyToClipboard(raw)
+        const ok = await copyToClipboard(redactSensitiveText(raw))
         if (ok) {
             showNotification(t('logs.copy_success', { defaultValue: 'Copied to clipboard' }), 'success')
         } else {
@@ -813,10 +944,11 @@ export function LogsPage() {
     const downloadRequestLog = async (id: string) => {
         setRequestLogDownloading(true)
         try {
-            const response = await logsApi.downloadRequestLogById(id)
+            const response = await logsApi.downloadRequestLogById(id, requestLogHomeIpByIdRef.current[id])
+            const text     = redactSensitiveText(await responseDataToText(response.data))
             downloadBlob({
                              filename: `request-${id}.log`,
-                             blob: new Blob([response.data], { type: 'text/plain' }),
+                             blob: new Blob([text], { type: 'text/plain' }),
                          })
             showNotification(t('logs.request_log_download_success'), 'success')
             setRequestLogId(null)
@@ -1013,7 +1145,8 @@ export function LogsPage() {
                                                 </span>
                                             ) : (
                                                  filters.pathOptions.map(({ path, count }) => {
-                                                     const active = filters.pathFilters.includes(path)
+                                                     const active       = filters.pathFilters.includes(path)
+                                                     const redactedPath = redactSensitiveText(path)
                                                      return (
                                                          <button
                                                              key={path}
@@ -1023,9 +1156,9 @@ export function LogsPage() {
                                                              }`}
                                                              onClick={() => filters.togglePathFilter(path)}
                                                              aria-pressed={active}
-                                                             title={path}
+                                                             title={redactedPath}
                                                          >
-                                                             {path} ({count})
+                                                             {redactedPath} ({count})
                                                          </button>
                                                      )
                                                  })
@@ -1421,7 +1554,10 @@ export function LogsPage() {
                             </div>
                             <div className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
                                 <span className={styles.traceInfoLabel}>{t('logs.trace_message')}</span>
-                                <span className={styles.traceInfoValue}>{trace.traceLogLine.message ||
+                                <span className={styles.traceInfoValue}>{trace.traceLogLine.message
+                                                                         ?
+                                                                         redactSensitiveText(trace.traceLogLine.message)
+                                                                         :
                                                                          notRecordedLabel}</span>
                             </div>
                         </div>

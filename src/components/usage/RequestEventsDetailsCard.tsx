@@ -828,7 +828,6 @@ export function RequestEventsDetailsCard({
                     'auth_index',
                     'provider',
                     'api_key',
-                    'raw_api_key',
                     'user',
                     'request_id',
                     'result',
@@ -868,7 +867,6 @@ export function RequestEventsDetailsCard({
                         e.auth_index ?? '',
                         e.provider ?? '',
                         row.apiKeyMasked,
-                        e.api_key ?? '',
                         row.user,
                         row.requestId,
                         e.failed ? 'failed' : 'success',
@@ -924,8 +922,8 @@ export function RequestEventsDetailsCard({
 
                 const content  = JSON.stringify(
                     events.map((event, index) => {
-                        const thinking = normalizeUsageThinking(event.thinking)
-                        const row      = eventToRow(
+                        const thinking  = normalizeUsageThinking(event.thinking)
+                        const row       = eventToRow(
                             event,
                             index,
                             sourceInfoMap,
@@ -937,10 +935,11 @@ export function RequestEventsDetailsCard({
                             t,
                             aliases,
                         )
+                        const safeEvent = { ...event } as Record<string, unknown>
+                        delete safeEvent.raw_api_key
                         return {
-                            ...event,
+                            ...safeEvent,
                             api_key: row.apiKeyMasked,
-                            raw_api_key: event.api_key ?? '',
                             thinking: thinking ?? undefined,
                         }
                     }),

@@ -165,17 +165,18 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             setTraceLoading(true)
             setTraceError('')
             try {
-                const eventsPromise                       = usageApi.getEvents({
-                                                                                   from,
-                                                                                   to,
-                                                                                   page: 1,
-                                                                                   page_size: TRACE_EVENT_PAGE_SIZE,
-                                                                                   sort: 'timestamp',
-                                                                                   order: 'desc',
-                                                                               })
-                const authPromise                         = authFresh ?
-                                                            Promise.resolve(null) :
-                                                            authFilesApi.list().catch(() => null)
+                const eventsPromise = usageApi.getEvents({
+                                                             from,
+                                                             to,
+                                                             page: 1,
+                                                             page_size: TRACE_EVENT_PAGE_SIZE,
+                                                             sort: 'timestamp',
+                                                             order: 'desc',
+                                                         })
+                let authPromise     = Promise.resolve<Awaited<ReturnType<typeof authFilesApi.list>> | null>(null)
+                if (!authFresh) {
+                    authPromise = authFilesApi.list().catch(() => null)
+                }
                 const [eventsResponse, authFilesResponse] = await Promise.all([eventsPromise, authPromise])
 
                 if (traceRequestIdRef.current !== currentRequestId) {

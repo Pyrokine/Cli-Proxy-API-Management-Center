@@ -127,6 +127,14 @@ export interface SummaryApiKeyStats {
     latency_sample_count?: number
 }
 
+export interface SummaryProviderStats {
+    provider: string
+    requests: number
+    success: number
+    failure: number
+    error_rate: number
+}
+
 export interface SummaryTimePoint {
     time: string
     requests: number
@@ -142,6 +150,7 @@ export interface UsageSummary {
     totals: SummaryTotals
     by_model: Record<string, SummaryModelStats>
     by_credential: Record<string, SummaryCredentialStats>
+    by_provider?: Record<string, SummaryProviderStats>
     by_api_key: Record<string, SummaryApiKeyStats>
     time_series: SummaryTimePoint[]
     time_series_by_model: Record<string, SummaryTimePoint[]>

@@ -3,6 +3,7 @@
  * 迁移自基线 modules/usage.js 的纯逻辑部分
  */
 
+import i18n from '@/i18n'
 import type {PutModelPricesResponse} from '@/services/api/modelPrices'
 import type {SummaryTimePoint, UsageSummary as ApiUsageSummary, UsageThinking} from '@/services/api/usage'
 import type {RecentRequestBucket} from '@/types/authFile'
@@ -505,15 +506,8 @@ function normalizeThinkingText(value: unknown): string {
     return typeof value === 'string' ? value.trim() : ''
 }
 
-function noThinkingLabel(locale?: string): string {
-    const lower = (locale ?? '').toLowerCase()
-    if (lower.startsWith('zh')) {
-        return '无思考'
-    }
-    if (lower.startsWith('ru')) {
-        return 'No thinking'
-    }
-    return 'No thinking'
+function noThinkingLabel(): string {
+    return i18n.t('usage_stats.no_thinking')
 }
 
 export function normalizeUsageThinking(value: unknown): UsageThinking | null {
@@ -563,7 +557,7 @@ export function formatThinkingLabel(thinking: UsageThinking | null | undefined, 
         return '-'
     }
     if (isNoThinkingUsage(thinking)) {
-        return noThinkingLabel(locale)
+        return noThinkingLabel()
     }
     if (budgetLabel !== null && label === String(budget)) {
         return budgetLabel

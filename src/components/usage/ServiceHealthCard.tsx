@@ -10,12 +10,11 @@ import {useTranslation} from 'react-i18next'
 
 /** Builds the service-health heat map from summary.time_series.
  *
- *  The grid follows the active filter window (from..to) so it always shows
- *  exactly the period the trend chart is showing. Buckets default to 1 hour
- *  but expand automatically once the window is too wide to draw in 1-hour
- *  cells without exploding the DOM (a hard cap of MAX_COLS protects the
- *  page from the brief race where dateRange.from is set to the epoch while
- *  the "all" preset is still resolving). */
+ *  The grid follows the active filter window (from/to) so it always shows
+ *  exactly the period the trend chart is showing. Buckets default to 1 hour.
+ *  They expand automatically once the window is too wide to draw in 1-hour
+ *  cells without creating too many DOM nodes. MAX_COLS also protects the page
+ *  while the "all" preset is still resolving. */
 function calculateServiceHealthFromSummary(
     timeSeries: SummaryTimePoint[],
     fromMs: number,
@@ -358,8 +357,7 @@ export function ServiceHealthCard({
                         if (!detail) {
                             return <span key={col} />
                         }
-                        const labelFull = formatUnixTimestamp(detail.startTime)
-                        const [datePart = labelFull] = labelFull ? labelFull.split(' ') : ['']
+                        const [datePart = ''] = formatUnixTimestamp(detail.startTime).split(' ')
                         const dateBits  = datePart.split('/')
                         const label     = dateBits.length >= 3 ? `${dateBits[1]}/${dateBits[2]}` : datePart
                         return (

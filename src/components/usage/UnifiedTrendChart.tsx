@@ -101,7 +101,7 @@ export function UnifiedTrendChart({
     }, [summary, metric, chartDimension, t])
 
     // For the cost card we still want a flat 0 sparkline (parity with requests/
-    // tokens) when no priced points exist, so emptiness is signalled by a small
+    // tokens) when no priced points exist, so emptiness is signaled by a small
     // header note rather than a full hint replacing the chart.
     const noCostNote = useMemo(() => {
         if (metric !== 'cost') {
