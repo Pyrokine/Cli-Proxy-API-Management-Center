@@ -50,6 +50,9 @@ commercial-mode: false
 logging-to-file: false
 request-log: false
 logs-max-total-size-mb: 0
+image-artifact-cache:
+  retention-days: 7
+  max-total-size-mb: 10240
 error-logs-max-files: 10
 usage-statistics-enabled: false
 redis-usage-queue-retention-seconds: 60

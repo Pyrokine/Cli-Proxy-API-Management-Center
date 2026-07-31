@@ -305,6 +305,14 @@ export function VisualConfigEditor({
     const portError                           = getValidationMessage(t, validationErrors?.port)
     const tlsHttpRedirectPortError            = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
     const logsMaxSizeError                    = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
+    const imageArtifactCacheRetentionDaysError = getValidationMessage(
+        t,
+        validationErrors?.imageArtifactCacheRetentionDays,
+    )
+    const imageArtifactCacheMaxSizeError      = getValidationMessage(
+        t,
+        validationErrors?.imageArtifactCacheMaxTotalSizeMb,
+    )
     const errorLogsMaxFilesError              = getValidationMessage(t, validationErrors?.errorLogsMaxFiles)
     const redisUsageQueueRetentionError       = getValidationMessage(
         t,
@@ -332,6 +340,27 @@ export function VisualConfigEditor({
                 {t('config_management.visual.sections.runtime.log_size_ready', {
                     size: formatFileSize(logSize.totalBytes),
                     count: logSize.fileCount,
+                })}
+            </FieldMeta>
+        )
+    })()
+    const imageArtifactCacheSizeMeta          = (() => {
+        const imageArtifactCacheSize = runtimeInfo?.imageArtifactCacheSize
+        if (!imageArtifactCacheSize || imageArtifactCacheSize.status === 'loading') {
+            return <FieldMeta>{t('config_management.visual.sections.runtime.image_artifact_cache_size_loading')}</FieldMeta>
+        }
+        if (imageArtifactCacheSize.status === 'error') {
+            return (
+                <FieldMeta tone='warning'>
+                    {t('config_management.visual.sections.runtime.image_artifact_cache_size_error')}
+                </FieldMeta>
+            )
+        }
+        return (
+            <FieldMeta>
+                {t('config_management.visual.sections.runtime.image_artifact_cache_size_ready', {
+                    size: formatFileSize(imageArtifactCacheSize.totalBytes),
+                    count: imageArtifactCacheSize.fileCount,
                 })}
             </FieldMeta>
         )
@@ -456,6 +485,8 @@ export function VisualConfigEditor({
                 icon: IconDiamond,
                 errorCount: countErrors([
                                             'logsMaxTotalSizeMb',
+                                            'imageArtifactCacheRetentionDays',
+                                            'imageArtifactCacheMaxTotalSizeMb',
                                             'errorLogsMaxFiles',
                                             'redisUsageQueueRetentionSeconds',
                                             'usageRetentionDays',
@@ -1594,6 +1625,43 @@ export function VisualConfigEditor({
                                                  disabled={disabled}
                                              />
                                          </FieldShell>
+                                     </FieldAnchor>
+                                     <FieldAnchor fieldId='imageArtifactCacheMaxTotalSizeMb'>
+                                         <FieldShell
+                                             label={t(
+                                                 'config_management.visual.sections.system.image_artifact_cache_max_size',
+                                             )}
+                                             hint={t(
+                                                 'config_management.visual.sections.system.image_artifact_cache_max_size_hint',
+                                             )}
+                                             error={imageArtifactCacheMaxSizeError}
+                                             meta={imageArtifactCacheSizeMeta}
+                                         >
+                                             <input
+                                                 className='input'
+                                                 type='number'
+                                                 placeholder='10240'
+                                                 value={values.imageArtifactCacheMaxTotalSizeMb}
+                                                 onChange={(e) => onChange({ imageArtifactCacheMaxTotalSizeMb: e.target.value })}
+                                                 disabled={disabled}
+                                             />
+                                         </FieldShell>
+                                     </FieldAnchor>
+                                     <FieldAnchor fieldId='imageArtifactCacheRetentionDays'>
+                                         <Input
+                                             label={t(
+                                                 'config_management.visual.sections.system.image_artifact_cache_retention_days',
+                                             )}
+                                             type='number'
+                                             placeholder='7'
+                                             value={values.imageArtifactCacheRetentionDays}
+                                             onChange={(e) => onChange({ imageArtifactCacheRetentionDays: e.target.value })}
+                                             disabled={disabled}
+                                             hint={t(
+                                                 'config_management.visual.sections.system.image_artifact_cache_retention_hint',
+                                             )}
+                                             error={imageArtifactCacheRetentionDaysError}
+                                         />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='errorLogsMaxFiles'>
                                          <Input

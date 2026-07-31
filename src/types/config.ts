@@ -13,6 +13,7 @@ export interface QuotaExceededConfig {
 
 export interface RemoteManagementConfig {
     allowRemote?: boolean
+    trustedProxies?: string[]
     secretKey?: string
     disableControlPanel?: boolean
     autoUpdatePanel?: boolean
@@ -27,6 +28,11 @@ export interface UsageRetentionConfig {
     days?: number
     maxDbSizeMb?: number
     warningThresholdPct?: number
+}
+
+export interface ImageArtifactCacheConfig {
+    retentionDays?: number
+    maxTotalSizeMb?: number
 }
 
 export interface QuotaRefreshConfig {
@@ -59,6 +65,7 @@ export interface Config {
     logsMaxTotalSizeMb?: number
     errorLogsMaxFiles?: number
     usageRetention?: UsageRetentionConfig
+    imageArtifactCache?: ImageArtifactCacheConfig
     wsAuth?: boolean
     forceModelPrefix?: boolean
     routingStrategy?: string
@@ -90,6 +97,7 @@ export type RawConfigSection =
     | 'logs-max-total-size-mb'
     | 'error-logs-max-files'
     | 'usage-retention'
+    | 'image-artifact-cache'
     | 'ws-auth'
     | 'force-model-prefix'
     | 'routing/strategy'

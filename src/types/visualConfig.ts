@@ -12,6 +12,8 @@ export type VisualConfigFieldPath =
     | 'port'
     | 'tlsHttpRedirectPort'
     | 'logsMaxTotalSizeMb'
+    | 'imageArtifactCacheRetentionDays'
+    | 'imageArtifactCacheMaxTotalSizeMb'
     | 'errorLogsMaxFiles'
     | 'redisUsageQueueRetentionSeconds'
     | 'authAutoRefreshWorkers'
@@ -32,6 +34,7 @@ export type VisualConfigFieldPath =
 export type VisualConfigValidationErrorCode =
     | 'port_range'
     | 'non_negative_integer'
+    | 'integer_range_1_3600'
     | 'quota_refresh_interval_range'
     | 'quota_refresh_max_interval_range'
 
@@ -54,9 +57,15 @@ export type VisualConfigUsageDbSizeInfo =
           capped?: boolean
       }
 
+export type VisualConfigImageArtifactCacheSizeInfo =
+    | { status: 'loading' }
+    | { status: 'error' }
+    | { status: 'ready'; totalBytes: number; fileCount: number }
+
 export type VisualConfigRuntimeInfo = {
     logSize: VisualConfigLogSizeInfo
     usageDbSize: VisualConfigUsageDbSizeInfo
+    imageArtifactCacheSize: VisualConfigImageArtifactCacheSizeInfo
 }
 
 export type PayloadParamEntry = {
@@ -143,6 +152,8 @@ export type VisualConfigValues = {
     pprofEnable: boolean
     pprofAddr: string
     logsMaxTotalSizeMb: string
+    imageArtifactCacheRetentionDays: string
+    imageArtifactCacheMaxTotalSizeMb: string
     errorLogsMaxFiles: string
     redisUsageQueueRetentionSeconds: string
     usageStatisticsEnabled: boolean
@@ -231,6 +242,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     pprofEnable: false,
     pprofAddr: '',
     logsMaxTotalSizeMb: '',
+    imageArtifactCacheRetentionDays: '',
+    imageArtifactCacheMaxTotalSizeMb: '',
     errorLogsMaxFiles: '',
     redisUsageQueueRetentionSeconds: '',
     usageStatisticsEnabled: false,

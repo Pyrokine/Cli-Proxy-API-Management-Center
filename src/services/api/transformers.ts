@@ -6,7 +6,7 @@ import type {
     OpenAIProviderConfig,
     ProviderKeyConfig,
 } from '@/types'
-import type {Config, PluginsConfig, RemoteManagementConfig} from '@/types/config'
+import type {Config, ImageArtifactCacheConfig, PluginsConfig, RemoteManagementConfig} from '@/types/config'
 import {buildHeaderObject} from '@/utils/headers'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -390,6 +390,27 @@ const normalizePluginsConfig = (payload: unknown): PluginsConfig | undefined => 
     return Object.keys(config).length ? config : undefined
 }
 
+const normalizeImageArtifactCacheConfig = (payload: unknown): ImageArtifactCacheConfig | undefined => {
+    if (!isRecord(payload)) {
+        return undefined
+    }
+
+    const retentionDays  = normalizeNumber(payload['retention-days'], 0)
+    const maxTotalSizeMb = normalizeNumber(payload['max-total-size-mb'], 0)
+    if (retentionDays === undefined && maxTotalSizeMb === undefined) {
+        return undefined
+    }
+
+    const config: ImageArtifactCacheConfig = {}
+    if (retentionDays !== undefined) {
+        config.retentionDays = retentionDays
+    }
+    if (maxTotalSizeMb !== undefined) {
+        config.maxTotalSizeMb = maxTotalSizeMb
+    }
+    return config
+}
+
 const normalizeRemoteManagementConfig = (payload: unknown): RemoteManagementConfig | undefined => {
     if (!isRecord(payload)) {
         return undefined
@@ -399,6 +420,10 @@ const normalizeRemoteManagementConfig = (payload: unknown): RemoteManagementConf
     const allowRemote                    = normalizeBoolean(payload['allow-remote'])
     if (allowRemote !== undefined) {
         config.allowRemote = allowRemote
+    }
+    const trustedProxies = payload['trusted-proxies']
+    if (Array.isArray(trustedProxies)) {
+        config.trustedProxies = trustedProxies.map((value) => String(value).trim()).filter(Boolean)
     }
     const secretKey = payload['secret-key']
     if (typeof secretKey === 'string' && secretKey.trim()) {
@@ -533,6 +558,11 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
             }
         }
     }
+    const imageArtifactCache = normalizeImageArtifactCacheConfig(raw['image-artifact-cache'])
+    if (imageArtifactCache) {
+        config.imageArtifactCache = imageArtifactCache
+    }
+
     config.wsAuth           = normalizeBoolean(raw['ws-auth'])
     config.forceModelPrefix = normalizeBoolean(raw['force-model-prefix'])
     const routing           = raw.routing

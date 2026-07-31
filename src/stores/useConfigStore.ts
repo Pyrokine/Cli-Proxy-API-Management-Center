@@ -44,6 +44,7 @@ const SECTION_KEYS: RawConfigSection[] = [
     'logs-max-total-size-mb',
     'error-logs-max-files',
     'usage-retention',
+    'image-artifact-cache',
     'ws-auth',
     'force-model-prefix',
     'routing/strategy',
@@ -86,6 +87,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
             return config.errorLogsMaxFiles
         case 'usage-retention':
             return config.usageRetention
+        case 'image-artifact-cache':
+            return config.imageArtifactCache
         case 'ws-auth':
             return config.wsAuth
         case 'force-model-prefix':
@@ -244,6 +247,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
                     break
                 case 'usage-retention':
                     nextConfig.usageRetention = value as Config['usageRetention']
+                    break
+                case 'image-artifact-cache':
+                    nextConfig.imageArtifactCache = value as Config['imageArtifactCache']
                     break
                 case 'ws-auth':
                     nextConfig.wsAuth = value as Config['wsAuth']

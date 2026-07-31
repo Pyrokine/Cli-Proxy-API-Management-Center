@@ -7,6 +7,7 @@ import {Tabs} from '@/components/ui/Tabs'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useVisualConfig} from '@/hooks/useVisualConfig'
 import {configFileApi, type ConfigValidationError} from '@/services/api/configFile'
+import {artifactsApi} from '@/services/api/artifacts'
 import {logsApi} from '@/services/api/logs'
 import {usageApi} from '@/services/api/usage'
 import {useAuthStore, useConfigStore, useNotificationStore, useThemeStore} from '@/stores'
@@ -78,6 +79,7 @@ export function ConfigPage() {
     const [runtimeInfo, setRuntimeInfo]               = useState<VisualConfigRuntimeInfo>({
                                                                                               logSize: { status: 'loading' },
                                                                                               usageDbSize: { status: 'loading' },
+                                                                                              imageArtifactCacheSize: { status: 'loading' },
                                                                                           })
 
     // Search state
@@ -111,12 +113,14 @@ export function ConfigPage() {
         setRuntimeInfo({
                            logSize: { status: 'loading' },
                            usageDbSize: { status: 'loading' },
+                           imageArtifactCacheSize: { status: 'loading' },
                        })
 
-        const [logSizeResult, usageDbSizeResult] = await Promise.allSettled([
-                                                                                logsApi.fetchLogSize(),
-                                                                                usageApi.getDBSize(),
-                                                                            ])
+        const [logSizeResult, usageDbSizeResult, imageArtifactCacheSizeResult] = await Promise.allSettled([
+                                                                                                            logsApi.fetchLogSize(),
+                                                                                                            usageApi.getDBSize(),
+                                                                                                            artifactsApi.fetchImageArtifactCacheSize(),
+                                                                                                        ])
 
         setRuntimeInfo({
                            logSize:
@@ -136,6 +140,14 @@ export function ConfigPage() {
                                        warningThresholdPct: usageDbSizeResult.value.warning_threshold_pct ?? undefined,
                                        warning: Boolean(usageDbSizeResult.value.warning),
                                        capped: Boolean(usageDbSizeResult.value.capped),
+                                   }
+                               : { status: 'error' },
+                           imageArtifactCacheSize:
+                               imageArtifactCacheSizeResult.status === 'fulfilled'
+                               ? {
+                                       status: 'ready',
+                                       totalBytes: imageArtifactCacheSizeResult.value.total_bytes ?? 0,
+                                       fileCount: imageArtifactCacheSizeResult.value.file_count ?? 0,
                                    }
                                : { status: 'error' },
                        })
@@ -302,6 +314,11 @@ export function ConfigPage() {
             }
 
             if (tab === 'source') {
+                if (visualDirty && hasVisualValidationErrors) {
+                    showNotification(t('config_management.visual.validation.validation_blocked'), 'error')
+                    return
+                }
+
                 // Only rewrite YAML when there are pending visual changes; otherwise preserve raw YAML + comments.
                 if (visualDirty) {
                     let nextContent: string
@@ -336,7 +353,16 @@ export function ConfigPage() {
             setActiveTab(tab)
             localStorage.setItem('config-management:tab', tab)
         },
-        [activeTab, applyVisualChangesToYaml, content, loadVisualValuesFromYaml, showNotification, t, visualDirty],
+        [
+            activeTab,
+            applyVisualChangesToYaml,
+            content,
+            hasVisualValidationErrors,
+            loadVisualValuesFromYaml,
+            showNotification,
+            t,
+            visualDirty,
+        ],
     )
 
     // Search functionality

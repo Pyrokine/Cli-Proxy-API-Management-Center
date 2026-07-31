@@ -453,6 +453,8 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         left.pprofEnable === right.pprofEnable &&
         left.pprofAddr === right.pprofAddr &&
         left.logsMaxTotalSizeMb === right.logsMaxTotalSizeMb &&
+        left.imageArtifactCacheRetentionDays === right.imageArtifactCacheRetentionDays &&
+        left.imageArtifactCacheMaxTotalSizeMb === right.imageArtifactCacheMaxTotalSizeMb &&
         left.errorLogsMaxFiles === right.errorLogsMaxFiles &&
         left.redisUsageQueueRetentionSeconds === right.redisUsageQueueRetentionSeconds &&
         left.usageStatisticsEnabled === right.usageStatisticsEnabled &&
@@ -500,6 +502,13 @@ function areVisualConfigValuesEqual(left: VisualConfigValues, right: VisualConfi
         arePayloadFilterRulesEqual(left.payloadFilterRules, right.payloadFilterRules)
     )
 }
+
+export const hasImageArtifactCacheChanges = (
+    values: Pick<VisualConfigValues, 'imageArtifactCacheRetentionDays' | 'imageArtifactCacheMaxTotalSizeMb'>,
+    baseline: Pick<VisualConfigValues, 'imageArtifactCacheRetentionDays' | 'imageArtifactCacheMaxTotalSizeMb'>,
+): boolean =>
+    values.imageArtifactCacheRetentionDays !== baseline.imageArtifactCacheRetentionDays ||
+    values.imageArtifactCacheMaxTotalSizeMb !== baseline.imageArtifactCacheMaxTotalSizeMb
 
 function parseApiKeyRules(raw: unknown): Record<string, ApiKeyModelRule> {
     const record = asRecord(raw)
@@ -896,6 +905,18 @@ function getNonNegativeIntegerError(value: string): VisualConfigValidationErrorC
     return undefined
 }
 
+function getRedisRetentionError(value: string): VisualConfigValidationErrorCode | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    if (!/^\d+$/.test(trimmed)) {
+        return 'integer_range_1_3600'
+    }
+    const parsed = Number(trimmed)
+    return parsed >= 1 && parsed <= 3600 ? undefined : 'integer_range_1_3600'
+}
+
 function parseOptionalInteger(value: string): number | undefined {
     const trimmed = value.trim()
     if (!trimmed) {
@@ -935,8 +956,10 @@ function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConf
         port: getPortError(values.port),
         tlsHttpRedirectPort: getNonNegativeIntegerError(values.tlsHttpRedirectPort),
         logsMaxTotalSizeMb: getNonNegativeIntegerError(values.logsMaxTotalSizeMb),
+        imageArtifactCacheRetentionDays: getNonNegativeIntegerError(values.imageArtifactCacheRetentionDays),
+        imageArtifactCacheMaxTotalSizeMb: getNonNegativeIntegerError(values.imageArtifactCacheMaxTotalSizeMb),
         errorLogsMaxFiles: getNonNegativeIntegerError(values.errorLogsMaxFiles),
-        redisUsageQueueRetentionSeconds: getNonNegativeIntegerError(values.redisUsageQueueRetentionSeconds),
+        redisUsageQueueRetentionSeconds: getRedisRetentionError(values.redisUsageQueueRetentionSeconds),
         authAutoRefreshWorkers: getNonNegativeIntegerError(values.authAutoRefreshWorkers),
         usageRetentionDays: getNonNegativeIntegerError(values.usageRetentionDays),
         usageRetentionMaxDbSizeMb: getNonNegativeIntegerError(values.usageRetentionMaxDbSizeMb),
@@ -1124,6 +1147,7 @@ export function useVisualConfig() {
             const remoteManagement                                    = asRecord(parsed['remote-management'])
             const pprof                                               = asRecord(parsed.pprof)
             const usageRetention                                      = asRecord(parsed['usage-retention'])
+            const imageArtifactCache                                  = asRecord(parsed['image-artifact-cache'])
             const quotaExceeded                                       = asRecord(parsed['quota-exceeded'])
             const quotaRefresh                                        = asRecord(parsed['quota-refresh'])
             const plugins                                             = asRecord(parsed.plugins)
@@ -1183,6 +1207,8 @@ export function useVisualConfig() {
                 pprofEnable: normalizeBoolean(pprof?.enable) ?? false,
                 pprofAddr: typeof pprof?.addr === 'string' ? pprof.addr : '',
                 logsMaxTotalSizeMb: String(parsed['logs-max-total-size-mb'] ?? ''),
+                imageArtifactCacheRetentionDays: String(imageArtifactCache?.['retention-days'] ?? ''),
+                imageArtifactCacheMaxTotalSizeMb: String(imageArtifactCache?.['max-total-size-mb'] ?? ''),
                 errorLogsMaxFiles: String(parsed['error-logs-max-files'] ?? ''),
                 redisUsageQueueRetentionSeconds: String(parsed['redis-usage-queue-retention-seconds'] ?? ''),
                 usageStatisticsEnabled: normalizeBoolean(parsed['usage-statistics-enabled']) ?? false,
@@ -1430,6 +1456,27 @@ export function useVisualConfig() {
                     deleteIfMapEmpty(doc, ['pprof'])
                 }
                 setIntFromStringInDoc(doc, ['logs-max-total-size-mb'], values.logsMaxTotalSizeMb)
+                if (
+                    hasImageArtifactCacheChanges(values, baselineValues) &&
+                    (
+                        docHas(doc, ['image-artifact-cache']) ||
+                        values.imageArtifactCacheRetentionDays.trim() ||
+                        values.imageArtifactCacheMaxTotalSizeMb.trim()
+                    )
+                ) {
+                    ensureMapInDoc(doc, ['image-artifact-cache'])
+                    setIntFromStringInDoc(
+                        doc,
+                        ['image-artifact-cache', 'retention-days'],
+                        values.imageArtifactCacheRetentionDays,
+                    )
+                    setIntFromStringInDoc(
+                        doc,
+                        ['image-artifact-cache', 'max-total-size-mb'],
+                        values.imageArtifactCacheMaxTotalSizeMb,
+                    )
+                    deleteIfMapEmpty(doc, ['image-artifact-cache'])
+                }
                 setIntFromStringInDoc(doc, ['error-logs-max-files'], values.errorLogsMaxFiles)
                 setIntFromStringInDoc(
                     doc,

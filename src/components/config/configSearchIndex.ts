@@ -234,6 +234,22 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['logs-max-total-size-mb'],
     },
     {
+        fieldId: 'imageArtifactCacheMaxTotalSizeMb',
+        sectionId: 'logging',
+        labelKey: L('sections.system.image_artifact_cache_max_size'),
+        hintKey: L('sections.system.image_artifact_cache_max_size_hint'),
+        yamlKeys: ['image-artifact-cache', 'max-total-size-mb'],
+        keywords: ['artifact', 'image cache', 'generated image'],
+    },
+    {
+        fieldId: 'imageArtifactCacheRetentionDays',
+        sectionId: 'logging',
+        labelKey: L('sections.system.image_artifact_cache_retention_days'),
+        hintKey: L('sections.system.image_artifact_cache_retention_hint'),
+        yamlKeys: ['image-artifact-cache', 'retention-days'],
+        keywords: ['artifact', 'image cache', 'generated image'],
+    },
+    {
         fieldId: 'errorLogsMaxFiles',
         sectionId: 'logging',
         labelKey: L('sections.system.error_logs_max_files'),
