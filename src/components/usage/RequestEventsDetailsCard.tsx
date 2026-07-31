@@ -24,6 +24,7 @@ import type {CredentialInfo} from '@/types/sourceInfo'
 import {AUTO_REFRESH_INTERVALS, DEFAULT_AUTO_REFRESH_MS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {downloadBlob} from '@/utils/download'
 import {formatDateTime, formatNumber, maskApiKey, toLocalDateTimeSecondsString} from '@/utils/format'
+import {redactSensitiveText} from '@/utils/redaction'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
 import {
     extractLatencyMs,
@@ -216,8 +217,8 @@ function resolveModelAliasRelations(model: string, lookup: ModelAliasLookup): st
     return (lookup.get(model.trim().toLowerCase()) ?? []).map((item) => item.label)
 }
 
-/** Append shared filter fields to a params object. Multi-value arrays are joined by comma,
- *  matching the summary endpoint convention; the events backend splits them back into a set. */
+/** Append shared filter fields to a params object. API keys remain separate query
+ *  values so a key containing a comma is not confused with multiple selections. */
 function applyFilters(
     params: EventsParams,
     from: string,
@@ -241,7 +242,7 @@ function applyFilters(
         params.source = selectedCredentials.join(',')
     }
     if (selectedApiKeys.length > 0) {
-        params.api_key = selectedApiKeys.join(',')
+        params.api_key = selectedApiKeys
     }
     if (searchQuery.trim()) {
         params.search = searchQuery.trim()
@@ -253,6 +254,16 @@ function applyFilters(
 
 function renderFailedNoUsage(t: ReturnType<typeof useTranslation>['t']) {
     return t('usage_stats.request_events_failed_no_usage', { defaultValue: '失败未返回用量' })
+}
+
+const responseDataToText = async (data: unknown): Promise<string> => {
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        return data.text()
+    }
+    if (typeof data === 'string') {
+        return data
+    }
+    return String(data ?? '')
 }
 
 /** Map backend sort field name */
@@ -378,7 +389,9 @@ function eventToRow(
     const authIndex          = event.auth_index || '-'
     const sourceInfo         = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
     const rawApiKey          = event.api_key || ''
-    const alias              = resolveApiKeyAlias(rawApiKey, aliases)
+    const alias              = 'api_key_alias' in event
+                               ? (event.api_key_alias || '').trim()
+                               : resolveApiKeyAlias(rawApiKey, aliases)
     const sourceDisplay      = sourceInfo.displayName.trim()
     const hasSourceDisplay   = sourceDisplay !== '' && sourceDisplay !== '-'
     const maskedApiKey       = displayApiKey(rawApiKey, alias, noApiKeyLabel)
@@ -993,7 +1006,7 @@ export function RequestEventsDetailsCard({
             if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
                 setRequestLogPreview({
                                          id: requestId,
-                                         content: preview.content,
+                                         content: redactSensitiveText(preview.content),
                                          truncated: preview.truncated,
                                          totalLines: preview.total_lines,
                                      })
@@ -1019,9 +1032,10 @@ export function RequestEventsDetailsCard({
         setRequestLogDownloading((prev) => new Set(prev).add(requestId))
         try {
             const response = await logsApi.downloadRequestLogById(requestId)
+            const content  = redactSensitiveText(await responseDataToText(response.data))
             downloadBlob({
                              filename: safeRequestLogFilename(requestId),
-                             blob: new Blob([response.data], { type: 'text/plain' }),
+                             blob: new Blob([content], { type: 'text/plain' }),
                          })
         } catch (err) {
             setRequestLogError(errorMessage(err) || 'request log download failed')

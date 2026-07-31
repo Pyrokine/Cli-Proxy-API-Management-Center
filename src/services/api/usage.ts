@@ -31,6 +31,24 @@ function localToIsoUtc(value: string): string {
     return d.toISOString()
 }
 
+function appendQueryValues(
+    searchParams: URLSearchParams,
+    name: string,
+    value: string | readonly string[] | undefined,
+): void {
+    if (typeof value !== 'string') {
+        value?.forEach((item) => {
+            if (item.trim()) {
+                searchParams.append(name, item)
+            }
+        })
+        return
+    }
+    if (value.trim()) {
+        searchParams.set(name, value)
+    }
+}
+
 interface UsageExportPayload {
     version?: number
     exported_at?: string
@@ -180,6 +198,7 @@ export interface UsageEvent {
     source: string
     auth_index: string
     api_key: string
+    api_key_alias?: string
     provider?: string
     latency_ms?: number | string | null
     request_id?: string | null
@@ -200,7 +219,7 @@ export interface EventsParams {
     page_size?: number
     model?: string
     source?: string
-    api_key?: string
+    api_key?: string | readonly string[]
     status?: 'success' | 'failure' | ''
     search?: string
     sort?: string
@@ -225,7 +244,13 @@ export const usageApi = {
      * 导出使用统计快照,可选筛选
      * 不传 filters 或全部为空 = 导出全量
      */
-    exportUsage: (filters?: { from?: string; to?: string; model?: string; api_key?: string; credential?: string }) => {
+    exportUsage: (filters?: {
+        from?: string
+        to?: string
+        model?: string
+        api_key?: string | readonly string[]
+        credential?: string
+    }) => {
         const params = new URLSearchParams()
         if (filters) {
             const { from, to, ...rest } = filters
@@ -235,10 +260,12 @@ export const usageApi = {
             if (to && to.trim()) {
                 params.set('to', localToIsoUtc(to))
             }
-            for (const [key, value] of Object.entries(rest)) {
-                if (value && value.trim()) {
-                    params.set(key, value)
-                }
+            if (rest.model?.trim()) {
+                params.set('model', rest.model)
+            }
+            appendQueryValues(params, 'api_key', rest.api_key)
+            if (rest.credential?.trim()) {
+                params.set('credential', rest.credential)
             }
         }
         const qs  = params.toString()
@@ -294,7 +321,7 @@ export const usageApi = {
             to?: string
             granularity?: 'hourly' | 'daily'
             model?: string
-            api_key?: string
+            api_key?: string | readonly string[]
             credential?: string
             groups?: 'none' | 'all'
         },
@@ -313,9 +340,7 @@ export const usageApi = {
         if (params?.model) {
             searchParams.set('model', params.model)
         }
-        if (params?.api_key) {
-            searchParams.set('api_key', params.api_key)
-        }
+        appendQueryValues(searchParams, 'api_key', params?.api_key)
         if (params?.credential) {
             searchParams.set('credential', params.credential)
         }
@@ -352,9 +377,7 @@ export const usageApi = {
         if (params?.source) {
             searchParams.set('source', params.source)
         }
-        if (params?.api_key) {
-            searchParams.set('api_key', params.api_key)
-        }
+        appendQueryValues(searchParams, 'api_key', params?.api_key)
         if (params?.status) {
             searchParams.set('status', params.status)
         }

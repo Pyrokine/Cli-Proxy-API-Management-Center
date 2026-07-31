@@ -252,10 +252,7 @@ export function UsagePage() {
 
     const isAllPreset                                     = dateRange.preset === 'all'
     const allSummaryResolutionKey                         = useMemo(
-        () =>
-            [dateRange.to, selectedModels.join(','), selectedApiKeys.join(','), selectedCredentials.join(',')].join(
-                '|',
-            ),
+        () => JSON.stringify([dateRange.to, selectedModels, selectedApiKeys, selectedCredentials]),
         [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials],
     )
     const [allSummaryResolution, setAllSummaryResolution] = useState<{ key: string; from: string; resolved: boolean }>({
@@ -307,7 +304,7 @@ export function UsagePage() {
                     page_size: 1,
                     model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
                     source: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
-                    api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+                    api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
                     sort: 'timestamp',
                     order: 'asc',
                 },
@@ -361,7 +358,7 @@ export function UsagePage() {
             to: effectiveDateTo,
             granularity: summaryGranularity,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
-            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
             groups: chartDimension === 'total' ? ('none' as const) : ('all' as const),
         }),
@@ -405,7 +402,7 @@ export function UsagePage() {
             to: liveSummaryRange.to,
             granularity: 'hourly' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
-            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
             groups: chartDimension === 'total' ? ('none' as const) : ('all' as const),
         }),
@@ -460,7 +457,7 @@ export function UsagePage() {
             to: effectiveDateTo,
             granularity: 'hourly' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
-            api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+            api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
             groups: 'none' as const,
         }),
@@ -581,7 +578,7 @@ export function UsagePage() {
                                          from: effectiveDateFrom,
                                          to: effectiveDateTo,
                                          model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
-                                         api_key: selectedApiKeys.length > 0 ? selectedApiKeys.join(',') : undefined,
+                                         api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
                                          credential: selectedCredentials.length > 0 ?
                                                      selectedCredentials.join(',') :
                                                      undefined,

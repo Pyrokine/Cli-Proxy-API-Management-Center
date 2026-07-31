@@ -5,6 +5,7 @@ import {Card} from '@/components/ui/Card'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {modelPricesApi} from '@/services/api/modelPrices'
 import {
     type ModelCatalogApplyDecision,
     type ModelCatalogDefaultUpdateChange,
@@ -15,6 +16,7 @@ import {
 } from '@/services/api/models'
 import {useNotificationStore} from '@/stores'
 import {buildModelTree, getModelMetadata, modelLeaves, type ModelTreeNode} from '@/utils/modelTree'
+import {formatUsd} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './ModelManagementPage.module.scss'
@@ -336,6 +338,38 @@ export function ModelManagementPage() {
         }
     }, [showNotification, t])
 
+    const observePriceRecalculation = useCallback(() => {
+        showNotification(t('usage_stats.recalculate_started'), 'success')
+        void modelPricesApi.waitForRecalculation().then((status) => {
+            if (!status) {
+                showNotification(t('usage_stats.recalculate_timeout'), 'warning')
+                return
+            }
+            if (status.status === 'error') {
+                showNotification(
+                    `${t('usage_stats.recalculate_failed')}${status.error ? `: ${status.error}` : ''}`,
+                    'error',
+                )
+                return
+            }
+            if (status.status === 'ok') {
+                showNotification(
+                    t('usage_stats.recalculate_success', {
+                        days: status.recalculated_days ?? 0,
+                        cost: formatUsd(status.total_cost ?? 0),
+                    }),
+                    'success',
+                )
+            }
+        }).catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : ''
+            showNotification(
+                `${t('usage_stats.recalculate_failed')}${message ? `: ${message}` : ''}`,
+                'error',
+            )
+        })
+    }, [showNotification, t])
+
     useEffect(() => {
         let cancelled = false
         queueMicrotask(() => {
@@ -492,13 +526,16 @@ export function ModelManagementPage() {
             setCatalogRows(catalog.models ?? [])
             setEditDraft(null)
             showNotification(t('model_management.save_success', { defaultValue: '模型配置已保存' }), 'success')
+            if (catalog.recalculation_pending) {
+                observePriceRecalculation()
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
             setSavingModel(null)
         }
-    }, [editDraft, showNotification, t])
+    }, [editDraft, observePriceRecalculation, showNotification, t])
 
     const handleAddModel = useCallback(async () => {
         if (!addDraft) {
@@ -538,13 +575,16 @@ export function ModelManagementPage() {
             setCatalogRows(catalog.models ?? [])
             setAddDraft(null)
             showNotification(t('model_management.add_success', { defaultValue: '模型已添加' }), 'success')
+            if (catalog.recalculation_pending) {
+                observePriceRecalculation()
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
             setSavingModel(null)
         }
-    }, [addDraft, allModelNames, showNotification, t])
+    }, [addDraft, allModelNames, observePriceRecalculation, showNotification, t])
 
     const deleteModel = useCallback(
         (row: ModelRow) => {
@@ -606,13 +646,16 @@ export function ModelManagementPage() {
                 t('model_management.default_update_applied', { defaultValue: '默认模型更新已处理' }),
                 'success',
             )
+            if (response.catalog.recalculation_pending) {
+                observePriceRecalculation()
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
             setUpdateApplying(false)
         }
-    }, [loadDefaultUpdatePreview, showNotification, t])
+    }, [loadDefaultUpdatePreview, observePriceRecalculation, showNotification, t])
 
     const initialLoading              = loading && modelRows.length === 0
     const refreshing                  = Boolean(savingModel) || (loading && modelRows.length > 0)

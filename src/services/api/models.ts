@@ -46,6 +46,7 @@ export type ModelCatalogRow = ModelCatalogFileModel & {
 export type ModelCatalogResponse = {
     models: ModelCatalogRow[]
     meta?: Record<string, unknown>
+    recalculation_pending?: boolean
 }
 
 export type ModelCatalogPatchRequest = {

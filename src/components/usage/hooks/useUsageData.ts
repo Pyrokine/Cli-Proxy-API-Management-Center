@@ -1,3 +1,4 @@
+import {modelPricesApi} from '@/services/api/modelPrices'
 import {usageApi} from '@/services/api/usage'
 import {USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore} from '@/stores'
 import type {NotificationType} from '@/types'
@@ -20,7 +21,7 @@ export interface ExportFilters {
     from?: string
     to?: string
     model?: string
-    api_key?: string
+    api_key?: string | readonly string[]
     credential?: string
 }
 
@@ -81,6 +82,13 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                           t('usage_stats.recalculate_failed')
                 message    = `${t('usage_stats.model_price_saved')}, ${base}: ${result.recalculation_error}`
                 type       = result.status === 'busy' ? 'warning' : 'error'
+            } else if (result.recalculation_pending) {
+                const recalculationMessage =
+                          result.already_running ?
+                          t('usage_stats.recalculate_busy') :
+                          t('usage_stats.recalculate_started')
+                message = `${t('usage_stats.model_price_saved')}, ${recalculationMessage}`
+                type    = result.already_running ? 'warning' : 'success'
             } else if (result.recalculation) {
                 message = `${t('usage_stats.model_price_saved')}, ${t('usage_stats.recalculate_success', {
                     days: result.recalculated_days ?? 0,
@@ -119,13 +127,27 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         if (!loadModelPricesEnabled) {
             return
         }
-        void loadModelPrices()
-            .then((loaded) => {
+
+        let active = true
+        const load = async () => {
+            try {
+                const loaded = await loadModelPrices()
+                if (!active) {
+                    return
+                }
                 setModelPrices(loaded)
-            })
-            .catch(() => {
-            })
-    }, [enabled, handleAfterPricesSaved, loadModelPricesEnabled, loadUsageStats])
+            } catch (err: unknown) {
+                if (active) {
+                    const message = err instanceof Error ? err.message : ''
+                    showNotification(`${t('notification.load_failed')}${message ? `: ${message}` : ''}`, 'error')
+                }
+            }
+        }
+        void load()
+        return () => {
+            active = false
+        }
+    }, [enabled, loadModelPricesEnabled, loadUsageStats, showNotification, t])
 
     const handleExport = async (filters?: ExportFilters) => {
         setExporting(true)
@@ -241,6 +263,39 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                 const feedback = buildPriceSaveFeedback(result)
                 setPriceSaveFeedback(feedback)
                 showNotification(feedback.message, feedback.type)
+                if (result.recalculation_pending) {
+                    try {
+                        const status = await modelPricesApi.waitForRecalculation()
+                        if (!status) {
+                            throw new Error(t('usage_stats.recalculate_timeout'))
+                        }
+                        const completionFeedback: PriceSaveFeedback =
+                                  status.status === 'ok' ?
+                                  {
+                                      message: t('usage_stats.recalculate_success', {
+                                          days: status.recalculated_days ?? 0,
+                                          cost: formatUsd(status.total_cost ?? 0),
+                                      }),
+                                      type: 'success',
+                                  } :
+                                  {
+                                      message: `${t('usage_stats.recalculate_failed')}${status.error ?
+                                                                                       `: ${status.error}` :
+                                                                                       ''}`,
+                                      type: 'error',
+                                  }
+                        setPriceSaveFeedback(completionFeedback)
+                        showNotification(completionFeedback.message, completionFeedback.type)
+                    } catch (err: unknown) {
+                        const message = err instanceof Error ? err.message : ''
+                        const recalculationFeedback: PriceSaveFeedback = {
+                            message: `${t('usage_stats.recalculate_failed')}${message ? `: ${message}` : ''}`,
+                            type: 'error',
+                        }
+                        setPriceSaveFeedback(recalculationFeedback)
+                        showNotification(recalculationFeedback.message, recalculationFeedback.type)
+                    }
+                }
                 await handleAfterPricesSaved()
             } catch (err: unknown) {
                 const message                     = err instanceof Error ? err.message : ''

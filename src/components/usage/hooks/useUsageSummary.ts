@@ -13,7 +13,7 @@ interface UseUsageSummaryReturn {
         to?: string
         granularity?: Granularity
         model?: string
-        api_key?: string
+        api_key?: string | readonly string[]
         credential?: string
         groups?: 'none' | 'all'
     }) => Promise<UsageSummary | null>
@@ -29,7 +29,7 @@ export function useUsageSummary(
         to?: string
         granularity?: Granularity
         model?: string
-        api_key?: string
+        api_key?: string | readonly string[]
         credential?: string
         groups?: 'none' | 'all'
     },
@@ -51,7 +51,7 @@ export function useUsageSummary(
             to?: string
             granularity?: Granularity
             model?: string
-            api_key?: string
+            api_key?: string | readonly string[]
             credential?: string
             groups?: 'none' | 'all'
         }) => {
