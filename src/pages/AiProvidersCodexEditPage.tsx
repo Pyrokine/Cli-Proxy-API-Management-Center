@@ -20,7 +20,8 @@ import {getErrorMessage} from '@/utils/helpers'
 import {useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField, PriorityField, ProviderModelSection} from './ProviderFormFields'
+import {CODEX_QUICK_FILL_PRESETS} from './providerQuickFill'
+import {HeadersField, PrefixField, PriorityField, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 
 // ---- Form helpers ----
 
@@ -280,6 +281,11 @@ export function AiProvidersCodexEditPage() {
             onSave={handleSave}
             swipeRef={swipeRef}
         >
+            <QuickFillField
+                presets={CODEX_QUICK_FILL_PRESETS}
+                disabled={controlsDisabled}
+                onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
+            />
             <Input
                 label={t('ai_providers.codex_add_modal_key_label')}
                 value={form.apiKey}

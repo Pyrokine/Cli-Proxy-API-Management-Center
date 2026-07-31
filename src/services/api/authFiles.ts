@@ -367,10 +367,7 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
                 if (!name || !alias) {
                     return null
                 }
-                const forceMapping                          = entry['force-mapping'] ===
-                                                              true ||
-                                                              entry.forceMapping ===
-                                                              true
+                const forceMappingValue                     = entry['force-mapping'] ?? entry.forceMapping
                 const normalizedEntry: OAuthModelAliasEntry = { name, alias }
                 if (entry.fork === false) {
                     normalizedEntry.fork = false
@@ -378,17 +375,23 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
                 if (entry.fork === true) {
                     normalizedEntry.fork = true
                 }
-                if (forceMapping) {
-                    normalizedEntry['force-mapping'] = true
+                if (typeof forceMappingValue === 'boolean') {
+                    normalizedEntry['force-mapping'] = forceMappingValue
                 }
                 return normalizedEntry
             })
             .filter(Boolean)
             .filter((entry) => {
-                const aliasEntry       = entry as OAuthModelAliasEntry
-                const forkFlag         = aliasEntry.fork ? '1' : '0'
-                const forceMappingFlag = aliasEntry['force-mapping'] || aliasEntry.forceMapping ? '1' : '0'
-                const dedupeKey        = `${aliasEntry.name.toLowerCase()}::${aliasEntry.alias.toLowerCase()}::${forkFlag}::${forceMappingFlag}`
+                const aliasEntry        = entry as OAuthModelAliasEntry
+                const forkFlag          = aliasEntry.fork ? '1' : '0'
+                const forceMappingValue = aliasEntry['force-mapping'] ?? aliasEntry.forceMapping
+                const forceMappingFlag  = typeof forceMappingValue === 'boolean' ? String(forceMappingValue) : 'unset'
+                const dedupeKey         = JSON.stringify([
+                    aliasEntry.name.toLowerCase(),
+                    aliasEntry.alias.toLowerCase(),
+                    forkFlag,
+                    forceMappingFlag,
+                ])
                 if (seen.has(dedupeKey)) {
                     return false
                 }

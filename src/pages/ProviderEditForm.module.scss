@@ -55,6 +55,46 @@
     }
 }
 
+.quickFillPanel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-md;
+    padding: $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-lg;
+    background: color-mix(in srgb, var(--primary-color) 6%, var(--bg-secondary));
+
+    @include mobile {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+.quickFillTitle {
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.quickFillHint {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.quickFillActions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: $spacing-sm;
+
+    @include mobile {
+        justify-content: flex-start;
+    }
+}
+
 .providerList {
     display: grid;
     gap: $spacing-md;

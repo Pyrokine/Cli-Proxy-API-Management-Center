@@ -175,12 +175,19 @@ export function AiProvidersClaudeEditLayout() {
                     cloak: form.cloak,
                 }
 
-                const nextList =
-                          editIndex !== null
-                          ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-                          : [...configs, payload]
+                let nextList: ProviderKeyConfig[]
+                if (editIndex !== null) {
+                    const existing = configs[editIndex]
+                    if (!existing) {
+                        throw new Error(t('common.invalid_provider_index'))
+                    }
+                    await providersApi.patchClaudeConfig(editIndex, payload, existing)
+                    nextList = await providersApi.getClaudeConfigs()
+                } else {
+                    nextList = [...configs, payload]
+                    await providersApi.saveClaudeConfigs(nextList)
+                }
 
-                await providersApi.saveClaudeConfigs(nextList)
                 setConfigs(nextList)
                 updateConfigValue('claude-api-key', nextList)
                 clearCache('claude-api-key')

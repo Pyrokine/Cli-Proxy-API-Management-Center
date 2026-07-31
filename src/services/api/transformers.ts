@@ -164,7 +164,11 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
     }
 
     const config: ProviderKeyConfig = { apiKey: trimmed }
-    const priority                  = normalizePriority(record)
+    const authIndex                 = record?.['auth-index'] ?? record?.authIndex
+    if (typeof authIndex === 'string' && authIndex.trim()) {
+        config.authIndex = authIndex.trim()
+    }
+    const priority = normalizePriority(record)
     if (priority !== undefined) {
         config.priority = priority
     }

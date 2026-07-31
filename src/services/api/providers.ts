@@ -97,6 +97,17 @@ const serializeBaseKeyPayload = (config: {
     return payload
 }
 
+const serializeCloakConfig = (config: ProviderKeyConfig['cloak']): Record<string, unknown> | null => {
+    if (!config) {
+        return null
+    }
+    return {
+        mode: config.mode?.trim() || 'auto',
+        'strict-mode': Boolean(config.strictMode),
+        'sensitive-words': Array.isArray(config.sensitiveWords) ? config.sensitiveWords : [],
+    }
+}
+
 const serializeProviderKey = (config: ProviderKeyConfig) => {
     const payload = serializeBaseKeyPayload(config)
     if (config.websockets !== undefined) {
@@ -109,24 +120,48 @@ const serializeProviderKey = (config: ProviderKeyConfig) => {
     if (config.excludedModels && config.excludedModels.length) {
         payload['excluded-models'] = config.excludedModels
     }
-    if (config.cloak) {
-        const cloakPayload: Record<string, unknown> = {}
-        const mode                                  = config.cloak.mode?.trim()
-        if (mode) {
-            cloakPayload.mode = mode
-        }
-        if (config.cloak.strictMode !== undefined) {
-            cloakPayload['strict-mode'] = config.cloak.strictMode
-        }
-        if (config.cloak.sensitiveWords && config.cloak.sensitiveWords.length) {
-            cloakPayload['sensitive-words'] = config.cloak.sensitiveWords
-        }
-        if (Object.keys(cloakPayload).length) {
-            payload.cloak = cloakPayload
-        }
+    const cloak = serializeCloakConfig(config.cloak)
+    if (cloak) {
+        payload.cloak = cloak
     }
     return payload
 }
+
+export const buildClaudeConfigPatchPayload = (config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+    const payload: Record<string, unknown> = {
+        priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
+        prefix: config.prefix?.trim() || '',
+        'base-url': config.baseUrl?.trim() || '',
+        'proxy-url': config.proxyUrl?.trim() || '',
+        headers: config.headers ?? {},
+        models: (config.models ?? []).map((model) => {
+            const name  = model.name.trim()
+            const alias = model.alias?.trim() || name
+            return { name, alias }
+        }),
+        'excluded-models': config.excludedModels ?? [],
+    }
+    const cloak         = serializeCloakConfig(config.cloak)
+    const originalCloak = serializeCloakConfig(original.cloak)
+    if (JSON.stringify(cloak) !== JSON.stringify(originalCloak)) {
+        payload.cloak = cloak
+    }
+    const apiKey = config.apiKey.trim()
+    if (apiKey && apiKey !== original.apiKey.trim()) {
+        payload['api-key'] = apiKey
+    }
+    return payload
+}
+
+export const buildClaudeConfigPatchRequest = (
+    index: number,
+    config: ProviderKeyConfig,
+    original: ProviderKeyConfig,
+) => ({
+    index,
+    ...(original.authIndex?.trim() ? { 'auth-index': original.authIndex.trim() } : {}),
+    value: buildClaudeConfigPatchPayload(config, original),
+})
 
 const serializeVertexModelAliases = (models?: ModelAlias[]) =>
     Array.isArray(models)
@@ -239,6 +274,9 @@ export const providersApi = {
             '/claude-api-key',
             configs.map((item) => serializeProviderKey(item)),
         ),
+
+    patchClaudeConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
+        apiClient.patch('/claude-api-key', buildClaudeConfigPatchRequest(index, config, original)),
 
     deleteClaudeConfig: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/claude-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),

@@ -68,6 +68,54 @@ export function PrefixField<T extends { prefix?: string }>({ form, setForm, disa
     )
 }
 
+// ---- Provider Quick Fill ----
+
+interface QuickFillPreset {
+    id: string
+    label: string
+    baseUrl: string
+    name?: string
+}
+
+interface QuickFillFieldProps {
+    presets: QuickFillPreset[]
+    disabled: boolean
+    onApply: (preset: QuickFillPreset) => void
+}
+
+export function QuickFillField({ presets, disabled, onApply }: QuickFillFieldProps) {
+    const { t } = useTranslation()
+    if (presets.length === 0) {
+        return null
+    }
+    return (
+        <div className={styles.quickFillPanel}>
+            <div>
+                <div className={styles.quickFillTitle}>
+                    {t('ai_providers.quick_fill_title', { defaultValue: 'Quick fill' })}
+                </div>
+                <div className={styles.quickFillHint}>
+                    {t('ai_providers.quick_fill_hint', { defaultValue: "Apply the provider's default Base URL" })}
+                </div>
+            </div>
+            <div className={styles.quickFillActions}>
+                {presets.map((preset) => (
+                    <Button
+                        key={preset.id}
+                        type='button'
+                        variant='secondary'
+                        size='sm'
+                        onClick={() => onApply(preset)}
+                        disabled={disabled}
+                    >
+                        {preset.label}
+                    </Button>
+                ))}
+            </div>
+        </div>
+    )
+}
+
 // ---- Custom Headers ----
 
 interface HeadersFieldProps {

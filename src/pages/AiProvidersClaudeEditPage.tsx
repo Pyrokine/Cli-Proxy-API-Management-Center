@@ -17,7 +17,8 @@ import {useNavigate, useOutletContext} from 'react-router-dom'
 import type {ClaudeEditOutletContext} from './AiProvidersClaudeEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
-import {ExcludedModelsField, HeadersField, PrefixField, PriorityField} from './ProviderFormFields'
+import {CLAUDE_QUICK_FILL_PRESETS} from './providerQuickFill'
+import {ExcludedModelsField, HeadersField, PrefixField, PriorityField, QuickFillField} from './ProviderFormFields'
 
 const CLAUDE_TEST_TIMEOUT_MS    = 30_000
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
@@ -259,6 +260,11 @@ export function AiProvidersClaudeEditPage() {
             onSave={() => void handleSave()}
         >
             <div className={styles.openaiEditForm}>
+                <QuickFillField
+                    presets={CLAUDE_QUICK_FILL_PRESETS}
+                    disabled={controlsDisabled}
+                    onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
+                />
                 <Input
                     label={t('ai_providers.claude_add_modal_key_label')}
                     value={form.apiKey}

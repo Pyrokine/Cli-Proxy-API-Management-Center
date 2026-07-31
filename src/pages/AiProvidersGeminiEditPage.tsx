@@ -20,7 +20,8 @@ import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField, PriorityField, ProviderModelSection} from './ProviderFormFields'
+import {GEMINI_QUICK_FILL_PRESETS} from './providerQuickFill'
+import {HeadersField, PrefixField, PriorityField, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 
 // ---- Gemini-specific helpers ----
 
@@ -339,6 +340,11 @@ export function AiProvidersGeminiEditPage() {
             onSave={handleSave}
             swipeRef={swipeRef}
         >
+            <QuickFillField
+                presets={GEMINI_QUICK_FILL_PRESETS}
+                disabled={controlsDisabled}
+                onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
+            />
             <Input
                 label={t('ai_providers.gemini_add_modal_key_label')}
                 placeholder={t('ai_providers.gemini_add_modal_key_placeholder')}

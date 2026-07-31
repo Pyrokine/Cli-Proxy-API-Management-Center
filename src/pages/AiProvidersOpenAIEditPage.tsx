@@ -20,7 +20,8 @@ import {useNavigate, useOutletContext} from 'react-router-dom'
 import type {OpenAIEditOutletContext} from './AiProvidersOpenAIEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField, PriorityField} from './ProviderFormFields'
+import {applyProviderQuickFill, OPENAI_QUICK_FILL_PRESETS} from './providerQuickFill'
+import {HeadersField, PrefixField, PriorityField, QuickFillField} from './ProviderFormFields'
 
 const OPENAI_TEST_TIMEOUT_MS = 30000
 
@@ -385,6 +386,11 @@ export function AiProvidersOpenAIEditPage() {
             onSave={() => void handleSave()}
         >
             <div className={styles.openaiEditForm}>
+                <QuickFillField
+                    presets={OPENAI_QUICK_FILL_PRESETS}
+                    disabled={controlsDisabled}
+                    onApply={(preset) => setForm((prev) => applyProviderQuickFill(prev, preset))}
+                />
                 <Input
                     label={t('ai_providers.openai_add_modal_name_label')}
                     value={form.name}

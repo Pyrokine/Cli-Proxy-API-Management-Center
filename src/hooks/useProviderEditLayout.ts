@@ -10,6 +10,7 @@
  */
 
 import type {ModelEntry} from '@/components/providers/types'
+import {resolveProviderDraftInitAction} from '@/hooks/providerEditLayoutState'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {BaseDraft, DraftSliceState} from '@/stores/createDraftSlice'
@@ -150,12 +151,11 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
     const disableControls  = connectionStatus !== 'connected'
 
     /* ---- Config store ---- */
-    const config       = useConfigStore((state) => state.config)
-    const fetchConfig  = useConfigStore((state) => state.fetchConfig)
-    const isCacheValid = useConfigStore((state) => state.isCacheValid)
+    const config      = useConfigStore((state) => state.config)
+    const fetchConfig = useConfigStore((state) => state.fetchConfig)
 
     const [configs, setConfigs] = useState<C[]>(() => extractConfigs(config))
-    const [loading, setLoading] = useState(() => !isCacheValid(configKey))
+    const [loading, setLoading] = useState(true)
     const [saving, setSaving]   = useState(false)
 
     /* ---- Draft store binding ---- */
@@ -263,16 +263,13 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
     /* ---- Config loading ---- */
     useEffect(() => {
-        let cancelled       = false
-        const hasValidCache = isCacheValid(configKey)
+        let cancelled = false
 
         queueMicrotask(() => {
             if (cancelled) {
                 return
             }
-            if (!hasValidCache) {
-                setLoading(true)
-            }
+            setLoading(true)
 
             fetchConfig(configKey)
                 .then((value) => {
@@ -299,25 +296,23 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         return () => {
             cancelled = true
         }
-    }, [configKey, fetchConfig, isCacheValid, showNotification, t])
+    }, [configKey, fetchConfig, showNotification, t])
 
     /* ---- Draft initialization ---- */
     useEffect(() => {
-        if (loading) {
-            return
-        }
-        if (draft?.initialized) {
-            return
-        }
-
-        if (initialData) {
-            const payload           = seedDraftInit(initialData)
-            const baselineSignature = buildSignature(payload.form as F, payload.testModel)
-            initDraft(draftKey, { ...payload, baselineSignature } as Omit<D, 'initialized'>)
+        const action = resolveProviderDraftInitAction({
+                                                          loading,
+                                                          initialized: Boolean(draft?.initialized),
+                                                          hasIndexParam,
+                                                          invalidIndexParam,
+                                                          initialData,
+                                                      })
+        if (action === 'wait') {
             return
         }
 
-        const payload           = buildEmptyDraftInit()
+        const payload =
+                  action === 'seed' && initialData !== undefined ? seedDraftInit(initialData) : buildEmptyDraftInit()
         const baselineSignature = buildSignature(payload.form as F, payload.testModel)
         initDraft(draftKey, { ...payload, baselineSignature } as Omit<D, 'initialized'>)
     }, [
@@ -325,14 +320,17 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
                   buildSignature,
                   draft?.initialized,
                   draftKey,
+                  hasIndexParam,
                   initDraft,
                   initialData,
+                  invalidIndexParam,
                   loading,
                   seedDraftInit,
               ])
 
-    /* ---- Resolved loading (draft not yet initialized) ---- */
-    const resolvedLoading = !draft?.initialized
+    /* ---- Resolved loading (config or draft not yet initialized) ---- */
+    const draftRequired   = !invalidIndexParam && !invalidIndex
+    const resolvedLoading = loading || (draftRequired && !draft?.initialized)
 
     /* ---- Dirty detection ---- */
     const currentSignature  = useMemo(() => buildSignature(form, testModel), [buildSignature, form, testModel])
