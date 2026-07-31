@@ -134,6 +134,24 @@ export interface PluginStoreInstallOptions {
     version?: string
 }
 
+export interface PluginStoreRelease {
+    tag_name: string
+    name: string
+    published_at: string
+    prerelease: boolean
+    html_url: string
+    asset_names: string[]
+}
+
+export const buildPluginStoreReleasesPath = (id: string, sourceId?: string): string => {
+    const params = new URLSearchParams()
+    if (sourceId?.trim()) {
+        params.set('source', sourceId.trim())
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ''
+    return `/plugin-store/${encodeURIComponent(id)}/releases${query}`
+}
+
 const OAUTH_PROVIDER_ALIASES: Record<string, OAuthProvider> = {
     'anthropic': 'anthropic',
     'antigravity': 'antigravity',
@@ -179,6 +197,8 @@ export const pluginsApi = {
 
 export const pluginStoreApi = {
     list: (config?: AxiosRequestConfig) => apiClient.get<PluginStoreResponse>('/plugin-store', config),
+    listReleases: (id: string, sourceId?: string, config?: AxiosRequestConfig) =>
+        apiClient.get<PluginStoreRelease[]>(buildPluginStoreReleasesPath(id, sourceId), config),
     install: (id: string, options: PluginStoreInstallOptions = {}, config?: AxiosRequestConfig) => {
         const params   = new URLSearchParams()
         const sourceId = options.sourceId?.trim()

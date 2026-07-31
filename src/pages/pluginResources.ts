@@ -52,9 +52,10 @@ export const buildRepositoryURL = (repository: string | undefined): string => {
     return `https://github.com/${trimmed.replace(/^\/+/, '')}`
 }
 
-const OFFICIAL_PLUGIN_REPO_PREFIX      = 'https://github.com/router-for-me/'
+const OFFICIAL_PLUGIN_REPO_OWNER       = 'router-for-me'
 const DEFAULT_PLUGIN_STORE_SOURCE_ID   = 'official'
 const DEFAULT_PLUGIN_STORE_SOURCE_NAME = 'official'
+const GITHUB_REPOSITORY_HOSTS          = new Set(['github.com', 'www.github.com'])
 
 export const getPluginRepositorySlug = (repository: string | undefined): string => {
     const trimmed = (repository ?? '').trim()
@@ -69,12 +70,36 @@ export const getPluginRepositorySlug = (repository: string | undefined): string 
     return repo ? `${owner}/${repo.replace(/\.git$/i, '')}` : owner
 }
 
-export const isOfficialPlugin = (entry: PluginStoreEntry): boolean =>
-    buildRepositoryURL(entry.repository).toLowerCase().startsWith(OFFICIAL_PLUGIN_REPO_PREFIX)
+const getGitHubRepositoryOwner = (repository: string | undefined): string => {
+    const repositoryURL = buildRepositoryURL(repository)
+    if (!repositoryURL) {
+        return ''
+    }
+    try {
+        const url = new URL(repositoryURL)
+        if (url.protocol !== 'https:' || !GITHUB_REPOSITORY_HOSTS.has(url.hostname.toLowerCase())) {
+            return ''
+        }
+        const segments = url.pathname.split('/').filter(Boolean)
+        if (segments.length !== 2) {
+            return ''
+        }
+        const [owner = '', repo = ''] = segments
+        return owner && repo ? owner.toLowerCase() : ''
+    } catch {
+        return ''
+    }
+}
 
-export const isDefaultPluginStoreSource = (entry: Pick<PluginStoreEntry, 'source_id' | 'source_name'>): boolean =>
-    entry.source_id.trim().toLowerCase() === DEFAULT_PLUGIN_STORE_SOURCE_ID ||
-    entry.source_name.trim().toLowerCase() === DEFAULT_PLUGIN_STORE_SOURCE_NAME
+export const isOfficialPlugin = (entry: PluginStoreEntry): boolean =>
+    entry.source_id.trim().toLowerCase() === DEFAULT_PLUGIN_STORE_SOURCE_ID &&
+    getGitHubRepositoryOwner(entry.repository) === OFFICIAL_PLUGIN_REPO_OWNER
+
+export const isDefaultPluginStoreSource = (entry: Pick<PluginStoreEntry, 'source_id' | 'source_name'>): boolean => {
+    const sourceID = entry.source_id.trim().toLowerCase()
+    return sourceID === DEFAULT_PLUGIN_STORE_SOURCE_ID ||
+           (!sourceID && entry.source_name.trim().toLowerCase() === DEFAULT_PLUGIN_STORE_SOURCE_NAME)
+}
 
 export const getPluginConfirmToken = (entry: PluginStoreEntry): string =>
     getPluginRepositorySlug(entry.repository) || entry.id

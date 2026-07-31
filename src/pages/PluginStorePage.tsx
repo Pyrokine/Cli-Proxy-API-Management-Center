@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
+import {Select} from '@/components/ui/Select'
 import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {getErrorMessage} from '@/utils/helpers'
@@ -20,6 +21,14 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import {waitForPluginStoreState} from './pluginPolling'
+import {
+    buildGitHubReleasesPageURL,
+    fetchPluginReleaseVersions,
+    getGitHubRepositorySlug,
+    isValidManualReleaseTag,
+    supportsPluginVersionSelection,
+    type PluginReleaseVersion,
+} from './pluginReleaseVersions'
 import {
     buildRepositoryURL,
     getPluginConfirmToken,
@@ -81,6 +90,7 @@ export function PluginStorePage() {
     const mountedRef           = useRef(true)
     const loadAbortRef         = useRef<AbortController | null>(null)
     const installAbortRef      = useRef<AbortController | null>(null)
+    const releaseAbortRef      = useRef<AbortController | null>(null)
 
     const [data, setData]                                 = useState<PluginStoreResponse | null>(null)
     const [loading, setLoading]                           = useState(true)
@@ -90,6 +100,9 @@ export function PluginStorePage() {
     const [installingKey, setInstallingKey]               = useState('')
     const [installEntry, setInstallEntry]                 = useState<PluginStoreEntry | null>(null)
     const [installVersion, setInstallVersion]             = useState('')
+    const [releaseVersions, setReleaseVersions]           = useState<PluginReleaseVersion[]>([])
+    const [releaseVersionsLoading, setReleaseVersionsLoading] = useState(false)
+    const [releaseVersionsError, setReleaseVersionsError] = useState('')
     const [gateEntry, setGateEntry]                       = useState<PluginStoreEntry | null>(null)
     const [gateIsUpdate, setGateIsUpdate]                 = useState(false)
     const [gateRequestedVersion, setGateRequestedVersion] = useState('')
@@ -131,10 +144,14 @@ export function PluginStorePage() {
         return () => window.clearTimeout(id)
     }, [loadStore])
 
-    useEffect(() => () => {
-        mountedRef.current = false
-        loadAbortRef.current?.abort()
-        installAbortRef.current?.abort()
+    useEffect(() => {
+        mountedRef.current = true
+        return () => {
+            mountedRef.current = false
+            loadAbortRef.current?.abort()
+            installAbortRef.current?.abort()
+            releaseAbortRef.current?.abort()
+        }
     }, [])
 
     const stats = useMemo(() => {
@@ -190,13 +207,55 @@ export function PluginStorePage() {
         { key: 'updates', label: t('plugin_store.filter_updates', { defaultValue: '可更新' }), count: stats.updates },
     ]
 
+    const loadReleaseVersions = useCallback(async (entry: PluginStoreEntry) => {
+        releaseAbortRef.current?.abort()
+        setReleaseVersions([])
+        setReleaseVersionsError('')
+        if (!supportsPluginVersionSelection(entry.install_type) || !getGitHubRepositorySlug(entry.repository)) {
+            setReleaseVersionsLoading(false)
+            return
+        }
+
+        const controller         = new AbortController()
+        releaseAbortRef.current = controller
+        setReleaseVersionsLoading(true)
+        try {
+            const versions = await fetchPluginReleaseVersions(entry.id, entry.source_id, { signal: controller.signal })
+            if (!controller.signal.aborted && mountedRef.current) {
+                setReleaseVersions(versions)
+            }
+        } catch (err: unknown) {
+            if (!isAbortError(err) && mountedRef.current) {
+                setReleaseVersionsError(getErrorMessage(err) || t(
+                    'plugin_store.release_versions_failed',
+                    { defaultValue: '获取 GitHub Releases 失败' },
+                ))
+            }
+        } finally {
+            if (releaseAbortRef.current === controller) {
+                releaseAbortRef.current = null
+            }
+            if (!controller.signal.aborted && mountedRef.current) {
+                setReleaseVersionsLoading(false)
+            }
+        }
+    }, [t])
+
+    const releaseVersionOptions = useMemo(
+        () => releaseVersions.map((release) => ({
+            value: release.tagName,
+            label: `${release.tagName}${release.name && release.name !== release.tagName ? ` · ${release.name}` : ''}${release.prerelease ? ` · ${t('plugin_store.prerelease')}` : ''}`,
+        })),
+        [releaseVersions, t],
+    )
+
     const runInstall = useCallback(async (entry: PluginStoreEntry, isUpdate: boolean, requestedVersion = '') => {
         installAbortRef.current?.abort()
         const controller        = new AbortController()
         installAbortRef.current = controller
         const isActive          = () => mountedRef.current && !controller.signal.aborted
         const entryKey          = storeEntryKey(entry)
-        const version           = requestedVersion.trim()
+        const version           = supportsPluginVersionSelection(entry.install_type) ? requestedVersion.trim() : ''
         setInstallingKey(entryKey)
         try {
             const result = await pluginStoreApi.install(entry.id, {
@@ -310,14 +369,21 @@ export function PluginStorePage() {
     const openInstallOptions = (entry: PluginStoreEntry) => {
         setInstallEntry(entry)
         setInstallVersion('')
+        if (supportsPluginVersionSelection(entry.install_type)) {
+            void loadReleaseVersions(entry)
+        }
     }
 
     const closeInstallOptions = () => {
         if (installingKey) {
             return
         }
+        releaseAbortRef.current?.abort()
         setInstallEntry(null)
         setInstallVersion('')
+        setReleaseVersions([])
+        setReleaseVersionsError('')
+        setReleaseVersionsLoading(false)
     }
 
     const confirmInstallOptions = async () => {
@@ -325,7 +391,14 @@ export function PluginStorePage() {
             return
         }
         const isUpdate = installEntry.installed && installEntry.update_available
-        const version  = installVersion.trim()
+        const version  = supportsPluginVersionSelection(installEntry.install_type) ? installVersion.trim() : ''
+        if (!isValidManualReleaseTag(version)) {
+            showNotification(t(
+                'plugin_store.install_version_invalid',
+                { defaultValue: '版本号必须以数字或 v 加数字开头，且只能包含字母、数字、点号、加号和连字符' },
+            ), 'error')
+            return
+        }
         if (!isOfficialPlugin(installEntry)) {
             setGateEntry(installEntry)
             setGateIsUpdate(isUpdate)
@@ -334,12 +407,16 @@ export function PluginStorePage() {
             setGateTyped('')
             setInstallEntry(null)
             setInstallVersion('')
+            setReleaseVersions([])
+            setReleaseVersionsError('')
             return
         }
         try {
             await runInstall(installEntry, isUpdate, version)
             setInstallEntry(null)
             setInstallVersion('')
+            setReleaseVersions([])
+            setReleaseVersionsError('')
         } catch {
             // runInstall 已提示错误
         }
@@ -468,8 +545,24 @@ export function PluginStorePage() {
         )
     }
 
-    const gateToken       = gateEntry ? getPluginConfirmToken(gateEntry) : ''
-    const installIsUpdate = Boolean(installEntry?.installed && installEntry.update_available)
+    const gateToken                    = gateEntry ? getPluginConfirmToken(gateEntry) : ''
+    const installIsUpdate              = Boolean(installEntry?.installed && installEntry.update_available)
+    const installSupportsVersion       = Boolean(installEntry &&
+                                                  supportsPluginVersionSelection(installEntry.install_type))
+    const installReleasesURL           = installSupportsVersion ?
+                                         buildGitHubReleasesPageURL(installEntry?.repository) :
+                                         ''
+    const selectedReleaseVersion       = releaseVersionOptions.some((option) => option.value === installVersion.trim()) ?
+                                         installVersion.trim() :
+                                         ''
+    const installVersionError          = installSupportsVersion &&
+                                         installVersion.trim() &&
+                                         !isValidManualReleaseTag(installVersion) ?
+                                         t(
+                                             'plugin_store.install_version_invalid',
+                                             { defaultValue: '版本号必须以数字或 v 加数字开头，且只能包含字母、数字、点号、加号和连字符' },
+                                         ) :
+                                         ''
 
     return (
         <div className={styles.page}>
@@ -591,7 +684,7 @@ export function PluginStorePage() {
                         <Button type='button' variant='ghost' onClick={closeInstallOptions}
                                 disabled={Boolean(installingKey)}>{t('common.cancel')}</Button>
                         <Button type='button' onClick={() => void confirmInstallOptions()}
-                                loading={Boolean(installingKey)}>
+                                loading={Boolean(installingKey)} disabled={Boolean(installVersionError)}>
                             {installIsUpdate ?
                              t('plugin_store.update', { defaultValue: '更新' }) :
                              t('plugin_store.install', { defaultValue: '安装' })}
@@ -605,15 +698,70 @@ export function PluginStorePage() {
                             'plugin_store.install_confirm_message',
                             { defaultValue: '确认安装或更新此插件' },
                         )}: {storeEntryTitle(installEntry)}</p>
-                        <Input
-                            label={t('plugin_store.install_version_label', { defaultValue: '指定版本' })}
-                            value={installVersion}
-                            onChange={(event) => setInstallVersion(event.target.value)}
-                            placeholder={installEntry.version ?
-                                         formatPluginVersion(installEntry.version) :
-                                         t('plugin_store.install_version_latest', { defaultValue: '最新版本' })}
-                            spellCheck={false}
-                        />
+                        {installSupportsVersion && (
+                            <>
+                                {installReleasesURL && (
+                                    <div className={styles.releasePicker}>
+                                        <div className={styles.releasePickerHeader}>
+                                            <span>{t(
+                                                'plugin_store.release_versions_label',
+                                                { defaultValue: 'GitHub Release 版本' },
+                                            )}</span>
+                                            <button
+                                                type='button'
+                                                className={styles.linkButton}
+                                                onClick={() => void loadReleaseVersions(installEntry)}
+                                                disabled={releaseVersionsLoading || Boolean(installingKey)}
+                                            >
+                                                {releaseVersionsLoading ?
+                                                 t('common.loading') :
+                                                 t('plugin_store.release_versions_reload', { defaultValue: '重新获取' })}
+                                            </button>
+                                        </div>
+                                        {releaseVersionOptions.length > 0 ? (
+                                            <Select
+                                                value={selectedReleaseVersion}
+                                                options={releaseVersionOptions}
+                                                onChange={setInstallVersion}
+                                                placeholder={t(
+                                                    'plugin_store.release_versions_placeholder',
+                                                    { defaultValue: '选择 GitHub Release tag' },
+                                                )}
+                                                disabled={releaseVersionsLoading || Boolean(installingKey)}
+                                            />
+                                        ) : (
+                                              <p>{releaseVersionsLoading ?
+                                                 t(
+                                                     'plugin_store.release_versions_loading',
+                                                     { defaultValue: '正在获取 GitHub Releases...' },
+                                                 ) :
+                                                 t(
+                                                     'plugin_store.release_versions_empty',
+                                                     { defaultValue: '未获取到 GitHub Release，可手动输入版本' },
+                                                 )}</p>
+                                          )}
+                                        {releaseVersionsError && <div className='error-box'>{releaseVersionsError}</div>}
+                                        <a href={installReleasesURL} target='_blank' rel='noreferrer'>
+                                            {t('plugin_store.open_releases', { defaultValue: '打开 GitHub Releases' })}
+                                        </a>
+                                    </div>
+                                )}
+                                <Input
+                                    label={t('plugin_store.install_version_label', { defaultValue: '指定版本' })}
+                                    value={installVersion}
+                                    onChange={(event) => setInstallVersion(event.target.value)}
+                                    placeholder={installEntry.version ?
+                                                 formatPluginVersion(installEntry.version) :
+                                                 t('plugin_store.install_version_latest', { defaultValue: '最新版本' })}
+                                    hint={t(
+                                        'plugin_store.install_version_hint',
+                                        { defaultValue: '留空安装插件源提供的默认版本；也可以手动输入 GitHub release tag' },
+                                    )}
+                                    error={installVersionError}
+                                    spellCheck={false}
+                                />
+                            </>
+                        )}
                     </div>
                 )}
             </Modal>

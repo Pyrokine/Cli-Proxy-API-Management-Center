@@ -311,3 +311,49 @@
         font-weight: $font-weight-semibold;
     }
 }
+
+.releasePicker {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-tertiary) 52%, transparent);
+
+    a {
+        width: fit-content;
+        color: var(--primary-color);
+        font-size: $font-size-sm;
+        text-decoration: none;
+
+        &:hover,
+        &:focus-visible {
+            text-decoration: underline;
+        }
+    }
+}
+
+.releasePickerHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+}
+
+.linkButton {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--primary-color);
+    cursor: pointer;
+    font: inherit;
+
+    &:disabled {
+        color: var(--text-tertiary);
+        cursor: not-allowed;
+    }
+}
