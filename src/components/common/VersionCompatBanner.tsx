@@ -1,4 +1,5 @@
 import {useAuthStore} from '@/stores'
+import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
 import {useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VersionCompatBanner.module.scss'
@@ -14,42 +15,6 @@ import styles from './VersionCompatBanner.module.scss'
  * augmented endpoints instead of being treated as plain "v1.7.16".
  */
 
-type LooseSemver = [number, number, number, number]
-
-function parseSemver(input: string): LooseSemver | null {
-    const trimmed = String(input ?? '').trim()
-    if (!trimmed) {
-        return null
-    }
-    const lowered = trimmed.toLowerCase()
-    // Treat dev / unknown / empty as "unknown" so the banner doesn't scream at
-    // local dev builds or during upgrades.
-    if (lowered === 'dev' || lowered === 'unknown' || lowered === '-') {
-        return null
-    }
-    const m = trimmed
-        .replace(/^v/i, '')
-        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?:aug|augmented)\.(?<aug>\d+))?/i)
-    if (!m) {
-        return null
-    }
-    return [
-        Number(m.groups!.major),
-        Number(m.groups!.minor),
-        m.groups!.patch !== undefined ? Number(m.groups!.patch) : 0,
-        m.groups!.aug !== undefined ? Number(m.groups!.aug) : 0,
-    ]
-}
-
-function compareSemver(a: LooseSemver, b: LooseSemver): number {
-    for (let i = 0; i < 4; i++) {
-        if (a[i] !== b[i]) {
-            return a[i] - b[i]
-        }
-    }
-    return 0
-}
-
 interface Mismatch {
     reason: 'server_too_old' | 'panel_too_old'
     panelVersion: string
@@ -60,14 +25,14 @@ interface Mismatch {
 
 function detectMismatch(panelVersion: string, serverVersion: string, minPanelVersion: string): Mismatch | null {
     const compatMinServer = typeof __COMPAT_MIN_SERVER__ === 'string' ? __COMPAT_MIN_SERVER__ : ''
-    const panel           = parseSemver(panelVersion)
-    const server          = parseSemver(serverVersion)
-    const minServer       = parseSemver(compatMinServer)
-    const minPanel        = parseSemver(minPanelVersion)
+    const panel           = parseLooseSemver(panelVersion)
+    const server          = parseLooseSemver(serverVersion)
+    const minServer       = parseLooseSemver(compatMinServer)
+    const minPanel        = parseLooseSemver(minPanelVersion)
 
     // Missing data on either side: treat as compatible rather than risking a
     // false-positive banner during rollouts.
-    if (server && minServer && compareSemver(server, minServer) < 0) {
+    if (server && minServer && compareLooseSemver(server, minServer) < 0) {
         return {
             reason: 'server_too_old',
             panelVersion: panelVersion.trim().replace(/^[vV]+/, ''),
@@ -76,7 +41,7 @@ function detectMismatch(panelVersion: string, serverVersion: string, minPanelVer
             minPanelVersion: minPanelVersion.trim().replace(/^[vV]+/, ''),
         }
     }
-    if (panel && minPanel && compareSemver(panel, minPanel) < 0) {
+    if (panel && minPanel && compareLooseSemver(panel, minPanel) < 0) {
         return {
             reason: 'panel_too_old',
             panelVersion: panelVersion.trim().replace(/^[vV]+/, ''),
