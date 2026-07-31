@@ -7,7 +7,7 @@ API** (config, credentials, logs, and usage).
 
 **Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: CLIProxyAPI ≥ v7.2.50-aug.1 (recommended latest)
+**Minimum Required Version**: CLIProxyAPI ≥ v7.2.67-aug.1 (recommended latest)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the
 service is running.
@@ -90,8 +90,8 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 - **API Keys**: manage proxy `api-keys` (add/edit/delete).
 - **AI Providers**:
     - Gemini/Codex/Claude/Vertex key entries (base URL, headers, proxy, model aliases, excluded models, prefix).
-    - OpenAI-compatible providers (multiple API keys, custom headers, model alias import via `/v1/models`, optional
-      browser-side "chat/completions" test).
+    - OpenAI-compatible providers (multiple API keys, custom headers, quick-fill presets, concurrency-safe drafts, model
+      alias import via `/v1/models`, and an optional browser-side "chat/completions" test).
 - **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view
   supported models per credential (when the server supports it), recent request buckets, manage OAuth excluded models
   (supports `*` wildcards), and configure OAuth model alias mappings.
@@ -100,12 +100,14 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 - **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Gemini CLI, Kimi and other
   providers, with backend-scheduled refresh status and manual refresh.
 - **Usage**: requests/tokens charts (hour/day), per-API / per-model / per-credential breakdown, cached/reasoning token
-  breakdown, RPM/TPM window, all-time range resolution, service health cards, and editable local model pricing.
+  breakdown, RPM/TPM window, all-time range resolution, service health cards, server-managed model pricing, and background
+  historical repricing status.
 - **Config**: edit `/config.yaml` in-browser with YAML highlighting + search, then save/reload.
 - **Logs**: tail logs with incremental polling, page auto-refresh interval control, search, hide management traffic,
   show raw logs, clear logs, and download request error log files.
-- **System**: quick links, grouped `/v1/models`, model catalog source/refresh metadata, latest local/remote version and
-  build time, and release history with update actions. Requires at least one proxy API key to query models.
+- **System**: quick links, grouped `/v1/models`, model catalog source/refresh metadata, image artifact cache settings,
+  plugin release selection, latest local/remote version and build time, and release history with update actions. Requires
+  at least one proxy API key to query models.
 
 ## Tech Stack
 

@@ -6,7 +6,7 @@
 
 **主项目**: https://github.com/Pyrokine/CLIProxyAPI
 **示例地址**: https://remote.router-for.me/
-**最低版本要求**: CLIProxyAPI ≥ v7.2.50-aug.1（推荐最新）
+**最低版本要求**: CLIProxyAPI ≥ v7.2.67-aug.1（推荐最新）
 
 从6.0.19版本开始，Web UI 随主程序一起提供；服务运行后，通过 API 端口上的"/management.html"访问它。
 
@@ -83,17 +83,16 @@ remote-management:
 - **API Keys**：管理代理 `api-keys`（增/改/删）。
 - **AI 提供商**：
     - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
-    - OpenAI 兼容提供商（多 Key、Header、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
+    - OpenAI 兼容提供商（多 Key、Header、快速填充预设、并发刷新期间保留草稿、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
 - **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；查看最近请求分桶；管理
   OAuth
   排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。
 - **OAuth**：对支持的提供商发起 OAuth/设备码流程，轮询状态；可选提交回调 `redirect_url`；包含 iFlow Cookie 导入。
 - **配额管理**：管理 Claude、Antigravity、Codex、Gemini CLI、Kimi 等提供商的配额上限与使用情况，支持后端定时刷新状态与手动刷新。
-- **使用统计**：按小时/天图表、按 API / 模型 / 凭证统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、全部时间范围解析、服务健康卡、可编辑本地模型价格用于费用估算。
+- **使用统计**：按小时/天图表、按 API / 模型 / 凭证统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、全部时间范围解析、服务健康卡、后端统一管理的模型价格和后台历史费用重算状态。
 - **配置文件**：浏览器内编辑 `/config.yaml`（YAML 高亮 + 搜索），保存/重载。
 - **日志**：增量拉取日志、页面自动刷新间隔控制、搜索、隐藏管理端流量、查看原始日志、清空日志；下载请求错误日志文件。
-- **系统信息**：快捷链接、拉取 `/v1/models` 并分组展示、查看模型目录来源与刷新信息、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作（需要至少一个代理
-  API Key 才能查询模型）。
+- **系统信息**：快捷链接、拉取 `/v1/models` 并分组展示、查看模型目录来源与刷新信息、管理图片 artifact cache、选择 plugin release、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作（需要至少一个代理 API Key 才能查询模型）。
 
 ## 技术栈
 

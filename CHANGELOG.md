@@ -1,5 +1,57 @@
 # Changelog
 
+## v1.17.14-aug.1 - 2026-07-31
+
+### Release Basis
+
+- Upstream semantic basis: v1.17.14
+- Previous local release: v1.17.10-aug.1
+- Local release: v1.17.14-aug.1
+- Required server: CLIProxyAPI v7.2.67-aug.1 or newer
+
+### What's Changed
+
+- feat(xai): Display xAI weekly billing periods, reset timing, and quota usage from the server
+- feat(providers): Add provider quick-fill presets that update only the Base URL and preserve unsaved drafts while concurrent data refreshes complete
+- feat(config): Manage image artifact cache settings through the visual configuration editor without overwriting concurrent server changes when those fields were not edited
+- feat(plugins): Validate plugin releases, query private repositories through server-side store authentication, and allow an explicit release version to be selected before installation
+- fix(models): Cancel stale model and API-key requests so older responses cannot replace newer selections
+- fix(auth-files): Preserve explicit false values in credential mappings instead of treating them as missing
+- fix(usage): Preserve multi-key filters, redact request-log data, load model prices only from the server, and poll background historical repricing to completion
+- fix(compat): Require CLIProxyAPI v7.2.67-aug.1 and compare augmented versions independently from their semantic base
+
+### Compatibility
+
+- This panel requires CLIProxyAPI v7.2.67-aug.1 because it uses the new model-catalog, usage backup, artifact cache, plugin release, and asynchronous repricing management APIs
+- Saving model prices returns before historical repricing finishes; the Usage page displays progress and refreshes totals after the server reports completion
+- The release asset remains `management.html`; deployment paths do not change
+
+---
+
+### 版本依据
+
+- 上游语义基线：v1.17.14
+- 上一个本地版本：v1.17.10-aug.1
+- 本地发布版本：v1.17.14-aug.1
+- 要求的后端版本：CLIProxyAPI v7.2.67-aug.1 或更新
+
+### 更新内容
+
+- feat(xai)：展示后端返回的 xAI 周账期、重置时间和 quota 使用情况
+- feat(providers)：新增只修改 Base URL 的 provider 快速填充预设，并在并发数据刷新期间保留未保存草稿
+- feat(config)：通过可视化配置编辑器管理图片 artifact cache 配置，未编辑这些字段时保留服务端并发修改
+- feat(plugins)：校验 plugin release，通过后端 store 认证查询私有仓库，并允许安装前明确选择 release 版本
+- fix(models)：取消过期的模型和 API Key 请求，避免旧响应覆盖较新的选择
+- fix(auth-files)：保留凭证映射中的显式 false 值，不再把它们当作缺失字段
+- fix(usage)：保留多 API Key 筛选、对请求日志数据脱敏、只从后端加载模型价格，并轮询后台历史费用重算直到完成
+- fix(compat)：最低后端版本提升到 CLIProxyAPI v7.2.67-aug.1，augmented 版本号独立于语义基线进行比较
+
+### 兼容性
+
+- 本面板要求 CLIProxyAPI v7.2.67-aug.1，因为使用了新的模型目录、使用量备份、artifact cache、plugin release 和异步费用重算管理 API
+- 保存模型价格后不等待历史费用重算，Usage 页面会显示进度，并在后端报告完成后刷新统计结果
+- release 资产仍为 `management.html`，部署路径不变
+
 ## v1.17.10-aug.1 - 2026-07-07
 
 ### Release Basis
