@@ -112,7 +112,19 @@ export interface KimiQuotaState {
     errorStatus?: number
 }
 
+export type XaiBillingPeriodType = 'weekly' | 'monthly' | 'unknown'
+
+export interface XaiProductUsageSummary {
+    product: string
+    usagePercent: number | null
+}
+
 export interface XaiBillingSummary {
+    periodType: XaiBillingPeriodType
+    usagePercent: number | null
+    periodStart?: string | null
+    periodEnd?: string | null
+    productUsage: XaiProductUsageSummary[]
     usedCents: number | null
     includedUsedCents: number | null
     monthlyLimitCents: number | null

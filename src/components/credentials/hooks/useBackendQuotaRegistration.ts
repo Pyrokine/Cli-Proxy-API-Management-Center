@@ -1179,6 +1179,32 @@ function pickString(sources: Array<Record<string, unknown> | null>, keys: string
     return null
 }
 
+function resolveXaiPeriodType(period: Record<string, unknown> | null): 'weekly' | 'monthly' | 'unknown' {
+    const rawType = stringValue(period?.type)?.toLowerCase() ?? ''
+    if (rawType.includes('weekly')) {
+        return 'weekly'
+    }
+    if (rawType.includes('monthly')) {
+        return 'monthly'
+    }
+    return 'unknown'
+}
+
+function normalizeXaiProductUsage(value: unknown): Array<{ product: string; usagePercent: number | null }> {
+    if (!Array.isArray(value)) {
+        return []
+    }
+    return value.flatMap((item, index) => {
+        const record = asRecord(item)
+        if (!record) {
+            return []
+        }
+        const product      = stringValue(record.product) ?? `Product ${index + 1}`
+        const usagePercent = normalizePercent(numberValue(record.usagePercent ?? record.usage_percent))
+        return [{ product, usagePercent }]
+    })
+}
+
 function normalizePercent(value: number | null): number | null {
     if (value === null) {
         return null
@@ -1194,6 +1220,22 @@ function mapXai(fileName: string, data: unknown, setter: Setter) {
 
     const usageRecord         = pickRecord([root], ['usage', 'current_usage', 'billing', 'billing_summary']) ?? root
     const configRecord        = pickRecord([root], ['config', 'billing_config', 'limits', 'subscription']) ?? root
+    const currentPeriod       = pickRecord([configRecord, usageRecord, root], ['currentPeriod', 'current_period'])
+    const periodType          = resolveXaiPeriodType(currentPeriod)
+    const productUsage        = normalizeXaiProductUsage(configRecord.productUsage ?? configRecord.product_usage)
+    const weeklyUsagePercent  = normalizePercent(pickNumber([configRecord, usageRecord, root], [
+        'creditUsagePercent',
+        'credit_usage_percent',
+    ]))
+    const weeklyPeriodStart   = stringValue(currentPeriod?.start) ?? pickString([configRecord, usageRecord, root], [
+        'period_start',
+        'periodStart',
+    ])
+    const weeklyPeriodEnd     = stringValue(currentPeriod?.end) ?? pickString([configRecord, usageRecord, root], [
+        'period_end',
+        'periodEnd',
+    ])
+    const hasWeeklyData       = weeklyUsagePercent !== null || periodType === 'weekly' || productUsage.length > 0
     const billingSources      = [usageRecord, configRecord, root]
     const usedCents           = pickNumber(billingSources, [
         'used_cents',
@@ -1281,9 +1323,9 @@ function mapXai(fileName: string, data: unknown, setter: Setter) {
         'resetAt',
     ])
 
-    if (usedPercent ===
-        null ||
-        (monthlyLimitCents === null && usedCents === null && onDemandCapCents === null && !billingPeriodEnd)) {
+    const hasMonthlyData = usedPercent !== null || monthlyLimitCents !== null || usedCents !== null ||
+                           onDemandCapCents !== null || Boolean(billingPeriodEnd)
+    if (!hasWeeklyData && !hasMonthlyData) {
         throw invalidQuotaPayload('xAI')
     }
 
@@ -1297,6 +1339,11 @@ function mapXai(fileName: string, data: unknown, setter: Setter) {
     const state: XaiQuotaState = {
         status: 'success',
         billing: {
+            periodType: hasWeeklyData ? (periodType === 'unknown' ? 'weekly' : periodType) : 'monthly',
+            usagePercent: hasWeeklyData ? weeklyUsagePercent : usedPercent,
+            periodStart: hasWeeklyData ? weeklyPeriodStart : billingPeriodStart,
+            periodEnd: hasWeeklyData ? weeklyPeriodEnd : billingPeriodEnd,
+            productUsage,
             usedCents,
             includedUsedCents,
             monthlyLimitCents,
@@ -1304,8 +1351,8 @@ function mapXai(fileName: string, data: unknown, setter: Setter) {
             onDemandUsedCents,
             onDemandUsedPercent,
             usedPercent,
-            billingPeriodStart,
-            billingPeriodEnd,
+            billingPeriodStart: hasMonthlyData ? billingPeriodStart : undefined,
+            billingPeriodEnd: hasMonthlyData ? billingPeriodEnd : undefined,
         },
         planType,
     }

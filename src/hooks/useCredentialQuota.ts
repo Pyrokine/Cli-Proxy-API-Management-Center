@@ -90,9 +90,44 @@ function formatUsdCents(value: number | null | undefined): string | null {
 }
 
 function fromXai(state: XaiQuotaState): QuotaItem[] {
-    if (state.status !== 'success' || !state.billing || state.billing.usedPercent === null) {
+    if (state.status !== 'success' || !state.billing) {
         return []
     }
+
+    const items: QuotaItem[] = []
+    if (state.billing.periodType === 'weekly') {
+        const weeklyUsed      = state.billing.usagePercent !== null ? Math.max(0, state.billing.usagePercent) : null
+        const weeklyRemaining = weeklyUsed !== null ? Math.max(0, 100 - weeklyUsed) : null
+        if (weeklyRemaining !== null || state.billing.periodEnd) {
+            items.push({
+                model: i18n.t('xai_quota.weekly_limit', { defaultValue: 'Weekly limit' }),
+                percent: Math.round(weeklyRemaining ?? 100),
+                detail: weeklyUsed !== null ? i18n.t('xai_quota.used_percent', {
+                    percent: Math.round(weeklyUsed),
+                    defaultValue: '{{percent}}% used',
+                }) : undefined,
+                resetLabel: state.billing.periodEnd ? formatQuotaResetTime(state.billing.periodEnd) : undefined,
+            })
+        }
+        for (const usage of state.billing.productUsage) {
+            if (usage.usagePercent === null) {
+                continue
+            }
+            items.push({
+                model: usage.product,
+                percent: Math.round(Math.max(0, 100 - usage.usagePercent)),
+                detail: i18n.t('xai_quota.used_percent', {
+                    percent: Math.round(Math.max(0, usage.usagePercent)),
+                    defaultValue: '{{percent}}% used',
+                }),
+            })
+        }
+    }
+
+    if (state.billing.usedPercent === null) {
+        return items
+    }
+
     const limit                  = formatUsdCents(state.billing.monthlyLimitCents)
     const includedUsed           = state.billing.includedUsedCents ?? state.billing.usedCents ?? 0
     const remaining              = state.billing.monthlyLimitCents !== null ?
@@ -117,7 +152,7 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
                                  ) :
                                  null,
                              ].filter(Boolean).join(' · ') || undefined
-        return [monthlyItem]
+        return [...items, monthlyItem]
     }
 
     const onDemandCap       = formatUsdCents(state.billing.onDemandCapCents)
@@ -128,6 +163,7 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
                               Math.max(0, 100 - state.billing.onDemandUsedPercent)
 
     return [
+        ...items,
         {
             model: i18n.t('xai_quota.pay_as_you_go_label', { defaultValue: 'Pay as you go' }),
             percent: Math.round(onDemandPercent),
