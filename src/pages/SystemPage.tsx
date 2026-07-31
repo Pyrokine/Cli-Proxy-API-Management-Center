@@ -11,19 +11,20 @@ import iconOpenaiDark from '@/assets/icons/openai-dark.svg'
 import iconOpenaiLight from '@/assets/icons/openai-light.svg'
 import iconQwen from '@/assets/icons/qwen.svg'
 import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
+import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
 import {VersionHistoryModal} from '@/components/system/VersionHistoryModal'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {IconBookOpen, IconCode, IconExternalLink, IconGithub} from '@/components/ui/icons'
 import {Select} from '@/components/ui/Select'
+import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
 import {versionApi} from '@/services/api'
-import {apiKeysApi} from '@/services/api/apiKeys'
 import {modelCatalogApi, type ModelCatalogMeta} from '@/services/api/modelCatalog'
 import {type BannedIPEntry, rateLimitsApi, type RateLimitUnbanHistoryEntry} from '@/services/api/rateLimits'
 import {type Release, releasesApi} from '@/services/api/releases'
 import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useThemeStore} from '@/stores'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
-import {formatDateTime, normalizeApiKeyList} from '@/utils/format'
+import {formatDateTime} from '@/utils/format'
 import {classifyModels, getLocalizedOtherLabel} from '@/utils/models'
 import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -89,6 +90,8 @@ export function SystemPage() {
     const { showNotification, showConfirmation } = useNotificationStore()
     const addPersistentNotification              = useNotificationStore((s) => s.addPersistentNotification)
     const resolvedTheme                          = useThemeStore((state) => state.resolvedTheme)
+    const transitionLayer                        = usePageTransitionLayer()
+    const pageLayerStatus                        = transitionLayer?.status ?? 'current'
     const auth                                   = useAuthStore()
     const config                                 = useConfigStore((state) => state.config)
     const fetchConfig                            = useConfigStore((state) => state.fetchConfig)
@@ -98,11 +101,13 @@ export function SystemPage() {
     const modelsError          = useModelsStore((state) => state.error)
     const fetchModelsFromStore = useModelsStore((state) => state.fetchModels)
     const modelsCache          = useModelsStore((state) => state.cache)
+    const { resolve: resolveApiKeysForModels, clearCache: clearApiKeysCache } = useApiKeysResolver()
 
     const [modelStatus, setModelStatus]                   = useState<{
         type: 'success' | 'warning' | 'error' | 'muted'
         message: string
     }>()
+    const [modelRequestLoading, setModelRequestLoading]   = useState(false)
     const [checkingVersion, setCheckingVersion]           = useState(false)
     const [versionHistoryTarget, setVersionHistoryTarget] = useState<'panel' | 'cpa' | null>(null)
     const [latestPanelVersion, setLatestPanelVersion]     = useState<string | null>(null)
@@ -118,9 +123,12 @@ export function SystemPage() {
     const [rateLimitLoading, setRateLimitLoading]         = useState(false)
     const [unbanning, setUnbanning]                       = useState<string | null>(null)
 
-    const apiKeysCache               = useRef<string[]>([])
+    const modelsRequestGeneration    = useRef(0)
     const versionCheckInFlight       = useRef<Promise<void> | null>(null)
     const notifiedRateLimitEventKeys = useRef<Set<string>>(new Set())
+    const invalidateModelsRequest    = useCallback(() => {
+        ++modelsRequestGeneration.current
+    }, [])
 
     const otherLabel     = useMemo(() => getLocalizedOtherLabel(t), [t])
     const groupedModels  = useMemo(() => classifyModels(models, { otherLabel, t }), [models, otherLabel, t])
@@ -195,32 +203,13 @@ export function SystemPage() {
         return resolvedTheme === 'dark' ? iconEntry.dark : iconEntry.light
     }
 
-    const resolveApiKeysForModels = useCallback(async () => {
-        if (apiKeysCache.current.length) {
-            return apiKeysCache.current
-        }
-
-        const configKeys = normalizeApiKeyList(config?.apiKeys)
-        if (configKeys.length) {
-            apiKeysCache.current = configKeys
-            return configKeys
-        }
-
-        try {
-            const list       = await apiKeysApi.list()
-            const normalized = normalizeApiKeyList(list)
-            if (normalized.length) {
-                apiKeysCache.current = normalized
-            }
-            return normalized
-        } catch (err) {
-            console.warn('Auto loading API keys for models failed:', err)
-            return []
-        }
-    }, [config?.apiKeys])
-
     const fetchModels = async ({ forceRefresh = false }: { forceRefresh?: boolean } = {}) => {
+        const requestGeneration = ++modelsRequestGeneration.current
+        if (pageLayerStatus !== 'current') {
+            return
+        }
         if (auth.connectionStatus !== 'connected') {
+            setModelRequestLoading(false)
             setModelStatus({
                                type: 'warning',
                                message: t('notification.connection_required'),
@@ -229,20 +218,28 @@ export function SystemPage() {
         }
 
         if (!auth.apiBase) {
+            setModelRequestLoading(false)
             showNotification(t('notification.connection_required'), 'warning')
             return
         }
 
         if (forceRefresh) {
-            apiKeysCache.current = []
+            clearApiKeysCache()
         }
 
+        setModelRequestLoading(true)
         setModelStatus({ type: 'muted', message: t('system_info.models_loading') })
         try {
-            const apiKeys    = await resolveApiKeysForModels()
+            const apiKeys = await resolveApiKeysForModels()
+            if (requestGeneration !== modelsRequestGeneration.current) {
+                return
+            }
             const primaryKey = apiKeys[0]
             const list       = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh)
-            const hasModels  = list.length > 0
+            if (requestGeneration !== modelsRequestGeneration.current) {
+                return
+            }
+            const hasModels = list.length > 0
             setModelStatus({
                                type: hasModels ? 'success' : 'warning',
                                message: hasModels
@@ -257,12 +254,19 @@ export function SystemPage() {
                 )
             }
         } catch (err: unknown) {
+            if (requestGeneration !== modelsRequestGeneration.current) {
+                return
+            }
             const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
             const suffix  = message ? `: ${message}` : ''
             const text    = `${t('system_info.models_error')}${suffix}`
             setModelStatus({ type: 'error', message: text })
             if (forceRefresh) {
                 addPersistentNotification(text, 'error', 'model-update')
+            }
+        } finally {
+            if (requestGeneration === modelsRequestGeneration.current) {
+                setModelRequestLoading(false)
             }
         }
     }
@@ -466,17 +470,31 @@ export function SystemPage() {
     }, [fetchCatalogMeta, showNotification, t])
 
     useEffect(() => {
+        if (pageLayerStatus !== 'current') {
+            invalidateModelsRequest()
+        }
+        return invalidateModelsRequest
+    }, [invalidateModelsRequest, pageLayerStatus])
+
+    useEffect(() => {
         fetchConfig().catch(() => {
             // ignore
         })
     }, [fetchConfig])
 
     useEffect(() => {
+        let cancelled = false
         queueMicrotask(() => {
-            void fetchModels()
+            if (!cancelled && pageLayerStatus === 'current') {
+                void fetchModels()
+            }
         })
+        return () => {
+            cancelled = true
+            invalidateModelsRequest()
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [auth.connectionStatus, auth.apiBase])
+    }, [auth.connectionStatus, auth.apiBase, config?.apiKeys, pageLayerStatus])
 
     useEffect(() => {
         if (auth.connectionStatus !== 'connected') {
@@ -735,7 +753,7 @@ export function SystemPage() {
                                     variant='secondary'
                                     size='sm'
                                     onClick={() => fetchModels({ forceRefresh: true })}
-                                    loading={modelsLoading}
+                                    loading={modelRequestLoading || modelsLoading}
                                 >
                                     {t('common.refresh')}
                                 </Button>
@@ -793,8 +811,8 @@ export function SystemPage() {
                         </p>
                     </div>
                     {modelStatus && <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>}
-                    {modelsError && <div className='error-box'>{modelsError}</div>}
-                    {modelsLoading ? (
+                    {!modelRequestLoading && !modelsLoading && modelsError && <div className='error-box'>{modelsError}</div>}
+                    {modelRequestLoading || modelsLoading ? (
                         <div className='hint'>{t('common.loading')}</div>
                     ) : models.length === 0 ? (
                         <div className={styles.emptyStatePanel}>

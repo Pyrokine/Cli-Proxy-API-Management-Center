@@ -3,8 +3,9 @@
  */
 
 import {normalizeApiBase} from '@/utils/connection'
+import {REQUEST_TIMEOUT_MS} from '@/utils/constants'
 import {normalizeModelList} from '@/utils/models'
-import axios from 'axios'
+import axios, {type AxiosRequestConfig} from 'axios'
 import {apiCallApi, getApiCallErrorMessage} from './apiCall'
 import {apiClient} from './client'
 
@@ -224,8 +225,11 @@ const fetchModelsViaApiCallWithEndpoint = async (
 }
 
 export const modelsApi = {
-    async fetchRuntimeModels() {
-        const response = await apiClient.get<{ models?: unknown[]; data?: unknown[] } | unknown[]>('/runtime-models')
+    async fetchRuntimeModels(config?: AxiosRequestConfig) {
+        const response = await apiClient.get<{ models?: unknown[]; data?: unknown[] } | unknown[]>(
+            '/runtime-models',
+            config,
+        )
         return normalizeModelList(response, { dedupe: true })
     },
 
@@ -259,7 +263,12 @@ export const modelsApi = {
     /**
      * Fetch available models from /v1/models endpoint (for system info page)
      */
-    async fetchModels(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
+    async fetchModels(
+        baseUrl: string,
+        apiKey?: string,
+        headers: Record<string, string> = {},
+        config?: AxiosRequestConfig,
+    ) {
         const endpoint = buildV1ModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
@@ -271,7 +280,12 @@ export const modelsApi = {
         }
 
         const response = await axios.get(endpoint, {
-            headers: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
+            ...config,
+            timeout: config?.timeout ?? REQUEST_TIMEOUT_MS,
+            headers: {
+                ...config?.headers,
+                ...resolvedHeaders,
+            },
         })
         const payload  = response.data?.data ?? response.data?.models ?? response.data
         return normalizeModelList(payload, { dedupe: true })

@@ -1,9 +1,10 @@
+import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
 import {IconBot, IconKey, IconSatellite} from '@/components/ui/icons'
 import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
 import {apiKeysApi, authFilesApi, providersApi} from '@/services/api'
 import {useAuthStore, useConfigStore, useModelsStore} from '@/stores'
 import {formatDateTime} from '@/utils/format'
-import {type ReactNode, useCallback, useEffect, useState} from 'react'
+import {type ReactNode, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router-dom'
 import styles from './DashboardPage.module.scss'
@@ -42,6 +43,8 @@ function getTimeOfDay(): TimeOfDay {
 
 export function DashboardPage() {
     const { t, i18n }      = useTranslation()
+    const transitionLayer  = usePageTransitionLayer()
+    const pageLayerStatus  = transitionLayer?.status ?? 'current'
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
     const serverVersion    = useAuthStore((state) => state.serverVersion)
     const serverBuildDate  = useAuthStore((state) => state.serverBuildDate)
@@ -50,6 +53,7 @@ export function DashboardPage() {
 
     const models               = useModelsStore((state) => state.models)
     const modelsLoading        = useModelsStore((state) => state.loading)
+    const modelsError          = useModelsStore((state) => state.error)
     const fetchModelsFromStore = useModelsStore((state) => state.fetchModels)
 
     const [stats, setStats] = useState<{
@@ -67,11 +71,16 @@ export function DashboardPage() {
                                                                           openai: null,
                                                                       })
 
-    const [loading, setLoading]         = useState(true)
-    const [timeOfDay, setTimeOfDay]     = useState<TimeOfDay>(getTimeOfDay)
+    const [loading, setLoading]                           = useState(true)
+    const [modelsRequestLoading, setModelsRequestLoading] = useState(false)
+    const [timeOfDay, setTimeOfDay]                       = useState<TimeOfDay>(getTimeOfDay)
     const [currentTime, setCurrentTime] = useState(() => new Date())
 
     const { resolve: resolveApiKeys, clearCache: clearApiKeysCache } = useApiKeysResolver()
+    const modelsRequestGeneration                                  = useRef(0)
+    const invalidateModelsRequest                                  = useCallback(() => {
+        ++modelsRequestGeneration.current
+    }, [])
 
     useEffect(() => {
         clearApiKeysCache()
@@ -86,20 +95,34 @@ export function DashboardPage() {
     }, [])
 
     const fetchModels = useCallback(async () => {
+        const requestGeneration = ++modelsRequestGeneration.current
+        if (pageLayerStatus !== 'current') {
+            return
+        }
         if (connectionStatus !== 'connected' || !apiBase) {
+            setModelsRequestLoading(false)
             return
         }
 
+        setModelsRequestLoading(true)
         try {
-            const apiKeys    = await resolveApiKeys()
+            const apiKeys = await resolveApiKeys()
+            if (requestGeneration !== modelsRequestGeneration.current) {
+                return
+            }
             const primaryKey = apiKeys[0]
             await fetchModelsFromStore(apiBase, primaryKey)
         } catch {
             // Ignore model fetch errors on dashboard
+        } finally {
+            if (requestGeneration === modelsRequestGeneration.current) {
+                setModelsRequestLoading(false)
+            }
         }
-    }, [connectionStatus, apiBase, resolveApiKeys, fetchModelsFromStore])
+    }, [pageLayerStatus, connectionStatus, apiBase, resolveApiKeys, fetchModelsFromStore])
 
     useEffect(() => {
+        let cancelled = false
         const fetchStats = async () => {
             setLoading(true)
             try {
@@ -131,6 +154,9 @@ export function DashboardPage() {
         }
 
         queueMicrotask(() => {
+            if (cancelled || pageLayerStatus !== 'current') {
+                return
+            }
             if (connectionStatus === 'connected') {
                 void fetchStats()
                 void fetchModels()
@@ -138,7 +164,11 @@ export function DashboardPage() {
                 setLoading(false)
             }
         })
-    }, [connectionStatus, fetchModels])
+        return () => {
+            cancelled = true
+            invalidateModelsRequest()
+        }
+    }, [connectionStatus, fetchModels, invalidateModelsRequest, pageLayerStatus])
 
     const providerStatsReady =
               providerStats.gemini !== null &&
@@ -183,10 +213,10 @@ export function DashboardPage() {
         },
         {
             label: t('dashboard.available_models'),
-            value: modelsLoading ? '-' : models.length,
+            value: modelsRequestLoading || modelsLoading || modelsError ? '-' : models.length,
             icon: <IconSatellite size={24} />,
             path: '/system',
-            loading: modelsLoading,
+            loading: modelsRequestLoading || modelsLoading,
             sublabel: t('dashboard.available_models_desc'),
         },
     ]

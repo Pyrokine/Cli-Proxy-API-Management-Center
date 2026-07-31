@@ -9,6 +9,21 @@ import {create} from 'zustand'
 
 type ModelsCacheScope = 'runtime' | 'public'
 
+let publicRequestGeneration  = 0
+let runtimeRequestGeneration = 0
+
+interface ModelsRequest {
+    key: string
+    generation: number
+    controller: AbortController
+    promise: Promise<ModelInfo[]>
+}
+
+let publicRequest: ModelsRequest | null  = null
+let runtimeRequest: ModelsRequest | null = null
+
+const getPublicRequestKey = (apiBase: string, apiKey?: string): string => JSON.stringify([apiBase, apiKey ?? ''])
+
 interface ModelsCache {
     data: ModelInfo[]
     timestamp: number
@@ -39,25 +54,43 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
     runtimeCache: null,
 
     fetchModels: async (apiBase, apiKey, forceRefresh = false) => {
+        const requestKey               = getPublicRequestKey(apiBase, apiKey)
         const { cache, isCacheValid } = get()
         const canUseCache             = !apiKey
 
+        if (!forceRefresh && publicRequest?.key === requestKey) {
+            return publicRequest.promise
+        }
+
         if (canUseCache && !forceRefresh && isCacheValid(apiBase, 'public') && cache) {
-            set({ models: cache.data, error: null })
+            if (publicRequest) {
+                ++publicRequestGeneration
+                publicRequest.controller.abort()
+                publicRequest = null
+            }
+            set({ models: cache.data, loading: false, error: null })
             return cache.data
         }
 
+        publicRequest?.controller.abort()
+        const requestGeneration = ++publicRequestGeneration
+        const controller        = new AbortController()
+        const requestPromise    = modelsApi.fetchModels(apiBase, apiKey, {}, { signal: controller.signal })
+        publicRequest           = { key: requestKey, generation: requestGeneration, controller, promise: requestPromise }
         set({ loading: true, error: null })
 
         try {
-            const list = await modelsApi.fetchModels(apiBase, apiKey)
+            const list = await requestPromise
             const now  = Date.now()
 
-            set({
-                    models: list,
-                    loading: false,
-                    cache: canUseCache ? { data: list, timestamp: now, apiBase, scope: 'public' } : null,
-                })
+            if (requestGeneration === publicRequestGeneration) {
+                set({
+                        models: list,
+                        loading: false,
+                        error: null,
+                        cache: canUseCache ? { data: list, timestamp: now, apiBase, scope: 'public' } : null,
+                    })
+            }
 
             return list
         } catch (error: unknown) {
@@ -65,49 +98,84 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
                       error instanceof Error ?
                       error.message :
                       typeof error === 'string' ? error : 'Failed to fetch models'
-            set({
-                    error: message,
-                    loading: false,
-                    models: [],
-                })
+            if (requestGeneration === publicRequestGeneration) {
+                set({
+                        error: message,
+                        loading: false,
+                        models: [],
+                    })
+            }
             throw error
+        } finally {
+            if (publicRequest?.generation === requestGeneration) {
+                publicRequest = null
+            }
         }
     },
 
     fetchRuntimeModels: async (apiBase, forceRefresh = false) => {
         const { runtimeCache, isCacheValid } = get()
+        if (!forceRefresh && runtimeRequest?.key === apiBase) {
+            return runtimeRequest.promise
+        }
+
         if (!forceRefresh && isCacheValid(apiBase, 'runtime') && runtimeCache) {
-            set({ runtimeModels: runtimeCache.data, error: null })
+            if (runtimeRequest) {
+                ++runtimeRequestGeneration
+                runtimeRequest.controller.abort()
+                runtimeRequest = null
+            }
+            set({ runtimeModels: runtimeCache.data, loading: false, error: null })
             return runtimeCache.data
         }
 
+        runtimeRequest?.controller.abort()
+        const requestGeneration = ++runtimeRequestGeneration
+        const controller        = new AbortController()
+        const requestPromise    = modelsApi.fetchRuntimeModels({ signal: controller.signal })
+        runtimeRequest          = { key: apiBase, generation: requestGeneration, controller, promise: requestPromise }
         set({ loading: true, error: null })
 
         try {
-            const list = await modelsApi.fetchRuntimeModels()
+            const list = await requestPromise
             const now  = Date.now()
-            set({
-                    runtimeModels: list,
-                    loading: false,
-                    runtimeCache: { data: list, timestamp: now, apiBase, scope: 'runtime' },
-                })
+            if (requestGeneration === runtimeRequestGeneration) {
+                set({
+                        runtimeModels: list,
+                        loading: false,
+                        error: null,
+                        runtimeCache: { data: list, timestamp: now, apiBase, scope: 'runtime' },
+                    })
+            }
             return list
         } catch (error: unknown) {
             const message =
                       error instanceof Error ?
                       error.message :
                       typeof error === 'string' ? error : 'Failed to fetch models'
-            set({
-                    error: message,
-                    loading: false,
-                    runtimeModels: [],
-                })
+            if (requestGeneration === runtimeRequestGeneration) {
+                set({
+                        error: message,
+                        loading: false,
+                        runtimeModels: [],
+                    })
+            }
             throw error
+        } finally {
+            if (runtimeRequest?.generation === requestGeneration) {
+                runtimeRequest = null
+            }
         }
     },
 
     clearCache: () => {
-        set({ cache: null, runtimeCache: null, models: [], runtimeModels: [] })
+        ++publicRequestGeneration
+        ++runtimeRequestGeneration
+        publicRequest?.controller.abort()
+        runtimeRequest?.controller.abort()
+        publicRequest  = null
+        runtimeRequest = null
+        set({ cache: null, runtimeCache: null, models: [], runtimeModels: [], loading: false, error: null })
     },
 
     isCacheValid: (apiBase, scope = 'public') => {
