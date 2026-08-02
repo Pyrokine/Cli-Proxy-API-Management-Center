@@ -17,6 +17,7 @@ export interface SummaryCredentialEntry {
     filterKey: string
     provider: string
     source: string
+    sourceKind: 'api_key' | 'identity' | ''
     normalizedSourceId: string
     success: number
     failure: number
@@ -54,12 +55,13 @@ export function summaryToCredentialEntries(
         const fallback           = splitCredentialKey(key)
         const provider           = (stats.provider ?? fallback.provider).trim()
         const source             = (stats.source ?? fallback.source).trim()
+        const sourceKind         = stats.source_kind ?? ''
         const normalizedSourceId = normalizeUsageSourceId(source)
         if (!source) {
             return
         }
 
-        const filterKey = provider ? `${provider}:${source}` : source
+        const filterKey = stats.filter_key?.trim() || (provider ? `${provider}:${source}` : source)
         const existing  = merged.get(filterKey)
         if (existing) {
             existing.success += stats.success
@@ -72,6 +74,7 @@ export function summaryToCredentialEntries(
             filterKey,
             provider,
             source,
+            sourceKind,
             normalizedSourceId,
             success: stats.success,
             failure: stats.failure,

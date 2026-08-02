@@ -260,9 +260,7 @@ export const modelsApi = {
         )
     },
 
-    /**
-     * Fetch available models from /v1/models endpoint (for system info page)
-     */
+    /** Fetch available models from the public /v1/models endpoint. */
     async fetchModels(
         baseUrl: string,
         apiKey?: string,

@@ -21,8 +21,8 @@ describe('version compatibility', () => {
         expect(parseLooseSemver('-')).toBeNull()
     })
 
-    test('requires CLIProxyAPI v7.2.67-aug.1', () => {
-        expect(viteConfig).toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.1')")
-        expect(viteConfig).not.toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.1.68-aug.1')")
+    test('requires CLIProxyAPI v7.2.67-aug.2', () => {
+        expect(viteConfig).toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.2')")
+        expect(viteConfig).not.toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.1')")
     })
 })

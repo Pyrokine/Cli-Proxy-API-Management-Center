@@ -33,23 +33,35 @@ function capitalizeProvider(name: string): string {
     return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
 }
 
-function formatCredentialOptionLabel(provider: string, source: string, aliases?: Record<string, string>): string {
+function formatCredentialOptionLabel(
+    provider: string,
+    source: string,
+    sourceKind: 'api_key' | 'identity' | '',
+    aliases?: Record<string, string>,
+): string {
     const aliasOrMasked = aliases?.[source] || maskSensitiveKey(source)
+    const kindLabel     = sourceKind === 'api_key' ? 'API key' : sourceKind === 'identity' ? 'Identity' : ''
+    const display       = kindLabel ? `${aliasOrMasked} · ${kindLabel}` : aliasOrMasked
     if (provider) {
-        return `[${capitalizeProvider(provider)}] ${aliasOrMasked}`
+        return `[${capitalizeProvider(provider)}] ${display}`
     }
-    return aliasOrMasked
+    return display
 }
 
 function normalizeCredentialOption(
-    entry: { filterKey: string; provider: string; source: string },
+    entry: {
+        filterKey: string
+        provider: string
+        source: string
+        sourceKind: 'api_key' | 'identity' | ''
+    },
     aliases?: Record<string, string>,
 ): { value: string; label: string } {
     const inferredProvider = entry.provider || inferProviderFromAuthFileName(entry.source)
     const normalizedSource = inferredProvider ? formatAuthFileDisplayName(entry.source) || entry.source : entry.source
     return {
         value: entry.filterKey,
-        label: formatCredentialOptionLabel(inferredProvider, normalizedSource, aliases),
+        label: formatCredentialOptionLabel(inferredProvider, normalizedSource, entry.sourceKind, aliases),
     }
 }
 
@@ -73,7 +85,7 @@ function buildCredentialOptionsFromSummary(
     const deduped = new Map<string, { value: string; label: string; sortKey: string }>()
     summaryToCredentialEntries(sourceSummary.by_credential).forEach((entry) => {
         const option    = normalizeCredentialOption(entry, aliases)
-        const dedupeKey = buildCredentialOptionDisplayKey(entry.provider, entry.source, aliases)
+        const dedupeKey = entry.filterKey || buildCredentialOptionDisplayKey(entry.provider, entry.source, aliases)
         if (!deduped.has(dedupeKey)) {
             deduped.set(dedupeKey, { ...option, sortKey: option.label.toLowerCase() })
         }
@@ -195,7 +207,7 @@ export function FilterBar({
                 const source   = formatAuthFileDisplayName(rawName) || info.name
                 result.push({
                                 value: rawName,
-                                label: formatCredentialOptionLabel(provider, source, aliases),
+                                label: formatCredentialOptionLabel(provider, source, '', aliases),
                                 sortKey: `${normalizeCredentialProviderForDisplay(provider)}::${source.toLowerCase()}`,
                             })
                 return result

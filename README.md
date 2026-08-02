@@ -7,7 +7,7 @@ API** (config, credentials, logs, and usage).
 
 **Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: CLIProxyAPI ≥ v7.2.67-aug.1 (recommended latest)
+**Minimum Required Version**: CLIProxyAPI ≥ v7.2.67-aug.2 (recommended latest)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the
 service is running.
@@ -105,9 +105,9 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 - **Config**: edit `/config.yaml` in-browser with YAML highlighting + search, then save/reload.
 - **Logs**: tail logs with incremental polling, page auto-refresh interval control, search, hide management traffic,
   show raw logs, clear logs, and download request error log files.
-- **System**: quick links, grouped `/v1/models`, model catalog source/refresh metadata, image artifact cache settings,
-  plugin release selection, latest local/remote version and build time, and release history with update actions. Requires
-  at least one proxy API key to query models.
+- **System**: quick links, grouped runtime models from the Management API, model catalog source/refresh metadata, image
+  artifact cache settings, plugin release selection, latest local/remote version and build time, and release history with
+  update actions.
 
 ## Tech Stack
 

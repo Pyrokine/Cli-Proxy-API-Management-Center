@@ -17,7 +17,6 @@ import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {IconBookOpen, IconCode, IconExternalLink, IconGithub} from '@/components/ui/icons'
 import {Select} from '@/components/ui/Select'
-import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
 import {versionApi} from '@/services/api'
 import {modelCatalogApi, type ModelCatalogMeta} from '@/services/api/modelCatalog'
 import {type BannedIPEntry, rateLimitsApi, type RateLimitUnbanHistoryEntry} from '@/services/api/rateLimits'
@@ -96,12 +95,11 @@ export function SystemPage() {
     const config                                 = useConfigStore((state) => state.config)
     const fetchConfig                            = useConfigStore((state) => state.fetchConfig)
 
-    const models               = useModelsStore((state) => state.models)
-    const modelsLoading        = useModelsStore((state) => state.loading)
-    const modelsError          = useModelsStore((state) => state.error)
-    const fetchModelsFromStore = useModelsStore((state) => state.fetchModels)
-    const modelsCache          = useModelsStore((state) => state.cache)
-    const { resolve: resolveApiKeysForModels, clearCache: clearApiKeysCache } = useApiKeysResolver()
+    const models                       = useModelsStore((state) => state.runtimeModels)
+    const modelsLoading                = useModelsStore((state) => state.runtimeLoading)
+    const modelsError                  = useModelsStore((state) => state.runtimeError)
+    const fetchRuntimeModelsFromStore  = useModelsStore((state) => state.fetchRuntimeModels)
+    const modelsCache                  = useModelsStore((state) => state.runtimeCache)
 
     const [modelStatus, setModelStatus]                   = useState<{
         type: 'success' | 'warning' | 'error' | 'muted'
@@ -203,7 +201,7 @@ export function SystemPage() {
         return resolvedTheme === 'dark' ? iconEntry.dark : iconEntry.light
     }
 
-    const fetchModels = async ({ forceRefresh = false }: { forceRefresh?: boolean } = {}) => {
+    const fetchRuntimeModels = async ({ forceRefresh = false }: { forceRefresh?: boolean } = {}) => {
         const requestGeneration = ++modelsRequestGeneration.current
         if (pageLayerStatus !== 'current') {
             return
@@ -223,19 +221,10 @@ export function SystemPage() {
             return
         }
 
-        if (forceRefresh) {
-            clearApiKeysCache()
-        }
-
         setModelRequestLoading(true)
         setModelStatus({ type: 'muted', message: t('system_info.models_loading') })
         try {
-            const apiKeys = await resolveApiKeysForModels()
-            if (requestGeneration !== modelsRequestGeneration.current) {
-                return
-            }
-            const primaryKey = apiKeys[0]
-            const list       = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh)
+            const list = await fetchRuntimeModelsFromStore(auth.apiBase, forceRefresh)
             if (requestGeneration !== modelsRequestGeneration.current) {
                 return
             }
@@ -486,7 +475,7 @@ export function SystemPage() {
         let cancelled = false
         queueMicrotask(() => {
             if (!cancelled && pageLayerStatus === 'current') {
-                void fetchModels()
+                void fetchRuntimeModels()
             }
         })
         return () => {
@@ -494,7 +483,7 @@ export function SystemPage() {
             invalidateModelsRequest()
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [auth.connectionStatus, auth.apiBase, config?.apiKeys, pageLayerStatus])
+    }, [auth.connectionStatus, auth.apiBase, pageLayerStatus])
 
     useEffect(() => {
         if (auth.connectionStatus !== 'connected') {
@@ -752,7 +741,7 @@ export function SystemPage() {
                                 <Button
                                     variant='secondary'
                                     size='sm'
-                                    onClick={() => fetchModels({ forceRefresh: true })}
+                                    onClick={() => fetchRuntimeModels({ forceRefresh: true })}
                                     loading={modelRequestLoading || modelsLoading}
                                 >
                                     {t('common.refresh')}
@@ -792,22 +781,18 @@ export function SystemPage() {
                                     })(),
                                 })}
                             </p>
-                            <p className={`${styles.sectionDescription} ${styles.cacheRefreshHint}`}>
-                                {t('system_info.models_source_label', { defaultValue: 'Source' })}{' '}
-                                {catalogMeta?.source === 'embed'
-                                 ? t('system_info.catalog_source_embed')
-                                 : renderCatalogSources(catalogSources)}
-                            </p>
                         </div>
                     )}
                     <div className={styles.modelsHintBlock}>
                         <p className={styles.sectionDescription}>{t('system_info.models_refresh_hint')}</p>
                         <p className={`${styles.sectionDescription} ${styles.cacheRefreshHint}`}>
-                            {t('system_info.models_refresh_interval_hint', {
-                                defaultValue:
-                                    'Backend fetches the upstream model list every {{hours}}h; click Refresh to trigger it now.',
-                                hours: catalogMeta?.interval_hours ?? 3,
-                            })}
+                            {(catalogMeta?.interval_hours ?? 3) > 0
+                             ? t('system_info.models_refresh_interval_hint', {
+                                    defaultValue:
+                                        'The backend fetches the upstream model catalog every {{hours}}h; use the catalog refresh button to fetch it immediately.',
+                                    hours: catalogMeta?.interval_hours ?? 3,
+                                })
+                             : t('system_info.catalog_refresh_interval_disabled')}
                         </p>
                     </div>
                     {modelStatus && <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>}

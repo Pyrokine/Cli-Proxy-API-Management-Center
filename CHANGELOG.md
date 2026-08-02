@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.17.14-aug.2 - 2026-08-02
+
+### Release Basis
+
+- Upstream semantic basis: v1.17.14
+- Previous local release: v1.17.14-aug.1
+- Local release: v1.17.14-aug.2
+- Required server: CLIProxyAPI v7.2.67-aug.2 or newer
+
+### What's Changed
+
+- fix(system): Load the current service's registered runtime models through the authenticated Management API instead of calling public `/v1/models` with redacted proxy API keys
+- fix(system): Cancel and clear model requests and caches when the authenticated management session changes
+- docs(system): Describe runtime registry data, empty states, page refresh, and catalog refresh behavior accurately
+- test(release): Run the Bun test suite before building the release asset
+- fix(compat): Require CLIProxyAPI v7.2.67-aug.2 for the paired credential-source privacy release
+
+### Compatibility
+
+- This panel requires CLIProxyAPI v7.2.67-aug.2 or newer
+- Dashboard keeps its public `/v1/models` request; provider model discovery keeps its authenticated Management `/api-call` proxy flow and provider-specific model endpoints
+- The release asset remains `management.html`; deployment paths do not change
+
+---
+
+### 版本依据
+
+- 上游语义基线：v1.17.14
+- 上一个本地版本：v1.17.14-aug.1
+- 本地发布版本：v1.17.14-aug.2
+- 要求的后端版本：CLIProxyAPI v7.2.67-aug.2 或更新
+
+### 更新内容
+
+- fix(system)：通过已认证的 Management API 读取当前服务注册的运行时模型，不再用脱敏后的代理 API Key 请求公共 `/v1/models`
+- fix(system)：管理认证会话变化时取消并清理模型请求与缓存
+- docs(system)：准确说明运行时注册数据、空状态、页面刷新与模型目录刷新行为
+- test(release)：构建 release 资产前执行 Bun 测试
+- fix(compat)：配套使用统计 credential source 隐私修复，最低后端版本提升到 CLIProxyAPI v7.2.67-aug.2
+
+### 兼容性
+
+- 本面板要求 CLIProxyAPI v7.2.67-aug.2 或更新
+- 仪表盘继续请求公共 `/v1/models`；provider 模型发现继续通过已认证的 Management `/api-call` 代理调用 provider 专用模型接口
+- release 资产仍为 `management.html`，部署路径不变
+
 ## v1.17.14-aug.1 - 2026-07-31
 
 ### Release Basis

@@ -13,6 +13,7 @@ import {isEncodedStorageValue} from '@/utils/encryption'
 import {create} from 'zustand'
 import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
 import {useConfigStore} from './useConfigStore'
+import {useModelsStore} from './useModelsStore'
 import {useUsageStatsStore} from './useUsageStatsStore'
 
 interface AuthStoreState extends AuthState {
@@ -134,6 +135,7 @@ export const useAuthStore = create<AuthStoreState>()(
 
             // 登录
             login: async (credentials) => {
+                useModelsStore.getState().clearCache()
                 const apiBase          = normalizeApiBase(credentials.apiBase)
                 const managementKey    = credentials.managementKey.trim()
                 const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false
@@ -207,6 +209,7 @@ export const useAuthStore = create<AuthStoreState>()(
             logout: () => {
                 restoreSessionPromise = null
                 useConfigStore.getState().clearCache()
+                useModelsStore.getState().clearCache()
                 useUsageStatsStore.getState().clearUsageStats()
                 set({
                         isAuthenticated: false,
@@ -391,11 +394,12 @@ function waitForAuthHydration(): Promise<void> {
     })
 }
 
-// 监听全局未授权事件 — 仅标记连接状态，不触发 logout 以避免级联请求
+// 监听全局未授权事件 — 清理会话缓存，但不触发 logout 以避免级联请求
 if (typeof window !== 'undefined') {
     window.addEventListener('unauthorized', () => {
         const state = useAuthStore.getState()
         if (state.isAuthenticated) {
+            useModelsStore.getState().clearCache()
             state.updateConnectionStatus('error', 'Management key is invalid or expired')
             useAuthStore.setState({ isAuthenticated: false, hydrated: true })
         }

@@ -6,7 +6,7 @@
 
 **主项目**: https://github.com/Pyrokine/CLIProxyAPI
 **示例地址**: https://remote.router-for.me/
-**最低版本要求**: CLIProxyAPI ≥ v7.2.67-aug.1（推荐最新）
+**最低版本要求**: CLIProxyAPI ≥ v7.2.67-aug.2（推荐最新）
 
 从6.0.19版本开始，Web UI 随主程序一起提供；服务运行后，通过 API 端口上的"/management.html"访问它。
 
@@ -92,7 +92,7 @@ remote-management:
 - **使用统计**：按小时/天图表、按 API / 模型 / 凭证统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、全部时间范围解析、服务健康卡、后端统一管理的模型价格和后台历史费用重算状态。
 - **配置文件**：浏览器内编辑 `/config.yaml`（YAML 高亮 + 搜索），保存/重载。
 - **日志**：增量拉取日志、页面自动刷新间隔控制、搜索、隐藏管理端流量、查看原始日志、清空日志；下载请求错误日志文件。
-- **系统信息**：快捷链接、拉取 `/v1/models` 并分组展示、查看模型目录来源与刷新信息、管理图片 artifact cache、选择 plugin release、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作（需要至少一个代理 API Key 才能查询模型）。
+- **系统信息**：快捷链接、通过 Management API 获取并分组展示运行时模型、查看模型目录来源与刷新信息、管理图片 artifact cache、选择 plugin release、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作。
 
 ## 技术栈
 

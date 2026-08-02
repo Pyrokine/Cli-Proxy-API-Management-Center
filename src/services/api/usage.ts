@@ -126,12 +126,13 @@ export interface SummaryModelStats {
 export interface SummaryCredentialStats {
     success: number
     failure: number
-    /** v2 schema additions: the upstream vendor (claude/codex/gemini/...) the
-     *  credential spoke to. Empty/undefined for legacy rows imported from
-     *  pre-v2 JSON. The map key for by_credential is `provider:source` when
-     *  provider is non-empty, bare `source` otherwise. */
+    /** The upstream vendor and safe source display. Empty/undefined for legacy
+     *  payloads. Current responses also provide a stable, type-aware filter key;
+     *  the map key is reserved for unique chart labels. */
     provider?: string
     source?: string
+    source_kind?: 'api_key' | 'identity'
+    filter_key?: string
 }
 
 export interface SummaryApiKeyStats {

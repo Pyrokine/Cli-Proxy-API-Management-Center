@@ -51,7 +51,7 @@ export default defineConfig({
                                     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
                                     // Lowest server (CPA) build the panel can talk to.
                                     // Bump when the panel depends on newer management APIs.
-                                    __COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.1'),
+                                    __COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.2'),
                                 },
                                 resolve: {
                                     alias: {

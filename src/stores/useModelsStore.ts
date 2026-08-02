@@ -36,6 +36,8 @@ interface ModelsState {
     runtimeModels: ModelInfo[]
     loading: boolean
     error: string | null
+    runtimeLoading: boolean
+    runtimeError: string | null
     cache: ModelsCache | null
     runtimeCache: ModelsCache | null
 
@@ -50,6 +52,8 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
     runtimeModels: [],
     loading: false,
     error: null,
+    runtimeLoading: false,
+    runtimeError: null,
     cache: null,
     runtimeCache: null,
 
@@ -125,7 +129,7 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
                 runtimeRequest.controller.abort()
                 runtimeRequest = null
             }
-            set({ runtimeModels: runtimeCache.data, loading: false, error: null })
+            set({ runtimeModels: runtimeCache.data, runtimeLoading: false, runtimeError: null })
             return runtimeCache.data
         }
 
@@ -134,7 +138,7 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
         const controller        = new AbortController()
         const requestPromise    = modelsApi.fetchRuntimeModels({ signal: controller.signal })
         runtimeRequest          = { key: apiBase, generation: requestGeneration, controller, promise: requestPromise }
-        set({ loading: true, error: null })
+        set({ runtimeLoading: true, runtimeError: null })
 
         try {
             const list = await requestPromise
@@ -142,8 +146,8 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
             if (requestGeneration === runtimeRequestGeneration) {
                 set({
                         runtimeModels: list,
-                        loading: false,
-                        error: null,
+                        runtimeLoading: false,
+                        runtimeError: null,
                         runtimeCache: { data: list, timestamp: now, apiBase, scope: 'runtime' },
                     })
             }
@@ -155,8 +159,8 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
                       typeof error === 'string' ? error : 'Failed to fetch models'
             if (requestGeneration === runtimeRequestGeneration) {
                 set({
-                        error: message,
-                        loading: false,
+                        runtimeError: message,
+                        runtimeLoading: false,
                         runtimeModels: [],
                     })
             }
@@ -175,7 +179,16 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
         runtimeRequest?.controller.abort()
         publicRequest  = null
         runtimeRequest = null
-        set({ cache: null, runtimeCache: null, models: [], runtimeModels: [], loading: false, error: null })
+        set({
+                cache: null,
+                runtimeCache: null,
+                models: [],
+                runtimeModels: [],
+                loading: false,
+                error: null,
+                runtimeLoading: false,
+                runtimeError: null,
+            })
     },
 
     isCacheValid: (apiBase, scope = 'public') => {
