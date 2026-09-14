@@ -5,18 +5,25 @@
 
 import i18n from '@/i18n'
 import type {PutModelPricesResponse} from '@/services/api/modelPrices'
-import type {SummaryTimePoint, UsageSummary as ApiUsageSummary, UsageThinking} from '@/services/api/usage'
+import type {ModelCatalogPrice} from '@/services/api/models'
+import type {
+    EventTokens,
+    SummaryTimePoint,
+    UsageCostStatus,
+    UsageSummary as ApiUsageSummary,
+    UsageThinking,
+} from '@/services/api/usage'
 import type {RecentRequestBucket} from '@/types/authFile'
 import type {ScriptableContext} from 'chart.js'
 import {formatKeyDisplay} from './format'
 
-export interface ModelPrice {
+export type ModelPrice = ModelCatalogPrice & {
     prompt: number
     completion: number
     cache: number
 }
 
-export interface UsageDetail {
+interface UsageDetail {
     timestamp: string
     source: string
     auth_index: number | string
@@ -34,8 +41,13 @@ export interface UsageDetail {
         reasoning_tokens: number
         cached_tokens: number
         cache_tokens?: number | string | null
+        cache_read_tokens?: number | string | null
+        cache_write_tokens?: number | string | null
         total_tokens: number
     }
+    cost?: number
+    cost_status?: UsageCostStatus
+    cost_reason?: string
     failed: boolean
     __modelName?: string
     __timestampMs?: number
@@ -49,10 +61,61 @@ export interface UsageDetailWithEndpoint extends UsageDetail {
     __timestampMs: number
 }
 
-const USAGE_ENDPOINT_METHOD_REGEX = /^(?<method>GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(?<path>\S+)/i
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
+
+const nonNegativeToken = (value: number | string | null | undefined): number | null => {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? Math.max(value, 0) : null
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? Math.max(parsed, 0) : null
+    }
+    return null
+}
+
+interface UsageTokenMetrics {
+    inputTokens: number | null
+    outputTokens: number | null
+    reasoningTokens: number | null
+    cachedTokens: number | null
+    cacheReadTokens: number | null
+    cacheWriteTokens: number | null
+    cacheHitTokens: number | null
+    totalTokens: number | null
+}
+
+type UsageTokenMetricInput = Partial<Record<keyof EventTokens, number | string | null>>
+
+export function resolveUsageTokenMetrics(tokens?: UsageTokenMetricInput | null): UsageTokenMetrics {
+    const inputTokens       = nonNegativeToken(tokens?.input_tokens)
+    const outputTokens      = nonNegativeToken(tokens?.output_tokens)
+    const reasoningTokens   = nonNegativeToken(tokens?.reasoning_tokens)
+    const cacheReadTokens   = nonNegativeToken(tokens?.cache_read_tokens)
+    const cacheWriteTokens  = nonNegativeToken(tokens?.cache_write_tokens)
+    const legacyCached      = [tokens?.cached_tokens, tokens?.cache_tokens]
+        .map(nonNegativeToken)
+        .filter((value): value is number => value !== null)
+        .reduce<number | null>((highest, value) => highest === null ? value : Math.max(highest, value), null)
+    const hasCanonicalCache = cacheReadTokens !== null || cacheWriteTokens !== null
+    const cachedTokens      = hasCanonicalCache ? (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0) : legacyCached
+    const explicitTotal     = nonNegativeToken(tokens?.total_tokens)
+    const totalTokens       = explicitTotal ?? (
+        inputTokens !== null || outputTokens !== null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null
+    )
+
+    return {
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        cachedTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        cacheHitTokens: hasCanonicalCache ? (cacheReadTokens ?? 0) : cachedTokens,
+        totalTokens,
+    }
+}
 
 const parseTimestamp = (input: unknown): number => {
     if (input instanceof Date) {
@@ -232,7 +295,6 @@ const USAGE_SOURCE_PREFIX_MASKED = 'm:'
 const USAGE_SOURCE_PREFIX_TEXT   = 't:'
 
 const KEY_LIKE_TOKEN_REGEX    = new RegExp(
-    '(?:' +
     [
         'sk-[A-Za-z0-9-_]{6,}',
         'sk-ant-[A-Za-z0-9-_]{6,}',
@@ -241,8 +303,7 @@ const KEY_LIKE_TOKEN_REGEX    = new RegExp(
         'hf_[A-Za-z0-9]{6,}',
         'pk_[A-Za-z0-9]{6,}',
         'rk_[A-Za-z0-9]{6,}',
-    ].join('|') +
-    ')',
+    ].join('|'),
 )
 const MASKED_TOKEN_HINT_REGEX = /^\S{1,24}(?:\*{2,}|\.{3}|…)\S{1,24}$/
 
@@ -260,7 +321,7 @@ const fnv1a64Hex = (value: string): string => {
     let hash = FNV_OFFSET_BASIS
     for (let i = 0; i < value.length; i++) {
         hash ^= BigInt(value.charCodeAt(i))
-        hash = (hash * FNV_PRIME) & 0xffffffffffffffffn
+        hash = BigInt.asUintN(64, hash * FNV_PRIME)
     }
 
     const hex = hash.toString(16).padStart(16, '0')
@@ -422,7 +483,7 @@ export function formatUsd(value: number): string {
 
 export const LATENCY_SOURCE_FIELD = 'latency_ms'
 
-export interface DurationFormatOptions {
+interface DurationFormatOptions {
     maxUnits?: number
     invalidText?: string
     secondDecimals?: number | 'auto'
@@ -571,8 +632,7 @@ export function formatThinkingLabel(thinking: UsageThinking | null | undefined, 
     return label
 }
 
-const usageDetailsCache             = new WeakMap<object, UsageDetail[]>()
-const usageDetailsWithEndpointCache = new WeakMap<object, UsageDetailWithEndpoint[]>()
+const usageDetailsCache = new WeakMap<object, UsageDetail[]>()
 
 /**
  * 从使用数据中收集所有请求明细
@@ -639,7 +699,8 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
                                  auth_index: detailRaw.auth_index as unknown as number,
                                  request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id : null,
                                  latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
-                                 time_to_first_byte_ms: detailRaw.time_to_first_byte_ms as UsageDetail['time_to_first_byte_ms'],
+                                 time_to_first_byte_ms:
+                                     detailRaw.time_to_first_byte_ms as UsageDetail['time_to_first_byte_ms'],
                                  total_duration_ms: detailRaw.total_duration_ms as UsageDetail['total_duration_ms'],
                                  completed: typeof detailRaw.completed === 'boolean' ? detailRaw.completed : null,
                                  metadata_recorded:
@@ -650,6 +711,15 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
                                      typeof detailRaw.reasoning_effort === 'string' ? detailRaw.reasoning_effort : null,
                                  thinking: normalizeUsageThinking(detailRaw.thinking),
                                  tokens: tokensRaw as unknown as UsageDetail['tokens'],
+                                 cost: typeof detailRaw.cost === 'number' ? detailRaw.cost : undefined,
+                                 cost_status:
+                                     detailRaw.cost_status === 'complete' ||
+                                     detailRaw.cost_status === 'partial' ||
+                                     detailRaw.cost_status === 'unpriced'
+                                     ? detailRaw.cost_status
+                                     : undefined,
+                                 cost_reason:
+                                     typeof detailRaw.cost_reason === 'string' ? detailRaw.cost_reason : undefined,
                                  failed: detailRaw.failed === true,
                                  __modelName: modelName,
                                  __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
@@ -666,122 +736,13 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
 }
 
 /**
- * 从使用数据中收集包含 endpoint/method/path 的请求明细
- */
-export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetailWithEndpoint[] {
-    const cacheKey = isRecord(usageData) ? (usageData as object) : null
-    if (cacheKey) {
-        const cached = usageDetailsWithEndpointCache.get(cacheKey)
-        if (cached) {
-            return cached
-        }
-    }
-
-    const apis = getApisRecord(usageData)
-    if (!apis) {
-        return []
-    }
-
-    const details: UsageDetailWithEndpoint[] = []
-    // noinspection DuplicatedCode
-    const sourceCache                        = new Map<string, string>()
-
-    const normalizeSource = (value: unknown): string => {
-        const raw     = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value)
-        const trimmed = raw.trim()
-        if (!trimmed) {
-            return ''
-        }
-        const cached = sourceCache.get(trimmed)
-        if (cached !== undefined) {
-            return cached
-        }
-        const normalized = normalizeUsageSourceId(trimmed)
-        sourceCache.set(trimmed, normalized)
-        return normalized
-    }
-
-    Object.entries(apis).forEach(([endpoint, apiEntry]) => {
-        if (!isRecord(apiEntry)) {
-            return
-        }
-        const modelsRaw = apiEntry.models
-        const models    = isRecord(modelsRaw) ? modelsRaw : null
-        if (!models) {
-            return
-        }
-
-        const endpointMatch  = endpoint.match(USAGE_ENDPOINT_METHOD_REGEX)
-        const endpointMethod = endpointMatch?.groups?.method?.toUpperCase()
-        const endpointPath   = endpointMatch?.groups?.path
-
-        Object.entries(models).forEach(([modelName, modelEntry]) => {
-            if (!isRecord(modelEntry)) {
-                return
-            }
-            const modelDetailsRaw = modelEntry.details
-            const modelDetails    = Array.isArray(modelDetailsRaw) ? modelDetailsRaw : []
-
-            modelDetails.forEach((detailRaw) => {
-                if (!isRecord(detailRaw) || detailRaw.timestamp === undefined || detailRaw.timestamp === null) {
-                    return
-                }
-                const timestamp   = timestampText(detailRaw.timestamp)
-                const timestampMs = parseTimestamp(detailRaw.timestamp)
-                const tokensRaw   = isRecord(detailRaw.tokens) ? detailRaw.tokens : {}
-                details.push({
-                                 timestamp,
-                                 source: normalizeSource(detailRaw.source),
-                                 auth_index: detailRaw.auth_index as unknown as number,
-                                 request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id : null,
-                                 latency_ms: detailRaw.latency_ms as UsageDetail['latency_ms'],
-                                 time_to_first_byte_ms: detailRaw.time_to_first_byte_ms as UsageDetail['time_to_first_byte_ms'],
-                                 total_duration_ms: detailRaw.total_duration_ms as UsageDetail['total_duration_ms'],
-                                 completed: typeof detailRaw.completed === 'boolean' ? detailRaw.completed : null,
-                                 metadata_recorded:
-                                     typeof detailRaw.metadata_recorded === 'boolean' ?
-                                     detailRaw.metadata_recorded :
-                                     null,
-                                 reasoning_effort:
-                                     typeof detailRaw.reasoning_effort === 'string' ? detailRaw.reasoning_effort : null,
-                                 thinking: normalizeUsageThinking(detailRaw.thinking),
-                                 tokens: tokensRaw as unknown as UsageDetail['tokens'],
-                                 failed: detailRaw.failed === true,
-                                 __modelName: modelName,
-                                 __endpoint: endpoint,
-                                 __endpointMethod: endpointMethod,
-                                 __endpointPath: endpointPath,
-                                 __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
-                             })
-            })
-        })
-    })
-
-    if (cacheKey) {
-        usageDetailsWithEndpointCache.set(cacheKey, details)
-    }
-    return details
-}
-
-/**
  * 从单条明细提取总 tokens
  */
 function extractTotalTokens(detail: unknown): number {
     const record    = isRecord(detail) ? detail : null
     const tokensRaw = record?.tokens
-    const tokens    = isRecord(tokensRaw) ? tokensRaw : {}
-    if (typeof tokens.total_tokens === 'number') {
-        return tokens.total_tokens
-    }
-    const inputTokens     = typeof tokens.input_tokens === 'number' ? tokens.input_tokens : 0
-    const outputTokens    = typeof tokens.output_tokens === 'number' ? tokens.output_tokens : 0
-    const reasoningTokens = typeof tokens.reasoning_tokens === 'number' ? tokens.reasoning_tokens : 0
-    const cachedTokens    = Math.max(
-        typeof tokens.cached_tokens === 'number' ? Math.max(tokens.cached_tokens, 0) : 0,
-        typeof tokens.cache_tokens === 'number' ? Math.max(tokens.cache_tokens, 0) : 0,
-    )
-
-    return inputTokens + outputTokens + reasoningTokens + cachedTokens
+    const tokens    = isRecord(tokensRaw) ? tokensRaw as Partial<EventTokens> : null
+    return resolveUsageTokenMetrics(tokens).totalTokens ?? 0
 }
 
 /**
@@ -850,7 +811,7 @@ function formatDayLabel(date: Date): string {
 export type ChartDimension = 'total' | 'model' | 'credential' | 'api_key'
 export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning'
 
-export interface ChartDataset {
+interface ChartDataset {
     label: string
     data: Array<number | null>
     borderColor: string
@@ -862,7 +823,7 @@ export interface ChartDataset {
     tension: number
 }
 
-export interface ChartData {
+interface ChartData {
     labels: string[]
     datasets: ChartDataset[]
 }
@@ -1066,7 +1027,7 @@ export function buildChartDataFromSummary(
         if (metric === 'tokens') {
             return typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
         }
-        return pt.has_cost ? (pt.cost ?? 0) : 0
+        return pt.cost ?? 0
     }
 
     const formatLabel = (iso: string): string => {
@@ -1171,6 +1132,31 @@ export interface StatusBarData {
     totalFailure: number
 }
 
+function buildStatusBarData(blockDetails: StatusBlockDetail[]): StatusBarData {
+    const blocks       = blockDetails.map((detail) => {
+        if (detail.success === 0 && detail.failure === 0) {
+            return 'idle' as const
+        }
+        if (detail.failure === 0) {
+            return 'success' as const
+        }
+        if (detail.success === 0) {
+            return 'failure' as const
+        }
+        return 'mixed' as const
+    })
+    const totalSuccess = blockDetails.reduce((sum, detail) => sum + detail.success, 0)
+    const totalFailure = blockDetails.reduce((sum, detail) => sum + detail.failure, 0)
+    const total        = totalSuccess + totalFailure
+    return {
+        blocks,
+        blockDetails,
+        successRate: total > 0 ? (totalSuccess / total) * 100 : -1,
+        totalSuccess,
+        totalFailure,
+    }
+}
+
 export function calculateStatusBarDataFromRecentRequests(recentRequests: RecentRequestBucket[]): StatusBarData {
     const blockDetails: StatusBlockDetail[] = recentRequests.map((bucket, index) => {
         const success           = Number(bucket.success ?? 0)
@@ -1190,31 +1176,47 @@ export function calculateStatusBarDataFromRecentRequests(recentRequests: RecentR
             totalTokens: 0,
         }
     })
+    return buildStatusBarData(blockDetails)
+}
 
-    const blocks = blockDetails.map((detail) => {
-        if (detail.success === 0 && detail.failure === 0) {
-            return 'idle' as const
+export function calculateStatusBarDataFromSummaryPoints(
+    points: SummaryTimePoint[],
+    windowStartMs: number,
+    bucketDurationMs: number,
+    bucketCount: number,
+): StatusBarData {
+    const count                             = Math.max(1, Math.trunc(bucketCount))
+    const duration                          = Math.max(1, Math.trunc(bucketDurationMs))
+    const blockDetails: StatusBlockDetail[] = Array.from({ length: count }, (_, index) => {
+        const startTime = windowStartMs + index * duration
+        return {
+            success: 0,
+            failure: 0,
+            rate: -1,
+            startTime,
+            endTime: startTime + duration,
+            totalTokens: 0,
         }
-        if (detail.failure === 0) {
-            return 'success' as const
-        }
-        if (detail.success === 0) {
-            return 'failure' as const
-        }
-        return 'mixed' as const
     })
 
-    const totalSuccess = blockDetails.reduce((sum, detail) => sum + detail.success, 0)
-    const totalFailure = blockDetails.reduce((sum, detail) => sum + detail.failure, 0)
-    const total        = totalSuccess + totalFailure
+    points.forEach((point) => {
+        const timestamp = parseTimestamp(point.time)
+        if (!Number.isFinite(timestamp)) {
+            return
+        }
+        const index  = Math.floor((timestamp - windowStartMs) / duration)
+        const detail = blockDetails[index]
+        if (!detail) {
+            return
+        }
+        detail.success += Number(point.success ?? 0)
+        detail.failure += Number(point.failure ?? 0)
+        detail.totalTokens += Number(point.tokens?.total ?? 0)
+        const total = detail.success + detail.failure
+        detail.rate = total > 0 ? detail.success / total : -1
+    })
 
-    return {
-        blocks,
-        blockDetails,
-        successRate: total > 0 ? (totalSuccess / total) * 100 : -1,
-        totalSuccess,
-        totalFailure,
-    }
+    return buildStatusBarData(blockDetails)
 }
 
 /**

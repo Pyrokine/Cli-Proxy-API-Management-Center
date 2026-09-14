@@ -1,0 +1,58 @@
+@use '../../styles/variables' as *;
+
+.content,
+.progress {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.description,
+.hint,
+.complete,
+.error {
+    margin: 0;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.description,
+.hint {
+    color: var(--text-secondary);
+}
+
+.complete {
+    color: var(--success-color);
+}
+
+.error {
+    color: var(--error-color);
+    overflow-wrap: anywhere;
+}
+
+.progressHeader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+
+    strong {
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+.progressBar {
+    overflow: hidden;
+    height: 8px;
+    border-radius: $radius-full;
+    background: var(--bg-tertiary);
+}
+
+.progressFill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary-color);
+    transition: width 180ms ease-out;
+}

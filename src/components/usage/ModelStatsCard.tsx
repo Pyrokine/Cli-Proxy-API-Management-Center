@@ -6,6 +6,7 @@ import {formatCompactNumber, formatDurationMs, formatUsd, LATENCY_SOURCE_FIELD} 
 import type {ModelStat} from '@/utils/usage/summaryHelpers'
 import {useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
+import {SuccessRateCell} from './SuccessRateCell'
 
 interface ModelStatsCardProps {
     modelStats: ModelStat[]
@@ -91,19 +92,7 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
                 header: t('usage_stats.success_rate'),
                 sortable: true,
                 sortValue: (row) => row.successRate,
-                cell: (row) => (
-                    <span
-                        className={
-                            row.successRate >= 95
-                            ? styles.statSuccess
-                            : row.successRate >= 80
-                              ? styles.statNeutral
-                              : styles.statFailure
-                        }
-                    >
-                        {row.successRate.toFixed(1)}%
-                    </span>
-                ),
+                cell: (row) => <SuccessRateCell value={row.successRate} />,
             },
         ]
         if (hasPrices) {

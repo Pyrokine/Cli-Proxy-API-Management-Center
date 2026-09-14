@@ -1,5 +1,5 @@
+import {BusyOverlay} from '@/components/common/BusyOverlay'
 import {CardSkeleton} from '@/components/common/CardSkeleton'
-import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import pageStyles from '@/pages/UsagePage.module.scss'
 import type {UsageSummary} from '@/services/api/usage'
 import {formatUnixTimestamp} from '@/utils/format'
@@ -100,17 +100,6 @@ export function UnifiedTrendChart({
         return buildChartDataFromSummary(summary, metric, chartDimension)
     }, [summary, metric, chartDimension, t])
 
-    // For the cost card we still want a flat 0 sparkline (parity with requests/
-    // tokens) when no priced points exist, so emptiness is signaled by a small
-    // header note rather than a full hint replacing the chart.
-    const noCostNote = useMemo(() => {
-        if (metric !== 'cost') {
-            return ''
-        }
-        const hasAny = !!summary?.time_series?.some((pt) => pt.has_cost)
-        return hasAny ? '' : t('usage_stats.cost_no_data')
-    }, [metric, summary, t])
-
     const summaryValues = useMemo(() => {
         const zero = metric === 'cost' ? formatUsd(0) : formatCompactNumber(0)
         const fmt  = (v: number) => (metric === 'cost' ? formatUsd(v) : formatCompactNumber(v))
@@ -140,7 +129,7 @@ export function UnifiedTrendChart({
             if (metric === 'tokens' || metric === 'token_breakdown') {
                 return typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
             }
-            return pt.has_cost ? (pt.cost ?? 0) : 0
+            return pt.cost ?? 0
         }
 
         let liveSum = totalOf(liveSummary)
@@ -306,30 +295,22 @@ export function UnifiedTrendChart({
              )}
 
             <div className={pageStyles.cardLoadingShell}>
-                {loading && summary && (
-                    <div className={pageStyles.cardLoadingOverlay} aria-busy='true'>
-                        <div className={pageStyles.cardLoadingPill}>
-                            <LoadingSpinner size={16} className={pageStyles.cardLoadingSpinner} />
-                            <span>{t('common.loading')}</span>
-                        </div>
-                    </div>
-                )}
+                {loading && summary && <BusyOverlay label={t('common.loading')} />}
                 <>
                     <div className={styles.summaryBar}>
                         <span className={styles.summaryTotal}>
                             {summaryValues.total}
-                            <span className={styles.summaryLabel}>{t('usage_stats.unified_total_label')}</span>
+                            <span className={styles.summaryLabel}>
+                                {metric === 'cost'
+                                 ? t('usage_stats.cost_reference_amount')
+                                 : t('usage_stats.unified_total_label')}
+                            </span>
                         </span>
                         <span className={styles.summaryLive}>
                             <span className={styles.liveDot} />
                             {summaryValues.live}
                             <span className={styles.summaryLabel}>{t('usage_stats.unified_latest_label')}</span>
                         </span>
-                        {noCostNote && (
-                            <span className={styles.dataStartsAt} style={{ marginLeft: 'auto' }}>
-                                {noCostNote}
-                            </span>
-                        )}
                     </div>
 
                     <div className={styles.chartBody}>

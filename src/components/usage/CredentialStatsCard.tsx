@@ -16,6 +16,7 @@ import {type SummaryCredentialEntry, summaryToCredentialEntries} from '@/utils/u
 import {useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
 import type {UsagePayload} from './hooks/useUsageData'
+import {SuccessRateCell} from './SuccessRateCell'
 
 interface CredentialStatsCardProps {
     usage: UsagePayload | null
@@ -417,19 +418,7 @@ export function CredentialStatsCard({
                 header: t('usage_stats.success_rate'),
                 sortable: true,
                 sortValue: (row) => row.successRate,
-                cell: (row) => (
-                    <span
-                        className={
-                            row.successRate >= 95
-                            ? styles.statSuccess
-                            : row.successRate >= 80
-                              ? styles.statNeutral
-                              : styles.statFailure
-                        }
-                    >
-                        {row.successRate.toFixed(1)}%
-                    </span>
-                ),
+                cell: (row) => <SuccessRateCell value={row.successRate} />,
             },
         ],
         [t],

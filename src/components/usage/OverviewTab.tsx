@@ -13,7 +13,7 @@ import {ServiceHealthCard} from './ServiceHealthCard'
 import {TokenBreakdownChart} from './TokenBreakdownChart'
 import {UnifiedTrendChart} from './UnifiedTrendChart'
 
-export interface CredentialContext {
+interface CredentialContext {
     loading: boolean
     geminiKeys: GeminiKeyConfig[]
     claudeConfigs: ProviderKeyConfig[]
@@ -89,33 +89,18 @@ export function OverviewTab({
         <>
             {/* Three metrics side by side */}
             <div className={styles.metricsGrid}>
-                <UnifiedTrendChart
-                    summary={summary ?? null}
-                    liveSummary={liveSummary ?? null}
-                    loading={loading}
-                    error={summaryError}
-                    chartDimension={chartDimension}
-                    isMobile={isMobile}
-                    metric='requests'
-                />
-                <UnifiedTrendChart
-                    summary={summary ?? null}
-                    liveSummary={liveSummary ?? null}
-                    loading={loading}
-                    error={summaryError}
-                    chartDimension={chartDimension}
-                    isMobile={isMobile}
-                    metric='tokens'
-                />
-                <UnifiedTrendChart
-                    summary={summary ?? null}
-                    liveSummary={liveSummary ?? null}
-                    loading={loading}
-                    error={summaryError}
-                    chartDimension={chartDimension}
-                    isMobile={isMobile}
-                    metric='cost'
-                />
+                {(['requests', 'tokens', 'cost'] as const).map((metric) => (
+                    <UnifiedTrendChart
+                        key={metric}
+                        summary={summary ?? null}
+                        liveSummary={liveSummary ?? null}
+                        loading={loading}
+                        error={summaryError}
+                        chartDimension={chartDimension}
+                        isMobile={isMobile}
+                        metric={metric}
+                    />
+                ))}
             </div>
 
             <ServiceHealthCard

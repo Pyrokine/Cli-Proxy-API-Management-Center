@@ -49,14 +49,6 @@ function appendQueryValues(
     }
 }
 
-interface UsageExportPayload {
-    version?: number
-    exported_at?: string
-    usage?: Record<string, unknown>
-
-    [key: string]: unknown
-}
-
 interface UsageImportResponse {
     added?: number
     skipped?: number
@@ -97,8 +89,21 @@ export interface SummaryTokens {
     input: number
     output: number
     cached: number
+    cache_read?: number
+    cache_write?: number
     reasoning: number
     total: number
+}
+
+interface SummaryCostCoverageCount {
+    requests: number
+    tokens: number
+}
+
+interface SummaryCostCoverage {
+    complete: SummaryCostCoverageCount
+    partial: SummaryCostCoverageCount
+    unpriced: SummaryCostCoverageCount
 }
 
 export interface SummaryTotals {
@@ -107,6 +112,7 @@ export interface SummaryTotals {
     failure: number
     tokens: SummaryTokens
     cost: number
+    cost_coverage?: SummaryCostCoverage
     average_latency_ms?: number | null
     total_latency_ms?: number | null
     latency_sample_count?: number
@@ -171,10 +177,12 @@ export interface UsageSummary {
     by_credential: Record<string, SummaryCredentialStats>
     by_provider?: Record<string, SummaryProviderStats>
     by_api_key: Record<string, SummaryApiKeyStats>
+    by_auth_index?: Record<string, SummaryApiKeyStats>
     time_series: SummaryTimePoint[]
     time_series_by_model: Record<string, SummaryTimePoint[]>
     time_series_by_credential: Record<string, SummaryTimePoint[]>
     time_series_by_api_key: Record<string, SummaryTimePoint[]>
+    time_series_by_auth_index?: Record<string, SummaryTimePoint[]>
 }
 
 export interface EventTokens {
@@ -182,6 +190,8 @@ export interface EventTokens {
     output_tokens: number
     cached_tokens: number
     cache_tokens?: number | string | null
+    cache_read_tokens?: number | string | null
+    cache_write_tokens?: number | string | null
     reasoning_tokens: number
     total_tokens: number
 }
@@ -191,6 +201,70 @@ export interface UsageThinking {
     mode?: string
     level?: string
     budget?: number
+}
+
+export type RequestLogState =
+    | 'pending'
+    | 'available'
+    | 'disabled'
+    | 'not_captured'
+    | 'publish_failed'
+    | 'expired'
+    | 'legacy_unknown'
+
+export type RequestLogLocation = 'local' | 'home'
+export type UsageCostStatus = 'complete' | 'partial' | 'unpriced'
+
+type PricingLineItemCategory =
+    | 'uncached_input'
+    | 'cache_read'
+    | 'cache_write_5m'
+    | 'cache_write_1h'
+    | 'cache_write_unknown'
+    | 'output'
+    | 'reasoning'
+    | 'unclassified'
+
+export interface PricingCoverage {
+    uncached_input_tokens?: number | string
+    cache_read_tokens?: number | string
+    cache_write_5m_tokens?: number | string
+    cache_write_1h_tokens?: number | string
+    cache_write_unknown_tokens?: number | string
+    output_tokens?: number | string
+    reasoning_tokens?: number | string
+    unclassified_tokens?: number | string
+    priced_tokens: number | string
+    unpriced_tokens: number | string
+    total_tokens: number | string
+}
+
+export interface PricingLineItem {
+    category: PricingLineItemCategory
+    tokens: number | string
+    rate_per_million?: number
+    rate_source: string
+    cost_micro: number | string
+    priced: boolean
+}
+
+export interface PricingReceipt {
+    schema_version: number
+    captured_at: string
+    priced_at: string
+    provider: string
+    model: string
+    canonical_model: string
+    price_revision?: string
+    source: string
+    currency: string
+    effective_from?: string
+    effective_until?: string
+    cost_micro: number | string
+    cost_status: UsageCostStatus
+    cost_reason?: string
+    coverage: PricingCoverage
+    line_items: PricingLineItem[]
 }
 
 export interface UsageEvent {
@@ -203,6 +277,13 @@ export interface UsageEvent {
     provider?: string
     latency_ms?: number | string | null
     request_id?: string | null
+    request_log_state?: RequestLogState | null
+    request_log_location?: RequestLogLocation | null
+    request_log_file_name?: string | null
+    request_log_home_ip?: string | null
+    request_log_reason?: string | null
+    request_log_revision?: number | string | null
+    request_log_updated_at?: string | null
     time_to_first_byte_ms?: number | string | null
     total_duration_ms?: number | string | null
     completed?: boolean | null
@@ -210,6 +291,10 @@ export interface UsageEvent {
     reasoning_effort?: string | null
     thinking?: UsageThinking | null
     tokens: EventTokens
+    cost?: number
+    cost_status?: UsageCostStatus
+    cost_reason?: string
+    pricing_receipt?: PricingReceipt
     failed: boolean
 }
 
@@ -225,6 +310,7 @@ export interface EventsParams {
     search?: string
     sort?: string
     order?: 'asc' | 'desc'
+    view?: 'compact'
 }
 
 export interface EventsResponse {
@@ -251,7 +337,7 @@ export const usageApi = {
         model?: string
         api_key?: string | readonly string[]
         credential?: string
-    }) => {
+    }, options?: { signal?: AbortSignal }) => {
         const params = new URLSearchParams()
         if (filters) {
             const { from, to, ...rest } = filters
@@ -271,7 +357,11 @@ export const usageApi = {
         }
         const qs  = params.toString()
         const url = qs ? `/usage/export?${qs}` : '/usage/export'
-        return apiClient.get<UsageExportPayload>(url, { timeout: USAGE_TIMEOUT_MS })
+        return apiClient.getRaw(url, {
+            timeout: USAGE_TIMEOUT_MS,
+            responseType: 'blob',
+            signal: options?.signal,
+        })
     },
 
     /**
@@ -325,6 +415,8 @@ export const usageApi = {
             api_key?: string | readonly string[]
             credential?: string
             groups?: 'none' | 'all'
+            auth_index_groups?: boolean
+            auth_index_granularity?: '10m' | 'hourly' | 'daily'
         },
         options?: { signal?: AbortSignal },
     ) => {
@@ -347,6 +439,12 @@ export const usageApi = {
         }
         if (params?.groups) {
             searchParams.set('groups', params.groups)
+        }
+        if (params?.auth_index_groups) {
+            searchParams.set('auth_index_groups', 'true')
+        }
+        if (params?.auth_index_granularity) {
+            searchParams.set('auth_index_granularity', params.auth_index_granularity)
         }
         const qs = searchParams.toString()
         return apiClient.get<UsageSummary>(`/usage/summary${qs ? `?${qs}` : ''}`, {
@@ -390,6 +488,9 @@ export const usageApi = {
         }
         if (params?.order) {
             searchParams.set('order', params.order)
+        }
+        if (params?.view) {
+            searchParams.set('view', params.view)
         }
         const qs = searchParams.toString()
         return apiClient.get<EventsResponse>(`/usage/events${qs ? `?${qs}` : ''}`, {

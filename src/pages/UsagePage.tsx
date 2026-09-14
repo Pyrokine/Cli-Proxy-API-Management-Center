@@ -1,6 +1,14 @@
 import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import {Tabs} from '@/components/ui/Tabs'
-import {EventsTab, FilterBar, OverviewTab, SettingsTab, useUsageData, useUsageSummary} from '@/components/usage'
+import {
+    EventsTab,
+    FilterBar,
+    OverviewTab,
+    SettingsTab,
+    usageSummaryRequestKey,
+    useUsageData,
+    useUsageSummary,
+} from '@/components/usage'
 import {useAuthFileMap} from '@/components/usage/hooks/useAuthFileMap'
 import type {UsagePayload} from '@/components/usage/hooks/useUsageData'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
@@ -255,11 +263,15 @@ export function UsagePage() {
         () => JSON.stringify([dateRange.to, selectedModels, selectedApiKeys, selectedCredentials]),
         [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials],
     )
-    const [allSummaryResolution, setAllSummaryResolution] = useState<{ key: string; from: string; resolved: boolean }>({
-                                                                                                                           key: '',
-                                                                                                                           from: '',
-                                                                                                                           resolved: false,
-                                                                                                                       })
+    const [allSummaryResolution, setAllSummaryResolution] = useState<{
+        key: string
+        from: string
+        resolved: boolean
+    }>({
+           key: '',
+           from: '',
+           resolved: false,
+       })
     const [allSummaryResolving, setAllSummaryResolving]   = useState(false)
     const allSummaryResolved                              =
               isAllPreset && allSummaryResolution.key === allSummaryResolutionKey && allSummaryResolution.resolved
@@ -307,6 +319,7 @@ export function UsagePage() {
                     api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
                     sort: 'timestamp',
                     order: 'asc',
+                    view: 'compact',
                 },
                 { signal: controller.signal },
             )
@@ -396,7 +409,7 @@ export function UsagePage() {
         }
     }, [effectiveDateFrom, effectiveDateTo, liveWindowAnchorMs])
 
-    const liveSummaryParams = useMemo(
+    const liveSummaryParams   = useMemo(
         () => ({
             from: liveSummaryRange.from,
             to: liveSummaryRange.to,
@@ -408,13 +421,16 @@ export function UsagePage() {
         }),
         [liveSummaryRange, selectedModels, selectedApiKeys, selectedCredentials, chartDimension],
     )
+    const reuseSummaryForLive = usageSummaryRequestKey(summaryParams) === usageSummaryRequestKey(liveSummaryParams)
     const {
-              summary: liveSummary,
-              loading: liveSummaryLoading,
+              summary: requestedLiveSummary,
+              loading: requestedLiveSummaryLoading,
               reload: reloadLiveSummary,
-          }                 = useUsageSummary(liveSummaryParams, {
-        enabled: usageStatsTabActive && effectiveRangeReady,
+          }                   = useUsageSummary(liveSummaryParams, {
+        enabled: usageStatsTabActive && effectiveRangeReady && !reuseSummaryForLive,
     })
+    const liveSummary         = reuseSummaryForLive ? summary : requestedLiveSummary
+    const liveSummaryLoading  = reuseSummaryForLive ? summaryLoading : requestedLiveSummaryLoading
 
     // Filtered usage: date range → model/credential selection
     const timeFilteredUsage = useMemo(
@@ -451,7 +467,7 @@ export function UsagePage() {
     // 健康监测: 跟顶部 dateRange + 维度筛选, 但 granularity 固定 hourly
     // 主 summary 在 >7 天窗口下用 daily 粒度防折线图过密, 那样每天只能映射
     // 到 1 个 hour cell, grid 几乎全 idle,独立请求保证每天 24 cells 都能填上
-    const heatmapSummaryParams = useMemo(
+    const heatmapSummaryParams   = useMemo(
         () => ({
             from: effectiveDateFrom,
             to: effectiveDateTo,
@@ -463,14 +479,19 @@ export function UsagePage() {
         }),
         [effectiveDateFrom, effectiveDateTo, selectedModels, selectedApiKeys, selectedCredentials],
     )
+    const reuseSummaryForHeatmap =
+              usageSummaryRequestKey(summaryParams) === usageSummaryRequestKey(heatmapSummaryParams)
     const {
-              summary: heatmapSummary,
-              loading: heatmapSummaryLoading,
-              error: heatmapSummaryError,
+              summary: requestedHeatmapSummary,
+              loading: requestedHeatmapSummaryLoading,
+              error: requestedHeatmapSummaryError,
               reload: reloadHeatmapSummary,
-          }                    = useUsageSummary(heatmapSummaryParams, {
-        enabled: usageStatsTabActive && effectiveRangeReady,
+          }                      = useUsageSummary(heatmapSummaryParams, {
+        enabled: usageStatsTabActive && effectiveRangeReady && !reuseSummaryForHeatmap,
     })
+    const heatmapSummary         = reuseSummaryForHeatmap ? summary : requestedHeatmapSummary
+    const heatmapSummaryLoading  = reuseSummaryForHeatmap ? summaryLoading : requestedHeatmapSummaryLoading
+    const heatmapSummaryError    = reuseSummaryForHeatmap ? summaryError : requestedHeatmapSummaryError
 
     useEffect(() => {
         if (summaryRefreshToken === 0 || !effectiveRangeReady) {
@@ -478,7 +499,13 @@ export function UsagePage() {
         }
 
         const token   = summaryRefreshToken
-        const reloads = [reloadSummary(), reloadHeatmapSummary(), reloadLiveSummary()]
+        const reloads = [reloadSummary()]
+        if (!reuseSummaryForHeatmap) {
+            reloads.push(reloadHeatmapSummary())
+        }
+        if (!reuseSummaryForLive) {
+            reloads.push(reloadLiveSummary())
+        }
         if (hasSelectionFilters) {
             reloads.push(reloadFilterOptionsSummary())
         }
@@ -493,6 +520,8 @@ export function UsagePage() {
                   reloadFilterOptionsSummary,
                   reloadHeatmapSummary,
                   reloadLiveSummary,
+                  reuseSummaryForHeatmap,
+                  reuseSummaryForLive,
                   hasSelectionFilters,
               ])
 

@@ -3,20 +3,44 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 
 type Granularity = 'hourly' | 'daily'
 
+interface UsageSummaryParams {
+    from?: string
+    to?: string
+    granularity?: Granularity
+    model?: string
+    api_key?: string | readonly string[]
+    credential?: string
+    groups?: 'none' | 'all'
+}
+
+function summaryTimeKey(value: string | undefined): string | number {
+    if (!value) {
+        return ''
+    }
+    const timestamp = new Date(value).getTime()
+    return Number.isFinite(timestamp) ? timestamp : value
+}
+
+export function usageSummaryRequestKey(params: UsageSummaryParams = {}): string {
+    return JSON.stringify({
+                              from: summaryTimeKey(params.from),
+                              to: summaryTimeKey(params.to),
+                              granularity: params.granularity ?? '',
+                              model: params.model ?? '',
+                              api_key: typeof params.api_key === 'string' ?
+                                       params.api_key :
+                                  [...(params.api_key ?? [])],
+                              credential: params.credential ?? '',
+                              groups: params.groups ?? '',
+                          })
+}
+
 interface UseUsageSummaryReturn {
     summary: UsageSummary | null
     loading: boolean
     error: string
     resolved: boolean
-    reload: (params?: {
-        from?: string
-        to?: string
-        granularity?: Granularity
-        model?: string
-        api_key?: string | readonly string[]
-        credential?: string
-        groups?: 'none' | 'all'
-    }) => Promise<UsageSummary | null>
+    reload: (params?: UsageSummaryParams) => Promise<UsageSummary | null>
 }
 
 interface UseUsageSummaryOptions {
@@ -24,15 +48,7 @@ interface UseUsageSummaryOptions {
 }
 
 export function useUsageSummary(
-    params?: {
-        from?: string
-        to?: string
-        granularity?: Granularity
-        model?: string
-        api_key?: string | readonly string[]
-        credential?: string
-        groups?: 'none' | 'all'
-    },
+    params?: UsageSummaryParams,
     options?: UseUsageSummaryOptions,
 ): UseUsageSummaryReturn {
     const enabled               = options?.enabled ?? true
@@ -46,15 +62,7 @@ export function useUsageSummary(
     const resolved              = enabled && !visibleLoading && !visibleError && visibleSummary !== null
 
     const reload = useCallback(
-        async (overrides?: {
-            from?: string
-            to?: string
-            granularity?: Granularity
-            model?: string
-            api_key?: string | readonly string[]
-            credential?: string
-            groups?: 'none' | 'all'
-        }) => {
+        async (overrides?: UsageSummaryParams) => {
             if (!enabled) {
                 return null
             }

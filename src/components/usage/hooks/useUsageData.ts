@@ -55,20 +55,31 @@ interface UseUsageDataOptions {
 }
 
 export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataReturn {
-    const { enabled = true, loadModelPricesEnabled = true, onAfterImport, onAfterPricesSaved } = options
-    const { t }                                                                                = useTranslation()
-    const { showNotification, showConfirmation, addPersistentNotification }                    = useNotificationStore()
-    const usageSnapshot                                                                        = useUsageStatsStore((state) => state.usage)
-    const loading                                                                              = useUsageStatsStore((state) => state.loading)
-    const storeError                                                                           = useUsageStatsStore((state) => state.error)
-    const lastRefreshedAtTs                                                                    = useUsageStatsStore((state) => state.lastRefreshedAt)
-    const loadUsageStats                                                                       = useUsageStatsStore((state) => state.loadUsageStats)
+    const {
+              enabled                = true,
+              loadModelPricesEnabled = true,
+              onAfterImport,
+              onAfterPricesSaved,
+          }     = options
+    const { t } = useTranslation()
+    const {
+              showNotification,
+              showConfirmation,
+              addPersistentNotification,
+          }     = useNotificationStore()
+
+    const usageSnapshot     = useUsageStatsStore((state) => state.usage)
+    const loading           = useUsageStatsStore((state) => state.loading)
+    const storeError        = useUsageStatsStore((state) => state.error)
+    const lastRefreshedAtTs = useUsageStatsStore((state) => state.lastRefreshedAt)
+    const loadUsageStats    = useUsageStatsStore((state) => state.loadUsageStats)
 
     const [modelPrices, setModelPrices]             = useState<Record<string, ModelPrice>>({})
     const [priceSaveFeedback, setPriceSaveFeedback] = useState<PriceSaveFeedback | null>(null)
     const [exporting, setExporting]                 = useState(false)
     const [importing, setImporting]                 = useState(false)
     const importInputRef                            = useRef<HTMLInputElement | null>(null)
+    const exportControllerRef                       = useRef<AbortController | null>(null)
 
     const buildPriceSaveFeedback = useCallback(
         (result: Awaited<ReturnType<typeof saveModelPrices>>): PriceSaveFeedback => {
@@ -87,8 +98,8 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                           result.already_running ?
                           t('usage_stats.recalculate_busy') :
                           t('usage_stats.recalculate_started')
-                message = `${t('usage_stats.model_price_saved')}, ${recalculationMessage}`
-                type    = result.already_running ? 'warning' : 'success'
+                message                    = `${t('usage_stats.model_price_saved')}, ${recalculationMessage}`
+                type                       = result.already_running ? 'warning' : 'success'
             } else if (result.recalculation) {
                 message = `${t('usage_stats.model_price_saved')}, ${t('usage_stats.recalculate_success', {
                     days: result.recalculated_days ?? 0,
@@ -149,25 +160,44 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         }
     }, [enabled, loadModelPricesEnabled, loadUsageStats, showNotification, t])
 
+    useEffect(
+        () => () => {
+            exportControllerRef.current?.abort()
+        },
+        [],
+    )
+
     const handleExport = async (filters?: ExportFilters) => {
+        exportControllerRef.current?.abort()
+        const controller            = new AbortController()
+        exportControllerRef.current = controller
         setExporting(true)
         try {
-            const data          = await usageApi.exportUsage(filters)
-            const exportedAt    = typeof data?.exported_at === 'string' ? new Date(data.exported_at) : new Date()
-            const safeTimestamp = Number.isNaN(exportedAt.getTime())
-                                  ? new Date().toISOString()
-                                  : exportedAt.toISOString()
-            const filename      = `usage-export-${safeTimestamp.replace(/[:.]/g, '-')}.json`
-            downloadBlob({
-                             filename,
-                             blob: new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' }),
-                         })
+            const response = await usageApi.exportUsage(filters, { signal: controller.signal })
+            if (controller.signal.aborted) {
+                return
+            }
+            const headerValue = response.headers?.['content-disposition']
+            const match       = typeof headerValue === 'string'
+                                ? headerValue.match(/filename="?(?<filename>[^";]+)"?/i)
+                                : null
+            const filename    = match?.groups?.filename ??
+                                `usage-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+            const blob        = response.data instanceof Blob
+                                ? response.data
+                                : new Blob([response.data], { type: 'application/json' })
+            downloadBlob({ filename, blob, revokeDelayMs: 60000 })
             showNotification(t('usage_stats.export_success'), 'success')
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : ''
-            showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            if (!controller.signal.aborted) {
+                const message = err instanceof Error ? err.message : ''
+                showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            }
         } finally {
-            setExporting(false)
+            if (exportControllerRef.current === controller) {
+                exportControllerRef.current = null
+                setExporting(false)
+            }
         }
     }
 
@@ -265,29 +295,32 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
                 showNotification(feedback.message, feedback.type)
                 if (result.recalculation_pending) {
                     try {
-                        const status = await modelPricesApi.waitForRecalculation()
+                        const status              = await modelPricesApi.waitForRecalculation()
+                        const recalculationFailed = t('usage_stats.recalculate_failed')
+                        let completionFeedback: PriceSaveFeedback
                         if (!status) {
-                            throw new Error(t('usage_stats.recalculate_timeout'))
+                            completionFeedback = {
+                                message: `${recalculationFailed}: ${t('usage_stats.recalculate_timeout')}`,
+                                type: 'error',
+                            }
+                        } else if (status.status === 'ok') {
+                            completionFeedback = {
+                                message: t('usage_stats.recalculate_success', {
+                                    days: status.recalculated_days ?? 0,
+                                    cost: formatUsd(status.total_cost ?? 0),
+                                }),
+                                type: 'success',
+                            }
+                        } else {
+                            completionFeedback = {
+                                message: `${recalculationFailed}${status.error ? `: ${status.error}` : ''}`,
+                                type: 'error',
+                            }
                         }
-                        const completionFeedback: PriceSaveFeedback =
-                                  status.status === 'ok' ?
-                                  {
-                                      message: t('usage_stats.recalculate_success', {
-                                          days: status.recalculated_days ?? 0,
-                                          cost: formatUsd(status.total_cost ?? 0),
-                                      }),
-                                      type: 'success',
-                                  } :
-                                  {
-                                      message: `${t('usage_stats.recalculate_failed')}${status.error ?
-                                                                                       `: ${status.error}` :
-                                                                                       ''}`,
-                                      type: 'error',
-                                  }
                         setPriceSaveFeedback(completionFeedback)
                         showNotification(completionFeedback.message, completionFeedback.type)
                     } catch (err: unknown) {
-                        const message = err instanceof Error ? err.message : ''
+                        const message                                  = err instanceof Error ? err.message : ''
                         const recalculationFeedback: PriceSaveFeedback = {
                             message: `${t('usage_stats.recalculate_failed')}${message ? `: ${message}` : ''}`,
                             type: 'error',

@@ -13,15 +13,21 @@ import {logsApi} from '@/services/api/logs'
 import {
     type EventsParams,
     type EventsResponse,
+    type PricingReceipt,
+    type RequestLogState,
     usageApi,
     type UsageEvent,
     type UsageThinking,
 } from '@/services/api/usage'
-import {useConfigStore} from '@/stores'
+import {useConfigStore, useNotificationStore} from '@/stores'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {OAuthModelAliasEntry} from '@/types/oauth'
 import type {CredentialInfo} from '@/types/sourceInfo'
-import {AUTO_REFRESH_INTERVALS, DEFAULT_AUTO_REFRESH_MS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
+import {
+    resolveUsageEventsAutoRefreshMs,
+    shouldRefreshUsageEvents,
+    USAGE_EVENTS_AUTO_REFRESH_INTERVALS,
+} from '@/utils/autoRefresh'
 import {downloadBlob} from '@/utils/download'
 import {formatDateTime, formatNumber, maskApiKey, toLocalDateTimeSecondsString} from '@/utils/format'
 import {redactSensitiveText} from '@/utils/redaction'
@@ -32,13 +38,49 @@ import {
     formatThinkingLabel,
     isNoThinkingUsage,
     normalizeUsageThinking,
+    resolveUsageTokenMetrics,
 } from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './RequestEventsDetailsCard.module.scss'
+import {
+    createUsageEventExport,
+    MAX_USAGE_EVENT_EXPORT_EVENTS,
+    USAGE_EVENT_EXPORT_PAGE_SIZE,
+    UsageEventExportLimitError,
+} from './usageEventExport'
 
-const STATUS_ALL        = ''
-const DEFAULT_PAGE_SIZE = 50
+const STATUS_ALL             = ''
+const DEFAULT_PAGE_SIZE      = 50
+const USAGE_EVENT_CSV_HEADER = [
+    'timestamp',
+    'model',
+    'source',
+    'auth_index',
+    'provider',
+    'api_key',
+    'user',
+    'request_id',
+    'result',
+    'latency_ms',
+    'time_to_first_byte_ms',
+    'total_duration_ms',
+    'completed',
+    'cache_hit_rate',
+    'response_throughput_tokens_per_second',
+    'thinking_intensity',
+    'thinking_mode',
+    'thinking_level',
+    'thinking_budget',
+    'input_tokens',
+    'output_tokens',
+    'reasoning_tokens',
+    'cache_read_tokens',
+    'cache_write_tokens',
+    'cached_tokens',
+    'total_tokens',
+    'cost',
+]
 
 function formatRequestThinkingLabel(
     thinking: UsageThinking | null,
@@ -78,6 +120,8 @@ type RequestEventRow = {
     apiKeyMasked: string
     user: string
     requestId: string
+    requestLogState: RequestLogState
+    requestLogHomeIp: string
     latencyMs: number | null
     latencyLabel: string
     timeToFirstByteMs: number | null
@@ -102,8 +146,16 @@ type RequestEventRow = {
     reasoningTokensLabel: string
     cachedTokens: number | null
     cachedTokensLabel: string
+    cacheReadTokens: number | null
+    cacheReadTokensLabel: string
+    cacheWriteTokens: number | null
+    cacheWriteTokensLabel: string
     totalTokens: number | null
     totalTokensLabel: string
+    cost: number
+    costLabel: string
+    pricingReceiptLabel: string
+    pricingReceiptTitle: string
 }
 
 interface RequestEventsDetailsCardProps {
@@ -314,14 +366,91 @@ function formatTokenValue(value: number | null, lang: string, missingText: strin
     return formatNumber(value, lang)
 }
 
+function formatEventCost(value: number, lang: string, currency = 'USD'): string {
+    try {
+        return new Intl.NumberFormat(lang, {
+            style: 'currency',
+            currency,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: value > 0 && value < 0.01 ? 6 : 4,
+        }).format(value)
+    } catch {
+        return `${currency} ${new Intl.NumberFormat(lang, { maximumFractionDigits: 6 }).format(value)}`
+    }
+}
+
+function pricingLineItemLabel(
+    category: string,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    return t(`usage_stats.request_events_pricing_category_${category}`, { defaultValue: category })
+}
+
+function formatPricingReceiptTitle(
+    receipt: PricingReceipt,
+    currentCost: number,
+    lang: string,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    const receiptCostMicro = nonNegativeNumber(receipt.cost_micro) ?? 0
+    const receiptCost      = receiptCostMicro / 1_000_000
+    const currency         = receipt.currency || 'USD'
+    const lines            = [
+        t('usage_stats.request_events_pricing_receipt', { defaultValue: 'Request-time pricing receipt' }),
+        `${t('usage_stats.request_events_pricing_provider', { defaultValue: 'Provider' })}: ${receipt.provider || '-'}`,
+        `${t('usage_stats.request_events_pricing_model', { defaultValue: 'Model' })}: ${receipt.model ||
+                                                                                        '-'} → ${receipt.canonical_model ||
+                                                                                                 '-'}`,
+        `${t('usage_stats.request_events_pricing_source', { defaultValue: 'Source' })}: ${receipt.source || '-'}`,
+        `${t('usage_stats.request_events_pricing_revision', { defaultValue: 'Revision' })}: ${receipt.price_revision ||
+                                                                                              '-'}`,
+        `${t(
+            'usage_stats.request_events_pricing_request_cost',
+            { defaultValue: 'Request-time cost' },
+        )}: ${formatEventCost(receiptCost, lang, currency)} (${receipt.cost_status})`,
+        `${t(
+            'usage_stats.request_events_pricing_current_cost',
+            { defaultValue: 'Current-catalog cost' },
+        )}: ${formatEventCost(currentCost, lang)}`,
+        `${t('usage_stats.request_events_pricing_coverage', { defaultValue: 'Coverage' })}: ${formatNumber(
+            numberFromValue(receipt.coverage.priced_tokens) ?? 0,
+            lang,
+        )} / ${formatNumber(numberFromValue(receipt.coverage.total_tokens) ?? 0, lang)}`,
+    ]
+    const effectiveRange   = [receipt.effective_from, receipt.effective_until].filter(Boolean).join(' → ')
+    if (effectiveRange) {
+        lines.push(`${t(
+            'usage_stats.request_events_pricing_effective',
+            { defaultValue: 'Effective' },
+        )}: ${effectiveRange}`)
+    }
+    receipt.line_items.forEach((item) => {
+        const tokens    = numberFromValue(item.tokens) ?? 0
+        const itemCost  = (numberFromValue(item.cost_micro) ?? 0) / 1_000_000
+        const rateLabel = item.priced && typeof item.rate_per_million === 'number'
+                          ?
+                          `${item.rate_per_million}/${t(
+                              'usage_stats.request_events_pricing_million_tokens',
+                              { defaultValue: 'MTok' },
+                          )}`
+                          :
+                          t('usage_stats.request_events_pricing_unpriced', { defaultValue: 'Unpriced' })
+        lines.push(
+            `${pricingLineItemLabel(item.category, t)}: ${formatNumber(
+                tokens,
+                lang,
+            )} × ${rateLabel} = ${formatEventCost(itemCost, lang, currency)} [${item.rate_source}]`,
+        )
+    })
+    if (receipt.cost_reason) {
+        lines.push(receipt.cost_reason)
+    }
+    return lines.join('\n')
+}
+
 function nonNegativeNumber(value: number | string | null | undefined): number | null {
     const parsed = numberFromValue(value)
     return parsed === null ? null : Math.max(parsed, 0)
-}
-
-function maxTokenValue(...values: Array<number | string | null | undefined>): number | null {
-    const parsed = values.map(nonNegativeNumber).filter((value): value is number => value !== null)
-    return parsed.length > 0 ? Math.max(...parsed) : null
 }
 
 function backendMaskedApiKey(key: string): string {
@@ -366,6 +495,45 @@ function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err || '')
 }
 
+function normalizeRequestLogState(value: unknown): RequestLogState {
+    switch (value) {
+        case 'pending':
+        case 'available':
+        case 'disabled':
+        case 'not_captured':
+        case 'publish_failed':
+        case 'expired':
+        case 'legacy_unknown':
+            return value
+        default:
+            return 'legacy_unknown'
+    }
+}
+
+function requestLogStateLabel(
+    state: RequestLogState,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    switch (state) {
+        case 'pending':
+            return t('usage_stats.request_events_log_state_pending', { defaultValue: 'Log is being generated' })
+        case 'disabled':
+            return t('usage_stats.request_events_log_state_disabled', { defaultValue: 'Logging was disabled' })
+        case 'not_captured':
+            return t('usage_stats.request_events_log_state_not_captured', { defaultValue: 'Log was not captured' })
+        case 'publish_failed':
+            return t('usage_stats.request_events_log_state_publish_failed', { defaultValue: 'Log generation failed' })
+        case 'expired':
+            return t('usage_stats.request_events_log_state_expired', { defaultValue: 'Log has expired' })
+        case 'legacy_unknown':
+            return t('usage_stats.request_events_log_state_legacy_unknown', {
+                defaultValue: 'Historical request has no log status',
+            })
+        case 'available':
+            return t('usage_stats.request_events_log_state_available', { defaultValue: 'Log available' })
+    }
+}
+
 function safeRequestLogFilename(requestId: string): string {
     return `request-${requestId.replace(/[^a-zA-Z0-9_.-]/g, '_')}.log`
 }
@@ -383,47 +551,71 @@ function eventToRow(
     t: ReturnType<typeof useTranslation>['t'],
     aliases?: Record<string, string>,
 ): RequestEventRow {
-    const timestampMs        = Date.parse(event.timestamp)
-    const date               = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
-    const sourceRaw          = event.source || ''
-    const authIndex          = event.auth_index || '-'
-    const sourceInfo         = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
-    const rawApiKey          = event.api_key || ''
-    const alias              = 'api_key_alias' in event
-                               ? (event.api_key_alias || '').trim()
-                               : resolveApiKeyAlias(rawApiKey, aliases)
-    const sourceDisplay      = sourceInfo.displayName.trim()
-    const hasSourceDisplay   = sourceDisplay !== '' && sourceDisplay !== '-'
-    const maskedApiKey       = displayApiKey(rawApiKey, alias, noApiKeyLabel)
-    const sourceBase         =
+    const timestampMs         = Date.parse(event.timestamp)
+    const date                = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
+    const sourceRaw           = event.source || ''
+    const authIndex           = event.auth_index || '-'
+    const sourceInfo          = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
+    const rawApiKey           = event.api_key || ''
+    const alias               = 'api_key_alias' in event
+                                ? (event.api_key_alias || '').trim()
+                                : resolveApiKeyAlias(rawApiKey, aliases)
+    const sourceDisplay       = sourceInfo.displayName.trim()
+    const hasSourceDisplay    = sourceDisplay !== '' && sourceDisplay !== '-'
+    const maskedApiKey        = displayApiKey(rawApiKey, alias, noApiKeyLabel)
+    const sourceBase          =
               hasSourceDisplay && sourceDisplay !== maskedApiKey ?
               sourceDisplay :
               alias || sourceDisplay || noApiKeyLabel
-    const providerLabel      = (sourceInfo.type || event.provider || '').trim()
-    const providerDisplay    = providerLabel ? channelLabel(providerLabel) : ''
-    const latencyMs          = extractLatencyMs(event)
-    const timeToFirstByteMs  = numberFromValue(event.time_to_first_byte_ms)
-    const totalDurationMs    = numberFromValue(event.total_duration_ms)
-    const requestId          = typeof event.request_id === 'string' ? event.request_id.trim() : ''
-    const inputTokens        = nonNegativeNumber(event.tokens?.input_tokens)
-    const outputTokens       = nonNegativeNumber(event.tokens?.output_tokens)
-    const reasoningTokens    = nonNegativeNumber(event.tokens?.reasoning_tokens)
-    const cachedTokens       = maxTokenValue(event.tokens?.cached_tokens, event.tokens?.cache_tokens)
-    const tokenParts         = [inputTokens, outputTokens, reasoningTokens, cachedTokens]
-    const totalTokens        = nonNegativeNumber(event.tokens?.total_tokens) ?? (
-        tokenParts.some((value) => value !== null)
-        ? tokenParts.reduce<number>((sum, value) => sum + (value ?? 0), 0)
-        : null
-    )
-    const cacheHitRate       = inputTokens !== null && cachedTokens !== null && inputTokens > 0
-                               ? (cachedTokens / inputTokens) * 100
-                               : null
-    const throughputTokens   =
+    const providerLabel       = (sourceInfo.type || event.provider || '').trim()
+    const providerDisplay     = providerLabel ? channelLabel(providerLabel) : ''
+    const latencyMs           = extractLatencyMs(event)
+    const timeToFirstByteMs   = numberFromValue(event.time_to_first_byte_ms)
+    const totalDurationMs     = numberFromValue(event.total_duration_ms)
+    const requestId           = typeof event.request_id === 'string' ? event.request_id.trim() : ''
+    const requestLogState     = normalizeRequestLogState(event.request_log_state)
+    const requestLogHomeIp    = typeof event.request_log_home_ip === 'string' ? event.request_log_home_ip.trim() : ''
+    const tokenMetrics        = resolveUsageTokenMetrics(event.tokens)
+    const inputTokens         = tokenMetrics.inputTokens
+    const outputTokens        = tokenMetrics.outputTokens
+    const reasoningTokens     = tokenMetrics.reasoningTokens
+    const cachedTokens        = tokenMetrics.cachedTokens
+    const cacheReadTokens     = tokenMetrics.cacheReadTokens
+    const cacheWriteTokens    = tokenMetrics.cacheWriteTokens
+    const totalTokens         = tokenMetrics.totalTokens
+    const cacheHitRate        = inputTokens !== null && tokenMetrics.cacheHitTokens !== null && inputTokens > 0
+                                ? (tokenMetrics.cacheHitTokens / inputTokens) * 100
+                                : null
+    const throughputTokens    =
               totalDurationMs !== null && totalDurationMs > 0 && outputTokens !== null
               ? outputTokens / (totalDurationMs / 1000)
               : null
-    const thinking           = normalizeUsageThinking(event.thinking)
-    const hasRequestMetadata =
+    const cost                = nonNegativeNumber(event.cost) ?? 0
+    const pricingReceipt      = event.pricing_receipt
+    const requestTimeCost     = pricingReceipt
+                                ? (nonNegativeNumber(pricingReceipt.cost_micro) ?? 0) / 1_000_000
+                                : null
+    const receiptCurrency     = pricingReceipt?.currency || 'USD'
+    const pricingChanged      = requestTimeCost !== null && receiptCurrency === 'USD' &&
+                                Math.abs(requestTimeCost - cost) >= 0.0000005
+    const pricingReceiptLabel = pricingReceipt && requestTimeCost !== null
+                                ?
+                                `${t(
+                                    'usage_stats.request_events_pricing_request_short',
+                                    { defaultValue: 'At request' },
+                                )}: ${formatEventCost(requestTimeCost, lang, receiptCurrency)}${pricingChanged ?
+                                                                                                ` · ${t(
+                                                                                                    'usage_stats.request_events_pricing_recalculated',
+                                                                                                    { defaultValue: 'Recalculated' },
+                                                                                                )}` :
+                                                                                                ''}`
+                                :
+                                ''
+    const pricingReceiptTitle = pricingReceipt
+                                ? formatPricingReceiptTitle(pricingReceipt, cost, lang, t)
+                                : ''
+    const thinking            = normalizeUsageThinking(event.thinking)
+    const hasRequestMetadata  =
               event.metadata_recorded === true &&
               (requestId !== '' ||
                timeToFirstByteMs !== null ||
@@ -446,6 +638,8 @@ function eventToRow(
         apiKeyMasked: maskedApiKey,
         user: sourceBase,
         requestId,
+        requestLogState,
+        requestLogHomeIp,
         latencyMs,
         latencyLabel: formatDurationMs(latencyMs, { locale: lang, invalidText: notRecordedLabel }),
         timeToFirstByteMs,
@@ -470,8 +664,16 @@ function eventToRow(
         reasoningTokensLabel: formatTokenValue(reasoningTokens, lang, notRecordedLabel),
         cachedTokens,
         cachedTokensLabel: formatTokenValue(cachedTokens, lang, notRecordedLabel),
+        cacheReadTokens,
+        cacheReadTokensLabel: formatTokenValue(cacheReadTokens, lang, notRecordedLabel),
+        cacheWriteTokens,
+        cacheWriteTokensLabel: formatTokenValue(cacheWriteTokens, lang, notRecordedLabel),
         totalTokens,
         totalTokensLabel: formatTokenValue(totalTokens, lang, notRecordedLabel),
+        cost,
+        costLabel: formatEventCost(cost, lang),
+        pricingReceiptLabel,
+        pricingReceiptTitle,
     }
 }
 
@@ -496,8 +698,9 @@ export function RequestEventsDetailsCard({
                                              selectedStatus,
                                              onSelectedStatusChange,
                                          }: RequestEventsDetailsCardProps) {
-    const { t, i18n } = useTranslation()
-    const config      = useConfigStore((state) => state.config)
+    const { t, i18n }      = useTranslation()
+    const config           = useConfigStore((state) => state.config)
+    const showNotification = useNotificationStore((state) => state.showNotification)
 
     // Model / credential / api-key filters come from the top FilterBar via props;
     // only the result (status) filter and free-text search remain local since the
@@ -514,17 +717,16 @@ export function RequestEventsDetailsCard({
     const [page, setPage]               = useState(1)
     const [pageSize, setPageSize]       = useState(DEFAULT_PAGE_SIZE)
 
-    // Auto-refresh
-    const configRefreshMs                                               = useMemo(
-        () => resolveAutoRefreshMs(autoRefreshConfigSeconds ?? config?.autoRefreshInterval),
+    // 自动刷新需要手动开启，并且只用于滚动的最近 24 小时范围
+    const configuredAutoRefreshInterval                                 = useMemo(
+        () => resolveUsageEventsAutoRefreshMs(autoRefreshConfigSeconds ?? config?.autoRefreshInterval),
         [autoRefreshConfigSeconds, config?.autoRefreshInterval],
     )
-    const [autoRefreshOverride, setAutoRefreshOverride]                 = useState<boolean | null>(null)
+    const [autoRefreshEnabled, setAutoRefreshEnabled]                   = useState(false)
     const [autoRefreshIntervalOverride, setAutoRefreshIntervalOverride] = useState<number | null>(null)
-    const autoRefresh                                                   = autoRefreshOverride ?? configRefreshMs > 0
+    const autoRefresh                                                   = activePreset === '24h' && autoRefreshEnabled
     const autoRefreshInterval                                           =
-              autoRefreshIntervalOverride ?? (configRefreshMs > 0 ? configRefreshMs : DEFAULT_AUTO_REFRESH_MS)
-    const requestLogEnabled                                             = config?.requestLog === true
+              autoRefreshIntervalOverride ?? configuredAutoRefreshInterval
     const [autoRefreshClockMs, setAutoRefreshClockMs]                   = useState(() => Date.now())
 
     // Server-side data
@@ -533,6 +735,7 @@ export function RequestEventsDetailsCard({
     const [fetchError, setFetchError]                           = useState<string>('')
     const [requestLogPreview, setRequestLogPreview]             = useState<{
                                                                                id: string
+                                                                               homeIp: string
                                                                                content: string
                                                                                truncated: boolean
                                                                                totalLines: number
@@ -542,7 +745,9 @@ export function RequestEventsDetailsCard({
     const [requestLogDownloading, setRequestLogDownloading]     = useState<Set<string>>(() => new Set())
     const [oauthModelAlias, setOauthModelAlias]                 = useState<Record<string, OAuthModelAliasEntry[]>>({})
     const [modelAliasError, setModelAliasError]                 = useState('')
-    const fetchIdRef                                            = useRef(0)
+    const [exportingFormat, setExportingFormat]                 = useState<'csv' | 'json' | null>(null)
+    const eventsRequestControllerRef                            = useRef<AbortController | null>(null)
+    const exportControllerRef                                   = useRef<AbortController | null>(null)
     const requestLogPreviewSeqRef                               = useRef(0)
     const activeRequestLogPreviewRef                            = useRef<string | null>(null)
 
@@ -561,32 +766,11 @@ export function RequestEventsDetailsCard({
             return { from: dateRange.from, to: dateRange.to }
         }
         const now = new Date(autoRefreshClockMs)
-        const to  = toLocalDateTimeSecondsString(now)
-        switch (activePreset) {
-            case '24h':
-                return {
-                    from: toLocalDateTimeSecondsString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-                    to,
-                }
-            case '7d':
-                return {
-                    from: toLocalDateTimeSecondsString(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
-                    to,
-                }
-            case '30d':
-                return {
-                    from: toLocalDateTimeSecondsString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
-                    to,
-                }
-            case 'all':
-                return {
-                    from: dateRange.from,
-                    to,
-                }
-            default:
-                return { from: dateRange.from, to: dateRange.to }
+        return {
+            from: toLocalDateTimeSecondsString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+            to: toLocalDateTimeSecondsString(now),
         }
-    }, [activePreset, autoRefresh, autoRefreshClockMs, dateRange.from, dateRange.to])
+    }, [autoRefresh, autoRefreshClockMs, dateRange.from, dateRange.to])
 
     useEffect(() => {
         onVisibleDateRangeChange?.(effectiveDateRange)
@@ -651,6 +835,7 @@ export function RequestEventsDetailsCard({
             page_size: pageSize,
             sort: toBackendSortField(sortField),
             order: sortDir,
+            view: 'compact',
         }
         applyFilters(
             params,
@@ -681,46 +866,92 @@ export function RequestEventsDetailsCard({
     // Fetch events from backend
     useEffect(() => {
         if (!enabled) {
+            eventsRequestControllerRef.current?.abort()
+            eventsRequestControllerRef.current = null
             return
         }
 
-        const fetchId = ++fetchIdRef.current
+        const controller                   = new AbortController()
+        eventsRequestControllerRef.current = controller
 
         usageApi
-            .getEvents(eventsParams)
+            .getEvents(eventsParams, { signal: controller.signal })
             .then((data) => {
-                if (fetchIdRef.current === fetchId) {
+                if (eventsRequestControllerRef.current === controller && !controller.signal.aborted) {
                     setEventsData(data)
                     setFetchError('')
                 }
             })
             .catch((err: unknown) => {
-                if (fetchIdRef.current === fetchId) {
+                if (eventsRequestControllerRef.current === controller && !controller.signal.aborted) {
                     setFetchError(err instanceof Error ? err.message : 'request failed')
                 }
             })
             .finally(() => {
-                if (fetchIdRef.current === fetchId) {
-                    setSettledRequestSignature(eventsRequestSignature)
+                if (eventsRequestControllerRef.current === controller) {
+                    eventsRequestControllerRef.current = null
+                    if (!controller.signal.aborted) {
+                        setSettledRequestSignature(eventsRequestSignature)
+                    }
                 }
             })
+
+        return () => {
+            if (eventsRequestControllerRef.current === controller) {
+                eventsRequestControllerRef.current = null
+            }
+            controller.abort()
+        }
     }, [enabled, eventsParams, eventsRequestSignature])
 
     useEffect(() => {
-        const timeoutId = window.setTimeout(() => {
-            setAutoRefreshClockMs(Date.now())
-        }, 0)
-        if (!autoRefresh || autoRefreshInterval <= 0 || requestLogPreview !== null) {
-            return () => window.clearTimeout(timeoutId)
+        const scheduleEligible = shouldRefreshUsageEvents({
+                                                              activePreset,
+                                                              enabled: enabled && autoRefreshEnabled,
+                                                              page,
+                                                              sortField,
+                                                              sortDir,
+                                                              pageVisible: true,
+                                                              busy: false,
+                                                          })
+        if (!scheduleEligible || requestLogPreview !== null || exportingFormat !== null) {
+            return
         }
         const intervalId = window.setInterval(() => {
-            setAutoRefreshClockMs(Date.now())
+            const busy = Boolean(eventsRequestControllerRef.current) ||
+                         requestLogPreview !== null ||
+                         exportingFormat !== null
+            if (shouldRefreshUsageEvents({
+                                             activePreset,
+                                             enabled: enabled && autoRefreshEnabled,
+                                             page,
+                                             sortField,
+                                             sortDir,
+                                             pageVisible: document.visibilityState === 'visible',
+                                             busy,
+                                         })) {
+                setAutoRefreshClockMs(Date.now())
+            }
         }, autoRefreshInterval)
-        return () => {
-            window.clearTimeout(timeoutId)
-            window.clearInterval(intervalId)
-        }
-    }, [activePreset, autoRefresh, autoRefreshInterval, dateRange.from, dateRange.to, requestLogPreview])
+        return () => window.clearInterval(intervalId)
+    }, [
+                  activePreset,
+                  autoRefreshEnabled,
+                  autoRefreshInterval,
+                  enabled,
+                  exportingFormat,
+                  page,
+                  requestLogPreview,
+                  sortDir,
+                  sortField,
+              ])
+
+    useEffect(
+        () => () => {
+            exportControllerRef.current?.abort()
+        },
+        [],
+    )
 
     const noApiKeyLabel        = t('usage_stats.filter_api_key_none')
     const identityLabel        = t('usage_stats.request_events_identity', { defaultValue: 'Identity' })
@@ -787,7 +1018,7 @@ export function RequestEventsDetailsCard({
         (page: number): EventsParams => {
             const params: EventsParams = {
                 page,
-                page_size: 500,
+                page_size: USAGE_EVENT_EXPORT_PAGE_SIZE,
                 sort: toBackendSortField(sortField),
                 order: sortDir,
             }
@@ -806,180 +1037,132 @@ export function RequestEventsDetailsCard({
         [effectiveDateRange, topModels, topCredentials, topApiKeys, statusFilter, searchQuery, sortField, sortDir],
     )
 
-    /** Fetch all pages of events for export. Backend caps at 500 per page. */
-    const fetchAllEvents = useCallback(async (): Promise<UsageEvent[]> => {
-        const allEvents: UsageEvent[] = []
-        let currentPage               = 1
+    const exportEvents = useCallback(
+        async (format: 'csv' | 'json') => {
+            exportControllerRef.current?.abort()
+            const controller            = new AbortController()
+            exportControllerRef.current = controller
+            setExportingFormat(format)
 
-        while (true) {
-            const data = await usageApi.getEvents(buildExportParams(currentPage))
-            if (!data?.events?.length) {
-                break
-            }
-            allEvents.push(...data.events)
-            if (allEvents.length >= (data.total ?? 0)) {
-                break
-            }
-            ++currentPage
-        }
+            const formatRow = (event: UsageEvent, index: number) => eventToRow(
+                event,
+                index,
+                sourceInfoMap,
+                authFileMap,
+                i18n.language,
+                noApiKeyLabel,
+                notRecordedLabel,
+                modelAliasLookup,
+                t,
+                aliases,
+            )
 
-        return allEvents
-    }, [buildExportParams])
-
-    const handleExportCsv = useCallback(
-        async () => {
             try {
-                const events = await fetchAllEvents()
-                if (!events.length) {
+                const blob = await createUsageEventExport({
+                                                              format,
+                                                              signal: controller.signal,
+                                                              csvHeader: USAGE_EVENT_CSV_HEADER,
+                                                              fetchPage: (page, signal) => usageApi.getEvents(
+                                                                  buildExportParams(page),
+                                                                  { signal },
+                                                              ),
+                                                              formatCsvRow: (event, index) => {
+                                                                  const row = formatRow(event, index)
+                                                                  return [
+                                                                      event.timestamp,
+                                                                      event.model,
+                                                                      event.source,
+                                                                      event.auth_index ?? '',
+                                                                      event.provider ?? '',
+                                                                      row.apiKeyMasked,
+                                                                      row.user,
+                                                                      row.requestId,
+                                                                      event.failed ? 'failed' : 'success',
+                                                                      row.latencyMs ?? '',
+                                                                      row.timeToFirstByteMs ?? '',
+                                                                      row.totalDurationMs ?? '',
+                                                                      row.completed === null ?
+                                                                      '' :
+                                                                      String(row.completed),
+                                                                      row.cacheHitRate ?? '',
+                                                                      row.throughputTokensPerSecond ?? '',
+                                                                      row.thinking?.intensity ?? '',
+                                                                      row.thinking?.mode ?? '',
+                                                                      row.thinking?.level ?? '',
+                                                                      row.thinking?.budget ?? '',
+                                                                      row.inputTokens ?? '',
+                                                                      row.outputTokens ?? '',
+                                                                      row.reasoningTokens ?? '',
+                                                                      row.cacheReadTokens ?? '',
+                                                                      row.cacheWriteTokens ?? '',
+                                                                      row.cachedTokens ?? '',
+                                                                      row.totalTokens ?? '',
+                                                                      row.cost,
+                                                                  ]
+                                                                      .map((value) => encodeCsv(value))
+                                                                      .join(',')
+                                                              },
+                                                              formatJsonEvent: (event, index) => {
+                                                                  const safeEvent = { ...event } as Record<string, unknown>
+                                                                  delete safeEvent.raw_api_key
+                                                                  return {
+                                                                      ...safeEvent,
+                                                                      api_key: formatRow(event, index).apiKeyMasked,
+                                                                      thinking: normalizeUsageThinking(event.thinking) ??
+                                                                                undefined,
+                                                                  }
+                                                              },
+                                                          })
+                if (!blob || controller.signal.aborted) {
                     return
                 }
-
-                const csvHeader = [
-                    'timestamp',
-                    'model',
-                    'source',
-                    'auth_index',
-                    'provider',
-                    'api_key',
-                    'user',
-                    'request_id',
-                    'result',
-                    'latency_ms',
-                    'time_to_first_byte_ms',
-                    'total_duration_ms',
-                    'completed',
-                    'cache_hit_rate',
-                    'response_throughput_tokens_per_second',
-                    'thinking_intensity',
-                    'thinking_mode',
-                    'thinking_level',
-                    'thinking_budget',
-                    'input_tokens',
-                    'output_tokens',
-                    'reasoning_tokens',
-                    'cached_tokens',
-                    'total_tokens',
-                ]
-                const csvRows   = events.map((e, index) => {
-                    const row = eventToRow(
-                        e,
-                        index,
-                        sourceInfoMap,
-                        authFileMap,
-                        i18n.language,
-                        noApiKeyLabel,
-                        notRecordedLabel,
-                        modelAliasLookup,
-                        t,
-                        aliases,
-                    )
-                    return [
-                        e.timestamp,
-                        e.model,
-                        e.source,
-                        e.auth_index ?? '',
-                        e.provider ?? '',
-                        row.apiKeyMasked,
-                        row.user,
-                        row.requestId,
-                        e.failed ? 'failed' : 'success',
-                        row.latencyMs ?? '',
-                        row.timeToFirstByteMs ?? '',
-                        row.totalDurationMs ?? '',
-                        row.completed === null ? '' : String(row.completed),
-                        row.cacheHitRate ?? '',
-                        row.throughputTokensPerSecond ?? '',
-                        row.thinking?.intensity ?? '',
-                        row.thinking?.mode ?? '',
-                        row.thinking?.level ?? '',
-                        row.thinking?.budget ?? '',
-                        row.inputTokens ?? '',
-                        row.outputTokens ?? '',
-                        row.reasoningTokens ?? '',
-                        row.cachedTokens ?? '',
-                        row.totalTokens ?? '',
-                    ]
-                        .map((v) => encodeCsv(v))
-                        .join(',')
-                })
-                const content   = [csvHeader.join(','), ...csvRows].join('\n')
-                const fileTime  = new Date().toISOString().replace(/[:.]/g, '-')
-                downloadBlob({
-                                 filename: `usage-events-${fileTime}.csv`,
-                                 blob: new Blob([content], { type: 'text/csv;charset=utf-8' }),
-                             })
-            } catch {
-                /* ignore */
-            }
-        },
-        [
-            fetchAllEvents,
-            sourceInfoMap,
-            authFileMap,
-            i18n.language,
-            noApiKeyLabel,
-            notRecordedLabel,
-            modelAliasLookup,
-            t,
-            aliases,
-        ],
-    )
-
-    const handleExportJson = useCallback(
-        async () => {
-            try {
-                const events = await fetchAllEvents()
-                if (!events.length) {
-                    return
-                }
-
-                const content  = JSON.stringify(
-                    events.map((event, index) => {
-                        const thinking  = normalizeUsageThinking(event.thinking)
-                        const row       = eventToRow(
-                            event,
-                            index,
-                            sourceInfoMap,
-                            authFileMap,
-                            i18n.language,
-                            noApiKeyLabel,
-                            notRecordedLabel,
-                            modelAliasLookup,
-                            t,
-                            aliases,
-                        )
-                        const safeEvent = { ...event } as Record<string, unknown>
-                        delete safeEvent.raw_api_key
-                        return {
-                            ...safeEvent,
-                            api_key: row.apiKeyMasked,
-                            thinking: thinking ?? undefined,
-                        }
-                    }),
-                    null,
-                    2,
-                )
                 const fileTime = new Date().toISOString().replace(/[:.]/g, '-')
                 downloadBlob({
-                                 filename: `usage-events-${fileTime}.json`,
-                                 blob: new Blob([content], { type: 'application/json;charset=utf-8' }),
+                                 filename: `usage-events-${fileTime}.${format}`,
+                                 blob,
+                                 revokeDelayMs: 60000,
                              })
-            } catch {
-                /* ignore */
+                showNotification(t('usage_stats.export_success'), 'success')
+            } catch (err: unknown) {
+                if (!controller.signal.aborted) {
+                    if (err instanceof UsageEventExportLimitError) {
+                        showNotification(
+                            t('usage_stats.export_limit_exceeded', {
+                                limit: formatNumber(MAX_USAGE_EVENT_EXPORT_EVENTS, i18n.language),
+                            }),
+                            'warning',
+                        )
+                    } else {
+                        const message = err instanceof Error ? err.message : String(err)
+                        showNotification(
+                            `${t('notification.download_failed')}${message ? `: ${message}` : ''}`,
+                            'error',
+                        )
+                    }
+                }
+            } finally {
+                if (exportControllerRef.current === controller) {
+                    exportControllerRef.current = null
+                    setExportingFormat(null)
+                }
             }
         },
         [
-            fetchAllEvents,
-            sourceInfoMap,
+            aliases,
             authFileMap,
+            buildExportParams,
             i18n.language,
+            modelAliasLookup,
             noApiKeyLabel,
             notRecordedLabel,
-            modelAliasLookup,
+            showNotification,
+            sourceInfoMap,
             t,
-            aliases,
         ],
     )
+
+    const handleExportCsv  = useCallback(() => void exportEvents('csv'), [exportEvents])
+    const handleExportJson = useCallback(() => void exportEvents('json'), [exportEvents])
 
     const handleSort = useCallback((field: SortField) => {
         setSortField((prev) => {
@@ -992,20 +1175,21 @@ export function RequestEventsDetailsCard({
         })
     }, [])
 
-    const previewRequestLog = useCallback(async (requestId: string) => {
+    const previewRequestLog = useCallback(async (requestId: string, homeIp: string) => {
         if (!requestId) {
             return
         }
         const seq                          = ++requestLogPreviewSeqRef.current
         activeRequestLogPreviewRef.current = requestId
-        setRequestLogPreview({ id: requestId, content: '', truncated: false, totalLines: 0 })
+        setRequestLogPreview({ id: requestId, homeIp, content: '', truncated: false, totalLines: 0 })
         setRequestLogError('')
         setRequestLogPreviewing((prev) => new Set(prev).add(requestId))
         try {
-            const preview = await logsApi.previewRequestLogById(requestId, 300)
+            const preview = await logsApi.previewRequestLogById(requestId, 300, homeIp || undefined)
             if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
                 setRequestLogPreview({
                                          id: requestId,
+                                         homeIp,
                                          content: redactSensitiveText(preview.content),
                                          truncated: preview.truncated,
                                          totalLines: preview.total_lines,
@@ -1024,14 +1208,14 @@ export function RequestEventsDetailsCard({
         }
     }, [])
 
-    const downloadRequestLog = useCallback(async (requestId: string) => {
+    const downloadRequestLog = useCallback(async (requestId: string, homeIp: string) => {
         if (!requestId) {
             return
         }
         setRequestLogError('')
         setRequestLogDownloading((prev) => new Set(prev).add(requestId))
         try {
-            const response = await logsApi.downloadRequestLogById(requestId)
+            const response = await logsApi.downloadRequestLogById(requestId, homeIp || undefined)
             const content  = redactSensitiveText(await responseDataToText(response.data))
             downloadBlob({
                              filename: safeRequestLogFilename(requestId),
@@ -1039,7 +1223,13 @@ export function RequestEventsDetailsCard({
                          })
         } catch (err) {
             setRequestLogError(errorMessage(err) || 'request log download failed')
-            setRequestLogPreview((prev) => prev ?? { id: requestId, content: '', truncated: false, totalLines: 0 })
+            setRequestLogPreview((prev) => prev ?? {
+                id: requestId,
+                homeIp,
+                content: '',
+                truncated: false,
+                totalLines: 0,
+            })
         } finally {
             setRequestLogDownloading((prev) => {
                 const next = new Set(prev)
@@ -1139,12 +1329,29 @@ export function RequestEventsDetailsCard({
                                            'usage_stats.request_events_reasoning_short',
                                            { defaultValue: '思考' },
                                        )} {row.reasoningTokensLabel} · {t(
-                                           'usage_stats.request_events_cached_short',
-                                           { defaultValue: '缓存' },
-                                       )} {row.cachedTokensLabel}
+                                           'usage_stats.request_events_cache_read_short',
+                                           { defaultValue: '缓存读取' },
+                                       )} {row.cacheReadTokensLabel} · {t(
+                                           'usage_stats.request_events_cache_write_short',
+                                           { defaultValue: '缓存写入' },
+                                       )} {row.cacheWriteTokensLabel}
                                        </div>
                                    </>
                                ),
+            },
+            {
+                key: 'cost',
+                header: t('usage_stats.request_events_cost', { defaultValue: '费用' }),
+                headerClassName: styles.requestEventsNumericHeader,
+                className: `${styles.requestEventsNumericCell} ${styles.requestEventsCostCell}`,
+                cell: (row) => (
+                    <div title={row.pricingReceiptTitle || undefined}>
+                        <div className={styles.requestEventsMetricPrimary}>{row.costLabel}</div>
+                        {row.pricingReceiptLabel && (
+                            <div className={styles.requestEventsSubline}>{row.pricingReceiptLabel}</div>
+                        )}
+                    </div>
+                ),
             },
             {
                 key: 'duration',
@@ -1200,43 +1407,47 @@ export function RequestEventsDetailsCard({
             {
                 key: 'requestLog',
                 header: requestLogLabel,
-                cell: (row) => row.requestId ? (
-                    <div className={styles.requestLogActions}>
-                        <span className={styles.requestEventsRequestId} title={row.requestId}>{row.requestId}</span>
-                        {requestLogEnabled || row.failed ? (
-                            <div className={styles.requestLogButtonRow}>
-                                <Button
-                                    variant='secondary'
-                                    size='xs'
-                                    loading={requestLogPreviewing.has(row.requestId)}
-                                    onClick={() => void previewRequestLog(row.requestId)}
-                                >
-                                    {t('usage_stats.request_events_log_preview', { defaultValue: 'View log' })}
-                                </Button>
-                                <Button
-                                    variant='ghost'
-                                    size='xs'
-                                    loading={requestLogDownloading.has(row.requestId)}
-                                    onClick={() => void downloadRequestLog(row.requestId)}
-                                >
-                                    {t('common.download')}
-                                </Button>
-                            </div>
-                        ) : (
-                             <span
-                                 className={styles.requestEventsLogDisabled}
-                                 title={t('usage_stats.request_events_log_disabled_hint', {
-                                     defaultValue: 'Enable request-log in Logs or Config for new requests',
-                                 })}
-                             >
-                            {t('usage_stats.request_events_log_disabled', { defaultValue: 'Request log off' })}
-                        </span>
-                         )}
-                    </div>
-                ) : (
-                                   <span className={styles.requestEventsPlainMissing}
-                                         title={missingMetadataTitle}>{notRecordedLabel}</span>
-                               ),
+                cell: (row) => {
+                    if (!row.requestId) {
+                        return (
+                            <span className={styles.requestEventsPlainMissing}
+                                  title={missingMetadataTitle}>{notRecordedLabel}</span>
+                        )
+                    }
+                    const stateLabel = requestLogStateLabel(row.requestLogState, t)
+                    return (
+                        <div className={styles.requestLogActions}>
+                            <span className={styles.requestEventsRequestId} title={row.requestId}>{row.requestId}</span>
+                            {row.requestLogState === 'available' ? (
+                                <div className={styles.requestLogButtonRow}>
+                                    <Button
+                                        variant='secondary'
+                                        size='xs'
+                                        loading={requestLogPreviewing.has(row.requestId)}
+                                        onClick={() => void previewRequestLog(row.requestId, row.requestLogHomeIp)}
+                                    >
+                                        {t('usage_stats.request_events_log_preview', { defaultValue: 'View log' })}
+                                    </Button>
+                                    <Button
+                                        variant='ghost'
+                                        size='xs'
+                                        loading={requestLogDownloading.has(row.requestId)}
+                                        onClick={() => void downloadRequestLog(row.requestId, row.requestLogHomeIp)}
+                                    >
+                                        {t('common.download')}
+                                    </Button>
+                                </div>
+                            ) : (
+                                 <span
+                                     className={styles.requestEventsLogDisabled}
+                                     title={stateLabel}
+                                 >
+                                     {stateLabel}
+                                 </span>
+                             )}
+                        </div>
+                    )
+                },
             },
         ],
         [
@@ -1248,7 +1459,6 @@ export function RequestEventsDetailsCard({
             previewRequestLog,
             renderSortableHeader,
             requestLogDownloading,
-            requestLogEnabled,
             requestLogLabel,
             requestLogPreviewing,
             t,
@@ -1275,22 +1485,39 @@ export function RequestEventsDetailsCard({
                         <ToggleSwitch
                             label={t('usage_stats.auto_refresh')}
                             checked={autoRefresh}
-                            onChange={(value) => setAutoRefreshOverride(value)}
+                            onChange={(value) => {
+                                setAutoRefreshEnabled(value)
+                                if (value) {
+                                    setAutoRefreshClockMs(Date.now())
+                                }
+                            }}
+                            disabled={activePreset !== '24h'}
                         />
                         <Select
                             value={String(autoRefreshInterval)}
-                            options={AUTO_REFRESH_INTERVALS}
+                            options={USAGE_EVENTS_AUTO_REFRESH_INTERVALS}
                             onChange={(v) => setAutoRefreshIntervalOverride(Number(v))}
+                            disabled={activePreset !== '24h'}
                             fullWidth={false}
                         />
                     </div>
                     <Button variant='ghost' size='sm' onClick={handleClearFilters} disabled={!hasActiveFilters}>
                         {t('usage_stats.clear_filters')}
                     </Button>
-                    <Button variant='secondary' size='sm' onClick={handleExportCsv} disabled={totalCount === 0}>
+                    <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={handleExportCsv}
+                        disabled={fetching || totalCount === 0 || exportingFormat !== null}
+                    >
                         {t('usage_stats.export_csv')}
                     </Button>
-                    <Button variant='secondary' size='sm' onClick={handleExportJson} disabled={totalCount === 0}>
+                    <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={handleExportJson}
+                        disabled={fetching || totalCount === 0 || exportingFormat !== null}
+                    >
                         {t('usage_stats.export_json')}
                     </Button>
                 </div>
@@ -1403,7 +1630,7 @@ export function RequestEventsDetailsCard({
                         <Button
                             onClick={() => {
                                 if (requestLogPreview?.id) {
-                                    void downloadRequestLog(requestLogPreview.id)
+                                    void downloadRequestLog(requestLogPreview.id, requestLogPreview.homeIp)
                                 }
                             }}
                             loading={requestLogPreview ? requestLogDownloading.has(requestLogPreview.id) : false}
