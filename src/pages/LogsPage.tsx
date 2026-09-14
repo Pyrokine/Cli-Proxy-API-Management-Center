@@ -47,6 +47,7 @@ import {
     resolveStatusGroup,
     STATUS_GROUPS,
 } from './hooks/logTypes'
+import type {RouteDecisionCooldown, RouteDecisionQuotaStatus} from './hooks/routeDecisionTrace'
 import {useLogFilters} from './hooks/useLogFilters'
 import {isTraceableRequestPath, useTraceResolver} from './hooks/useTraceResolver'
 import styles from './LogsPage.module.scss'
@@ -304,12 +305,118 @@ export function LogsPage() {
     const [requestLogDownloading, setRequestLogDownloading] = useState(false)
     const [logPanelFullscreen, setLogPanelFullscreen]       = useState(false)
 
-    const trace = useTraceResolver({
-                                       traceScopeKey,
-                                       connectionStatus,
-                                       config,
-                                       requestLogDownloading,
-                                   })
+    const trace                        = useTraceResolver({
+                                                              traceScopeKey,
+                                                              connectionStatus,
+                                                              config,
+                                                              requestLogDownloading,
+                                                          })
+    const routeDecisionTrace           = trace.routeDecisionTrace
+    const routeDecision                = routeDecisionTrace.decision
+    const routeBackendNotProvidedLabel = t('logs.trace_route_backend_not_provided')
+    const routeRequestLogStateLabel    = useMemo(() => {
+        switch (routeDecisionTrace.requestLogState) {
+            case 'pending':
+                return t('usage_stats.request_events_log_state_pending')
+            case 'available':
+                return t('usage_stats.request_events_log_state_available')
+            case 'disabled':
+                return t('usage_stats.request_events_log_state_disabled')
+            case 'not_captured':
+                return t('usage_stats.request_events_log_state_not_captured')
+            case 'publish_failed':
+                return t('usage_stats.request_events_log_state_publish_failed')
+            case 'expired':
+                return t('usage_stats.request_events_log_state_expired')
+            case 'legacy_unknown':
+                return t('usage_stats.request_events_log_state_legacy_unknown')
+            default:
+                return ''
+        }
+    }, [routeDecisionTrace.requestLogState, t])
+    const routeDecisionStatusLabel     = useMemo(() => {
+        switch (routeDecisionTrace.status) {
+            case 'loading':
+                return t('logs.trace_route_loading')
+            case 'pending':
+                return t('logs.trace_route_pending')
+            case 'lifecycle':
+                return routeRequestLogStateLabel
+            case 'missing_request_id':
+                return t('logs.trace_route_missing_request_id')
+            case 'not_found':
+                return t('logs.trace_route_not_found')
+            case 'not_recorded':
+                return t('logs.trace_route_not_recorded')
+            case 'truncated':
+                return t('logs.trace_route_truncated')
+            case 'invalid':
+                return t('logs.trace_route_invalid')
+            case 'unavailable':
+                return t('logs.trace_route_unavailable')
+            default:
+                return ''
+        }
+    }, [routeDecisionTrace.status, routeRequestLogStateLabel, t])
+    const routeCandidateScopeLabel     = routeDecision?.candidateScope === 'complete'
+                                         ? t('logs.trace_route_scope_complete')
+                                         : routeDecision?.candidateScope === 'selected_only'
+                                           ? t('logs.trace_route_scope_selected_only')
+                                           : routeDecision
+                                             ? t('logs.trace_route_scope_unknown')
+                                             : ''
+    const formatRouteBoolean           = (value: boolean | null): string => {
+        if (value === null) {
+            return routeBackendNotProvidedLabel
+        }
+        return value ? t('common.yes') : t('common.no')
+    }
+    const formatRouteNullableNumber    = (value: number | null): string =>
+        value === null ? routeBackendNotProvidedLabel : new Intl.NumberFormat(i18n.language).format(value)
+    const formatRouteQuotaStatus       = (status: RouteDecisionQuotaStatus): string => {
+        switch (status) {
+            case 'fresh':
+                return t('logs.trace_route_quota_status_fresh')
+            case 'stale':
+                return t('logs.trace_route_quota_status_stale')
+            case 'unknown':
+                return t('logs.trace_route_quota_status_unknown')
+            default:
+                return routeBackendNotProvidedLabel
+        }
+    }
+    const formatRouteCooldown          = (cooldown: RouteDecisionCooldown): string => {
+        if (!cooldown.known) {
+            return routeBackendNotProvidedLabel
+        }
+        const parts = [
+            t(
+                cooldown.active ? 'logs.trace_route_cooldown_active' : 'logs.trace_route_cooldown_inactive',
+            ),
+        ]
+        if (cooldown.active) {
+            if (cooldown.indefinite) {
+                parts.push(t('logs.trace_route_cooldown_indefinite'))
+            } else if (cooldown.retryAfterMs !== null) {
+                parts.push(t('logs.trace_route_cooldown_retry_after', {
+                    duration: formatTraceDuration(cooldown.retryAfterMs, i18n.language, routeBackendNotProvidedLabel),
+                }))
+            }
+            if (cooldown.reason) {
+                parts.push(t('logs.trace_route_cooldown_reason', { reason: cooldown.reason }))
+            }
+        }
+        if (cooldown.effectKey) {
+            parts.push(t('logs.trace_route_cooldown_effect', { effect: cooldown.effectKey }))
+        }
+        if (cooldown.stateGeneration !== null) {
+            parts.push(t('logs.trace_route_cooldown_generation', { generation: cooldown.stateGeneration }))
+        }
+        if (cooldown.resetAuthority) {
+            parts.push(t('logs.trace_route_cooldown_reset', { authority: cooldown.resetAuthority }))
+        }
+        return parts.join(' · ')
+    }
 
     const logScrollerRef            = useRef<HTMLDivElement | null>(null)
     const logViewportRef            = useRef({
@@ -329,8 +436,10 @@ export function LogsPage() {
                                                  startY: number
                                                  fired: boolean
                                              } | null>(null)
+    const logRequestControllerRef   = useRef<AbortController | null>(null)
     const logRequestInFlightRef     = useRef(false)
     const pendingFullReloadRef      = useRef(false)
+    const logPageActiveRef          = useRef(false)
 
     // 保存最新读取位置用于增量获取
     const logPositionRef          = useRef<LogPosition>({})
@@ -351,11 +460,18 @@ export function LogsPage() {
         if (logRequestInFlightRef.current) {
             if (!incremental) {
                 pendingFullReloadRef.current = true
+                logRequestControllerRef.current?.abort()
             }
             return
         }
 
-        logRequestInFlightRef.current = true
+        const controller                = new AbortController()
+        logRequestControllerRef.current = controller
+        logRequestInFlightRef.current   = true
+        const requestIsCurrent          = () =>
+            logPageActiveRef.current &&
+            logRequestControllerRef.current === controller &&
+            !controller.signal.aborted
 
         if (!incremental) {
             setLoading(true)
@@ -373,24 +489,21 @@ export function LogsPage() {
                     ...(position.cursor ? { cursor: position.cursor } : {}),
                 }
                                       : { limit: MAX_BUFFER_LINES }
-            const [data]            = await Promise.all([
-                                                            logsApi.fetchLogs(params),
-                                                            // 非增量加载时同步刷新磁盘占用
+            const [data, logSize]   = await Promise.all([
+                                                            logsApi.fetchLogs(params, { signal: controller.signal }),
                                                             incremental
                                                             ? Promise.resolve(null)
                                                             : logsApi
-                                                                .fetchLogSize()
-                                                                .then((res) => {
-                                                                    setLogDiskSize({
-                                                                                       totalBytes: res.total_bytes,
-                                                                                       fileCount: res.file_count,
-                                                                                   })
-                                                                    return res
-                                                                })
+                                                                .fetchLogSize({ signal: controller.signal })
                                                                 .catch(() => null),
                                                         ])
+            if (!requestIsCurrent()) {
+                return
+            }
+            if (logSize) {
+                setLogDiskSize({ totalBytes: logSize.total_bytes, fileCount: logSize.file_count })
+            }
 
-            // 更新读取位置
             const nextPosition: LogPosition = incremental ? { ...logPositionRef.current } : {}
             if (data.latestAfter !== undefined) {
                 nextPosition.after = data.latestAfter
@@ -429,38 +542,39 @@ export function LogsPage() {
                     }
                 }
 
-                // 增量更新：追加新日志并限制缓冲区大小
                 setLogState((prev) => {
                     const linesToAppend = overlapAfter
-                                          ?
-                                          dropOverlappingLogLines(
-                                              prev.buffer,
-                                              newLines,
-                                              overlapLineLimit(prev.buffer, requestAfter),
-                                          )
-                                          :
-                                          newLines
+                                          ? dropOverlappingLogLines(
+                            prev.buffer,
+                            newLines,
+                            overlapLineLimit(prev.buffer, requestAfter),
+                        )
+                                          : newLines
                     const combined      = [...prev.buffer, ...linesToAppend]
                     const dropCount     = Math.max(combined.length - MAX_BUFFER_LINES, 0)
                     const buffer        = dropCount > 0 ? combined.slice(dropCount) : combined
                     return { buffer }
                 })
             } else if (!incremental) {
-                // 全量加载
                 const buffer = newLines.slice(-MAX_BUFFER_LINES)
                 setLogState({ buffer })
                 setLogPage(1)
             }
         } catch (err: unknown) {
-            setError(getErrorMessage(err) || t('logs.load_error'))
-        } finally {
-            if (!incremental) {
-                setLoading(false)
+            if (requestIsCurrent()) {
+                setError(getErrorMessage(err) || t('logs.load_error'))
             }
-            logRequestInFlightRef.current = false
-            if (pendingFullReloadRef.current) {
-                pendingFullReloadRef.current = false
-                void loadLogs(false)
+        } finally {
+            if (logRequestControllerRef.current === controller) {
+                logRequestControllerRef.current = null
+                logRequestInFlightRef.current   = false
+                if (!incremental && logPageActiveRef.current) {
+                    setLoading(false)
+                }
+                if (logPageActiveRef.current && pendingFullReloadRef.current) {
+                    pendingFullReloadRef.current = false
+                    void loadLogs(false)
+                }
             }
         }
     }
@@ -556,6 +670,19 @@ export function LogsPage() {
     }
 
     useEffect(() => {
+        logPageActiveRef.current = true
+        return () => {
+            logPageActiveRef.current      = false
+            pendingFullReloadRef.current  = false
+            logRequestInFlightRef.current = false
+            logRequestControllerRef.current?.abort()
+            logRequestControllerRef.current = null
+        }
+    }, [])
+
+    useEffect(() => {
+        pendingFullReloadRef.current = false
+        logRequestControllerRef.current?.abort()
         if (connectionStatus === 'connected') {
             logPositionRef.current          = {}
             requestLogHomeIpByIdRef.current = {}
@@ -864,7 +991,10 @@ export function LogsPage() {
                             onClick={(event) => {
                                 event.stopPropagation()
                                 cancelLongPress()
-                                trace.openTraceModal(line)
+                                trace.openTraceModal(
+                                    line,
+                                    line.requestId ? requestLogHomeIpByIdRef.current[line.requestId] : undefined,
+                                )
                             }}
                             title={t('logs.trace_button')}
                         >
@@ -941,10 +1071,13 @@ export function LogsPage() {
         setRequestLogId(null)
     }
 
-    const downloadRequestLog = async (id: string) => {
+    const downloadRequestLog = async (id: string, frozenHomeIp?: string | null) => {
         setRequestLogDownloading(true)
         try {
-            const response = await logsApi.downloadRequestLogById(id, requestLogHomeIpByIdRef.current[id])
+            const homeIp   = frozenHomeIp === undefined ?
+                             requestLogHomeIpByIdRef.current[id] :
+                             frozenHomeIp || undefined
+            const response = await logsApi.downloadRequestLogById(id, homeIp)
             const text     = redactSensitiveText(await responseDataToText(response.data))
             downloadBlob({
                              filename: `request-${id}.log`,
@@ -1485,6 +1618,7 @@ export function LogsPage() {
                 open={Boolean(trace.traceLogLine)}
                 onClose={trace.closeTraceModal}
                 title={t('logs.trace_title')}
+                width={900}
                 footer={
                     <>
                         {trace.traceLogLine?.requestId && (
@@ -1492,7 +1626,10 @@ export function LogsPage() {
                                 variant='secondary'
                                 onClick={() => {
                                     if (trace.traceLogLine?.requestId) {
-                                        void downloadRequestLog(trace.traceLogLine.requestId)
+                                        void downloadRequestLog(
+                                            trace.traceLogLine.requestId,
+                                            trace.requestLogHomeIp,
+                                        )
                                     }
                                 }}
                                 loading={requestLogDownloading}
@@ -1561,6 +1698,329 @@ export function LogsPage() {
                                                                          notRecordedLabel}</span>
                             </div>
                         </div>
+
+                        <div className={styles.traceCandidatesHeader}>
+                            <h3 className={styles.traceSectionTitle}>{t('logs.trace_route_decision_title')}</h3>
+                        </div>
+                        {routeDecisionTrace.status === 'ready' && routeDecision ? (
+                            <>
+                                {routeDecision.candidateScope === 'selected_only' && (
+                                    <div className={styles.traceNotice}>
+                                        {t('logs.trace_route_selected_only_notice')}
+                                    </div>
+                                )}
+                                {routeDecisionTrace.requestLogTruncated && (
+                                    <div className={styles.traceNotice}>
+                                        {t('logs.trace_route_log_truncated_ready')}
+                                    </div>
+                                )}
+                                {routeDecision.truncatedCandidates > 0 && (
+                                    <div className={styles.traceNotice}>
+                                        {t('logs.trace_route_candidates_truncated_notice', {
+                                            count: routeDecision.truncatedCandidates,
+                                        })}
+                                    </div>
+                                )}
+                                {routeDecisionTrace.omittedEvents > 0 && (
+                                    <div className={styles.traceNotice}>
+                                        {t('logs.trace_route_events_omitted_notice', {
+                                            count: routeDecisionTrace.omittedEvents,
+                                        })}
+                                    </div>
+                                )}
+                                {routeDecisionTrace.invalidLines > 0 && (
+                                    <div className={styles.traceNotice}>
+                                        {t('logs.trace_route_invalid_lines_notice', {
+                                            count: routeDecisionTrace.invalidLines,
+                                        })}
+                                    </div>
+                                )}
+                                <div className={styles.traceInfoGrid}>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>{t('logs.trace_route_strategy')}</span>
+                                        <span className={styles.traceInfoValue}>{routeDecision.strategy}</span>
+                                    </div>
+                                    {routeRequestLogStateLabel && (
+                                        <div className={styles.traceInfoItem}>
+                                            <span className={styles.traceInfoLabel}>
+                                                {t('logs.trace_route_request_log_state')}
+                                            </span>
+                                            <span className={styles.traceInfoValue}>{routeRequestLogStateLabel}</span>
+                                        </div>
+                                    )}
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>{t('logs.trace_route_attempt')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecisionTrace.attempt ?? notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>
+                                            {t('logs.trace_route_requested_model')}
+                                        </span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.requestedModel || notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span
+                                            className={styles.traceInfoLabel}>{t('logs.trace_route_routed_model')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.routedModel || notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>{t('logs.trace_route_providers')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.providers.join(', ') || notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>{t('logs.trace_route_affinity')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.affinity || notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span
+                                            className={styles.traceInfoLabel}>{t('logs.trace_route_matched_rule')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.matchedRule || notRecordedLabel}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>
+                                            {t('logs.trace_route_candidate_scope')}
+                                        </span>
+                                        <span className={styles.traceInfoValue}>{routeCandidateScopeLabel}</span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>
+                                            {t('logs.trace_route_truncated_candidates')}
+                                        </span>
+                                        <span className={styles.traceInfoValue}>
+                                            {formatNumber(routeDecision.truncatedCandidates, i18n.language)}
+                                        </span>
+                                    </div>
+                                    <div className={styles.traceInfoItem}>
+                                        <span className={styles.traceInfoLabel}>
+                                            {t('logs.trace_route_omitted_events')}
+                                        </span>
+                                        <span className={styles.traceInfoValue}>
+                                            {formatNumber(routeDecisionTrace.omittedEvents, i18n.language)}
+                                        </span>
+                                    </div>
+                                    <div className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                        <span className={styles.traceInfoLabel}>{t('logs.trace_route_selected')}</span>
+                                        <span className={styles.traceInfoValue}>
+                                            {routeDecision.selected
+                                             ? [
+                                                 routeDecision.selected.provider,
+                                                 routeDecision.selected.targetModel || routeDecision.selected.model,
+                                                 routeDecision.selected.authIndex,
+                                                 routeDecision.selected.matchedRule,
+                                             ].filter(Boolean).join(' · ')
+                                             : t('logs.trace_route_no_selected')}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <h4 className={styles.traceSectionTitle}>{t('logs.trace_route_candidates')}</h4>
+                                <div className={styles.traceCandidates}>
+                                    {routeDecision.candidates.map((candidate) => {
+                                        const sourceInfo     = trace.resolveTraceSourceInfo('', candidate.authIndex)
+                                        const credentialName = sourceInfo.displayName !== '-' &&
+                                                               sourceInfo.displayName !== candidate.authIndex
+                                                               ? sourceInfo.displayName
+                                                               : ''
+                                        return (
+                                            <div key={candidate.authIndex} className={styles.traceCandidate}>
+                                                <div className={styles.traceCandidateHeader}>
+                                                    {candidate.selected && (
+                                                        <span className={styles.traceModelBadge}>
+                                                        {t('logs.trace_route_selected_badge')}
+                                                    </span>
+                                                    )}
+                                                    <span className={styles.traceInfoValue} title={candidate.authIndex}>
+                                                    {[
+                                                        candidate.provider,
+                                                        credentialName,
+                                                        sourceInfo.type,
+                                                        candidate.authIndex,
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(' · ')}
+                                                </span>
+                                                </div>
+                                                <div className={styles.traceCandidateGrid}>
+                                                    <div className={styles.traceInfoItem}>
+                                                        <span
+                                                            className={styles.traceInfoLabel}>{t('logs.trace_model')}</span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.model || notRecordedLabel}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_target_model')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.targetModel || notRecordedLabel}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_priority')}
+                                                    </span>
+                                                        <span
+                                                            className={styles.traceInfoValue}>{candidate.priority}</span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_effective_weight')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.effectiveWeight}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                        <span className={styles.traceInfoLabel}>{t(
+                                                            'logs.trace_route_native')}</span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteBoolean(candidate.native)}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_converted')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteBoolean(candidate.converted)}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_affinity')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.affinity || notRecordedLabel}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_quota_status')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteQuotaStatus(candidate.quotaStatus)}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_quota_headroom')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.quotaHeadroom === null
+                                                         ? routeBackendNotProvidedLabel
+                                                         : `${new Intl.NumberFormat(i18n.language, {
+                                                                maximumFractionDigits: 1,
+                                                            }).format(candidate.quotaHeadroom * 100)}%`}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_quota_reset_after')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatTraceDuration(
+                                                            candidate.quotaResetAfterMs,
+                                                            i18n.language,
+                                                            routeBackendNotProvidedLabel,
+                                                        )}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_in_flight')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteNullableNumber(candidate.inFlight)}
+                                                    </span>
+                                                    </div>
+                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_matched_rules')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.matchedRules.join(', ') ||
+                                                         t('logs.trace_route_none')}
+                                                    </span>
+                                                    </div>
+                                                    <div
+                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_excluded_reasons')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {candidate.excludedReasons.join(', ') ||
+                                                         t('logs.trace_route_none')}
+                                                    </span>
+                                                    </div>
+                                                    <div
+                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_cooldown_exact_model')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteCooldown(candidate.cooldowns.exactModel)}
+                                                    </span>
+                                                    </div>
+                                                    <div
+                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_cooldown_quota_family')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteCooldown(candidate.cooldowns.quotaFamily)}
+                                                    </span>
+                                                    </div>
+                                                    <div
+                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_cooldown_credential')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteCooldown(candidate.cooldowns.credential)}
+                                                    </span>
+                                                    </div>
+                                                    <div
+                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
+                                                    <span className={styles.traceInfoLabel}>
+                                                        {t('logs.trace_route_cooldown_provider')}
+                                                    </span>
+                                                        <span className={styles.traceInfoValue}>
+                                                        {formatRouteCooldown(candidate.cooldowns.provider)}
+                                                    </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </>
+                        ) : routeDecisionTrace.status !== 'idle' ? (
+                            <div className={styles.traceNotice}>
+                                <span>{routeDecisionStatusLabel}</span>
+                                {routeRequestLogStateLabel &&
+                                 routeRequestLogStateLabel !==
+                                 routeDecisionStatusLabel &&
+                                 (
+                                     <span> · {routeRequestLogStateLabel}</span>
+                                 )}
+                                {routeDecisionTrace.message && (
+                                    <span> · {redactSensitiveText(routeDecisionTrace.message)}</span>
+                                )}
+                            </div>
+                        ) : null}
 
                         <div className={styles.traceCandidatesHeader}>
                             <h3 className={styles.traceSectionTitle}>{t('logs.trace_candidates_title')}</h3>

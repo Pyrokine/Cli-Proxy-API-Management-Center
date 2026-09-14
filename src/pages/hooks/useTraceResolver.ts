@@ -1,5 +1,13 @@
-import {authFilesApi, usageApi, type UsageEvent} from '@/services/api'
-import type {AuthFileItem, Config} from '@/types'
+import {
+    apiClient,
+    authFilesApi,
+    logsApi,
+    parseRequestLogState,
+    type RequestLogPreview,
+    usageApi,
+    type UsageEvent,
+} from '@/services/api'
+import type {ApiError, AuthFileItem, Config} from '@/types'
 import type {CredentialInfo, SourceInfo} from '@/types/sourceInfo'
 import {getErrorMessage} from '@/utils/helpers'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
@@ -7,6 +15,12 @@ import {normalizeAuthIndex, type UsageDetailWithEndpoint} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import type {ParsedLogLine} from './logTypes'
+import {
+    createRouteDecisionTraceState,
+    parseRouteDecisionTrace,
+    requestLogStateToRouteDecisionStatus,
+    type RouteDecisionTraceState,
+} from './routeDecisionTrace'
 
 type TraceCandidate = {
     detail: UsageDetailWithEndpoint
@@ -15,10 +29,11 @@ type TraceCandidate = {
     timeDeltaMs: number | null
 }
 
-const TRACE_AUTH_CACHE_MS    = 60 * 1000
-const TRACE_MAX_CANDIDATES   = 5
-const TRACE_LOOKUP_WINDOW_MS = 2 * 60 * 1000
-const TRACE_EVENT_PAGE_SIZE  = 500
+const TRACE_AUTH_CACHE_MS     = 60 * 1000
+const TRACE_MAX_CANDIDATES    = 5
+const TRACE_LOOKUP_WINDOW_MS  = 2 * 60 * 1000
+const TRACE_EVENT_PAGE_SIZE   = 500
+const TRACE_REQUEST_LOG_LINES = 300
 
 const TRACEABLE_EXACT_PATHS  = new Set(['/v1/chat/completions', '/v1/messages', '/v1/responses'])
 const TRACEABLE_PREFIX_PATHS = ['/v1beta/models']
@@ -90,6 +105,41 @@ const eventToTraceDetail = (event: UsageEvent, line: ParsedLogLine, logPath: str
     }
 }
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+
+const requestLogFailureState = (err: unknown): RouteDecisionTraceState => {
+    const apiError        = err as ApiError
+    const data            = asRecord(apiError.data ?? apiError.details)
+    const requestLogState = parseRequestLogState(data?.request_log_state)
+    const message         = getErrorMessage(err)
+    const status          = requestLogState
+                            ? requestLogStateToRouteDecisionStatus(requestLogState)
+                            : apiError.status === 404 ? 'not_found' : 'unavailable'
+    return createRouteDecisionTraceState(status, { requestLogState, message })
+}
+
+const requestLogPreviewState = (preview: RequestLogPreview): RouteDecisionTraceState => {
+    if (preview.requestLogState && preview.requestLogState !== 'available') {
+        return createRouteDecisionTraceState(
+            requestLogStateToRouteDecisionStatus(preview.requestLogState),
+            {
+                requestLogState: preview.requestLogState,
+                message: preview.message,
+                requestLogTruncated: preview.truncated,
+            },
+        )
+    }
+    const parsed = parseRouteDecisionTrace(preview.content, preview.truncated)
+    return {
+        ...parsed,
+        requestLogState: preview.requestLogState,
+        message: preview.message,
+    }
+}
+
 interface UseTraceResolverOptions {
     traceScopeKey: string
     connectionStatus: string
@@ -102,10 +152,12 @@ interface UseTraceResolverReturn {
     traceLoading: boolean
     traceError: string
     traceCandidates: TraceCandidate[]
+    routeDecisionTrace: RouteDecisionTraceState
+    requestLogHomeIp: string | null
     resolveTraceSourceInfo: (sourceRaw: string, authIndex: unknown) => SourceInfo
     loadTraceUsageDetails: () => Promise<void>
     refreshTraceUsageDetails: () => Promise<void>
-    openTraceModal: (line: ParsedLogLine) => void
+    openTraceModal: (line: ParsedLogLine, requestLogHomeIp?: string) => void
     closeTraceModal: () => void
 }
 
@@ -113,109 +165,146 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     const { traceScopeKey, connectionStatus, config, requestLogDownloading } = options
     const { t }                                                              = useTranslation()
 
-    const [traceLogLine, setTraceLogLine]           = useState<ParsedLogLine | null>(null)
-    const [traceUsageDetails, setTraceUsageDetails] = useState<UsageDetailWithEndpoint[]>([])
-    const [traceAuthFileMap, setTraceAuthFileMap]   = useState<Map<string, CredentialInfo>>(new Map())
-    const [traceLoading, setTraceLoading]           = useState(false)
-    const [traceError, setTraceError]               = useState('')
+    const [traceLogLine, setTraceLogLine]             = useState<ParsedLogLine | null>(null)
+    const [traceUsageDetails, setTraceUsageDetails]   = useState<UsageDetailWithEndpoint[]>([])
+    const [traceAuthFileMap, setTraceAuthFileMap]     = useState<Map<string, CredentialInfo>>(new Map())
+    const [traceLoading, setTraceLoading]             = useState(false)
+    const [traceError, setTraceError]                 = useState('')
+    const [requestLogHomeIp, setRequestLogHomeIp]     = useState<string | null>(null)
+    const [routeDecisionTrace, setRouteDecisionTrace] = useState<RouteDecisionTraceState>(
+        createRouteDecisionTraceState('idle'),
+    )
 
-    const traceAuthLoadedAtRef = useRef(0)
-    const traceScopeKeyRef     = useRef('')
-    const traceRequestIdRef    = useRef(0)
+    const traceAuthLoadedAtRef   = useRef(0)
+    const traceScopeKeyRef       = useRef('')
+    const latestTraceScopeKeyRef = useRef(traceScopeKey)
+    const traceRequestIdRef      = useRef(0)
+    const traceRequestHomeIpRef  = useRef('')
+
+    latestTraceScopeKeyRef.current = traceScopeKey
 
     const traceSourceInfoMap = useMemo(() => buildSourceInfoMap(config ?? {}), [config])
 
     const loadTraceUsageDetailsInternal = useCallback(
-        async (line: ParsedLogLine | null) => {
+        async (line: ParsedLogLine | null, requestHomeIp = traceRequestHomeIpRef.current) => {
             if (traceScopeKeyRef.current !== traceScopeKey) {
                 traceScopeKeyRef.current     = traceScopeKey
                 traceAuthLoadedAtRef.current = 0
                 setTraceAuthFileMap(new Map())
                 setTraceUsageDetails([])
                 setTraceError('')
+                setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
             }
 
             if (!line) {
                 return
             }
 
-            const logTimestampMs = line.timestamp ? Date.parse(line.timestamp) : Number.NaN
+            const currentRequestId    = traceRequestIdRef.current + 1
+            traceRequestIdRef.current = currentRequestId
+            const authGeneration      = apiClient.getAuthGeneration()
+            const requestIsCurrent    = () => traceRequestIdRef.current === currentRequestId &&
+                                              apiClient.getAuthGeneration() === authGeneration &&
+                                              latestTraceScopeKeyRef.current === traceScopeKey &&
+                                              traceScopeKeyRef.current === traceScopeKey
+            const logTimestampMs      = line.timestamp ? Date.parse(line.timestamp) : Number.NaN
+            const requestId           = line.requestId?.trim() ?? ''
+            const now                 = Date.now()
+            const authFresh           = traceAuthLoadedAtRef.current > 0 &&
+                                        now - traceAuthLoadedAtRef.current < TRACE_AUTH_CACHE_MS
+            const logPath             = normalizeTracePath(line.path)
+
+            setTraceLoading(true)
+            setTraceError('')
+            setRouteDecisionTrace(createRouteDecisionTraceState(
+                requestId ? 'loading' : 'missing_request_id',
+            ))
+
+            if (requestId) {
+                void logsApi.previewRequestLogById(
+                    requestId,
+                    TRACE_REQUEST_LOG_LINES,
+                    requestHomeIp || undefined,
+                ).then((preview) => {
+                    if (requestIsCurrent()) {
+                        const resolvedHomeIp = preview.requestLogHomeIp.trim()
+                        if (resolvedHomeIp) {
+                            traceRequestHomeIpRef.current = resolvedHomeIp
+                            setRequestLogHomeIp(resolvedHomeIp)
+                        }
+                        setRouteDecisionTrace(requestLogPreviewState(preview))
+                    }
+                }).catch((err: unknown) => {
+                    if (requestIsCurrent()) {
+                        setRouteDecisionTrace(requestLogFailureState(err))
+                    }
+                })
+            }
+
+            // noinspection ES6MissingAwait
+            const eventsPromise              = Number.isNaN(logTimestampMs)
+                                               ? Promise.resolve(null)
+                                               : usageApi.getEvents({
+                                                                        from: new Date(logTimestampMs -
+                                                                                       TRACE_LOOKUP_WINDOW_MS).toISOString(),
+                                                                        to: new Date(logTimestampMs +
+                                                                                     TRACE_LOOKUP_WINDOW_MS).toISOString(),
+                                                                        page: 1,
+                                                                        page_size: TRACE_EVENT_PAGE_SIZE,
+                                                                        sort: 'timestamp',
+                                                                        order: 'desc',
+                                                                    })
+            // noinspection ES6MissingAwait
+            const authPromise                = authFresh
+                                               ?
+                                               Promise.resolve<Awaited<ReturnType<typeof authFilesApi.list>> | null>(
+                                                   null)
+                                               :
+                                               authFilesApi.list()
+            const [eventsResult, authResult] = await Promise.allSettled([
+                                                                            eventsPromise,
+                                                                            authPromise,
+                                                                        ] as const)
+
+            if (!requestIsCurrent()) {
+                return
+            }
+
             if (Number.isNaN(logTimestampMs)) {
                 setTraceUsageDetails([])
                 setTraceError(t(
                     'logs.trace_timestamp_required',
                     { defaultValue: '日志时间缺失，不能安全匹配 usage 事件' },
                 ))
-                return
-            }
-
-            const currentRequestId    = traceRequestIdRef.current + 1
-            traceRequestIdRef.current = currentRequestId
-
-            const now       = Date.now()
-            const authFresh = traceAuthLoadedAtRef.current >
-                              0 &&
-                              now -
-                              traceAuthLoadedAtRef.current <
-                              TRACE_AUTH_CACHE_MS
-            const from      = new Date(logTimestampMs - TRACE_LOOKUP_WINDOW_MS).toISOString()
-            const to        = new Date(logTimestampMs + TRACE_LOOKUP_WINDOW_MS).toISOString()
-            const logPath   = normalizeTracePath(line.path)
-
-            setTraceLoading(true)
-            setTraceError('')
-            try {
-                const eventsPromise = usageApi.getEvents({
-                                                             from,
-                                                             to,
-                                                             page: 1,
-                                                             page_size: TRACE_EVENT_PAGE_SIZE,
-                                                             sort: 'timestamp',
-                                                             order: 'desc',
-                                                         })
-                let authPromise     = Promise.resolve<Awaited<ReturnType<typeof authFilesApi.list>> | null>(null)
-                if (!authFresh) {
-                    authPromise = authFilesApi.list().catch(() => null)
-                }
-                const [eventsResponse, authFilesResponse] = await Promise.all([eventsPromise, authPromise])
-
-                if (traceRequestIdRef.current !== currentRequestId) {
-                    return
-                }
-
-                const events = Array.isArray(eventsResponse?.events) ? eventsResponse.events : []
+            } else if (eventsResult.status === 'fulfilled') {
+                const events = Array.isArray(eventsResult.value?.events) ? eventsResult.value.events : []
                 setTraceUsageDetails(events.map((event) => eventToTraceDetail(event, line, logPath)))
+            } else {
+                setTraceUsageDetails([])
+                setTraceError(getErrorMessage(eventsResult.reason) || t('logs.trace_usage_load_error'))
+            }
 
-                if (authFilesResponse !== null) {
-                    const files = Array.isArray(authFilesResponse)
-                                  ? authFilesResponse
-                                  : (authFilesResponse as { files?: AuthFileItem[] })?.files
-                    if (Array.isArray(files)) {
-                        const map = new Map<string, CredentialInfo>()
-                        files.forEach((file) => {
-                            const key = normalizeAuthIndex(file['auth_index'] ?? file.authIndex)
-                            if (!key) {
-                                return
-                            }
-                            map.set(key, {
-                                name: file.name || key,
-                                type: (file.type || file.provider || '').toString(),
-                            })
+            if (authResult.status === 'fulfilled' && authResult.value !== null) {
+                const files = Array.isArray(authResult.value)
+                              ? authResult.value
+                              : (authResult.value as { files?: AuthFileItem[] })?.files
+                if (Array.isArray(files)) {
+                    const map = new Map<string, CredentialInfo>()
+                    files.forEach((file) => {
+                        const key = normalizeAuthIndex(file['auth_index'] ?? file.authIndex)
+                        if (!key) {
+                            return
+                        }
+                        map.set(key, {
+                            name: file.name || key,
+                            type: (file.type || file.provider || '').toString(),
                         })
-                        setTraceAuthFileMap(map)
-                        traceAuthLoadedAtRef.current = Date.now()
-                    }
-                }
-            } catch (err: unknown) {
-                if (traceRequestIdRef.current === currentRequestId) {
-                    setTraceUsageDetails([])
-                    setTraceError(getErrorMessage(err) || t('logs.trace_usage_load_error'))
-                }
-            } finally {
-                if (traceRequestIdRef.current === currentRequestId) {
-                    setTraceLoading(false)
+                    })
+                    setTraceAuthFileMap(map)
+                    traceAuthLoadedAtRef.current = Date.now()
                 }
             }
+            setTraceLoading(false)
         },
         [t, traceScopeKey],
     )
@@ -229,16 +318,21 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     }, [loadTraceUsageDetailsInternal, traceLogLine])
 
     useEffect(() => {
-        if (connectionStatus !== 'connected') {
-            return
-        }
+        const resetRequestId          = ++traceRequestIdRef.current
+        traceScopeKeyRef.current      = traceScopeKey
+        traceAuthLoadedAtRef.current  = 0
+        traceRequestHomeIpRef.current = ''
         queueMicrotask(() => {
-            traceScopeKeyRef.current     = traceScopeKey
-            traceAuthLoadedAtRef.current = 0
+            if (traceRequestIdRef.current !== resetRequestId) {
+                return
+            }
+            setTraceLogLine(null)
             setTraceAuthFileMap(new Map())
             setTraceUsageDetails([])
             setTraceLoading(false)
             setTraceError('')
+            setRequestLogHomeIp(null)
+            setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
         })
     }, [connectionStatus, traceScopeKey])
 
@@ -298,14 +392,18 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     )
 
     const openTraceModal = useCallback(
-        (line: ParsedLogLine) => {
+        (line: ParsedLogLine, requestLogHomeIp = '') => {
             if (!isTraceableRequestPath(line.path)) {
                 return
             }
+            const frozenHomeIp            = requestLogHomeIp.trim()
+            traceRequestHomeIpRef.current = frozenHomeIp
+            setRequestLogHomeIp(frozenHomeIp || null)
             setTraceError('')
             setTraceUsageDetails([])
+            setRouteDecisionTrace(createRouteDecisionTraceState('loading'))
             setTraceLogLine(line)
-            void loadTraceUsageDetailsInternal(line)
+            void loadTraceUsageDetailsInternal(line, frozenHomeIp)
         },
         [loadTraceUsageDetailsInternal],
     )
@@ -314,8 +412,14 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
         if (requestLogDownloading) {
             return
         }
+        ++traceRequestIdRef.current
+        traceRequestHomeIpRef.current = ''
         setTraceLogLine(null)
+        setRequestLogHomeIp(null)
         setTraceUsageDetails([])
+        setTraceLoading(false)
+        setTraceError('')
+        setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
     }, [requestLogDownloading])
 
     return {
@@ -323,6 +427,8 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
         traceLoading,
         traceError,
         traceCandidates,
+        routeDecisionTrace,
+        requestLogHomeIp,
         resolveTraceSourceInfo,
         loadTraceUsageDetails,
         refreshTraceUsageDetails,

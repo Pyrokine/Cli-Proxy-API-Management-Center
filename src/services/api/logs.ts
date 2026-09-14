@@ -4,6 +4,7 @@
 
 import {LOGS_TIMEOUT_MS} from '@/utils/constants'
 import {apiClient} from './client'
+import type {RequestLogState} from './usage'
 
 type LogCursor = number | string
 
@@ -17,7 +18,7 @@ export interface LogsQuery {
     offset?: number
 }
 
-export interface LogsResponse {
+interface LogsResponse {
     lines: string[]
     lineCount: number
     latestAfter?: LogCursor
@@ -45,13 +46,29 @@ interface LogSizeResponse {
     file_count: number
 }
 
-export interface ErrorLogPreview {
+interface ErrorLogPreview {
     content: string
     truncated: boolean
     total_lines: number
 }
 
+export interface RequestLogPreview extends ErrorLogPreview {
+    requestLogState: RequestLogState | ''
+    requestLogHomeIp: string
+    message: string
+}
+
 type RawLogRecord = Record<string, unknown>
+
+const requestLogStates = new Set<RequestLogState>([
+                                                      'pending',
+                                                      'available',
+                                                      'disabled',
+                                                      'not_captured',
+                                                      'publish_failed',
+                                                      'expired',
+                                                      'legacy_unknown',
+                                                  ])
 
 function asRecord(value: unknown): RawLogRecord | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as RawLogRecord : null
@@ -70,6 +87,11 @@ function numberValue(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+export function parseRequestLogState(value: unknown): RequestLogState | '' {
+    const state = stringValue(value)
+    return state && requestLogStates.has(state as RequestLogState) ? state as RequestLogState : ''
 }
 
 function booleanValue(value: unknown): boolean {
@@ -181,7 +203,23 @@ function normalizeLogsResponse(raw: unknown): LogsResponse {
     return { lines: [], lineCount: 0, logBackendKind: 'unknown' }
 }
 
-async function fetchCompleteHomeLogs(firstPage: unknown, params: LogsQuery): Promise<unknown> {
+function normalizeRequestLogPreview(raw: unknown): RequestLogPreview {
+    const record = asRecord(raw)
+    return {
+        content: typeof record?.content === 'string' ? record.content : '',
+        truncated: booleanValue(record?.truncated),
+        total_lines: numberValue(record?.total_lines) ?? 0,
+        requestLogState: parseRequestLogState(record?.request_log_state),
+        requestLogHomeIp: stringValue(record?.request_log_home_ip) ?? '',
+        message: stringValue(record?.error) ?? '',
+    }
+}
+
+async function fetchCompleteHomeLogs(
+    firstPage: unknown,
+    params: LogsQuery,
+    signal?: AbortSignal,
+): Promise<unknown> {
     const firstRecord = asRecord(firstPage)
     if (!firstRecord || !Array.isArray(firstRecord.logs)) {
         return firstPage
@@ -208,6 +246,7 @@ async function fetchCompleteHomeLogs(firstPage: unknown, params: LogsQuery): Pro
         const page      = asRecord(await apiClient.get('/logs', {
             params: { ...pageParamsBase, limit: nextLimit, offset: nextOffset },
             timeout: LOGS_TIMEOUT_MS,
+            signal,
         }))
         const pageLogs  = Array.isArray(page?.logs) ? page.logs : []
         if (pageLogs.length === 0) {
@@ -224,11 +263,16 @@ async function fetchCompleteHomeLogs(firstPage: unknown, params: LogsQuery): Pro
 }
 
 export const logsApi = {
-    fetchLogSize: (): Promise<LogSizeResponse> => apiClient.get('/log-size'),
+    fetchLogSize: (options?: { signal?: AbortSignal }): Promise<LogSizeResponse> =>
+        apiClient.get('/log-size', { signal: options?.signal }),
 
-    fetchLogs: async (params: LogsQuery = {}): Promise<LogsResponse> => {
-        const raw = await apiClient.get('/logs', { params, timeout: LOGS_TIMEOUT_MS })
-        return normalizeLogsResponse(await fetchCompleteHomeLogs(raw, params))
+    fetchLogs: async (params: LogsQuery = {}, options?: { signal?: AbortSignal }): Promise<LogsResponse> => {
+        const raw = await apiClient.get('/logs', {
+            params,
+            timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
+        })
+        return normalizeLogsResponse(await fetchCompleteHomeLogs(raw, params, options?.signal))
     },
 
     clearLogs: () => apiClient.delete('/logs'),
@@ -255,9 +299,11 @@ export const logsApi = {
             timeout: LOGS_TIMEOUT_MS,
         }),
 
-    previewRequestLogById: (id: string, lines = 200, homeIp?: string): Promise<ErrorLogPreview> =>
-        apiClient.get(`/request-log-by-id/${encodeURIComponent(id)}`, {
+    previewRequestLogById: async (id: string, lines = 200, homeIp?: string): Promise<RequestLogPreview> => {
+        const raw = await apiClient.get(`/request-log-by-id/${encodeURIComponent(id)}`, {
             params: homeIp ? { lines, home_ip: homeIp } : { lines },
             timeout: LOGS_TIMEOUT_MS,
-        }),
+        })
+        return normalizeRequestLogPreview(raw)
+    },
 }

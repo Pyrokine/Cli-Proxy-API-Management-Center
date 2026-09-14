@@ -34,9 +34,9 @@ const HTTP_STATUS_TEXTS = [
 const HTTP_STATUS_PATTERNS: RegExp[] = [
     /\|\s*(?<code>[1-5]\d{2})\s*\|/,
     /\b(?<code>[1-5]\d{2})\s*-/,
-    new RegExp(`\\b(?:${HTTP_METHODS.join('|')})\\s+\\S+\\s+(?<code>[1-5]\\d{2})\\b`),
+    new RegExp(`\\b(?<method>${HTTP_METHODS.join('|')})\\s+\\S+\\s+(?<code>[1-5]\\d{2})\\b`),
     /\b(?:status|code|http)[:\s]+(?<code>[1-5]\d{2})\b/i,
-    new RegExp(`\\b(?<code>[1-5]\\d{2})\\s+(?:${HTTP_STATUS_TEXTS.join('|')})\\b`, 'i'),
+    new RegExp(`\\b(?<code>[1-5]\\d{2})\\s+(?<statusText>${HTTP_STATUS_TEXTS.join('|')})\\b`, 'i'),
 ]
 
 const detectHttpStatusCode = (text: string): number | undefined => {
