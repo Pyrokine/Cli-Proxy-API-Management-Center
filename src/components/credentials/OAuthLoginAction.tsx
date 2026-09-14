@@ -114,14 +114,16 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
     const [projectId, setProjectId]                   = useState('')
     const [callbackUrl, setCallbackUrl]               = useState('')
     const [callbackSubmitting, setCallbackSubmitting] = useState(false)
+    const [callbackAccepted, setCallbackAccepted]     = useState(false)
     const [oauthState, setOauthState]                 = useState('')
     const pollRef                                     = useRef<number | null>(null)
+    const terminalRef                                 = useRef(false)
 
     const needsProjectId   = provider === 'gemini-cli'
     const supportsCallback = CALLBACK_SUPPORTED.includes(provider)
 
     const stopPolling = useCallback(() => {
-        if (pollRef.current) {
+        if (pollRef.current !== null) {
             clearInterval(pollRef.current)
             pollRef.current = null
         }
@@ -130,6 +132,8 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
     useEffect(() => stopPolling, [stopPolling])
 
     const startAuth = useCallback(async () => {
+        terminalRef.current = false
+        setCallbackAccepted(false)
         setStatus('starting')
         setError('')
         try {
@@ -146,6 +150,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
 
             const authUrl = safeExternalUrl(response.url)
             if (!authUrl) {
+                terminalRef.current = true
                 setError('Invalid OAuth URL received from server')
                 setStatus('error')
                 return
@@ -158,11 +163,16 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 pollRef.current = window.setInterval(async () => {
                     try {
                         const result = await oauthApi.getAuthStatus(stateValue, nonce)
+                        if (terminalRef.current) {
+                            return
+                        }
                         if (result.status === 'ok') {
+                            terminalRef.current = true
                             stopPolling()
                             setStatus('success')
                             onSuccess()
                         } else if (result.status === 'error') {
+                            terminalRef.current = true
                             stopPolling()
                             setStatus('error')
                             setError(result.error || t('credentials.oauth_error'))
@@ -173,6 +183,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 }, POLL_INTERVAL)
             }
         } catch (err) {
+            terminalRef.current = true
             setStatus('error')
             setError(err instanceof Error ? err.message : t('credentials.oauth_error'))
         }
@@ -189,19 +200,19 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
             return
         }
         setCallbackSubmitting(true)
+        setError('')
         try {
             await oauthApi.submitCallback(provider, redirectUrl)
-            stopPolling()
-            setStatus('success')
-            onSuccess()
+            setCallbackAccepted(true)
         } catch (err) {
             setError(err instanceof Error ? err.message : t('credentials.oauth_error'))
         } finally {
             setCallbackSubmitting(false)
         }
-    }, [provider, callbackUrl, oauthState, stopPolling, onSuccess, t])
+    }, [provider, callbackUrl, oauthState, t])
 
     const handleCancel = useCallback(() => {
+        terminalRef.current = true
         stopPolling()
         onCancel()
     }, [stopPolling, onCancel])
@@ -219,11 +230,13 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                             variant='secondary'
                             size='sm'
                             onClick={() => {
+                                terminalRef.current = false
                                 stopPolling()
                                 setStatus('idle')
                                 setUrl('')
                                 setError('')
                                 setCallbackUrl('')
+                                setCallbackAccepted(false)
                                 setOauthState('')
                             }}
                         >
@@ -263,7 +276,11 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                 <div className={styles.waitingArea}>
                     <div className={styles.statusLine}>
                         <span className='loading-spinner' aria-hidden='true' />
-                        <span>{t('credentials.oauth_waiting')}</span>
+                        <span>
+                            {t(callbackAccepted ?
+                               'credentials.oauth_callback_processing' :
+                               'credentials.oauth_waiting')}
+                        </span>
                     </div>
 
                     {url && (
@@ -295,7 +312,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                         </div>
                     )}
 
-                    {supportsCallback && (
+                    {supportsCallback && !callbackAccepted && (
                         <div className={styles.callbackArea}>
                             <div className={styles.callbackInputRow}>
                                 <Input
@@ -328,6 +345,7 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                                  ? t('auth_login.xai_callback_hint')
                                  : t('auth_login.oauth_callback_hint')}
                             </div>
+                            {error && <div className={styles.callbackError}>{error}</div>}
                         </div>
                     )}
 

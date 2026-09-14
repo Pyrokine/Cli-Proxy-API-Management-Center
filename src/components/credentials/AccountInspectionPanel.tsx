@@ -15,7 +15,7 @@ import type {
 } from '@/services/api/accountInspection'
 import {accountInspectionApi} from '@/services/api/accountInspection'
 import {authFilesApi} from '@/services/api/authFiles'
-import type {QuotaConfig, QuotaStatusResponse} from '@/services/api/quota'
+import type {QuotaConfig, QuotaRefreshTaskTarget, QuotaStatusResponse} from '@/services/api/quota'
 import {quotaApi} from '@/services/api/quota'
 import type {UsageSummary} from '@/services/api/usage'
 import {usageApi} from '@/services/api/usage'
@@ -26,13 +26,14 @@ import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
 import styles from './AccountInspectionPanel.module.scss'
+import {isQuotaRefreshTaskTerminal} from './hooks/quotaRefreshTask'
 import {buildProviderHealthRows} from './providerHealth'
 
 const UI_STATE_KEY      = 'cpa-account-inspection-ui-state'
 const DEFAULT_PAGE_SIZE = 25
 
-type ColumnKey = 'account' | 'provider' | 'status' | 'reason' | 'advice' | 'checked_at' | 'actions'
-type DetailTab = 'results' | 'logs'
+type ColumnKey = 'account' | 'provider' | 'status' | 'probe' | 'reason' | 'advice' | 'checked_at' | 'actions'
+type DetailTab = 'results' | 'quota' | 'logs'
 
 type UIState = {
     issuesOnly?: boolean
@@ -163,14 +164,23 @@ function statusClass(status: string): string {
     switch (status) {
         case 'normal':
         case 'completed':
+        case 'succeeded':
+        case 'passed':
             return styles.statusNormal
         case 'disabled':
+        case 'skipped':
+        case 'cancelled':
             return styles.statusDisabled
         case 'unavailable':
         case 'error':
         case 'stopped':
+        case 'failed':
+        case 'inconclusive':
+        case 'interrupted':
             return styles.statusUnavailable
+        case 'queued':
         case 'running':
+        case 'paused':
             return styles.statusRunning
         default:
             return styles.statusUnknown
@@ -271,7 +281,9 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const { t, i18n }                                             = useTranslation()
     const navigate                                                = useNavigate()
     const showNotification                                        = useNotificationStore((s) => s.showNotification)
-    const addPersistentNotification                               = useNotificationStore((s) => s.addPersistentNotification)
+    const addPersistentNotification                               = useNotificationStore(
+        (state) => state.addPersistentNotification,
+    )
     const [initialUIState]                                        = useState(loadUIState)
     const [issuesOnly, setIssuesOnly]                             = useState(initialUIState.issuesOnly ?? true)
     const [includeDisabled, setIncludeDisabled]                   = useState(false)
@@ -296,6 +308,11 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const [busyAction, setBusyAction]                             = useState<string>('')
     const [fetchError, setFetchError]                             = useState('')
     const [actionError, setActionError]                           = useState('')
+    const latestQuotaTask                                         = status.refresh_queue.latest_task
+    const latestQuotaTaskId                                       = latestQuotaTask?.id ?? ''
+    const quotaTaskActive                                         = latestQuotaTask !== undefined &&
+                                                                    !isQuotaRefreshTaskTerminal(latestQuotaTask)
+    const quotaTaskActionBusy                                     = busyAction.startsWith('quota-')
 
     useEffect(() => {
         localStorage.setItem(UI_STATE_KEY, JSON.stringify({ issuesOnly, pageSize }))
@@ -361,6 +378,55 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         const id = window.setInterval(() => void fetchData(), 2000)
         return () => window.clearInterval(id)
     }, [fetchData, status.status])
+
+    useEffect(() => {
+        if (!latestQuotaTaskId || !quotaTaskActive) {
+            return
+        }
+        const controller  = new AbortController()
+        let requestActive = false
+        const pollTask    = async () => {
+            if (requestActive) {
+                return
+            }
+            requestActive = true
+            try {
+                const task = await quotaApi.getTask(latestQuotaTaskId, { signal: controller.signal })
+                if (controller.signal.aborted) {
+                    return
+                }
+                setStatus((prev) => {
+                    if (prev.refresh_queue.latest_task?.id !== task.id) {
+                        return prev
+                    }
+                    return {
+                        ...prev,
+                        refresh_queue: {
+                            ...prev.refresh_queue,
+                            latest_task: task,
+                            pending: task.summary.queued + task.summary.running,
+                            skipped: task.summary.skipped,
+                            failed: task.summary.failed + task.summary.inconclusive + task.summary.interrupted,
+                        },
+                    }
+                })
+                if (isQuotaRefreshTaskTerminal(task)) {
+                    void fetchData()
+                }
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    console.warn('[AccountInspectionPanel] quota refresh task poll failed:', error)
+                }
+            } finally {
+                requestActive = false
+            }
+        }
+        const id          = window.setInterval(() => void pollTask(), 1000)
+        return () => {
+            controller.abort()
+            window.clearInterval(id)
+        }
+    }, [fetchData, latestQuotaTaskId, quotaTaskActive])
 
     const handleIssuesOnlyChange = useCallback((checked: boolean) => {
         setIssuesOnly(checked)
@@ -465,6 +531,13 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const renderRowActions = useCallback(
         (result: AccountInspectionResult) => {
             const key = rowKey(result)
+            if (result.probe_status === 'outdated') {
+                return (
+                    <span className={styles.noAction}>
+                        {t('credentials.inspection_probe_status_outdated', { defaultValue: '已过期' })}
+                    </span>
+                )
+            }
             if (result.status === 'disabled') {
                 return (
                     <Button
@@ -497,7 +570,8 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     </Button>
                 )
             }
-            if (result.status === 'unknown' || result.reason === 'provider_error') {
+            if (result.status === 'unknown' ||
+                ['provider_error', 'probe_failed', 'probe_inconclusive'].includes(result.reason)) {
                 return (
                     <Button
                         variant='ghost'
@@ -556,6 +630,39 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                 ),
             },
             {
+                columnKey: 'probe',
+                key: 'probe_status',
+                header: t('credentials.inspection_probe', { defaultValue: '主动探测' }),
+                sortable: true,
+                sortValue: (row) => row.probe_status,
+                cell: (row) => {
+                    const digest = row.credential_digest || ''
+                    return (
+                        <div className={styles.probeCell} title={row.probe_error || undefined}>
+                            <span className={`${styles.statusBadge} ${statusClass(row.probe_status)}`}>
+                                {t(`credentials.inspection_probe_status_${row.probe_status}`, {
+                                    defaultValue: row.probe_status,
+                                })}
+                            </span>
+                            <span className={styles.probeMeta}>
+                                {t('credentials.inspection_probe_revision', { defaultValue: '协议' })}:{' '}
+                                {row.probe_revision || '-'}
+                            </span>
+                            <span className={styles.probeMeta}>
+                                {t('credentials.inspection_auth_generation', { defaultValue: '凭证代际' })}:{' '}
+                                {row.auth_generation}
+                            </span>
+                            <span className={styles.probeMeta}>
+                                {t('credentials.inspection_credential_digest', { defaultValue: '凭证摘要' })}:{' '}
+                                <code className={styles.probeDigest} title={digest || undefined}>
+                                    {digest ? `${digest.slice(0, 12)}…` : '-'}
+                                </code>
+                            </span>
+                        </div>
+                    )
+                },
+            },
+            {
                 columnKey: 'reason',
                 key: 'reason',
                 header: t('credentials.inspection_reason', { defaultValue: '原因' }),
@@ -587,31 +694,31 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         return items
     }, [formatTime, renderAdvice, renderReason, renderRowActions, t])
 
-    const totalPages                       = Math.max(1, Math.ceil(total / pageSize))
-    const sheetStatus: DataStatusValue     = fetchError
-                                             ? 'error'
-                                             : loading && results.length === 0
-                                               ? 'loading'
-                                               : results.length === 0
-                                                 ? 'empty'
-                                                 : 'ready'
-    const visibleLogs                      = useMemo(() => logs.slice(-80), [logs])
-    const providerHealthRows               = useMemo(
+    const totalPages                            = Math.max(1, Math.ceil(total / pageSize))
+    const sheetStatus: DataStatusValue          = fetchError
+                                                  ? 'error'
+                                                  : loading && results.length === 0
+                                                    ? 'loading'
+                                                    : results.length === 0
+                                                      ? 'empty'
+                                                      : 'ready'
+    const visibleLogs                           = useMemo(() => logs.slice(-80), [logs])
+    const providerHealthRows                    = useMemo(
         () => buildProviderHealthRows({ inspectionStatus: status, quotaStatus, usageSummary, authFiles }),
         [authFiles, quotaStatus, status, usageSummary],
     )
-    const lastRunResultLabel               = status.last_run
-                                             ? t('credentials.inspection_last_run_result', {
+    const lastRunResultLabel                    = status.last_run
+                                                  ? t('credentials.inspection_last_run_result', {
             checked: status.last_run.checked,
             defaultValue: '{{checked}} 个账号',
         })
-                                             : ''
-    const logsSheetStatus: DataStatusValue = loading && visibleLogs.length === 0
-                                             ? 'loading'
-                                             : visibleLogs.length === 0
-                                               ? 'empty'
-                                               : 'ready'
-    const logColumns                       = useMemo<SheetColumn<AccountInspectionLogEntry>[]>(() => [
+                                                  : ''
+    const logsSheetStatus: DataStatusValue      = loading && visibleLogs.length === 0
+                                                  ? 'loading'
+                                                  : visibleLogs.length === 0
+                                                    ? 'empty'
+                                                    : 'ready'
+    const logColumns                            = useMemo<SheetColumn<AccountInspectionLogEntry>[]>(() => [
         {
             key: 'time',
             header: t('credentials.inspection_log_time', { defaultValue: '时间' }),
@@ -632,8 +739,58 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             cell: (entry) => <span className={styles.logMessage}>{formatInspectionLogMessage(entry, t)}</span>,
         },
     ], [formatTime, t])
-    const inspectionScheduleDisabled       = !inspectionScheduleLoaded || busyAction === 'inspection-schedule'
-    const sheetEmptyHint                   =
+    const quotaTaskColumns                      = useMemo<SheetColumn<QuotaRefreshTaskTarget>[]>(() => [
+        {
+            key: 'provider',
+            header: t('credentials.quota_task_provider', { defaultValue: 'Provider' }),
+            cell: (target) => target.provider || '-',
+        },
+        {
+            key: 'credential',
+            header: t('credentials.quota_task_credential', { defaultValue: '凭证' }),
+            cell: (target) => {
+                const name = target.file_name || target.identifier || target.entry_key || target.id
+                return <span className={styles.taskCredential} title={name}>{name}</span>
+            },
+        },
+        {
+            key: 'status',
+            header: t('credentials.quota_task_target_status', { defaultValue: '目标状态' }),
+            cell: (target) => (
+                <span className={`${styles.statusBadge} ${statusClass(target.status)}`}>
+                    {t(`credentials.quota_task_status_${target.status}`, { defaultValue: target.status })}
+                </span>
+            ),
+        },
+        {
+            key: 'result',
+            header: t('credentials.quota_task_result', { defaultValue: '结果' }),
+            cell: (target) => (
+                <span className={styles.taskResult}>
+                    {target.error || (target.shared_execution
+                                      ?
+                                      t('credentials.quota_task_shared_execution', { defaultValue: '复用同一目标刷新' })
+                                      :
+                                      '-')}
+                </span>
+            ),
+        },
+        {
+            key: 'started_at',
+            header: t('credentials.quota_task_started_at', { defaultValue: '开始时间' }),
+            cell: (target) => <span className={styles.timeCell}>{formatTime(target.started_at)}</span>,
+        },
+        {
+            key: 'completed_at',
+            header: t('credentials.quota_task_completed_at', { defaultValue: '完成时间' }),
+            cell: (target) => <span className={styles.timeCell}>{formatTime(target.completed_at)}</span>,
+        },
+    ], [formatTime, t])
+    const quotaTaskSheetStatus: DataStatusValue = !latestQuotaTask || latestQuotaTask.targets.length === 0
+                                                  ? 'empty'
+                                                  : 'ready'
+    const inspectionScheduleDisabled            = !inspectionScheduleLoaded || busyAction === 'inspection-schedule'
+    const sheetEmptyHint                        =
               results.length ===
               0 &&
               !includeDisabled &&
@@ -658,7 +815,11 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     }),
                     'warning',
                     'quota',
-                    { dedupeKey: `quota:provider:${row.provider}:${row.quotaError}:${row.quotaBanned}:${row.quotaExceeded}` },
+                    {
+                        dedupeKey:
+                            `quota:provider:${row.provider}:` +
+                            `${row.quotaError}:${row.quotaBanned}:${row.quotaExceeded}`,
+                    },
                 )
             })
     }, [addPersistentNotification, providerHealthRows, t])
@@ -1017,6 +1178,10 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             value: 'results',
                             label: t('credentials.inspection_results_tab', { defaultValue: '巡检结果' }),
                         },
+                        {
+                            value: 'quota',
+                            label: t('credentials.quota_task_tab', { defaultValue: '配额刷新任务' }),
+                        },
                         { value: 'logs', label: t('credentials.inspection_logs', { defaultValue: '巡检日志' }) },
                     ]}
                     activeValue={detailTab}
@@ -1081,39 +1246,168 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             onPageSizeChange={handlePageSizeChange}
                         />
                     </div>
+                ) : detailTab === 'quota' ? (
+                    <div className={styles.sectionCard}>
+                        {latestQuotaTask && (
+                            <>
+                                <div className={styles.statusPanel}>
+                                    <div>
+                                        <div className={styles.taskHeaderLine}>
+                                            <div className={styles.sectionTitle}>
+                                                {t(
+                                                    'credentials.quota_task_latest',
+                                                    { defaultValue: '最近配额刷新任务' },
+                                                )}
+                                            </div>
+                                            <span
+                                                className={`${styles.statusBadge} ${statusClass(latestQuotaTask.status)}`}>
+                                                {t(`credentials.quota_task_status_${latestQuotaTask.status}`, {
+                                                    defaultValue: latestQuotaTask.status,
+                                                })}
+                                            </span>
+                                        </div>
+                                        <div className={styles.statusLine}>
+                                            <span>
+                                                {t('credentials.quota_task_id', { defaultValue: '任务 ID' })}:{' '}
+                                                <code className={styles.taskId}>{latestQuotaTask.id}</code>
+                                            </span>
+                                            <span>
+                                                {t(
+                                                    'credentials.quota_task_created_at',
+                                                    { defaultValue: '创建时间' },
+                                                )}:{' '}
+                                                {formatTime(latestQuotaTask.created_at)}
+                                            </span>
+                                            <span>
+                                                {t(
+                                                    'credentials.quota_task_started_at',
+                                                    { defaultValue: '开始时间' },
+                                                )}:{' '}
+                                                {formatTime(latestQuotaTask.started_at)}
+                                            </span>
+                                            <span>
+                                                {t(
+                                                    'credentials.quota_task_completed_at',
+                                                    { defaultValue: '完成时间' },
+                                                )}:{' '}
+                                                {formatTime(latestQuotaTask.completed_at)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className={styles.actionsRow}>
+                                        <Button
+                                            variant='secondary'
+                                            size='sm'
+                                            loading={busyAction === `quota-pause-${latestQuotaTask.id}`}
+                                            disabled={quotaTaskActionBusy ||
+                                                      !['queued', 'running'].includes(latestQuotaTask.status)}
+                                            onClick={() => void runAction(
+                                                `quota-pause-${latestQuotaTask.id}`,
+                                                () => quotaApi.pauseTask(latestQuotaTask.id),
+                                            )}
+                                        >
+                                            {t('credentials.quota_task_pause', { defaultValue: '暂停' })}
+                                        </Button>
+                                        <Button
+                                            variant='secondary'
+                                            size='sm'
+                                            loading={busyAction === `quota-resume-${latestQuotaTask.id}`}
+                                            disabled={quotaTaskActionBusy || latestQuotaTask.status !== 'paused'}
+                                            onClick={() => void runAction(
+                                                `quota-resume-${latestQuotaTask.id}`,
+                                                () => quotaApi.resumeTask(latestQuotaTask.id),
+                                            )}
+                                        >
+                                            {t('credentials.quota_task_resume', { defaultValue: '继续' })}
+                                        </Button>
+                                        <Button
+                                            variant='danger'
+                                            size='sm'
+                                            loading={busyAction === `quota-cancel-${latestQuotaTask.id}`}
+                                            disabled={quotaTaskActionBusy ||
+                                                      isQuotaRefreshTaskTerminal(latestQuotaTask)}
+                                            onClick={() => void runAction(
+                                                `quota-cancel-${latestQuotaTask.id}`,
+                                                () => quotaApi.cancelTask(latestQuotaTask.id),
+                                            )}
+                                        >
+                                            {t('credentials.quota_task_cancel', { defaultValue: '取消' })}
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div className={styles.summaryGrid}>
+                                    {([
+                                        ['total', latestQuotaTask.summary.total, '目标'],
+                                        ['queued', latestQuotaTask.summary.queued, '排队'],
+                                        ['running', latestQuotaTask.summary.running, '执行中'],
+                                        ['succeeded', latestQuotaTask.summary.succeeded, '成功'],
+                                        ['failed', latestQuotaTask.summary.failed, '失败'],
+                                        ['skipped', latestQuotaTask.summary.skipped, '跳过'],
+                                        ['cancelled', latestQuotaTask.summary.cancelled, '取消'],
+                                        ['inconclusive', latestQuotaTask.summary.inconclusive, '无法判定'],
+                                        ['interrupted', latestQuotaTask.summary.interrupted, '已中断'],
+                                    ] as const).map(([key, value, label]) => (
+                                        <div className={styles.metric} key={key}>
+                                            <span>{t(`credentials.quota_task_summary_${key}`, {
+                                                defaultValue: label,
+                                            })}</span>
+                                            <strong>{value}</strong>
+                                        </div>
+                                    ))}
+                                </div>
+                                {(latestQuotaTask.error || latestQuotaTask.persistence_error) && (
+                                    <div className={styles.error}>
+                                        {[latestQuotaTask.error, latestQuotaTask.persistence_error]
+                                            .filter(Boolean)
+                                            .join(' · ')}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                        <Sheet
+                            rows={latestQuotaTask?.targets ?? []}
+                            columns={quotaTaskColumns}
+                            rowKey={(target) => target.id}
+                            status={quotaTaskSheetStatus}
+                            emptyText={t('credentials.quota_task_empty', { defaultValue: '暂无配额刷新任务' })}
+                            loadingText={t('common.loading')}
+                            refreshing={quotaTaskActive}
+                            refreshingText={t('credentials.quota_task_polling', { defaultValue: '正在读取任务进度' })}
+                        />
+                    </div>
                 ) : (
-                     <Sheet
-                         rows={visibleLogs}
-                         columns={logColumns}
-                         rowKey={(entry, index) => `${entry.time}-${index}`}
-                         status={logsSheetStatus}
-                         emptyText={t('credentials.inspection_logs_empty', { defaultValue: '暂无巡检日志' })}
-                         loadingText={t('common.loading')}
-                         refreshing={loading && visibleLogs.length > 0}
-                         refreshingText={t('common.loading')}
-                         className={styles.logsPanel}
-                         tableWrapClassName={styles.logsTableWrap}
-                         summaryContent={(
-                             <div>
-                                 <div className={styles.logsTitle}>
-                                     {t('credentials.inspection_logs', { defaultValue: '巡检日志' })}
-                                 </div>
-                                 <div className={styles.logsMeta}>
-                                     {t('credentials.inspection_logs_count', {
-                                         shown: visibleLogs.length,
-                                         total: logs.length,
-                                         defaultValue: '显示最后 {{shown}} / {{total}} 条，后端已保存',
-                                     })}
-                                 </div>
-                             </div>
-                         )}
-                         toolbarContent={(
-                             <Button variant='ghost' size='sm' onClick={() => void fetchData()} loading={loading}>
-                                 {t('common.refresh')}
-                             </Button>
-                         )}
-                     />
-                 )}
+                        <Sheet
+                            rows={visibleLogs}
+                            columns={logColumns}
+                            rowKey={(entry, index) => `${entry.time}-${index}`}
+                            status={logsSheetStatus}
+                            emptyText={t('credentials.inspection_logs_empty', { defaultValue: '暂无巡检日志' })}
+                            loadingText={t('common.loading')}
+                            refreshing={loading && visibleLogs.length > 0}
+                            refreshingText={t('common.loading')}
+                            className={styles.logsPanel}
+                            tableWrapClassName={styles.logsTableWrap}
+                            summaryContent={(
+                                <div>
+                                    <div className={styles.logsTitle}>
+                                        {t('credentials.inspection_logs', { defaultValue: '巡检日志' })}
+                                    </div>
+                                    <div className={styles.logsMeta}>
+                                        {t('credentials.inspection_logs_count', {
+                                            shown: visibleLogs.length,
+                                            total: logs.length,
+                                            defaultValue: '显示最后 {{shown}} / {{total}} 条，后端已保存',
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            toolbarContent={(
+                                <Button variant='ghost' size='sm' onClick={() => void fetchData()} loading={loading}>
+                                    {t('common.refresh')}
+                                </Button>
+                            )}
+                        />
+                    )}
             </div>
         </div>
     )

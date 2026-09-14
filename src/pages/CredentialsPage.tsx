@@ -20,16 +20,21 @@ import {
     useCredentialsData,
     VendorSection,
 } from '@/components/credentials'
+import {createLatestCredentialsRequestTracker} from '@/components/credentials/credentialsDataLifecycle'
 import {useBackendQuotaRegistration} from '@/components/credentials/hooks/useBackendQuotaRegistration'
 import {Button} from '@/components/ui/Button'
 import {IconSearch} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {MultiSelect} from '@/components/ui/MultiSelect'
 import {Tabs} from '@/components/ui/Tabs'
+import {downloadAuthFilesBatch} from '@/features/authFiles/batchDownload'
 import {useAutoRefresh} from '@/hooks/useAutoRefresh'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {accountInspectionApi, type AccountInspectionResult} from '@/services/api/accountInspection'
 import {apiKeyAliasApi} from '@/services/api/apiKeys'
 import {authFilesApi} from '@/services/api/authFiles'
-import {type SummaryApiKeyStats, usageApi} from '@/services/api/usage'
+import {apiClient} from '@/services/api/client'
+import {type SummaryApiKeyStats, type SummaryTimePoint, usageApi} from '@/services/api/usage'
 import {useConfigStore, useThemeStore} from '@/stores'
 import {useNotificationStore} from '@/stores/useNotificationStore'
 import {resolveAutoRefreshMs} from '@/utils/autoRefresh'
@@ -76,6 +81,23 @@ function loadStoredArray(key: string): string[] {
 
 const CREDENTIALS_UI_STATE_KEY     = 'cpa-credentials-ui-state'
 const CREDENTIALS_VENDOR_ORDER_KEY = 'cpa-vendor-order'
+const API_KEY_STATUS_BUCKET_MS     = 10 * 60 * 1000
+const API_KEY_STATUS_BUCKET_COUNT  = 24
+
+type CredentialUsageWindow = {
+    startMs: number
+    bucketDurationMs: number
+    bucketCount: number
+}
+
+const createCredentialUsageWindow = (nowMs = Date.now()): CredentialUsageWindow => {
+    const currentBucketStart = Math.floor(nowMs / API_KEY_STATUS_BUCKET_MS) * API_KEY_STATUS_BUCKET_MS
+    return {
+        startMs: currentBucketStart - (API_KEY_STATUS_BUCKET_COUNT - 1) * API_KEY_STATUS_BUCKET_MS,
+        bucketDurationMs: API_KEY_STATUS_BUCKET_MS,
+        bucketCount: API_KEY_STATUS_BUCKET_COUNT,
+    }
+}
 
 type CredentialsStatusFilter = 'all' | 'available' | 'exhausted' | 'error' | 'disabled'
 type CredentialsTypeFilter = 'all' | 'api-key' | 'auth-file'
@@ -151,30 +173,51 @@ export default function CredentialsPage() {
                                      Qwen: makeIconComponent(iconQwen, 'Qwen'),
                                      IFlow: makeIconComponent(iconIflow, 'iFlow'),
                                      Grok: makeThemedIconComponent(iconGrok, iconGrokDark, 'Grok'),
-                                 }).sort((a, b) => {
-                const idxA = vendorOrder.indexOf(a.id)
-                const idxB = vendorOrder.indexOf(b.id)
-                if (idxA !== -1 && idxB !== -1) {
-                    return idxA - idxB
-                }
-                if (idxA !== -1) {
-                    return -1
-                }
-                if (idxB !== -1) {
-                    return 1
-                }
-                return a.label.localeCompare(b.label)
-            }),
-        [vendorOrder],
+                                 })
+                .map((vendor) => ({
+                    ...vendor,
+                    label: t(vendor.labelKey, { defaultValue: vendor.label }),
+                }))
+                .sort((a, b) => {
+                    const idxA = vendorOrder.indexOf(a.id)
+                    const idxB = vendorOrder.indexOf(b.id)
+                    if (idxA !== -1 && idxB !== -1) {
+                        return idxA - idxB
+                    }
+                    if (idxA !== -1) {
+                        return -1
+                    }
+                    if (idxB !== -1) {
+                        return 1
+                    }
+                    return a.label.localeCompare(b.label)
+                }),
+        [t, vendorOrder],
     )
 
-    const { vendorData, authFiles, loading, error, refresh } = useCredentialsData(vendors)
-    const { lastRefreshedAt, isRefreshing, markRefreshed }   = useAutoRefresh(refresh, autoRefreshMs)
-    const [aliases, setAliases]                              = useState<Record<string, string>>({})
-    const [apiKeyUsageStats, setApiKeyUsageStats]            = useState<Record<string, SummaryApiKeyStats>>({})
-    const quotaScheduler                                     = useBackendQuotaRegistration(authFiles)
-    const quotaStatusMap                                     = quotaScheduler.statusMap
-    const authFileByName                                     = useMemo(
+    const {
+              vendorData,
+              authFiles,
+              loading,
+              refreshing,
+              error,
+              refresh,
+              completeMutation,
+          }                                                       = useCredentialsData(vendors)
+    const [aliases, setAliases]                                   = useState<Record<string, string>>({})
+    const [authIndexUsageStats, setAuthIndexUsageStats]           = useState<Record<string, SummaryApiKeyStats>>({})
+    const [authIndexTimeSeries, setAuthIndexTimeSeries]           = useState<Record<string, SummaryTimePoint[]>>({})
+    const [authIndexUsageWindow, setAuthIndexUsageWindow]         = useState<CredentialUsageWindow>(
+        createCredentialUsageWindow)
+    const [authIndexUsageLoadFailed, setAuthIndexUsageLoadFailed] = useState(false)
+    const [accountHealthByAuthIndex, setAccountHealthByAuthIndex] = useState<
+        Record<string, AccountInspectionResult>
+    >({})
+    const [accountHealthLoadFailed, setAccountHealthLoadFailed]   = useState(false)
+    const credentialInsightsTrackerRef                            = useRef(createLatestCredentialsRequestTracker())
+    const quotaScheduler                                          = useBackendQuotaRegistration(authFiles)
+    const quotaStatusMap                                          = quotaScheduler.statusMap
+    const authFileByName                                          = useMemo(
         () => new Map(authFiles.map((file) => [file.name, file])),
         [authFiles],
     )
@@ -204,6 +247,81 @@ export default function CredentialsPage() {
             .catch((err) => console.warn('Failed to load aliases:', err))
     }, [vendorData])
 
+    const refreshCredentialInsights = useCallback(async () => {
+        const authGeneration                  = apiClient.getAuthGeneration()
+        const requestToken                    = credentialInsightsTrackerRef.current.begin(authGeneration)
+        const usageEnd                        = Date.now()
+        const usageWindow                     = createCredentialUsageWindow(usageEnd)
+        const [usageResult, inspectionResult] = await Promise.allSettled([
+                                                                             usageApi.getSummary({
+                                                                                                     from: new Date(
+                                                                                                         usageWindow.startMs).toISOString(),
+                                                                                                     to: new Date(
+                                                                                                         usageEnd).toISOString(),
+                                                                                                     granularity: 'hourly',
+                                                                                                     groups: 'none',
+                                                                                                     auth_index_groups: true,
+                                                                                                     auth_index_granularity: '10m',
+                                                                                                 }),
+                                                                             accountInspectionApi.getAllResults({ includeDisabled: true }),
+                                                                         ])
+
+        if (!credentialInsightsTrackerRef.current.isCurrent(requestToken, apiClient.getAuthGeneration())) {
+            return
+        }
+
+        if (usageResult.status === 'fulfilled') {
+            setAuthIndexUsageStats(usageResult.value.by_auth_index ?? {})
+            setAuthIndexTimeSeries(usageResult.value.time_series_by_auth_index ?? {})
+            setAuthIndexUsageWindow(usageWindow)
+            setAuthIndexUsageLoadFailed(false)
+        } else {
+            setAuthIndexUsageLoadFailed(true)
+            console.warn('Failed to load credential usage insights:', usageResult.reason)
+        }
+
+        if (inspectionResult.status === 'fulfilled') {
+            const latestByAuthIndex: Record<string, AccountInspectionResult> = {}
+            inspectionResult.value.forEach((result) => {
+                const authIndex = result.auth_index?.trim()
+                if (!authIndex) {
+                    return
+                }
+                const current = latestByAuthIndex[authIndex]
+                if (!current || Date.parse(result.checked_at) >= Date.parse(current.checked_at)) {
+                    latestByAuthIndex[authIndex] = result
+                }
+            })
+            setAccountHealthByAuthIndex(latestByAuthIndex)
+            setAccountHealthLoadFailed(false)
+        } else {
+            setAccountHealthLoadFailed(true)
+            console.warn('Failed to load account inspection results:', inspectionResult.reason)
+        }
+    }, [])
+
+    const refreshAllCredentials                            = useCallback(async () => {
+        await Promise.all([refresh(), refreshCredentialInsights()])
+    }, [refresh, refreshCredentialInsights])
+    const { lastRefreshedAt, isRefreshing, markRefreshed } = useAutoRefresh(
+        refreshAllCredentials,
+        autoRefreshMs,
+    )
+
+    useEffect(() => {
+        let cancelled = false
+        const tracker = credentialInsightsTrackerRef.current
+        queueMicrotask(() => {
+            if (!cancelled) {
+                void refreshCredentialInsights()
+            }
+        })
+        return () => {
+            cancelled = true
+            tracker.invalidate()
+        }
+    }, [refreshCredentialInsights])
+
     // Mark initial load as refreshed
     useEffect(() => {
         if (!loading && !lastRefreshedAt) {
@@ -211,26 +329,11 @@ export default function CredentialsPage() {
         }
     }, [loading, lastRefreshedAt, markRefreshed])
 
-    const refreshApiKeyUsageStats = useCallback(async () => {
-        try {
-            const summary = await usageApi.getSummary({ groups: 'all' })
-            setApiKeyUsageStats(summary.by_api_key ?? {})
-        } catch (err) {
-            setApiKeyUsageStats({})
-            console.warn('Failed to load API key usage stats:', err)
-        }
-    }, [])
-
-    useEffect(() => {
-        queueMicrotask(() => {
-            void refreshApiKeyUsageStats()
-        })
-    }, [refreshApiKeyUsageStats])
-
     const handleRefresh = useCallback(async () => {
-        await Promise.all([refresh(), refreshApiKeyUsageStats()])
+        await refreshAllCredentials()
         markRefreshed()
-    }, [refresh, refreshApiKeyUsageStats, markRefreshed])
+    }, [markRefreshed, refreshAllCredentials])
+    useHeaderRefresh(handleRefresh)
 
     const handleAliasChange = useCallback(
         async (apiKey: string, alias: string) => {
@@ -332,7 +435,7 @@ export default function CredentialsPage() {
                                      const result = await authFilesApi.deleteFiles(names)
                                      if (result.files.length > 0) {
                                          setSelectedItems(new Set())
-                                         await refresh()
+                                         await completeMutation({ kind: 'delete', names: result.files })
                                          markRefreshed()
                                      }
                                      if (result.failed.length === 0) {
@@ -354,7 +457,38 @@ export default function CredentialsPage() {
                                  }
                              },
                          })
-    }, [selectedVisibleItems, showConfirmation, showNotification, t, refresh, markRefreshed])
+    }, [selectedVisibleItems, showConfirmation, showNotification, t, completeMutation, markRefreshed])
+
+    const handleBatchDownload = useCallback(async () => {
+        if (selectedVisibleItems.length === 0) {
+            return
+        }
+        setBatchBusy(true)
+        try {
+            const result = await downloadAuthFilesBatch(selectedVisibleItems, authFilesApi.download)
+            if (result.failed.length === 0) {
+                showNotification(
+                    t('auth_files.batch_download_success', {
+                        count: result.downloaded.length,
+                        defaultValue: 'Downloaded {{count}} credential(s)',
+                    }),
+                    'success',
+                )
+            } else {
+                showNotification(
+                    t('auth_files.batch_download_partial', {
+                        success: result.downloaded.length,
+                        failed: result.failed.length,
+                        names: result.failed.join(', '),
+                        defaultValue: 'Downloaded {{success}} credential(s); {{failed}} failed: {{names}}',
+                    }),
+                    'warning',
+                )
+            }
+        } finally {
+            setBatchBusy(false)
+        }
+    }, [selectedVisibleItems, showNotification, t])
 
     const handleBatchRefresh = useCallback(async () => {
         if (selectedVisibleItems.length === 0) {
@@ -365,7 +499,9 @@ export default function CredentialsPage() {
         if (refreshableItems.length === 0) {
             showNotification(
                 t('credentials.batch_refresh_disabled_only', {
-                    defaultValue: 'Selected credentials are disabled. Enable them or use the card refresh button to verify one account manually.',
+                    defaultValue:
+                        'Selected credentials are disabled. Enable them or use ' +
+                        'the card refresh button to verify one account manually.',
                 }),
                 'warning',
             )
@@ -380,7 +516,9 @@ export default function CredentialsPage() {
                 showNotification(
                     t('credentials.batch_refresh_skipped_disabled', {
                         count: skippedDisabled,
-                        defaultValue: 'Skipped {{count}} disabled credential(s). Use the card refresh button to verify one disabled account manually.',
+                        defaultValue:
+                            'Skipped {{count}} disabled credential(s). Use the card ' +
+                            'refresh button to verify one disabled account manually.',
                     }),
                     'warning',
                 )
@@ -399,7 +537,7 @@ export default function CredentialsPage() {
             setBatchBusy(true)
             try {
                 const result = disabled ? await authFilesApi.bulkDisable(names) : await authFilesApi.bulkEnable(names)
-                await refresh()
+                await completeMutation({ kind: 'status', names: result.updated, disabled })
                 markRefreshed()
                 const failed = result.failed ? Object.entries(result.failed) : []
                 if (failed.length === 0) {
@@ -415,7 +553,7 @@ export default function CredentialsPage() {
                 setBatchBusy(false)
             }
         },
-        [selectedVisibleItems, refresh, markRefreshed, showNotification, t],
+        [selectedVisibleItems, completeMutation, markRefreshed, showNotification, t],
     )
 
     return (
@@ -428,7 +566,7 @@ export default function CredentialsPage() {
                             {t('credentials.last_updated')} {formatTime(lastRefreshedAt)}
                         </span>
                     )}
-                    {(loading || isRefreshing) && <span className='loading-spinner' aria-hidden='true' />}
+                    {(loading || refreshing || isRefreshing) && <span className='loading-spinner' aria-hidden='true' />}
                 </div>
             </div>
 
@@ -486,6 +624,14 @@ export default function CredentialsPage() {
                 </div>
             )}
 
+            {activeTab === 'credentials' && (
+                <div className={styles.filterHint}>{t('credentials.routing_order_hint')}</div>
+            )}
+
+            {activeTab === 'credentials' && (statusFilter === 'error' || statusFilter === 'exhausted') && (
+                <div className={styles.filterHint}>{t('credentials.runtime_status_filter_hint')}</div>
+            )}
+
             {activeTab === 'credentials' && <div className={styles.batchBar}>
                 <div className={styles.batchSummary} aria-live='polite'>
                     <span className={styles.batchMode}>{t('credentials.batch_mode')}</span>
@@ -535,6 +681,14 @@ export default function CredentialsPage() {
                                 disabled={selectedVisibleCount === 0 || batchBusy}
                             >
                                 {t('credentials.batch_refresh', { defaultValue: 'Refresh Selected' })}
+                            </Button>
+                            <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => void handleBatchDownload()}
+                                disabled={selectedVisibleCount === 0 || batchBusy}
+                            >
+                                {t('auth_files.batch_download', { defaultValue: 'Download Selected' })}
                             </Button>
                             <Button
                                 variant='ghost'
@@ -617,6 +771,7 @@ export default function CredentialsPage() {
                              onAliasChange={handleAliasChange}
                              disableControls={loading || batchBusy}
                              onRefresh={handleRefresh}
+                             onAuthFileMutation={completeMutation}
                              searchQuery={searchQuery}
                              statusFilter={statusFilter}
                              typeFilter={typeFilter}
@@ -625,7 +780,13 @@ export default function CredentialsPage() {
                              onSelectVendorFiles={handleSelectVendorFiles}
                              onVisibleAuthFilesChange={handleVisibleAuthFilesChange}
                              quotaStatusMap={quotaStatusMap}
-                             apiKeyUsageStats={apiKeyUsageStats}
+                             authIndexUsageStats={authIndexUsageStats}
+                             authIndexTimeSeries={authIndexTimeSeries}
+                             authIndexUsageWindow={authIndexUsageWindow}
+                             authIndexUsageLoadFailed={authIndexUsageLoadFailed}
+                             usageStatisticsEnabled={config?.usageStatisticsEnabled}
+                             accountHealthByAuthIndex={accountHealthByAuthIndex}
+                             accountHealthLoadFailed={accountHealthLoadFailed}
                              scheduler={quotaScheduler}
                          />
                      </div>

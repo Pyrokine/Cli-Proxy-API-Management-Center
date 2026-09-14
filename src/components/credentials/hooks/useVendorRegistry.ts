@@ -12,6 +12,7 @@ export interface QuotaConfig {
 export interface VendorDefinition {
     id: string
     label: string
+    labelKey: string
     icon: ComponentType<{ size?: number }>
     /** Extract API key configs from server config */
     configExtractor?: (config: Config) => AnyKeyConfig[]
@@ -53,6 +54,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'gemini',
             label: 'Gemini',
+            labelKey: 'credentials.vendor_gemini',
             icon: icons.Gemini,
             configExtractor: (c) => c.geminiApiKeys || [],
             authFileTypes: ['gemini', 'gemini-cli', 'aistudio'],
@@ -64,8 +66,23 @@ export function createVendorRegistry(icons: {
             supportsCookieAuth: false,
         },
         {
+            id: 'interactions',
+            label: 'Interactions',
+            labelKey: 'credentials.vendor_interactions',
+            icon: icons.Gemini,
+            configExtractor: (c) => c.interactionsApiKeys || [],
+            authFileTypes: [],
+            oauthProviders: [],
+            editRoute: '/credentials/interactions',
+            createRoute: '/credentials/interactions/new',
+            supportsFileUpload: false,
+            supportsJsonImport: false,
+            supportsCookieAuth: false,
+        },
+        {
             id: 'claude',
-            label: 'Claude',
+            label: 'Claude Compatible',
+            labelKey: 'credentials.vendor_claude_compatible',
             icon: icons.Claude,
             configExtractor: (c) => c.claudeApiKeys || [],
             authFileTypes: ['claude', 'antigravity'],
@@ -80,6 +97,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'codex',
             label: 'Codex',
+            labelKey: 'credentials.vendor_codex',
             icon: icons.Codex,
             configExtractor: (c) => c.codexApiKeys || [],
             authFileTypes: ['codex'],
@@ -94,6 +112,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'vertex',
             label: 'Vertex',
+            labelKey: 'credentials.vendor_vertex',
             icon: icons.Vertex,
             configExtractor: (c) => c.vertexApiKeys || [],
             authFileTypes: ['vertex'],
@@ -107,6 +126,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'openai',
             label: 'OpenAI Compatible',
+            labelKey: 'credentials.vendor_openai_compatible',
             icon: icons.OpenAI,
             configExtractor: (c) => c.openaiCompatibility || [],
             authFileTypes: [],
@@ -120,6 +140,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'kimi',
             label: 'Kimi',
+            labelKey: 'credentials.vendor_kimi',
             icon: icons.Kimi,
             authFileTypes: ['kimi'],
             oauthProviders: ['kimi'],
@@ -131,6 +152,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'qwen',
             label: 'Qwen',
+            labelKey: 'credentials.vendor_qwen',
             icon: icons.Qwen,
             authFileTypes: ['qwen'],
             oauthProviders: ['qwen'],
@@ -141,6 +163,7 @@ export function createVendorRegistry(icons: {
         {
             id: 'iflow',
             label: 'iFlow',
+            labelKey: 'credentials.vendor_iflow',
             icon: icons.IFlow,
             authFileTypes: ['iflow'],
             oauthProviders: [],
@@ -151,9 +174,13 @@ export function createVendorRegistry(icons: {
         {
             id: 'xai',
             label: 'xAI',
+            labelKey: 'credentials.vendor_xai',
             icon: icons.Grok,
+            configExtractor: (c) => c.xaiApiKeys || [],
             authFileTypes: ['xai', 'x-ai', 'grok'],
             oauthProviders: ['xai'],
+            editRoute: '/credentials/xai',
+            createRoute: '/credentials/xai/new',
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: false,

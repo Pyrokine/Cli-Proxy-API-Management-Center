@@ -5,29 +5,44 @@
  */
 
 import i18n from '@/i18n'
-import {quotaApi} from '@/services/api/quota'
+import {apiClient} from '@/services/api/client'
+import {quotaApi, type QuotaEntry, type QuotaRefreshTask, type QuotaRefreshTaskTarget} from '@/services/api/quota'
 import {useNotificationStore} from '@/stores/useNotificationStore'
-import {useQuotaStore} from '@/stores/useQuotaStore'
+import {
+    areQuotaSubjectsCurrent,
+    captureQuotaRequestClaim,
+    commitQuotaSnapshot,
+    isQuotaRequestCurrent,
+    markQuotaRequestFailed,
+    markQuotaSnapshotRejected,
+    type QuotaCachePayload,
+    quotaRequestClaimSignature,
+    reconcileQuotaSubjects,
+    useQuotaStore,
+} from '@/stores/useQuotaStore'
 import type {
     AntigravityQuotaState,
     ClaudeExtraUsage,
     ClaudeQuotaState,
-    ClaudeQuotaWindow,
     CodexQuotaState,
     CodexQuotaWindow,
-    CodexRateLimitResetCredit,
     GeminiCliQuotaBucketState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    QuotaCacheMetadata,
+    QuotaFreshness,
     XaiQuotaState,
 } from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
+import {buildClaudeQuotaWindows, buildKimiQuotaRows} from '@/utils/quota/builders'
+import {resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
+import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
+import {parseXaiQuotaPayload} from '@/utils/quota/xaiBilling'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
-
-const refreshPollIntervalMs = 1000
-const refreshPollTimeoutMs  = 10 * 60 * 1000
+import {useTranslation} from 'react-i18next'
+import {waitForQuotaRefreshTask} from './quotaRefreshTask'
 
 interface EntryMeta {
     fileName: string
@@ -37,173 +52,219 @@ interface EntryMeta {
     status: string
 }
 
-interface RefreshBaseline {
-    lastRefreshMs: number | null
-    previousStatus: string
-    requestedAtMs: number
+interface QuotaPollRequest {
+    claimSignature: string
+    promise: Promise<void>
 }
 
-export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
+const quotaFreshness = (value: string | undefined): QuotaFreshness => {
+    switch (value) {
+        case 'fresh':
+        case 'stale':
+        case 'partial':
+        case 'outdated':
+            return value
+        default:
+            return 'outdated'
+    }
+}
+
+const quotaMetadataFromEntry = (fileName: string, entry: QuotaEntry): QuotaCacheMetadata => ({
+    fileName,
+    type: entry.type,
+    backendGeneration: entry.generation,
+    backendStateRevision: entry.state_revision,
+    status: entry.status,
+    freshness: quotaFreshness(entry.freshness),
+    source: entry.source?.trim() || undefined,
+    observedAt: entry.observed_at ?? null,
+    fetchedAt: entry.fetched_at ?? null,
+    lastSuccessAt: entry.last_success_at ?? null,
+    lastError: entry.last_error?.trim() || entry.error?.trim() || undefined,
+    lastErrorAt: entry.last_error_at ?? null,
+    retryAt: entry.retry_at ?? null,
+    successfulEmpty: entry.successful_empty === true,
+    lastRefreshAt: entry.last_refresh,
+    nextRefreshAt: entry.next_refresh,
+})
+
+const entryMetaFromMetadata = (metadata: QuotaCacheMetadata, quotaEnabled: boolean): EntryMeta => ({
+    fileName: metadata.fileName,
+    type: metadata.type,
+    lastRefresh: metadata.lastRefreshAt ? new Date(metadata.lastRefreshAt) : null,
+    nextRefresh: quotaEnabled && metadata.nextRefreshAt ? new Date(metadata.nextRefreshAt) : null,
+    status: metadata.status,
+})
+
+const quotaMetaSnapshot = (quotaEnabled: boolean): Record<string, EntryMeta> =>
+    Object.fromEntries(
+        Object.entries(useQuotaStore.getState().quotaMetadata).map(([key, metadata]) => [
+            key,
+            entryMetaFromMetadata(metadata, quotaEnabled),
+        ]),
+    )
+
+export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
+    const cacheGeneration                     = useQuotaStore((state) => state.cacheGeneration)
+    const { i18n: translation }               = useTranslation()
+    const quotaLanguage                       = translation.resolvedLanguage ?? translation.language
     const mounted                             = useRef(true)
-    const timeoutRef                          = useRef<number | null>(null)
-    const pollInFlightRef                     = useRef(false)
-    const pendingRefreshRef                   = useRef<Record<string, RefreshBaseline>>({})
+    const pollPromiseRef                      = useRef<QuotaPollRequest | null>(null)
+    const refreshControllersRef               = useRef(new Set<AbortController>())
     const metaRef                             = useRef<Record<string, EntryMeta>>({})
+    const quotaEnabledRef                     = useRef(false)
     const [meta, setMeta]                     = useState<Record<string, EntryMeta>>({})
     const [quotaEnabled, setQuotaEnabled]     = useState(false)
     const [pollIntervalMs, setPollIntervalMs] = useState(0)
 
-    const setAntigravityQuota = useQuotaStore((s) => s.setAntigravityQuota)
-    const setClaudeQuota      = useQuotaStore((s) => s.setClaudeQuota)
-    const setCodexQuota       = useQuotaStore((s) => s.setCodexQuota)
-    const setGeminiCliQuota   = useQuotaStore((s) => s.setGeminiCliQuota)
-    const setKimiQuota        = useQuotaStore((s) => s.setKimiQuota)
-    const setXaiQuota         = useQuotaStore((s) => s.setXaiQuota)
-
-    const poll = useCallback(async () => {
-        if (pollInFlightRef.current) {
-            return
+    const poll = useCallback((): Promise<void> => {
+        const claim          = captureQuotaRequestClaim(apiClient.getAuthGeneration())
+        const claimSignature = quotaRequestClaimSignature(claim)
+        const inFlight       = pollPromiseRef.current
+        if (inFlight?.claimSignature === claimSignature) {
+            return inFlight.promise
         }
-        pollInFlightRef.current = true
-        try {
-            const status = await quotaApi.getStatus()
-            if (!mounted.current) {
-                return
-            }
 
-            setQuotaEnabled(status.enabled)
-            setPollIntervalMs(status.enabled ? Math.max(status.interval_seconds, 0) * 1000 : 0)
-
-            const newMeta: Record<string, EntryMeta> = {}
-            const setters: Setters                   = {
-                setAntigravityQuota,
-                setClaudeQuota,
-                setCodexQuota,
-                setGeminiCliQuota,
-                setKimiQuota,
-                setXaiQuota,
-            }
-            for (const [credentialKey, entry] of Object.entries(status.credentials)) {
-                const fileName                       = entry.file_name?.trim() || credentialKey
-                const metaKey                        = quotaCredentialKey(entry.type, fileName)
-                let data: unknown                    = null
-                let parseErrorMessage: string | null = null
-                const hasData                        = entry.data !== undefined && entry.data !== null
-                if (hasData) {
-                    try {
-                        data = typeof entry.data === 'string' ? JSON.parse(entry.data as string) : entry.data
-                    } catch (e) {
-                        parseErrorMessage = quotaParseErrorMessage(e)
-                        console.warn('[QuotaScheduler] failed to parse entry data:', metaKey, e)
-                    }
+        let repollCurrent      = false
+        const request          = (async () => {
+            try {
+                const status               = await quotaApi.getStatus()
+                const connectionGeneration = apiClient.getAuthGeneration()
+                if (!mounted.current) {
+                    return
                 }
-                const entryStatus = parseErrorMessage ? 'error' : resolveEntryStatus(entry.type, entry.status, data)
-                newMeta[metaKey]  = {
-                    fileName,
-                    type: entry.type,
-                    lastRefresh: entry.last_refresh ? new Date(entry.last_refresh) : null,
-                    nextRefresh: status.enabled && entry.next_refresh ? new Date(entry.next_refresh) : null,
-                    status: entryStatus,
+                if (!isQuotaRequestCurrent(claim, connectionGeneration)) {
+                    repollCurrent = true
+                    return
                 }
 
-                if (parseErrorMessage) {
-                    mapQuotaError(fileName, entry.type, parseErrorMessage, setters)
-                    continue
-                }
-                if (
-                    entryStatus === 'error' ||
-                    ((entryStatus === 'banned' || entryStatus === 'quota_exceeded') && entry.error?.trim())
-                ) {
-                    mapQuotaError(
-                        fileName,
-                        entry.type,
-                        entry.error || i18n.t('credentials.refresh_status_error', { defaultValue: '刷新失败' }),
-                        setters,
-                    )
-                    continue
-                }
-                if (data === null || data === undefined) {
-                    if (entryStatus === 'success') {
-                        const errorMessage = quotaParseErrorMessage(invalidQuotaPayload(entry.type || 'unknown'))
-                        newMeta[metaKey]   = {
-                            ...newMeta[metaKey],
-                            status: 'error',
+                quotaEnabledRef.current = status.enabled
+                setQuotaEnabled(status.enabled)
+                setPollIntervalMs(status.enabled ? Math.max(status.interval_seconds, 0) * 1000 : 0)
+
+                const seenKeys   = new Set<string>()
+                const rejectedAt = new Date().toISOString()
+                for (const [credentialKey, entry] of Object.entries(status.credentials)) {
+                    const fileName = entry.file_name?.trim() || credentialKey
+                    const metaKey  = quotaCredentialKey(entry.type, fileName)
+                    seenKeys.add(metaKey)
+
+                    let data: unknown
+                    let payload: QuotaCachePayload | undefined
+                    let parseErrorMessage: string | undefined
+                    const hasData         = entry.data !== undefined && entry.data !== null
+                    const successfulEmpty =
+                              entry.status === 'success' && entry.successful_empty === true && !hasData
+                    if (entry.successful_empty === true && !successfulEmpty) {
+                        parseErrorMessage = quotaParseErrorMessage(invalidQuotaPayload(entry.type || 'unknown'))
+                    } else if (hasData) {
+                        try {
+                            data    = typeof entry.data === 'string' ? JSON.parse(entry.data) : entry.data
+                            payload = mapQuotaPayload(entry.type, data)
+                        } catch (e) {
+                            parseErrorMessage = quotaParseErrorMessage(e)
+                            console.warn('[QuotaScheduler] failed to parse entry data:', metaKey, e)
                         }
-                        mapQuotaError(fileName, entry.type, errorMessage, setters)
+                    } else if (entry.status === 'success' && !successfulEmpty) {
+                        parseErrorMessage = quotaParseErrorMessage(invalidQuotaPayload(entry.type || 'unknown'))
                     }
-                    continue
-                }
-                try {
-                    mapToStore(fileName, entry.type, data, setters)
-                } catch (e) {
-                    const errorMessage = quotaParseErrorMessage(e)
-                    console.warn('[QuotaScheduler] failed to map entry data:', metaKey, e)
-                    newMeta[metaKey] = {
-                        ...newMeta[metaKey],
-                        status: 'error',
-                    }
-                    mapQuotaError(fileName, entry.type, errorMessage, setters)
-                }
-            }
 
-            const nextPending: Record<string, RefreshBaseline> = {}
-            const timedOutNames: string[]                      = []
-            const now                                          = Date.now()
-            for (const [fileName, baseline] of Object.entries(pendingRefreshRef.current)) {
-                const currentMeta          = newMeta[fileName]
-                const currentLastRefreshMs = currentMeta?.lastRefresh?.getTime() ?? null
-                const completed            =
-                          currentLastRefreshMs !== null &&
-                          (baseline.lastRefreshMs === null || currentLastRefreshMs > baseline.lastRefreshMs)
-                if (completed) {
-                    continue
-                }
-                if (now - baseline.requestedAtMs >= refreshPollTimeoutMs) {
-                    timedOutNames.push(fileName)
-                    if (currentMeta) {
-                        newMeta[fileName] = {
-                            ...currentMeta,
-                            status: baseline.previousStatus || 'error',
-                        }
+                    const metadata           = quotaMetadataFromEntry(fileName, entry)
+                    metadata.successfulEmpty = successfulEmpty
+                    metadata.status          = parseErrorMessage
+                                               ? 'error'
+                                               : resolveEntryStatus(entry.type, entry.status, data)
+                    const snapshot           = {
+                        key: metaKey,
+                        metadata,
+                        payload,
+                        clearData: successfulEmpty,
+                        failure: parseErrorMessage,
                     }
-                    continue
+                    const result             = commitQuotaSnapshot(claim, connectionGeneration, snapshot)
+                    if (result === 'stale_request' || result === 'stale_subject') {
+                        repollCurrent = true
+                    } else if (result === 'invalid_backend_version' || result === 'older_backend_version') {
+                        markQuotaSnapshotRejected(
+                            claim,
+                            connectionGeneration,
+                            snapshot,
+                            quotaSnapshotRejectionMessage(result),
+                            rejectedAt,
+                        )
+                    }
                 }
-                nextPending[fileName] = baseline
-            }
-            pendingRefreshRef.current = nextPending
-            if (timedOutNames.length > 0) {
-                useNotificationStore
-                    .getState()
-                    .showNotification(`Quota refresh timed out for ${timedOutNames.join(', ')}`, 'error')
-            }
 
-            metaRef.current = newMeta
-            setMeta(newMeta)
-        } catch (e) {
-            console.warn('[QuotaScheduler] poll failed:', e)
-        } finally {
-            pollInFlightRef.current = false
+                reconcileQuotaSubjects(claim, connectionGeneration, seenKeys)
+                if (!isQuotaRequestCurrent(claim, apiClient.getAuthGeneration())) {
+                    repollCurrent = true
+                    return
+                }
+                const newMeta   = quotaMetaSnapshot(status.enabled)
+                metaRef.current = newMeta
+                setMeta(newMeta)
+            } catch (e) {
+                const connectionGeneration = apiClient.getAuthGeneration()
+                if (!mounted.current) {
+                    return
+                }
+                if (!isQuotaRequestCurrent(claim, connectionGeneration)) {
+                    repollCurrent = true
+                    return
+                }
+                const message = e instanceof Error ? e.message : String(e ?? '')
+                console.warn('[QuotaScheduler] poll failed:', e)
+                markQuotaRequestFailed(claim, connectionGeneration, message, new Date().toISOString())
+                const newMeta   = quotaMetaSnapshot(quotaEnabledRef.current)
+                metaRef.current = newMeta
+                setMeta(newMeta)
+            }
+        })()
+        const trackedRequest   = { claimSignature, promise: request }
+        pollPromiseRef.current = trackedRequest
+        const finishRequest    = () => {
+            if (pollPromiseRef.current === trackedRequest) {
+                pollPromiseRef.current = null
+            }
+            if (repollCurrent && mounted.current) {
+                queueMicrotask(() => void poll())
+            }
         }
-    }, [setAntigravityQuota, setClaudeQuota, setCodexQuota, setGeminiCliQuota, setKimiQuota, setXaiQuota])
+        void request.then(finishRequest, finishRequest)
+        return request
+    }, [])
+
+    const pollLatest = useCallback(async () => {
+        const currentSignature = quotaRequestClaimSignature(
+            captureQuotaRequestClaim(apiClient.getAuthGeneration()),
+        )
+        const inFlight         = pollPromiseRef.current
+        if (inFlight?.claimSignature === currentSignature) {
+            await inFlight.promise
+        }
+        await poll()
+    }, [poll])
 
     useEffect(() => {
-        mounted.current = true
-        const initialId = window.setTimeout(() => {
-            void poll()
-        }, 0)
-        const id        = pollIntervalMs > 0 ? window.setInterval(() => void poll(), pollIntervalMs) : null
+        mounted.current   = true
+        const controllers = refreshControllersRef.current
         return () => {
-            mounted.current           = false
-            pendingRefreshRef.current = {}
-            window.clearTimeout(initialId)
-            if (timeoutRef.current !== null) {
-                window.clearTimeout(timeoutRef.current)
-                timeoutRef.current = null
-            }
-            if (id !== null) {
-                window.clearInterval(id)
-            }
+            mounted.current = false
+            controllers.forEach((controller) => controller.abort())
+            controllers.clear()
         }
+    }, [])
+
+    useEffect(() => {
+        void pollLatest()
+    }, [authFiles, cacheGeneration, quotaLanguage, pollLatest])
+
+    useEffect(() => {
+        if (pollIntervalMs <= 0) {
+            return
+        }
+        const id = window.setInterval(() => void poll(), pollIntervalMs)
+        return () => window.clearInterval(id)
     }, [poll, pollIntervalMs])
 
     const statusMap = useMemo(() => {
@@ -214,24 +275,6 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
         return next
     }, [meta])
 
-    const waitForPendingRefreshes = useCallback(async () => {
-        while (mounted.current && Object.keys(pendingRefreshRef.current).length > 0) {
-            await poll()
-            if (!mounted.current || Object.keys(pendingRefreshRef.current).length === 0) {
-                break
-            }
-            await new Promise<void>((resolve) => {
-                if (timeoutRef.current !== null) {
-                    window.clearTimeout(timeoutRef.current)
-                }
-                timeoutRef.current = window.setTimeout(() => {
-                    timeoutRef.current = null
-                    resolve()
-                }, refreshPollIntervalMs)
-            })
-        }
-    }, [poll])
-
     const refreshMany = useCallback(
         async (names: string[]) => {
             const uniqueNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)))
@@ -239,75 +282,120 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
                 return
             }
 
-            const refreshMetaKeys     = refreshMetaKeysForIdentifiers(uniqueNames, metaRef.current)
-            const requestedAtMs       = Date.now()
-            const baselines           = Object.fromEntries(
-                refreshMetaKeys.map((metaKey) => {
-                    const currentMeta = metaRef.current[metaKey]
-                    return [
-                        metaKey,
-                        {
-                            lastRefreshMs: currentMeta?.lastRefresh?.getTime() ?? null,
-                            previousStatus: currentMeta?.status ?? 'idle',
-                            requestedAtMs,
-                        } satisfies RefreshBaseline,
-                    ]
-                }),
+            const claim                                               = captureQuotaRequestClaim(apiClient.getAuthGeneration())
+            const controller                                          = new AbortController()
+            const initialMetaKeys                                     = refreshMetaKeysForIdentifiers(
+                uniqueNames,
+                metaRef.current,
             )
-            pendingRefreshRef.current = {
-                ...pendingRefreshRef.current,
-                ...baselines,
+            const claimedKeys                                         = new Set(initialMetaKeys)
+            const isUIClaimCurrent                                    = () =>
+                mounted.current && areQuotaSubjectsCurrent(
+                                    claim,
+                                    apiClient.getAuthGeneration(),
+                                    claimedKeys,
+                                )
+            const previousMeta: Record<string, EntryMeta | undefined> = {}
+            for (const metaKey of initialMetaKeys) {
+                previousMeta[metaKey] = metaRef.current[metaKey]
             }
+            refreshControllersRef.current.add(controller)
             setMeta((prev) => {
-                const next = { ...prev }
-                for (const metaKey of refreshMetaKeys) {
-                    next[metaKey] = {
-                        fileName: prev[metaKey]?.fileName ?? metaKey,
-                        type: prev[metaKey]?.type ?? '',
-                        lastRefresh: prev[metaKey]?.lastRefresh ?? null,
-                        nextRefresh: quotaEnabled ? (prev[metaKey]?.nextRefresh ?? null) : null,
-                        status: 'loading',
-                    }
-                }
+                const next      = markQuotaMetaLoading(prev, initialMetaKeys, quotaEnabled)
                 metaRef.current = next
                 return next
             })
 
+            let taskCreated = false
             try {
-                await quotaApi.refresh(uniqueNames)
-            } catch (e) {
-                console.warn('[useBackendQuotaRegistration] refresh failed for', uniqueNames, e)
-                for (const metaKey of refreshMetaKeys) {
-                    delete pendingRefreshRef.current[metaKey]
-                }
-                setMeta((prev) => {
-                    const next = { ...prev }
-                    for (const metaKey of refreshMetaKeys) {
-                        const baseline = baselines[metaKey]
-                        next[metaKey]  = {
-                            fileName: prev[metaKey]?.fileName ?? metaKey,
-                            type: prev[metaKey]?.type ?? '',
-                            lastRefresh: prev[metaKey]?.lastRefresh ?? null,
-                            nextRefresh: quotaEnabled ? (prev[metaKey]?.nextRefresh ?? null) : null,
-                            status: baseline?.previousStatus || 'error',
-                        }
+                const initialTask = await quotaApi.refresh(uniqueNames, { signal: controller.signal })
+                taskCreated       = true
+                refreshControllersRef.current.delete(controller)
+
+                const taskMetaKeys = refreshMetaKeysForTask(initialTask, metaRef.current)
+                taskMetaKeys.forEach((metaKey) => claimedKeys.add(metaKey))
+                for (const metaKey of taskMetaKeys) {
+                    if (!(metaKey in previousMeta)) {
+                        previousMeta[metaKey] = metaRef.current[metaKey]
                     }
-                    metaRef.current = next
-                    return next
-                })
-                const message = e instanceof Error ? e.message : ''
-                useNotificationStore
-                    .getState()
-                    .showNotification(
-                        `Failed to refresh quota for ${uniqueNames.join(', ')}${message ? `: ${message}` : ''}`,
+                }
+                if (isUIClaimCurrent()) {
+                    setMeta((prev) => {
+                        const next      = applyQuotaRefreshTaskToMeta(
+                            markQuotaMetaLoading(prev, taskMetaKeys, quotaEnabled),
+                            initialTask,
+                            previousMeta,
+                        )
+                        metaRef.current = next
+                        return next
+                    })
+                }
+
+                const terminalTask = await waitForQuotaRefreshTask(initialTask)
+                if (isUIClaimCurrent()) {
+                    setMeta((prev) => {
+                        const next      = applyQuotaRefreshTaskToMeta(prev, terminalTask, previousMeta)
+                        metaRef.current = next
+                        return next
+                    })
+                }
+                if (mounted.current) {
+                    await pollLatest()
+                }
+                if (isUIClaimCurrent() && terminalTask.status !== 'succeeded') {
+                    const message = terminalTask.error || terminalTask.status
+                    useNotificationStore.getState().showNotification(
+                        i18n.t('auth_files.quota_refresh_failed', {
+                            name: uniqueNames.join(', '),
+                            message,
+                        }),
+                        terminalTask.status === 'cancelled' ? 'warning' : 'error',
+                    )
+                }
+            } catch (e) {
+                const canPublish = isUIClaimCurrent()
+                if (!taskCreated && (controller.signal.aborted || !canPublish)) {
+                    if (mounted.current) {
+                        await pollLatest()
+                    }
+                    return
+                }
+
+                console.warn('[useBackendQuotaRegistration] refresh failed for', uniqueNames, e)
+                if (taskCreated) {
+                    if (mounted.current) {
+                        await pollLatest()
+                    }
+                } else if (canPublish) {
+                    setMeta((prev) => {
+                        const next = { ...prev }
+                        for (const metaKey of initialMetaKeys) {
+                            const previous = previousMeta[metaKey]
+                            if (previous) {
+                                next[metaKey] = previous
+                            } else {
+                                delete next[metaKey]
+                            }
+                        }
+                        metaRef.current = next
+                        return next
+                    })
+                }
+                if (isUIClaimCurrent()) {
+                    const message = e instanceof Error ? e.message : String(e ?? '')
+                    useNotificationStore.getState().showNotification(
+                        i18n.t('auth_files.quota_refresh_failed', {
+                            name: uniqueNames.join(', '),
+                            message,
+                        }),
                         'error',
                     )
-                return
+                }
+            } finally {
+                refreshControllersRef.current.delete(controller)
             }
-
-            await waitForPendingRefreshes()
         },
-        [quotaEnabled, waitForPendingRefreshes],
+        [pollLatest, quotaEnabled],
     )
 
     return {
@@ -326,16 +414,12 @@ export function useBackendQuotaRegistration(_authFiles: AuthFileItem[]) {
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Setter = (updater: any) => void
-
-interface Setters {
-    setAntigravityQuota: Setter
-    setClaudeQuota: Setter
-    setCodexQuota: Setter
-    setGeminiCliQuota: Setter
-    setKimiQuota: Setter
-    setXaiQuota: Setter
+function quotaSnapshotRejectionMessage(
+    result: 'invalid_backend_version' | 'older_backend_version',
+): string {
+    return result === 'invalid_backend_version'
+           ? i18n.t('credentials.quota_invalid_backend_version')
+           : i18n.t('credentials.quota_older_backend_version')
 }
 
 function quotaParseErrorMessage(error: unknown): string {
@@ -385,71 +469,113 @@ function refreshMetaKeysForIdentifiers(identifiers: string[], meta: Record<strin
     return Array.from(keys)
 }
 
-function mapToStore(fileName: string, type: string, data: unknown, s: Setters) {
-    const key = quotaCredentialKey(type, fileName)
-    switch (type) {
-        case 'antigravity':
-            mapAntigravity(key, data, s.setAntigravityQuota)
-            break
-        case 'claude':
-            mapClaude(key, data, s.setClaudeQuota)
-            break
-        case 'codex':
-            mapCodex(key, data, s.setCodexQuota)
-            break
-        case 'gemini-cli':
-            mapGemini(key, data, s.setGeminiCliQuota)
-            break
-        case 'kimi':
-            mapKimi(key, data, s.setKimiQuota)
-            break
-        case 'xai':
-            mapXai(key, data, s.setXaiQuota)
-            break
-        default:
-            throw invalidQuotaPayload(type || 'unknown')
+function refreshMetaKeysForTarget(target: QuotaRefreshTaskTarget, meta: Record<string, EntryMeta>): string[] {
+    const keys     = new Set<string>()
+    const entryKey = target.entry_key?.trim()
+    const fileName = target.file_name?.trim()
+    const provider = target.provider?.trim()
+    if (entryKey) {
+        keys.add(entryKey)
+    }
+    if (fileName && provider) {
+        keys.add(quotaCredentialKey(provider, fileName))
+    }
+    if (fileName) {
+        for (const [metaKey, entry] of Object.entries(meta)) {
+            if (entry.fileName === fileName && (!provider || entry.type === provider)) {
+                keys.add(metaKey)
+            }
+        }
+    }
+    return Array.from(keys)
+}
+
+function refreshMetaKeysForTask(task: QuotaRefreshTask, meta: Record<string, EntryMeta>): string[] {
+    return Array.from(new Set(task.targets.flatMap((target) => refreshMetaKeysForTarget(target, meta))))
+}
+
+function emptyMetaForKey(metaKey: string): EntryMeta {
+    const separatorIndex = metaKey.indexOf('::')
+    return {
+        fileName: separatorIndex >= 0 ? metaKey.slice(separatorIndex + 2) : metaKey,
+        type: separatorIndex >= 0 ? metaKey.slice(0, separatorIndex) : '',
+        lastRefresh: null,
+        nextRefresh: null,
+        status: 'idle',
     }
 }
 
-function mapQuotaError(fileName: string, type: string, error: string, s: Setters) {
-    const key = quotaCredentialKey(type, fileName)
+function markQuotaMetaLoading(
+    meta: Record<string, EntryMeta>,
+    metaKeys: string[],
+    quotaEnabled: boolean,
+): Record<string, EntryMeta> {
+    const next = { ...meta }
+    for (const metaKey of metaKeys) {
+        const current = next[metaKey] ?? emptyMetaForKey(metaKey)
+        next[metaKey] = {
+            ...current,
+            nextRefresh: quotaEnabled ? current.nextRefresh : null,
+            status: 'loading',
+        }
+    }
+    return next
+}
+
+function quotaMetaStatusForTarget(
+    status: QuotaRefreshTaskTarget['status'],
+    previousStatus: string | undefined,
+): string {
+    switch (status) {
+        case 'queued':
+        case 'running':
+            return 'loading'
+        case 'succeeded':
+            return 'success'
+        case 'failed':
+        case 'inconclusive':
+        case 'interrupted':
+            return 'error'
+        case 'skipped':
+        case 'cancelled':
+            return previousStatus || 'idle'
+    }
+}
+
+function applyQuotaRefreshTaskToMeta(
+    meta: Record<string, EntryMeta>,
+    task: QuotaRefreshTask,
+    previousMeta: Record<string, EntryMeta | undefined>,
+): Record<string, EntryMeta> {
+    const next = { ...meta }
+    for (const target of task.targets) {
+        for (const metaKey of refreshMetaKeysForTarget(target, next)) {
+            const current = next[metaKey] ?? previousMeta[metaKey] ?? emptyMetaForKey(metaKey)
+            next[metaKey] = {
+                ...current,
+                status: quotaMetaStatusForTarget(target.status, previousMeta[metaKey]?.status),
+            }
+        }
+    }
+    return next
+}
+
+function mapQuotaPayload(type: string, data: unknown): QuotaCachePayload {
     switch (type) {
         case 'antigravity':
-            s.setAntigravityQuota((prev: Record<string, AntigravityQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', groups: [], error },
-            }))
-            break
+            return { provider: type, value: mapAntigravity(data) }
         case 'claude':
-            s.setClaudeQuota((prev: Record<string, ClaudeQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', windows: [], error },
-            }))
-            break
+            return { provider: type, value: mapClaude(data) }
         case 'codex':
-            s.setCodexQuota((prev: Record<string, CodexQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', windows: [], error },
-            }))
-            break
+            return { provider: type, value: mapCodex(data) }
         case 'gemini-cli':
-            s.setGeminiCliQuota((prev: Record<string, GeminiCliQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', buckets: [], error },
-            }))
-            break
+            return { provider: type, value: mapGemini(data) }
         case 'kimi':
-            s.setKimiQuota((prev: Record<string, KimiQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', rows: [], error },
-            }))
-            break
+            return { provider: type, value: mapKimi(data) }
         case 'xai':
-            s.setXaiQuota((prev: Record<string, XaiQuotaState>) => ({
-                ...prev,
-                [key]: { status: 'error', billing: null, error },
-            }))
-            break
+            return { provider: type, value: mapXai(data) }
+        default:
+            throw invalidQuotaPayload(type || 'unknown')
     }
 }
 
@@ -528,17 +654,19 @@ function extractCloudCodeBuckets(data: unknown): GeminiCliQuotaBucketState[] {
                   : typeof bucketRecord.token_type === 'string'
                     ? bucketRecord.token_type
                     : null
+        const resetTime =
+                  typeof bucketRecord.resetTime === 'string'
+                  ? bucketRecord.resetTime
+                  : typeof bucketRecord.reset_time === 'string'
+                    ? bucketRecord.reset_time
+                    : undefined
         buckets.push({
                          id: `${modelId ?? 'unknown'}-${tokenType ?? 'unknown'}`,
                          label: modelId ?? tokenType ?? 'Quota',
                          remainingFraction,
                          remainingAmount: null,
-                         resetTime:
-                             typeof bucketRecord.resetTime === 'string'
-                             ? bucketRecord.resetTime
-                             : typeof bucketRecord.reset_time === 'string'
-                               ? bucketRecord.reset_time
-                               : undefined,
+                         resetTime,
+                         resetAtMs: resolveResetMs([resetTime]),
                          tokenType,
                          modelIds: modelId ? [modelId] : undefined,
                      })
@@ -597,8 +725,12 @@ function parseAntigravitySubscription(data: unknown) {
     }
 }
 
-function mapAntigravity(fileName: string, data: unknown, setter: Setter) {
-    const groups       = extractCloudCodeBuckets(data)
+function mapAntigravity(data: unknown): AntigravityQuotaState {
+    const dataRecord         = asRecord(data)
+    const serverTimeOffsetMs = numberValue(
+        dataRecord?.server_time_offset_ms ?? dataRecord?.serverTimeOffsetMs,
+    )
+    const groups             = extractCloudCodeBuckets(data)
         .filter((bucket) => bucket.remainingFraction !== null)
         .map((bucket) => ({
             id: bucket.id,
@@ -606,22 +738,22 @@ function mapAntigravity(fileName: string, data: unknown, setter: Setter) {
             models: bucket.modelIds ?? [],
             remainingFraction: bucket.remainingFraction ?? 0,
             resetTime: bucket.resetTime,
+            resetAtMs: bucket.resetAtMs ?? resolveResetMs([bucket.resetTime]),
         }))
-    const subscription = parseAntigravitySubscription(data)
+    const subscription       = parseAntigravitySubscription(data)
     if (groups.length === 0 && !subscription.planType) {
         throw invalidQuotaPayload('Antigravity')
     }
 
-    const state: AntigravityQuotaState = {
+    return {
         status: 'success',
         groups,
+        serverTimeOffsetMs,
         planType: subscription.planType,
         tierName: subscription.tierName,
         tierId: subscription.tierId,
         premium: subscription.premium,
     }
-
-    setter((prev: Record<string, AntigravityQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
 function parseClaudeExtraUsage(value: unknown): ClaudeExtraUsage | null {
@@ -644,7 +776,7 @@ function parseClaudeExtraUsage(value: unknown): ClaudeExtraUsage | null {
     }
 }
 
-function mapClaude(fileName: string, data: unknown, setter: Setter) {
+function mapClaude(data: unknown): ClaudeQuotaState {
     const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     if (!d) {
         throw invalidQuotaPayload('Claude')
@@ -655,35 +787,7 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
         throw invalidQuotaPayload('Claude')
     }
 
-    const windows: ClaudeQuotaWindow[] = []
-    const windowDefs                   = [
-        { key: 'five_hour', id: 'five-hour', label: i18n.t('credentials.quota_window_five_hour') },
-        { key: 'seven_day', id: 'seven-day', label: i18n.t('credentials.quota_window_seven_day') },
-        {
-            key: 'seven_day_oauth_apps',
-            id: 'seven-day-oauth-apps',
-            label: i18n.t('credentials.quota_window_seven_day_oauth_apps'),
-        },
-        { key: 'seven_day_opus', id: 'seven-day-opus', label: i18n.t('credentials.quota_window_seven_day_opus') },
-        { key: 'seven_day_sonnet', id: 'seven-day-sonnet', label: i18n.t('credentials.quota_window_seven_day_sonnet') },
-        { key: 'seven_day_cowork', id: 'seven-day-cowork', label: i18n.t('credentials.quota_window_seven_day_cowork') },
-        { key: 'iguana_necktie', id: 'iguana-necktie', label: 'Iguana Necktie' },
-    ]
-
-    for (const def of windowDefs) {
-        const w       = usage[def.key]
-        const wRecord = w !== null && typeof w === 'object' ? (w as Record<string, unknown>) : null
-        if (wRecord && typeof wRecord.utilization === 'number') {
-            const resetLabel = typeof wRecord.resets_at === 'string' ? formatDateTime(new Date(wRecord.resets_at)) : ''
-            windows.push({
-                             id: def.id,
-                             label: def.label,
-                             labelKey: `claude_quota.${def.key}`,
-                             usedPercent: wRecord.utilization,
-                             resetLabel,
-                         })
-        }
-    }
+    const windows = buildClaudeQuotaWindows(usage, (key) => i18n.t(key))
 
     // Extract plan type from profile
     const profileRaw            = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
@@ -715,133 +819,45 @@ function mapClaude(fileName: string, data: unknown, setter: Setter) {
         throw invalidQuotaPayload('Claude')
     }
 
-    const state: ClaudeQuotaState = {
+    return {
         status: 'success',
         windows,
         extraUsage,
         planType,
     }
-
-    setter((prev: Record<string, ClaudeQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
-interface CodexResetCreditsSummary {
-    availableCount: number | null
-    credits: CodexRateLimitResetCredit[]
-    invalidPayload: boolean
-}
-
-function stringValue(value: unknown): string | null {
-    if (typeof value === 'string') {
-        const trimmed = value.trim()
-        return trimmed ? trimmed : null
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return value.toString()
-    }
-    return null
-}
-
-function normalizeCodexResetCredit(value: unknown): CodexRateLimitResetCredit | null {
-    const record = asRecord(value)
-    if (!record) {
-        return null
-    }
-    if (stringValue(record.reset_type ?? record.resetType) !== 'codex_rate_limits') {
-        return null
-    }
-    if (stringValue(record.status) !== 'available') {
-        return null
-    }
-
-    const expiresAt = stringValue(record.expires_at ?? record.expiresAt)
-    if (!expiresAt) {
-        return null
-    }
-
-    return {
-        id: stringValue(record.id) ?? '',
-        status: stringValue(record.status) ?? '',
-        grantedAt: stringValue(record.granted_at ?? record.grantedAt) ?? '',
-        expiresAt,
-    }
-}
-
-function normalizeCodexResetCreditsPayload(payload: unknown): CodexResetCreditsSummary {
-    let parsedPayload = payload
-    if (typeof payload === 'string') {
-        const trimmed = payload.trim()
-        if (!trimmed) {
-            return { availableCount: null, credits: [], invalidPayload: true }
-        }
-        try {
-            parsedPayload = JSON.parse(trimmed)
-        } catch {
-            return { availableCount: null, credits: [], invalidPayload: true }
-        }
-    }
-
-    const record = asRecord(parsedPayload)
-    if (!record) {
-        return { availableCount: null, credits: [], invalidPayload: true }
-    }
-
-    const hasExpectedShape =
-              'credits' in record ||
-              'available_count' in record ||
-              'availableCount' in record
-    const credits          = Array.isArray(record.credits) ?
-                             record.credits
-                                   .map((item) => normalizeCodexResetCredit(item))
-                                   .filter((item): item is CodexRateLimitResetCredit => Boolean(item)) :
-        []
-
-    return {
-        availableCount: numberValue(record.available_count ?? record.availableCount),
-        credits,
-        invalidPayload: !hasExpectedShape,
-    }
-}
-
-function mapCodex(fileName: string, data: unknown, setter: Setter) {
+function mapCodex(data: unknown): CodexQuotaState {
     const d = asRecord(data)
     if (!d) {
         throw invalidQuotaPayload('Codex')
     }
-    const windows: CodexQuotaWindow[]  = []
-    const planTypeRaw                  = d.plan_type ?? d.planType
-    const planType                     = typeof planTypeRaw === 'string' && planTypeRaw.trim() !== '' ?
-                                         planTypeRaw.trim() :
-                                         null
-    const resetCredits                 = asRecord(d.rate_limit_reset_credits ?? d.rateLimitResetCredits)
-    const usageResetCreditsAvailable   = numberValue(resetCredits?.available_count ?? resetCredits?.availableCount)
-    const resetCreditsDetailsRaw       =
+    const windows: CodexQuotaWindow[] = []
+    const planTypeRaw                 = d.plan_type ?? d.planType
+    const planType                    = typeof planTypeRaw === 'string' && planTypeRaw.trim() !== '' ?
+                                        planTypeRaw.trim() :
+                                        null
+    const resetCreditsRaw             = d.rate_limit_reset_credits ?? d.rateLimitResetCredits
+    const resetCreditsDetailsRaw      =
               d.rate_limit_reset_credits_details ??
               d.rateLimitResetCreditsDetails ??
               d.rate_limit_reset_credit_details ??
               d.rateLimitResetCreditDetails
-    const resetCreditsDetails          =
-              resetCreditsDetailsRaw === undefined || resetCreditsDetailsRaw === null ?
-                  { availableCount: null, credits: [], invalidPayload: false } :
-              normalizeCodexResetCreditsPayload(resetCreditsDetailsRaw)
-    const resetCreditsCountFromDetails = resetCreditsDetails.credits.length > 0 ?
-                                         resetCreditsDetails.credits.length :
-                                         null
-    const resetCreditsAvailable        =
-              resetCreditsDetails.availableCount ??
-              resetCreditsCountFromDetails ??
-              usageResetCreditsAvailable
-    const resetCreditsErrorRaw         = d.rate_limit_reset_credits_error ?? d.rateLimitResetCreditsError
-    const resetCreditsError            =
+    const resetCredits                = resolveCodexResetCredits(resetCreditsRaw, resetCreditsDetailsRaw)
+    const resetCreditsErrorRaw        = d.rate_limit_reset_credits_error ?? d.rateLimitResetCreditsError
+    const resetCreditsRequestError    =
               typeof resetCreditsErrorRaw === 'string' && resetCreditsErrorRaw.trim() !== '' ?
               resetCreditsErrorRaw.trim() :
-              resetCreditsDetails.invalidPayload ?
-              i18n.t(
-                  'codex_quota.reset_credits_invalid_payload',
-                  { defaultValue: 'Invalid manual reset expiry response' },
-              ) :
               ''
-    const subscriptionActiveUntil      =
+    const resetCreditsDetailsState    = resetCreditsRequestError ? 'error' : resetCredits.detailsState
+    const resetCreditsError           = resetCreditsRequestError ||
+                                        (resetCreditsDetailsState === 'invalid' ?
+                                         i18n.t(
+                                             'codex_quota.reset_credits_invalid_payload',
+                                             { defaultValue: 'Invalid manual reset expiry response' },
+                                         ) :
+                                         '')
+    const subscriptionActiveUntil     =
               d.chatgpt_subscription_active_until ??
               d.chatgptSubscriptionActiveUntil ??
               d.subscription_active_until ??
@@ -951,16 +967,13 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
             if (usedPercent === null) {
                 continue
             }
-            let resetLabel = ''
-            const resetAt  = numberValue(wRecord.reset_at ?? wRecord.resetAt)
-            if (resetAt !== null) {
-                resetLabel = formatDateTime(new Date(resetAt * 1000))
+            let resetLabel               = ''
+            let resetAtMs: number | null = resolveResetMs([wRecord.reset_at, wRecord.resetAt])
+            if (resetAtMs !== null) {
+                resetLabel = formatDateTime(new Date(resetAtMs))
             } else {
                 const resetAfterSeconds = numberValue(wRecord.reset_after_seconds ?? wRecord.resetAfterSeconds)
-                if (resetAfterSeconds !== null) {
-                    const hours = Math.round(resetAfterSeconds / 3600)
-                    resetLabel  = `${hours}h`
-                }
+                resetAtMs               = parseOffsetSecondsToMs(resetAfterSeconds, Date.now())
             }
             const span = numberValue(wRecord.limit_window_seconds ?? wRecord.limitWindowSeconds)
             windows.push({
@@ -968,6 +981,8 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
                              label: windowLabel(span, idPrefix, def.idSuffix, namePrefix),
                              usedPercent,
                              resetLabel,
+                             resetAtMs,
+                             periodHours: span !== null && span > 0 ? span / 3600 : null,
                          })
         }
     }
@@ -1006,36 +1021,42 @@ function mapCodex(fileName: string, data: unknown, setter: Setter) {
         if (cu) {
             const used       = numberValue(cu.premium_completions_used ?? cu.completions_used)
             const limit      = numberValue(cu.premium_completions_limit ?? cu.completions_limit)
-            const resetLabel = typeof cu.reset_date === 'string' ? formatDateTime(new Date(cu.reset_date)) : ''
+            const resetAtMs  = resolveResetMs([cu.reset_date])
+            const resetLabel = resetAtMs !== null ? formatDateTime(new Date(resetAtMs)) : ''
             if (used !== null && limit !== null && limit > 0) {
                 windows.push({
                                  id: 'completions',
                                  label: 'Completions',
                                  usedPercent: (used / limit) * 100,
                                  resetLabel,
+                                 resetAtMs,
                              })
             }
         }
     }
 
-    if (windows.length === 0 && !planType && resetCreditsAvailable === null && subscriptionActiveUntil === null) {
+    const hasResetCreditSummary =
+              resetCredits.availableCount.state !== 'missing' ||
+              resetCredits.applicableAvailableCount.state !== 'missing' ||
+              resetCreditsDetailsState !== 'missing'
+    if (windows.length === 0 && !planType && !hasResetCreditSummary && subscriptionActiveUntil === null) {
         throw invalidQuotaPayload('Codex')
     }
 
-    const state: CodexQuotaState = {
+    return {
         status: 'success',
         windows,
         planType,
         subscriptionActiveUntil: subscriptionActiveUntil as string | number | null,
-        rateLimitResetCreditsAvailableCount: resetCreditsAvailable,
-        rateLimitResetCredits: resetCreditsDetails.credits,
+        rateLimitResetCreditsAvailableCount: resetCredits.availableCount,
+        rateLimitResetCreditsApplicableAvailableCount: resetCredits.applicableAvailableCount,
+        rateLimitResetCredits: resetCredits.credits,
+        rateLimitResetCreditDetailsState: resetCreditsDetailsState,
         rateLimitResetCreditsError: resetCreditsError,
     }
-
-    setter((prev: Record<string, CodexQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
-function mapGemini(fileName: string, data: unknown, setter: Setter) {
+function mapGemini(data: unknown): GeminiCliQuotaState {
     const d = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
     if (!d) {
         throw invalidQuotaPayload('Gemini')
@@ -1060,15 +1081,17 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
             if (metricName === '' || remaining === null || total === null || total <= 0) {
                 continue
             }
+            const resetTime =
+                      typeof (c.resetTime ?? c.reset_time) === 'string'
+                      ? ((c.resetTime ?? c.reset_time) as string)
+                      : undefined
             buckets.push({
                              id: metricName,
                              label: metricName,
                              remainingFraction: remaining / total,
                              remainingAmount: remaining,
-                             resetTime:
-                                 typeof (c.resetTime ?? c.reset_time) === 'string'
-                                 ? ((c.resetTime ?? c.reset_time) as string)
-                                 : undefined,
+                             resetTime,
+                             resetAtMs: resolveResetMs([resetTime]),
                              tokenType: null,
                          })
         }
@@ -1091,14 +1114,12 @@ function mapGemini(fileName: string, data: unknown, setter: Setter) {
         throw invalidQuotaPayload('Gemini')
     }
 
-    const state: GeminiCliQuotaState = {
+    return {
         status: 'success',
         buckets,
         tierLabel,
         tierId: tierLabel,
     }
-
-    setter((prev: Record<string, GeminiCliQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1111,21 +1132,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     }
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         return value as Record<string, unknown>
-    }
-    return null
-}
-
-function pickRecord(sources: Array<Record<string, unknown> | null>, keys: string[]): Record<string, unknown> | null {
-    for (const source of sources) {
-        if (!source) {
-            continue
-        }
-        for (const key of keys) {
-            const record = asRecord(source[key])
-            if (record) {
-                return record
-            }
-        }
     }
     return null
 }
@@ -1149,247 +1155,30 @@ function numberValue(value: unknown): number | null {
     return null
 }
 
-function pickNumber(sources: Array<Record<string, unknown> | null>, keys: string[]): number | null {
-    for (const source of sources) {
-        if (!source) {
-            continue
-        }
-        for (const key of keys) {
-            const parsed = numberValue(source[key])
-            if (parsed !== null) {
-                return parsed
-            }
-        }
-    }
-    return null
-}
-
-function pickString(sources: Array<Record<string, unknown> | null>, keys: string[]): string | null {
-    for (const source of sources) {
-        if (!source) {
-            continue
-        }
-        for (const key of keys) {
-            const value = source[key]
-            if (typeof value === 'string' && value.trim() !== '') {
-                return value
-            }
-        }
-    }
-    return null
-}
-
-function resolveXaiPeriodType(period: Record<string, unknown> | null): 'weekly' | 'monthly' | 'unknown' {
-    const rawType = stringValue(period?.type)?.toLowerCase() ?? ''
-    if (rawType.includes('weekly')) {
-        return 'weekly'
-    }
-    if (rawType.includes('monthly')) {
-        return 'monthly'
-    }
-    return 'unknown'
-}
-
-function normalizeXaiProductUsage(value: unknown): Array<{ product: string; usagePercent: number | null }> {
-    if (!Array.isArray(value)) {
-        return []
-    }
-    return value.flatMap((item, index) => {
-        const record = asRecord(item)
-        if (!record) {
-            return []
-        }
-        const product      = stringValue(record.product) ?? `Product ${index + 1}`
-        const usagePercent = normalizePercent(numberValue(record.usagePercent ?? record.usage_percent))
-        return [{ product, usagePercent }]
-    })
-}
-
-function normalizePercent(value: number | null): number | null {
-    if (value === null) {
-        return null
-    }
-    return value >= 0 && value <= 1 ? value * 100 : value
-}
-
-function mapXai(fileName: string, data: unknown, setter: Setter) {
-    const root = asRecord(data)
-    if (!root) {
+function mapXai(data: unknown): XaiQuotaState {
+    const parsed = parseXaiQuotaPayload(data)
+    if (!parsed) {
         throw invalidQuotaPayload('xAI')
     }
 
-    const usageRecord         = pickRecord([root], ['usage', 'current_usage', 'billing', 'billing_summary']) ?? root
-    const configRecord        = pickRecord([root], ['config', 'billing_config', 'limits', 'subscription']) ?? root
-    const currentPeriod       = pickRecord([configRecord, usageRecord, root], ['currentPeriod', 'current_period'])
-    const periodType          = resolveXaiPeriodType(currentPeriod)
-    const productUsage        = normalizeXaiProductUsage(configRecord.productUsage ?? configRecord.product_usage)
-    const weeklyUsagePercent  = normalizePercent(pickNumber([configRecord, usageRecord, root], [
-        'creditUsagePercent',
-        'credit_usage_percent',
-    ]))
-    const weeklyPeriodStart   = stringValue(currentPeriod?.start) ?? pickString([configRecord, usageRecord, root], [
-        'period_start',
-        'periodStart',
-    ])
-    const weeklyPeriodEnd     = stringValue(currentPeriod?.end) ?? pickString([configRecord, usageRecord, root], [
-        'period_end',
-        'periodEnd',
-    ])
-    const hasWeeklyData       = weeklyUsagePercent !== null || periodType === 'weekly' || productUsage.length > 0
-    const billingSources      = [usageRecord, configRecord, root]
-    const usedCents           = pickNumber(billingSources, [
-        'used_cents',
-        'usedCents',
-        'usage_cents',
-        'usageCents',
-        'current_usage_cents',
-        'currentUsageCents',
-        'total_usage_cents',
-        'totalUsageCents',
-        'spent_cents',
-        'spentCents',
-        'used',
-        'currentUsage',
-        'totalUsage',
-    ])
-    const monthlyLimitCents   = pickNumber([configRecord, root], [
-        'monthly_limit_cents',
-        'monthlyLimitCents',
-        'monthly_limit',
-        'monthlyLimit',
-        'spending_limit_cents',
-        'spendingLimitCents',
-        'hard_limit_cents',
-        'hardLimitCents',
-        'credit_limit_cents',
-        'creditLimitCents',
-        'limit_cents',
-        'limitCents',
-        'limit',
-    ])
-    const onDemandCapCents    = pickNumber([configRecord, root], [
-        'on_demand_cap_cents',
-        'onDemandCapCents',
-        'on_demand_cap',
-        'onDemandCap',
-        'on_demand_spend_limit_cents',
-        'onDemandSpendLimitCents',
-        'on_demand_limit_cents',
-        'onDemandLimitCents',
-    ])
-    const usedPercentRaw      = pickNumber(billingSources, [
-        'used_percent',
-        'usedPercent',
-        'usage_percent',
-        'usagePercent',
-        'utilization',
-    ])
-    const remainingPercentRaw = pickNumber(billingSources, ['remaining_percent', 'remainingPercent'])
-    const denominator         = monthlyLimitCents !== null && monthlyLimitCents > 0 ? monthlyLimitCents : null
-    const includedUsedCents   = usedCents === null ?
-                                null :
-                                denominator !== null ? Math.min(usedCents, denominator) : usedCents
-    const onDemandUsedCents   = usedCents !== null && denominator !== null ? Math.max(0, usedCents - denominator) : null
-    const onDemandUsedPercent =
-              onDemandCapCents !== null && onDemandCapCents > 0 && onDemandUsedCents !== null ?
-              (onDemandUsedCents / onDemandCapCents) * 100 :
-              null
-    const usedPercent         =
-              usedPercentRaw !== null
-              ? normalizePercent(usedPercentRaw)
-              : remainingPercentRaw !== null
-                ? 100 - (normalizePercent(remainingPercentRaw) ?? 0)
-                : denominator !== null && includedUsedCents !== null
-                  ? (includedUsedCents / denominator) * 100
-                  : null
-    const billingPeriodStart  = pickString([configRecord, usageRecord, root], [
-        'billing_period_start',
-        'billingPeriodStart',
-        'period_start',
-        'periodStart',
-        'start_time',
-        'startTime',
-    ])
-    const billingPeriodEnd    = pickString([configRecord, usageRecord, root], [
-        'billing_period_end',
-        'billingPeriodEnd',
-        'period_end',
-        'periodEnd',
-        'end_time',
-        'endTime',
-        'next_reset',
-        'nextReset',
-        'reset_at',
-        'resetAt',
-    ])
-
-    const hasMonthlyData = usedPercent !== null || monthlyLimitCents !== null || usedCents !== null ||
-                           onDemandCapCents !== null || Boolean(billingPeriodEnd)
-    if (!hasWeeklyData && !hasMonthlyData) {
-        throw invalidQuotaPayload('xAI')
-    }
-
-    const planType =
-              monthlyLimitCents === 150_000
-              ? 'supergrok_heavy'
-              : monthlyLimitCents === 15_000
-                ? 'supergrok'
-                : null
-
-    const state: XaiQuotaState = {
+    return {
         status: 'success',
-        billing: {
-            periodType: hasWeeklyData ? (periodType === 'unknown' ? 'weekly' : periodType) : 'monthly',
-            usagePercent: hasWeeklyData ? weeklyUsagePercent : usedPercent,
-            periodStart: hasWeeklyData ? weeklyPeriodStart : billingPeriodStart,
-            periodEnd: hasWeeklyData ? weeklyPeriodEnd : billingPeriodEnd,
-            productUsage,
-            usedCents,
-            includedUsedCents,
-            monthlyLimitCents,
-            onDemandCapCents,
-            onDemandUsedCents,
-            onDemandUsedPercent,
-            usedPercent,
-            billingPeriodStart: hasMonthlyData ? billingPeriodStart : undefined,
-            billingPeriodEnd: hasMonthlyData ? billingPeriodEnd : undefined,
-        },
-        planType,
+        billing: parsed.billing,
+        planType: parsed.planType,
+        planCode: parsed.planCode,
+        planName: parsed.planName,
+        planTier: parsed.planTier,
     }
-
-    setter((prev: Record<string, XaiQuotaState>) => ({ ...prev, [fileName]: state }))
 }
 
-function mapKimi(fileName: string, data: unknown, setter: Setter) {
-    const d       = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : null
-    const rowsRaw = Array.isArray(data) ? data : (d?.usages ?? null)
-    if (!Array.isArray(rowsRaw)) {
-        throw invalidQuotaPayload('Kimi')
-    }
-    const mapped = rowsRaw.flatMap((row) => {
-        const r = asRecord(row)
-        if (!r) {
-            return []
-        }
-        const id        = pickString([r], ['id', 'name', 'label'])
-        const label     = pickString([r], ['label', 'name', 'id'])
-        const used      = numberValue(r.used)
-        const limit     = numberValue(r.limit)
-        const resetHint = typeof r.reset_hint === 'string' ? r.reset_hint : undefined
-        if (!id || !label || used === null || limit === null || limit <= 0) {
-            return []
-        }
-        return [{ id, label, used, limit, resetHint }]
-    })
-
-    if (mapped.length === 0) {
+function mapKimi(data: unknown): KimiQuotaState {
+    const rows = buildKimiQuotaRows(data)
+    if (rows.length === 0) {
         throw invalidQuotaPayload('Kimi')
     }
 
-    const state: KimiQuotaState = {
+    return {
         status: 'success',
-        rows: mapped,
+        rows,
     }
-
-    setter((prev: Record<string, KimiQuotaState>) => ({ ...prev, [fileName]: state }))
 }

@@ -1,8 +1,13 @@
 import type {AuthFileItem} from '@/types'
+import {normalizeBooleanValue} from '@/utils/boolean'
 import {formatDateTime} from '@/utils/format'
 
-const AUTH_FILE_PREFIX_REGEX =
-          /^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow)-(?<rest>.+)$/i
+const AUTH_FILE_PREFIX_REGEX = new RegExp(
+    '^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|' +
+    'gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow)' +
+    '-(?<rest>.+)$',
+    'i',
+)
 const AUTH_FILE_SUFFIX_HINTS = new Set(['plus', 'pro', 'free', 'team', 'max', 'ultra', 'sonnet', 'opus', 'haiku'])
 const INTEGER_STRING_PATTERN = /^[+-]?\d+$/
 
@@ -74,6 +79,25 @@ const appendRemainderCandidates = (items: string[], value: string) => {
         appendUnique(items, current)
     }
 }
+
+export const normalizeAuthFileProvider = (provider: unknown): string => {
+    const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
+    return normalized === 'x-ai' || normalized === 'grok' ? 'xai' : normalized
+}
+
+export const supportsAuthFileUsingApi = (provider: unknown): boolean =>
+    normalizeAuthFileProvider(provider) === 'xai'
+
+export const readAuthFileUsingApi = (file: Record<string, unknown>): boolean =>
+    normalizeBooleanValue(file.usingApi ?? file.using_api) ?? false
+
+export const applyAuthFileUsingApi = (
+    file: Record<string, unknown>,
+    usingApi: boolean,
+): Record<string, unknown> => ({ ...file, using_api: usingApi })
+
+export const readAuthFileDisableCooling = (file: AuthFileItem): boolean =>
+    normalizeBooleanValue(file.disableCooling ?? file.disable_cooling ?? file['disable-cooling']) ?? false
 
 export const parsePriorityValue = (value: unknown): number | undefined => {
     if (typeof value === 'number') {

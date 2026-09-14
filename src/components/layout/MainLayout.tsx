@@ -17,8 +17,10 @@ import {
     IconSlidersHorizontal,
 } from '@/components/ui/icons'
 import {triggerHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {resolveProviderEditModalState} from '@/hooks/useProviderEditPresentation'
 import {MainRoutes} from '@/router/MainRoutes'
 import {useAuthStore, useConfigStore, useLanguageStore, useNotificationStore, useThemeStore} from '@/stores'
+import {useAuthFilesSummaryStore} from '@/stores/useAuthFilesSummaryStore'
 import type {Theme} from '@/types'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
 import {isSupportedLanguage} from '@/utils/language'
@@ -198,11 +200,16 @@ export function MainLayout() {
     const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
     const location             = useLocation()
+    const providerModal        = resolveProviderEditModalState(location.state, location.pathname)
+    const pageLocation         = providerModal?.backgroundLocation ?? location
 
     const apiBase               = useAuthStore((state) => state.apiBase)
     const connectionStatus      = useAuthStore((state) => state.connectionStatus)
     const pluginsFeatureEnabled = useAuthStore((state) => state.serverFeatures.plugins === true)
     const logout                = useAuthStore((state) => state.logout)
+    const authFilesCount        = useAuthFilesSummaryStore((state) => state.count)
+    const refreshAuthFilesCount = useAuthFilesSummaryStore((state) => state.refresh)
+    const clearAuthFilesCount   = useAuthFilesSummaryStore((state) => state.clear)
 
     const config      = useConfigStore((state) => state.config)
     const fetchConfig = useConfigStore((state) => state.fetchConfig)
@@ -226,7 +233,7 @@ export function MainLayout() {
 
     const fullBrandName            = 'CLI Proxy API Management Center'
     const abbrBrandName            = t('title.abbr')
-    const isLogsPage               = location.pathname.startsWith('/logs')
+    const isLogsPage               = pageLocation.pathname.startsWith('/logs')
     const mobileSidebarToggleLabel = sidebarOpen
                                      ? t('sidebar.toggle_collapse', { defaultValue: 'Close navigation' })
                                      : t('sidebar.toggle_expand', { defaultValue: 'Open navigation' })
@@ -407,6 +414,14 @@ export function MainLayout() {
         })
     }, [fetchConfig])
 
+    useEffect(() => {
+        if (connectionStatus !== 'connected') {
+            clearAuthFilesCount()
+            return
+        }
+        void refreshAuthFilesCount()
+    }, [apiBase, connectionStatus, clearAuthFilesCount, refreshAuthFilesCount])
+
     // 连接状态变化时推送持久通知
     const addPersistentNotification = useNotificationStore((s) => s.addPersistentNotification)
     const prevConnectionRef         = useRef(connectionStatus)
@@ -472,22 +487,50 @@ export function MainLayout() {
                   ? 'error'
                   : 'muted'
 
-    const navItems      = useMemo(
+    const navSections   = useMemo(
         () => [
-            { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
-            { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
-            { path: '/credentials', label: t('nav.credentials'), icon: sidebarIcons.aiProviders },
-            { path: '/models', label: t('nav.model_management'), icon: sidebarIcons.models },
-            ...(pluginsFeatureEnabled ? [
-                { path: '/plugin-store', label: t('nav.plugin_store'), icon: sidebarIcons.plugins },
-                { path: '/plugins', label: t('nav.plugin_management'), icon: sidebarIcons.plugins },
-            ] : []),
-            { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
-            ...(config?.loggingToFile ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }] : []),
-            { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
-        ],
-        [t, config?.loggingToFile, pluginsFeatureEnabled],
+            {
+                key: 'overview',
+                label: t('nav.section_overview'),
+                items: [{ path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard }],
+            },
+            {
+                key: 'configuration',
+                label: t('nav.section_configuration'),
+                items: [
+                    { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
+                    {
+                        path: '/credentials',
+                        label: t('nav.credentials'),
+                        icon: sidebarIcons.aiProviders,
+                        badge: authFilesCount,
+                    },
+                    { path: '/models', label: t('nav.model_management'), icon: sidebarIcons.models },
+                ],
+            },
+            {
+                key: 'extensions',
+                label: t('nav.section_extensions'),
+                items: pluginsFeatureEnabled ? [
+                    { path: '/plugin-store', label: t('nav.plugin_store'), icon: sidebarIcons.plugins },
+                    { path: '/plugins', label: t('nav.plugin_management'), icon: sidebarIcons.plugins },
+                ] : [],
+            },
+            {
+                key: 'observability',
+                label: t('nav.section_system'),
+                items: [
+                    { path: '/usage', label: t('nav.usage_stats'), icon: sidebarIcons.usage },
+                    ...(config?.loggingToFile ? [
+                        { path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs },
+                    ] : []),
+                    { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
+                ],
+            },
+        ].filter((section) => section.items.length > 0),
+        [t, config?.loggingToFile, pluginsFeatureEnabled, authFilesCount],
     )
+    const navItems      = useMemo(() => navSections.flatMap((section) => section.items), [navSections])
     const getRouteOrder = useCallback((pathname: string) => {
         const navOrder       = navItems.map((item) => item.path)
         const trimmedPath    = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
@@ -504,6 +547,9 @@ export function MainLayout() {
                 }
                 if (normalizedPath.startsWith('/credentials/codex')) {
                     return credentialsIndex + 0.2
+                }
+                if (normalizedPath.startsWith('/credentials/xai')) {
+                    return credentialsIndex + 0.25
                 }
                 if (normalizedPath.startsWith('/credentials/claude')) {
                     return credentialsIndex + 0.3
@@ -741,31 +787,47 @@ export function MainLayout() {
                 />
 
                 <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>
-                    <div className='nav-section'>
-                        {navItems.map((item) => (
-                            <NavLink
-                                key={item.path}
-                                to={item.path}
-                                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                                onClick={() => setSidebarOpen(false)}
-                                title={sidebarCollapsed ? item.label : undefined}
-                            >
-                                <span className='nav-icon'>{item.icon}</span>
-                                {!sidebarCollapsed && <span className='nav-label'>{item.label}</span>}
-                            </NavLink>
+                    <nav className='nav-sections' aria-label={t('nav.primary_navigation')}>
+                        {navSections.map((section) => (
+                            <div className='nav-section' key={section.key}>
+                                {!sidebarCollapsed && <div className='nav-section-title'>{section.label}</div>}
+                                <div className='nav-section-items'>
+                                    {section.items.map((item) => (
+                                        <NavLink
+                                            key={item.path}
+                                            to={item.path}
+                                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                                            onClick={() => setSidebarOpen(false)}
+                                            title={item.label}
+                                        >
+                                            <span className='nav-icon'>{item.icon}</span>
+                                            {!sidebarCollapsed && <span className='nav-label'>{item.label}</span>}
+                                            {typeof item.badge === 'number' && (
+                                                <span className='nav-badge' aria-label={`${item.label}: ${item.badge}`}>
+                                                    {item.badge}
+                                                </span>
+                                            )}
+                                        </NavLink>
+                                    ))}
+                                </div>
+                            </div>
                         ))}
-                    </div>
+                    </nav>
                 </aside>
 
                 <div className={`content${isLogsPage ? ' content-logs' : ''}`} ref={contentRef}>
                     <main className={`main-content${isLogsPage ? ' main-content-logs' : ''}`}>
                         <PageTransition
+                            location={pageLocation}
                             render={(location) => <MainRoutes location={location}
                                                               pluginsFeatureEnabled={pluginsFeatureEnabled} />}
                             getRouteOrder={getRouteOrder}
                             getTransitionVariant={getTransitionVariant}
                             scrollContainerRef={contentRef}
                         />
+                        {providerModal && (
+                            <MainRoutes location={location} pluginsFeatureEnabled={pluginsFeatureEnabled} />
+                        )}
                     </main>
                 </div>
             </div>

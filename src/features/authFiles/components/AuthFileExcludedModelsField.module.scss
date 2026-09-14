@@ -1,0 +1,47 @@
+@use '../../../styles/variables' as *;
+
+.root {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+}
+
+.status {
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-normal;
+}
+
+.catalog {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $spacing-xs $spacing-sm;
+    max-height: 200px;
+    overflow: auto;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+
+    @media (max-width: 720px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+.rules {
+    min-height: 84px;
+    resize: vertical;
+    font-family: $font-mono;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}

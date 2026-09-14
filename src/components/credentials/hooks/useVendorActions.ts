@@ -1,31 +1,52 @@
+import type {AuthFileMutation} from '@/components/credentials/credentialsDataLifecycle'
+import {downloadAuthFilesBatch} from '@/features/authFiles/batchDownload'
+import {
+    isAuthFileUploadInFlight,
+    subscribeAuthFileUploadLock,
+    withAuthFileUploadLock,
+} from '@/features/authFiles/uploadLock'
 import {authFilesApi} from '@/services/api/authFiles'
 import {providersApi} from '@/services/api/providers'
 import {useNotificationStore} from '@/stores'
-import {useCallback} from 'react'
+import {useCallback, useSyncExternalStore} from 'react'
 import {useTranslation} from 'react-i18next'
 
 type ApiKeyDeleter = (identifier: string, baseUrl?: string) => Promise<unknown>
+type MutationCompleter = (mutation: AuthFileMutation) => Promise<void>
 
 const API_KEY_DELETERS: Record<string, ApiKeyDeleter> = {
     gemini: (key, baseUrl) => providersApi.deleteGeminiKey(key, baseUrl),
+    interactions: (key, baseUrl) => providersApi.deleteInteractionsKey(key, baseUrl),
     claude: (key, baseUrl) => providersApi.deleteClaudeConfig(key, baseUrl),
     codex: (key, baseUrl) => providersApi.deleteCodexConfig(key, baseUrl),
+    xai: (key, baseUrl) => providersApi.deleteXAIConfig(key, baseUrl),
     vertex: (key, baseUrl) => providersApi.deleteVertexConfig(key, baseUrl),
     openai: (name) => providersApi.deleteOpenAIProvider(name),
 }
 
 const DELETE_CONFIRM_KEYS: Record<string, string> = {
     gemini: 'ai_providers.gemini_delete_confirm',
+    interactions: 'ai_providers.interactions_delete_confirm',
     claude: 'ai_providers.claude_delete_confirm',
     codex: 'ai_providers.codex_delete_confirm',
+    xai: 'ai_providers.xai_delete_confirm',
     vertex: 'ai_providers.vertex_delete_confirm',
     openai: 'ai_providers.openai_delete_confirm',
 }
 
-export function useVendorActions(vendorId: string, onRefresh: () => Promise<void>) {
+export function useVendorActions(
+    vendorId: string,
+    onRefresh: () => Promise<void>,
+    completeMutation: MutationCompleter,
+) {
     const { t }            = useTranslation()
-    const showNotification = useNotificationStore((s) => s.showNotification)
-    const showConfirmation = useNotificationStore((s) => s.showConfirmation)
+    const showNotification = useNotificationStore((state) => state.showNotification)
+    const showConfirmation = useNotificationStore((state) => state.showConfirmation)
+    const uploadInFlight   = useSyncExternalStore(
+        subscribeAuthFileUploadLock,
+        isAuthFileUploadInFlight,
+        isAuthFileUploadInFlight,
+    )
 
     const deleteApiKey = useCallback(
         (identifier: string, baseUrl?: string) => {
@@ -53,13 +74,13 @@ export function useVendorActions(vendorId: string, onRefresh: () => Promise<void
     const toggleAuthFile = useCallback(
         async (name: string, disabled: boolean) => {
             try {
-                await authFilesApi.setStatus(name, disabled)
-                await onRefresh()
+                const result = await authFilesApi.setStatus(name, disabled)
+                await completeMutation({ kind: 'status', names: [name], disabled: result.disabled })
             } catch {
                 showNotification(t('common.error'), 'error')
             }
         },
-        [onRefresh, showNotification, t],
+        [completeMutation, showNotification, t],
     )
 
     const deleteAuthFile = useCallback(
@@ -75,26 +96,19 @@ export function useVendorActions(vendorId: string, onRefresh: () => Promise<void
                                      if (result.failed.length > 0) {
                                          throw new Error(result.failed[0]?.error || t('common.error'))
                                      }
+                                     const deletedNames = result.files.length > 0 ? result.files : [name]
+                                     await completeMutation({ kind: 'delete', names: deletedNames })
                                      showNotification(t('common.success'), 'success')
-                                     await onRefresh()
                                  },
                              })
         },
-        [onRefresh, showNotification, showConfirmation, t],
+        [completeMutation, showNotification, showConfirmation, t],
     )
 
     const downloadAuthFile = useCallback(
         async (name: string) => {
-            try {
-                const content = await authFilesApi.downloadText(name)
-                const blob    = new Blob([content], { type: 'text/plain' })
-                const url     = URL.createObjectURL(blob)
-                const a       = document.createElement('a')
-                a.href        = url
-                a.download    = name
-                a.click()
-                URL.revokeObjectURL(url)
-            } catch {
+            const result = await downloadAuthFilesBatch([name], authFilesApi.download)
+            if (result.failed.length > 0) {
                 showNotification(t('common.error'), 'error')
             }
         },
@@ -104,19 +118,38 @@ export function useVendorActions(vendorId: string, onRefresh: () => Promise<void
     const uploadAuthFile = useCallback(
         async (file: File) => {
             try {
-                const result = await authFilesApi.upload(file)
+                const lockResult = await withAuthFileUploadLock(() => authFilesApi.upload(file))
+                if (!lockResult.started) {
+                    showNotification(
+                        t('auth_files.upload_in_progress', {
+                            defaultValue: 'A credential upload is already in progress',
+                        }),
+                        'warning',
+                    )
+                    return
+                }
+                const result = lockResult.value
                 if (result.failed.length > 0) {
                     showNotification(t('common.error'), 'error')
                     return
                 }
+                const uploadedNames = result.files.length > 0 ? result.files : [file.name]
+                await completeMutation({ kind: 'upload', names: uploadedNames })
                 showNotification(t('common.success'), 'success')
-                await onRefresh()
-            } catch {
-                showNotification(t('common.error'), 'error')
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : t('common.error')
+                showNotification(message, 'error')
             }
         },
-        [onRefresh, showNotification, t],
+        [completeMutation, showNotification, t],
     )
 
-    return { deleteApiKey, toggleAuthFile, deleteAuthFile, downloadAuthFile, uploadAuthFile }
+    return {
+        deleteApiKey,
+        toggleAuthFile,
+        deleteAuthFile,
+        downloadAuthFile,
+        uploadAuthFile,
+        uploadInFlight,
+    }
 }

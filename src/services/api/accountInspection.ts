@@ -1,7 +1,9 @@
 import {apiClient} from './client'
+import type {QuotaRefreshTask} from './quota'
 
 export type AccountInspectionStatus = 'idle' | 'running' | 'completed' | 'stopped' | 'error'
 export type AccountHealthStatus = 'normal' | 'unavailable' | 'unknown' | 'disabled'
+export type AccountProbeStatus = 'passed' | 'failed' | 'inconclusive' | 'outdated'
 
 export interface AccountInspectionSchedule {
     enabled: boolean
@@ -50,6 +52,7 @@ export interface AccountInspectionRefreshQueue {
     skipped: number
     failed: number
     next_refresh?: string
+    latest_task?: QuotaRefreshTask
 }
 
 export interface AccountInspectionStatusResponse {
@@ -73,6 +76,11 @@ export interface AccountInspectionResult {
     reason: string
     advice: string
     auto_handling: string
+    probe_status: AccountProbeStatus
+    probe_error?: string
+    auth_generation: number
+    credential_digest?: string
+    probe_revision: string
     checked_at: string
 }
 
@@ -94,25 +102,44 @@ export interface AccountInspectionLogsResponse {
     logs: AccountInspectionLogEntry[]
 }
 
+type AccountInspectionResultsParams = {
+    status?: string
+    issuesOnly?: boolean
+    includeDisabled?: boolean
+    page?: number
+    pageSize?: number
+}
+
+const getAccountInspectionResults = (params?: AccountInspectionResultsParams) =>
+    apiClient.get<AccountInspectionResultsResponse>('/account-inspection/results', {
+        params: {
+            status: params?.status || undefined,
+            issues_only: params?.issuesOnly ? 'true' : undefined,
+            include_disabled: params?.includeDisabled ? 'true' : undefined,
+            page: params?.page,
+            page_size: params?.pageSize,
+        },
+    })
+
+async function getAllAccountInspectionResults(
+    params?: Omit<AccountInspectionResultsParams, 'page' | 'pageSize'>,
+): Promise<AccountInspectionResult[]> {
+    const pageSize = 500
+    const first    = await getAccountInspectionResults({ ...params, page: 1, pageSize })
+    const results  = [...(first.results ?? [])]
+    for (let page = 2; page <= first.total_pages; ++page) {
+        const next = await getAccountInspectionResults({ ...params, page, pageSize })
+        results.push(...(next.results ?? []))
+    }
+    return results
+}
+
 export const accountInspectionApi = {
     getStatus: () => apiClient.get<AccountInspectionStatusResponse>('/account-inspection/status'),
 
-    getResults: (params?: {
-        status?: string
-        issuesOnly?: boolean
-        includeDisabled?: boolean
-        page?: number
-        pageSize?: number
-    }) =>
-        apiClient.get<AccountInspectionResultsResponse>('/account-inspection/results', {
-            params: {
-                status: params?.status || undefined,
-                issues_only: params?.issuesOnly ? 'true' : undefined,
-                include_disabled: params?.includeDisabled ? 'true' : undefined,
-                page: params?.page,
-                page_size: params?.pageSize,
-            },
-        }),
+    getResults: getAccountInspectionResults,
+
+    getAllResults: getAllAccountInspectionResults,
 
     getLogs: () => apiClient.get<AccountInspectionLogsResponse>('/account-inspection/logs'),
 

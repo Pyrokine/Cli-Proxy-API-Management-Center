@@ -20,6 +20,15 @@
     text-align: center;
 }
 
+.readOnlyNotice {
+    padding: $spacing-sm $spacing-md;
+    border-left: 3px solid var(--primary-color);
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--primary-color) 7%, transparent);
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}
+
 .fieldGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -52,6 +61,16 @@
     font-family: $font-mono;
     font-size: $font-size-sm;
     line-height: 1.5;
+}
+
+.switches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-sm $spacing-lg;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
 }
 
 .headersTextarea {

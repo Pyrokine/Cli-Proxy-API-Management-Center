@@ -3,9 +3,9 @@ import type {QuotaStatusResponse} from '@/services/api/quota'
 import type {UsageSummary} from '@/services/api/usage'
 import type {AuthFileItem} from '@/types/authFile'
 
-export type ProviderHealthStatus = 'healthy' | 'warning' | 'error' | 'unknown'
+type ProviderHealthStatus = 'healthy' | 'warning' | 'error' | 'unknown'
 
-export interface ProviderHealthRow {
+interface ProviderHealthRow {
     provider: string
     accountTotal: number
     normal: number
@@ -31,7 +31,7 @@ export interface ProviderHealthRow {
     status: ProviderHealthStatus
 }
 
-export interface ProviderHealthInput {
+interface ProviderHealthInput {
     inspectionStatus?: AccountInspectionStatusResponse | null
     quotaStatus?: QuotaStatusResponse | null
     usageSummary?: UsageSummary | null

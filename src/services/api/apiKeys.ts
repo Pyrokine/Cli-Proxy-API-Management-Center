@@ -2,19 +2,12 @@
  * API 密钥管理
  */
 
-import type {RecentRequestBucket} from '@/types/authFile'
 import type {AxiosRequestConfig} from 'axios'
 import {apiClient} from './client'
 
-export interface ApiKeyUsageEntry {
-    success: number
-    failed: number
-    recentRequests: RecentRequestBucket[]
-}
-
 export const apiKeysApi = {
     async list(config?: AxiosRequestConfig): Promise<string[]> {
-        const data = await apiClient.get<string[] | {'api-keys'?: unknown}>('/api-keys', config)
+        const data = await apiClient.get<string[] | { 'api-keys'?: unknown }>('/api-keys', config)
         const keys = Array.isArray(data) ? data : data['api-keys']
         return Array.isArray(keys) ? keys.map((key) => String(key)) : []
     },

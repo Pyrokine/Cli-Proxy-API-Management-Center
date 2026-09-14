@@ -1,7 +1,22 @@
-import {parsePriorityValue} from '@/features/authFiles/constants'
+import {
+    inferProviderFromAuthFileName,
+    normalizeAuthFileProvider,
+    parsePriorityValue,
+    readAuthFileDisableCooling,
+    readAuthFileUsingApi,
+    supportsAuthFileUsingApi,
+} from '@/features/authFiles/constants'
+import {buildSafeAuthFileDisplayInfo} from '@/features/authFiles/identity'
 import {type AuthFileFieldsPatch, authFilesApi} from '@/services/api/authFiles'
 import {useNotificationStore} from '@/stores'
 import type {AuthFileItem} from '@/types'
+import {
+    type CredentialWeightError,
+    parseCredentialWeightText,
+    readCredentialWeight,
+    validateCredentialWeightText,
+} from '@/utils/credentialWeight'
+import {formatExcludedModelsText, normalizeExcludedModelsValue, parseExcludedModelsText} from '@/utils/excludedModels'
 import {useState} from 'react'
 import {useTranslation} from 'react-i18next'
 
@@ -10,9 +25,22 @@ type AuthFileHeadersErrorKey =
     | 'auth_files.headers_invalid_json'
     | 'auth_files.headers_invalid_object'
     | 'auth_files.headers_invalid_value'
+    | 'auth_files.headers_sensitive_name'
+type AuthFileWeightErrorKey = 'auth_files.weight_integer_error' | 'auth_files.weight_max_error'
+type AuthFileEditorErrorKey = AuthFileHeadersErrorKey | AuthFileWeightErrorKey
 type AuthFileContentErrorKey = 'auth_files.prefix_proxy_invalid_json' | 'auth_files.prefix_proxy_html_challenge'
 
-export type PrefixProxyEditorField = 'prefix' | 'proxyUrl' | 'priority' | 'note' | 'headersText'
+const credentialWeightErrorKey = (error: CredentialWeightError): AuthFileWeightErrorKey =>
+    error === 'max' ? 'auth_files.weight_max_error' : 'auth_files.weight_integer_error'
+
+export type PrefixProxyEditorField =
+    | 'prefix'
+    | 'proxyUrl'
+    | 'priority'
+    | 'weight'
+    | 'note'
+    | 'headersText'
+    | 'excludedModelsText'
 export type PrefixProxyEditorFieldValue = string
 
 export type PrefixProxyEditorState = {
@@ -20,30 +48,38 @@ export type PrefixProxyEditorState = {
     fileInfoText: string
     loading: boolean
     saving: boolean
+    readOnly: boolean
     error: string | null
-    originalText: string
-    rawText: string
-    invalidContentPreview: string
     json: Record<string, unknown> | null
     prefix: string
     proxyUrl: string
     priority: string
+    weight: string
+    weightError: string | null
     note: string
     noteTouched: boolean
     headersText: string
     headersTouched: boolean
     headersError: string | null
+    disableCooling: boolean
+    disableCoolingTouched: boolean
+    supportsUsingApi: boolean
+    usingApi: boolean
+    usingApiTouched: boolean
+    excludedModelsText: string
+    excludedModelsTouched: boolean
 }
 
 type UseAuthFilesPrefixProxyEditorOptions = {
     disableControls: boolean
-    loadFiles: () => Promise<void>
+    completeMutation: (name: string, fields: AuthFileFieldsPatch) => Promise<void>
 }
-
-const INVALID_CONTENT_PREVIEW_LIMIT = 1000
 
 const isRecordObject = (value: unknown): value is Record<string, unknown> =>
     Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+export const isRuntimeOnlyAuthFile = (file: AuthFileItem): boolean =>
+    file.runtimeOnly === true || String(file.runtimeOnly ?? '').trim().toLowerCase() === 'true'
 
 const validateHeadersValue = (value: unknown): AuthFileHeadersErrorKey | null => {
     if (!isRecordObject(value)) {
@@ -72,22 +108,14 @@ const parseHeadersText = (text: string): {
     if (errorKey) {
         return { value: null, errorKey }
     }
+    if (Object.keys(parsed as Record<string, unknown>).some((name) => SENSITIVE_HEADER_NAME_PATTERN.test(name))) {
+        return { value: null, errorKey: 'auth_files.headers_sensitive_name' }
+    }
 
     return { value: parsed as AuthFileHeaders, errorKey: null }
 }
 
 const normalizeTextField = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
-
-const buildInvalidContentPreview = (text: string): string => {
-    const trimmed = text.trim()
-    if (!trimmed) {
-        return ''
-    }
-    if (trimmed.length <= INVALID_CONTENT_PREVIEW_LIMIT) {
-        return trimmed
-    }
-    return `${trimmed.slice(0, INVALID_CONTENT_PREVIEW_LIMIT)}\n...`
-}
 
 const getAuthFileContentErrorKey = (text: string): AuthFileContentErrorKey => {
     const head               = text.trimStart().slice(0, 4096).toLowerCase()
@@ -110,6 +138,9 @@ const getAuthFileContentErrorKey = (text: string): AuthFileContentErrorKey => {
 const hasKeys = (value: Record<string, unknown> | AuthFileFieldsPatch | null | undefined): boolean =>
     Boolean(value && Object.keys(value).length > 0)
 
+const SENSITIVE_HEADER_NAME_PATTERN =
+          /authorization|cookie|token|secret|password|api[-_]?key|access[-_]?key|client[-_]?key/i
+
 const normalizeHeaders = (value: unknown): AuthFileHeaders => {
     if (!isRecordObject(value)) {
         return {}
@@ -128,6 +159,11 @@ const normalizeHeaders = (value: unknown): AuthFileHeaders => {
         return result
     }, {})
 }
+
+const normalizeEditableHeaders = (value: unknown): AuthFileHeaders =>
+    Object.fromEntries(
+        Object.entries(normalizeHeaders(value)).filter(([name]) => !SENSITIVE_HEADER_NAME_PATTERN.test(name)),
+    )
 
 const buildHeadersPatch = (
     originalHeaders: AuthFileHeaders,
@@ -151,36 +187,14 @@ const buildHeadersPatch = (
     return Object.keys(patch).length > 0 ? patch : undefined
 }
 
-const applyHeadersPatch = (value: Record<string, unknown>, headersPatch: AuthFileHeaders | undefined) => {
-    if (!headersPatch) {
-        return
-    }
-
-    const nextHeaders = normalizeHeaders(value.headers)
-    Object.entries(headersPatch).forEach(([name, rawValue]) => {
-        const headerName = name.trim()
-        if (!headerName) {
-            return
-        }
-        const headerValue = rawValue.trim()
-        if (!headerValue) {
-            delete nextHeaders[headerName]
-            return
-        }
-        nextHeaders[headerName] = headerValue
-    })
-
-    if (Object.keys(nextHeaders).length > 0) {
-        value.headers = nextHeaders
-    } else {
-        delete value.headers
-    }
-}
-
-const buildAuthFileFieldsPatch = (
+export const buildAuthFileFieldsPatch = (
     editor: PrefixProxyEditorState,
-    resolveHeadersError: (key: AuthFileHeadersErrorKey) => string,
+    resolveHeadersError: (key: AuthFileEditorErrorKey) => string,
 ): AuthFileFieldsPatch => {
+    if (editor.readOnly) {
+        return {}
+    }
+
     const original                   = editor.json ?? {}
     const patch: AuthFileFieldsPatch = {}
 
@@ -213,6 +227,20 @@ const buildAuthFileFieldsPatch = (
         }
     }
 
+    const weightError = validateCredentialWeightText(editor.weight)
+    if (weightError) {
+        throw new Error(resolveHeadersError(credentialWeightErrorKey(weightError)))
+    }
+    const originalWeight = readCredentialWeight(original.weight)
+    const nextWeight     = parseCredentialWeightText(editor.weight)
+    if (nextWeight === undefined) {
+        if (originalWeight !== undefined) {
+            patch.weight = null
+        }
+    } else if (nextWeight !== originalWeight) {
+        patch.weight = nextWeight
+    }
+
     if (editor.noteTouched) {
         const originalNote = normalizeTextField(original.note)
         const nextNote     = editor.note.trim()
@@ -227,71 +255,50 @@ const buildAuthFileFieldsPatch = (
             throw new Error(resolveHeadersError(errorKey))
         }
         const headersPatch = buildHeadersPatch(
-            normalizeHeaders(original.headers),
-            normalizeHeaders(parsedHeaders ?? {}),
+            normalizeEditableHeaders(original.headers),
+            normalizeEditableHeaders(parsedHeaders ?? {}),
         )
         if (headersPatch) {
             patch.headers = headersPatch
         }
     }
 
+    if (editor.disableCoolingTouched) {
+        const originalDisableCooling = readAuthFileDisableCooling(original as AuthFileItem)
+        if (editor.disableCooling !== originalDisableCooling) {
+            patch.disable_cooling = editor.disableCooling
+        }
+    }
+
+    if (editor.supportsUsingApi && editor.usingApiTouched) {
+        const originalUsingApi = readAuthFileUsingApi(original as AuthFileItem)
+        if (editor.usingApi !== originalUsingApi) {
+            patch.using_api = editor.usingApi
+        }
+    }
+
+    if (editor.excludedModelsTouched) {
+        const originalRules = normalizeExcludedModelsValue(
+            original.excluded_models ?? original['excluded-models'] ?? original.excludedModels,
+        )
+        const nextRules     = parseExcludedModelsText(editor.excludedModelsText)
+        if (JSON.stringify(nextRules) !== JSON.stringify(originalRules)) {
+            patch.excluded_models = nextRules
+        }
+    }
+
     return patch
 }
 
-const buildPrefixProxyUpdatedText = (
-    editor: PrefixProxyEditorState | null,
-    resolveHeadersError: (key: AuthFileHeadersErrorKey) => string,
-): string => {
-    if (!editor?.json) {
-        return editor?.rawText ?? ''
-    }
-    const patch                         = buildAuthFileFieldsPatch(editor, resolveHeadersError)
-    const next: Record<string, unknown> = { ...editor.json }
-
-    if (patch.prefix !== undefined) {
-        if (patch.prefix) {
-            next.prefix = patch.prefix
-        } else {
-            delete next.prefix
-        }
-    }
-    if (patch.proxy_url !== undefined) {
-        if (patch.proxy_url) {
-            next.proxy_url = patch.proxy_url
-        } else {
-            delete next.proxy_url
-        }
-    }
-    if (patch.priority !== undefined) {
-        if (patch.priority === 0) {
-            delete next.priority
-        } else {
-            next.priority = patch.priority
-        }
-    }
-    if (patch.note !== undefined) {
-        if (patch.note) {
-            next.note = patch.note
-        } else {
-            delete next.note
-        }
-    }
-    applyHeadersPatch(next, patch.headers)
-
-    return JSON.stringify(next)
-}
-
 export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEditorOptions) {
-    const { disableControls, loadFiles }            = options
+    const { disableControls, completeMutation }     = options
     const { t }                                     = useTranslation()
     const showNotification                          = useNotificationStore((state) => state.showNotification)
     const [prefixProxyEditor, setPrefixProxyEditor] = useState<PrefixProxyEditorState | null>(null)
 
-    const hasBlockingValidationError = Boolean(prefixProxyEditor?.headersTouched && prefixProxyEditor.headersError)
-    const prefixProxyUpdatedText     =
-              prefixProxyEditor && !hasBlockingValidationError ?
-              buildPrefixProxyUpdatedText(prefixProxyEditor, (key) => t(key)) :
-              ''
+    const hasBlockingValidationError = Boolean(
+        prefixProxyEditor?.weightError || (prefixProxyEditor?.headersTouched && prefixProxyEditor.headersError),
+    )
     const prefixProxyPatch           =
               prefixProxyEditor?.json && !hasBlockingValidationError
               ? buildAuthFileFieldsPatch(prefixProxyEditor, (key) => t(key))
@@ -312,24 +319,75 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             return
         }
 
+        const provider = file.provider || file.type || inferProviderFromAuthFileName(file.name)
+        if (isRuntimeOnlyAuthFile(file)) {
+            const headers                       = normalizeEditableHeaders(file.headers)
+            const json: Record<string, unknown> = {
+                prefix: file.prefix,
+                proxy_url: file.proxy_url ?? file.proxyUrl,
+                priority: file.priority,
+                weight: file.weight,
+                note: file.note,
+                headers,
+                disable_cooling: file.disableCooling,
+                using_api: file.usingApi,
+                excluded_models: file.excludedModels,
+            }
+            setPrefixProxyEditor({
+                                     fileName: name,
+                                     fileInfoText: JSON.stringify(buildSafeAuthFileDisplayInfo(file), null, 2),
+                                     loading: false,
+                                     saving: false,
+                                     readOnly: true,
+                                     error: null,
+                                     json,
+                                     prefix: normalizeTextField(json.prefix),
+                                     proxyUrl: normalizeTextField(json.proxy_url),
+                                     priority: file.priority !== undefined ? String(file.priority) : '',
+                                     weight: file.weight !== undefined ? String(file.weight) : '',
+                                     weightError: null,
+                                     note: file.note ?? '',
+                                     noteTouched: false,
+                                     headersText:
+                                         Object.keys(headers).length > 0 ? JSON.stringify(headers, null, 2) : '',
+                                     headersTouched: false,
+                                     headersError: null,
+                                     disableCooling: readAuthFileDisableCooling(file),
+                                     disableCoolingTouched: false,
+                                     supportsUsingApi: supportsAuthFileUsingApi(provider),
+                                     usingApi: readAuthFileUsingApi(file),
+                                     usingApiTouched: false,
+                                     excludedModelsText: formatExcludedModelsText(file.excludedModels ?? []),
+                                     excludedModelsTouched: false,
+                                 })
+            return
+        }
+
         setPrefixProxyEditor({
                                  fileName: name,
-                                 fileInfoText: JSON.stringify(file, null, 2),
+                                 fileInfoText: JSON.stringify(buildSafeAuthFileDisplayInfo(file), null, 2),
                                  loading: true,
                                  saving: false,
+                                 readOnly: false,
                                  error: null,
-                                 originalText: '',
-                                 rawText: '',
-                                 invalidContentPreview: '',
                                  json: null,
                                  prefix: '',
                                  proxyUrl: '',
                                  priority: '',
+                                 weight: '',
+                                 weightError: null,
                                  note: '',
                                  noteTouched: false,
                                  headersText: '',
                                  headersTouched: false,
                                  headersError: null,
+                                 disableCooling: readAuthFileDisableCooling(file),
+                                 disableCoolingTouched: false,
+                                 supportsUsingApi: supportsAuthFileUsingApi(provider),
+                                 usingApi: readAuthFileUsingApi(file),
+                                 usingApiTouched: false,
+                                 excludedModelsText: formatExcludedModelsText(file.excludedModels ?? []),
+                                 excludedModelsTouched: false,
                              })
 
         try {
@@ -345,9 +403,6 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                                  ...prev,
                                                  loading: false,
                                                  error: t(getAuthFileContentErrorKey(rawText)),
-                                                 rawText,
-                                                 originalText: rawText,
-                                                 invalidContentPreview: buildInvalidContentPreview(rawText),
                                              }
                                          : prev,
                 )
@@ -361,23 +416,31 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                                  ...prev,
                                                  loading: false,
                                                  error: t(getAuthFileContentErrorKey(rawText)),
-                                                 rawText,
-                                                 originalText: rawText,
-                                                 invalidContentPreview: buildInvalidContentPreview(rawText),
                                              }
                                          : prev,
                 )
                 return
             }
 
-            const json                      = { ...(parsed as Record<string, unknown>) }
-            const originalText              = JSON.stringify(json)
-            const priority                  = parsePriorityValue(json.priority)
-            const headers                   = json.headers
-            let headersText                 = ''
-            let headersError: string | null = null
+            const downloaded                    = parsed as Record<string, unknown>
+            const json: Record<string, unknown> = {
+                prefix: downloaded.prefix,
+                proxy_url: downloaded.proxy_url,
+                priority: downloaded.priority,
+                weight: downloaded.weight,
+                note: downloaded.note,
+                headers: normalizeEditableHeaders(downloaded.headers),
+                disable_cooling: downloaded.disable_cooling ?? downloaded['disable-cooling'],
+                using_api: downloaded.using_api,
+                excluded_models: downloaded.excluded_models ?? downloaded['excluded-models'],
+            }
+            const priority                      = parsePriorityValue(json.priority)
+            const weight                        = readCredentialWeight(json.weight)
+            const headers                       = json.headers
+            let headersText                     = ''
+            let headersError: string | null     = null
             if (headers !== undefined) {
-                headersText        = JSON.stringify(headers, null, 2)
+                headersText        = JSON.stringify(normalizeEditableHeaders(headers), null, 2)
                 const { errorKey } = parseHeadersText(headersText)
                 headersError       = errorKey ? t(errorKey) : null
             }
@@ -387,18 +450,34 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                      ? {
                                              ...prev,
                                              loading: false,
-                                             originalText,
-                                             rawText: originalText,
-                                             invalidContentPreview: '',
                                              json,
                                              prefix: typeof json.prefix === 'string' ? json.prefix : '',
                                              proxyUrl: typeof json.proxy_url === 'string' ? json.proxy_url : '',
                                              priority: priority !== undefined ? String(priority) : '',
+                                             weight: weight !== undefined ? String(weight) : '',
+                                             weightError: null,
                                              note: typeof json.note === 'string' ? json.note : '',
                                              noteTouched: false,
                                              headersText,
                                              headersTouched: false,
                                              headersError,
+                                             disableCooling: readAuthFileDisableCooling(json as AuthFileItem),
+                                             disableCoolingTouched: false,
+                                             supportsUsingApi: supportsAuthFileUsingApi(
+                                                 normalizeAuthFileProvider(
+                                                     file.provider ||
+                                                     file.type ||
+                                                     inferProviderFromAuthFileName(file.name),
+                                                 ),
+                                             ),
+                                             usingApi: readAuthFileUsingApi(json as AuthFileItem),
+                                             usingApiTouched: false,
+                                             excludedModelsText: formatExcludedModelsText(
+                                                 normalizeExcludedModelsValue(
+                                                     json.excluded_models ?? json['excluded-models'],
+                                                 ),
+                                             ),
+                                             excludedModelsTouched: false,
                                              error: null,
                                          }
                                      : prev,
@@ -406,9 +485,9 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : t('notification.download_failed')
             setPrefixProxyEditor((prev) =>
-                                     prev && prev.fileName === name ?
-                                         { ...prev, loading: false, error: errorMessage, rawText: '' } :
-                                     prev,
+                                     prev && prev.fileName === name
+                                     ? { ...prev, loading: false, error: errorMessage }
+                                     : prev,
             )
             showNotification(`${t('notification.download_failed')}: ${errorMessage}`, 'error')
         }
@@ -416,7 +495,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
 
     const handlePrefixProxyChange = (field: PrefixProxyEditorField, value: PrefixProxyEditorFieldValue) => {
         setPrefixProxyEditor((prev) => {
-            if (!prev) {
+            if (!prev || prev.readOnly) {
                 return prev
             }
             if (field === 'prefix') {
@@ -428,8 +507,19 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             if (field === 'priority') {
                 return { ...prev, priority: value }
             }
+            if (field === 'weight') {
+                const weightError = validateCredentialWeightText(value)
+                return {
+                    ...prev,
+                    weight: value,
+                    weightError: weightError ? t(credentialWeightErrorKey(weightError)) : null,
+                }
+            }
             if (field === 'note') {
                 return { ...prev, note: value, noteTouched: true }
+            }
+            if (field === 'excludedModelsText') {
+                return { ...prev, excludedModelsText: value, excludedModelsTouched: true }
             }
             const { errorKey } = parseHeadersText(value)
             return {
@@ -441,8 +531,22 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         })
     }
 
+    const handlePrefixProxyBooleanChange = (
+        field: 'disableCooling' | 'usingApi',
+        value: boolean,
+    ) => {
+        setPrefixProxyEditor((prev) => {
+            if (!prev || prev.readOnly) {
+                return prev
+            }
+            return field === 'disableCooling'
+                   ? { ...prev, disableCooling: value, disableCoolingTouched: true }
+                   : { ...prev, usingApi: value, usingApiTouched: true }
+        })
+    }
+
     const handlePrefixProxySave = async () => {
-        if (!prefixProxyEditor?.json || !prefixProxyDirty) {
+        if (!prefixProxyEditor?.json || prefixProxyEditor.readOnly || !prefixProxyDirty) {
             return
         }
         const name = prefixProxyEditor.fileName
@@ -461,8 +565,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         setPrefixProxyEditor((prev) => (prev && prev.fileName === name ? { ...prev, saving: true } : prev))
         try {
             await authFilesApi.patchFields(name, payload)
+            await completeMutation(name, payload)
             showNotification(t('auth_files.prefix_proxy_saved_success', { name }), 'success')
-            await loadFiles()
             setPrefixProxyEditor(null)
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : ''
@@ -473,11 +577,11 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
 
     return {
         prefixProxyEditor,
-        prefixProxyUpdatedText,
         prefixProxyDirty,
         openPrefixProxyEditor,
         closePrefixProxyEditor,
         handlePrefixProxyChange,
+        handlePrefixProxyBooleanChange,
         handlePrefixProxySave,
     }
 }
