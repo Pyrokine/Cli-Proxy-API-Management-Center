@@ -14,6 +14,9 @@ export interface ApiClientConfig {
 export type ApiError = Error & {
     status?: number
     code?: string
+    backendCode?: string
+    retryAfterSeconds?: number
+    rateLimitUntil?: string
     details?: unknown
     data?: unknown
 }

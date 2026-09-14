@@ -8,6 +8,28 @@ import {computeApiUrl} from '@/utils/connection'
 import {BUILD_DATE_HEADER_KEYS, REQUEST_TIMEOUT_MS, VERSION_HEADER_KEYS} from '@/utils/constants'
 import axios, {AxiosInstance, AxiosRequestConfig, AxiosResponse} from 'axios'
 
+type AuthScopedRequestConfig = AxiosRequestConfig & { __authGeneration?: number }
+
+const finiteNonNegativeNumber = (value: unknown): number | undefined => {
+    const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : Number.NaN
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+}
+
+export function parseRetryAfterSeconds(value: unknown, nowMs = Date.now()): number | undefined {
+    const seconds = finiteNonNegativeNumber(value)
+    if (seconds !== undefined) {
+        return Math.ceil(seconds)
+    }
+    if (typeof value !== 'string') {
+        return undefined
+    }
+    const retryAt = Date.parse(value)
+    if (!Number.isFinite(retryAt)) {
+        return undefined
+    }
+    return Math.max(0, Math.ceil((retryAt - nowMs) / 1000))
+}
+
 class ApiClient {
     private instance: AxiosInstance
     private apiBase: string       = ''
@@ -15,6 +37,9 @@ class ApiClient {
 
     /** 标记认证已失败，阻止后续请求继续发送 */
     private authFailed: boolean = false
+
+    /** 请求所属的认证会话，配置变化时递增 */
+    private authGeneration: number = 0
 
     constructor() {
         this.instance = axios.create({
@@ -31,6 +56,7 @@ class ApiClient {
      * 设置 API 配置
      */
     setConfig(config: ApiClientConfig): void {
+        this.authGeneration += 1
         this.apiBase       = computeApiUrl(config.apiBase)
         this.managementKey = config.managementKey
         this.authFailed    = false
@@ -40,6 +66,10 @@ class ApiClient {
         } else {
             this.instance.defaults.timeout = REQUEST_TIMEOUT_MS
         }
+    }
+
+    getAuthGeneration(): number {
+        return this.authGeneration
     }
 
     /**
@@ -157,6 +187,10 @@ class ApiClient {
                     return Promise.reject(new axios.Cancel('Authentication failed, request aborted'))
                 }
 
+                // 记录请求发起时的认证会话
+                const authScopedConfig            = config as AuthScopedRequestConfig
+                authScopedConfig.__authGeneration = this.authGeneration
+
                 // 设置 baseURL
                 config.baseURL = this.apiBase
                 if (config.url) {
@@ -177,6 +211,11 @@ class ApiClient {
         // 响应拦截器
         this.instance.interceptors.response.use(
             (response) => {
+                const responseGeneration = (response.config as AuthScopedRequestConfig).__authGeneration
+                if (responseGeneration !== this.authGeneration) {
+                    return response
+                }
+
                 const headers   = response.headers as Record<string, string | undefined>
                 const version   = this.readHeader(headers, VERSION_HEADER_KEYS)
                 const buildDate = this.readHeader(headers, BUILD_DATE_HEADER_KEYS)
@@ -216,14 +255,34 @@ class ApiClient {
                           ? responseRecord.message
                           : error.message || 'Request failed'
             const apiError              = new Error(message) as ApiError
+            const bodyRetryAfter        = finiteNonNegativeNumber(responseRecord?.retry_after_seconds)
+            const headerRetryAfter      = parseRetryAfterSeconds(
+                this.readHeader(error.response?.headers as Record<string, unknown> | undefined, ['Retry-After']),
+            )
+            const retryAfterSeconds     = Math.max(
+                bodyRetryAfter === undefined ? 0 : Math.ceil(bodyRetryAfter),
+                headerRetryAfter ?? 0,
+            )
+            const bannedUntil           =
+                      typeof responseRecord?.banned_until === 'string' && responseRecord.banned_until.trim()
+                      ? responseRecord.banned_until
+                      : retryAfterSeconds > 0
+                        ? new Date(Date.now() + retryAfterSeconds * 1000).toISOString()
+                        : undefined
             apiError.name               = 'ApiError'
             apiError.status             = error.response?.status
             apiError.code               = error.code
+            apiError.backendCode        = typeof responseRecord?.code === 'string' ? responseRecord.code : undefined
+            apiError.retryAfterSeconds  = retryAfterSeconds > 0 ? retryAfterSeconds : undefined
+            apiError.rateLimitUntil     = bannedUntil
             apiError.details            = responseData
             apiError.data               = responseData
 
-            // 401 未授权 - 标记认证失败并通知 UI（仅首次）
-            if (error.response?.status === 401 && !this.authFailed) {
+            // 只有当前认证会话的 401 可以使会话失效
+            const requestGeneration = (error.config as AuthScopedRequestConfig | undefined)?.__authGeneration
+            if (error.response?.status === 401 &&
+                requestGeneration === this.authGeneration &&
+                !this.authFailed) {
                 this.authFailed = true
                 window.dispatchEvent(new Event('unauthorized'))
             }

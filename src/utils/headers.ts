@@ -49,6 +49,30 @@ export const hasHeader = (headers: Record<string, string>, name: string) => {
     return Object.keys(headers).some((key) => key.toLowerCase() === target)
 }
 
+const headerValuesByName = (entries: HeaderEntry[]) => {
+    const values = new Map<string, string[]>()
+    entries.forEach((entry) => {
+        const name = entry.key.trim().toLowerCase()
+        if (!name) {
+            return
+        }
+        const current = values.get(name) ?? []
+        current.push(entry.value)
+        values.set(name, current)
+    })
+    values.forEach((items) => items.sort())
+    return values
+}
+
+export const getChangedHeaderNames = (previous: HeaderEntry[], next: HeaderEntry[]): string[] => {
+    const before = headerValuesByName(previous)
+    const after  = headerValuesByName(next)
+    const names  = new Set([...before.keys(), ...after.keys()])
+    return Array.from(names).filter(
+        (name) => JSON.stringify(before.get(name) ?? []) !== JSON.stringify(after.get(name) ?? []),
+    )
+}
+
 export const normalizeHeaderEntries = (entries: HeaderEntry[]) =>
     (entries ?? [])
         .map((entry) => ({

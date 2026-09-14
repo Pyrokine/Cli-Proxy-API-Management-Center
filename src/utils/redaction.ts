@@ -17,24 +17,39 @@ const SENSITIVE_FIELD_PATTERN = [
     'secret',
     'client[-_ ]?secret',
     'proxy[-_ ]?url',
+    '(?:[a-z0-9]+[-_])+(?:authorization|cookie|token|key|secret|password|passwd)(?:[-_][a-z0-9]+)*',
     'key',
 ].join('|')
 
-const QUOTED_FIELD_VALUE_REGEX         = new RegExp(
-    `(["'](?:${SENSITIVE_FIELD_PATTERN})["']\\s*[:=]\\s*["'])([^"']*)(["'])`,
+const FIELD_PREFIX                    = `(?<![\\w-])["']?(?<field>${SENSITIVE_FIELD_PATTERN})["']?\\s*[:=]\\s*`
+const DOUBLE_QUOTED_FIELD_VALUE_REGEX = new RegExp(
+    `(?<prefix>${FIELD_PREFIX}")(?<value>(?:\\\\.|[^"\\\\])*)"`,
     'gi',
 )
-const BARE_FIELD_VALUE_REGEX           = new RegExp(
-    `(\\b(?:${SENSITIVE_FIELD_PATTERN})\\b\\s*[:=]\\s*)([^\\s,;}]+)`,
+const SINGLE_QUOTED_FIELD_VALUE_REGEX = new RegExp(
+    `(?<prefix>${FIELD_PREFIX}')(?<value>(?:\\\\.|[^'\\\\])*)'`,
     'gi',
 )
-const URL_QUERY_VALUE_REGEX            = new RegExp(
-    `([?&](?:${SENSITIVE_FIELD_PATTERN})=)([^&#\\s"']+)`,
+const BARE_FIELD_VALUE_REGEX          = new RegExp(
+    `(?<prefix>${FIELD_PREFIX})(?!\\[REDACTED])[^\\s,;}\\x5D&#"']+`,
     'gi',
 )
-const AUTHORIZATION_HEADER_VALUE_REGEX = /\b(Authorization\s*[:=]\s*)(?:Bearer\s+)?[A-Za-z0-9._~+/=-]+/gi
-const BEARER_VALUE_REGEX               = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi
-const COOKIE_HEADER_VALUE_REGEX        = /\b((?:Cookie|Set-Cookie)\s*[:=]\s*)([^\]}\n\r]+)/gi
+// noinspection RegExpUnnecessaryNonCapturingGroup
+const URL_QUERY_VALUE_REGEX           = new RegExp(
+    `(?<prefix>[?&](?:${SENSITIVE_FIELD_PATTERN})=)[^&#\\s"']+`,
+    'gi',
+)
+const AUTHORIZATION_VALUE_REGEX       = new RegExp(
+    `(?<prefix>(?<![\\w-])["']?(?:proxy[-_ ]?)?authorization["']?\\s*[:=]\\s*)` +
+    `(?:"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^\\],;}&#\\n\\r]+)`,
+    'gi',
+)
+const BEARER_VALUE_REGEX              = /(?<prefix>\bBearer\s+)[A-Za-z0-9._~+/=-]+/gi
+const COOKIE_VALUE_REGEX              = new RegExp(
+    `(?<prefix>(?<![\\w-])["']?(?:set[-_ ]?)?cookie["']?\\s*[:=]\\s*)` +
+    `(?:"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^\\]}&#\\n\\r]+)`,
+    'gi',
+)
 
 export function redactSensitiveText(text: string): string {
     if (!text) {
@@ -42,10 +57,11 @@ export function redactSensitiveText(text: string): string {
     }
 
     return text
-        .replace(COOKIE_HEADER_VALUE_REGEX, `$1${REDACTED}`)
-        .replace(AUTHORIZATION_HEADER_VALUE_REGEX, `$1${REDACTED}`)
-        .replace(BEARER_VALUE_REGEX, `$1${REDACTED}`)
-        .replace(QUOTED_FIELD_VALUE_REGEX, `$1${REDACTED}$3`)
-        .replace(BARE_FIELD_VALUE_REGEX, `$1${REDACTED}`)
-        .replace(URL_QUERY_VALUE_REGEX, `$1${REDACTED}`)
+        .replace(COOKIE_VALUE_REGEX, `$<prefix>${REDACTED}`)
+        .replace(AUTHORIZATION_VALUE_REGEX, `$<prefix>${REDACTED}`)
+        .replace(BEARER_VALUE_REGEX, `$<prefix>${REDACTED}`)
+        .replace(DOUBLE_QUOTED_FIELD_VALUE_REGEX, `$<prefix>${REDACTED}"`)
+        .replace(SINGLE_QUOTED_FIELD_VALUE_REGEX, `$<prefix>${REDACTED}'`)
+        .replace(BARE_FIELD_VALUE_REGEX, `$<prefix>${REDACTED}`)
+        .replace(URL_QUERY_VALUE_REGEX, `$<prefix>${REDACTED}`)
 }
