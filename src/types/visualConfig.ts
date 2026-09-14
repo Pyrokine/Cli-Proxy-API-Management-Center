@@ -79,6 +79,7 @@ export type PayloadModelEntry = {
     id: string
     name: string
     protocol?: string
+    extra?: Record<string, unknown>
 }
 
 export type PayloadRule = {
@@ -99,9 +100,41 @@ export interface StreamingConfig {
     nonstreamKeepaliveInterval: string
 }
 
+export type ApiKeyPolicyLimit = {
+    window: string
+    requests: string
+    tokens: string
+    costMicro: string
+}
+
 export type ApiKeyModelRule = {
     blockedModels: string[]
+    providers: string[]
+    canonicalModels: string[]
+    modelMappings: Record<string, string>
+    policyProfile: string
+    reservationTtl: string
+    limits: ApiKeyPolicyLimit[]
 }
+
+export const EMPTY_API_KEY_MODEL_RULE: ApiKeyModelRule = {
+    blockedModels: [],
+    providers: [],
+    canonicalModels: [],
+    modelMappings: {},
+    policyProfile: '',
+    reservationTtl: '',
+    limits: [],
+}
+
+export const isApiKeyModelRuleEmpty = (rule: ApiKeyModelRule): boolean =>
+    rule.blockedModels.length === 0 &&
+    rule.providers.length === 0 &&
+    rule.canonicalModels.length === 0 &&
+    Object.keys(rule.modelMappings).length === 0 &&
+    !rule.policyProfile.trim() &&
+    !rule.reservationTtl.trim() &&
+    rule.limits.length === 0
 
 export type PluginStoreAuthRule = {
     id: string
@@ -126,6 +159,7 @@ export type VisualConfigValues = {
     tlsRequireForAuth: boolean
     tlsTrustForwardedProto: boolean
     rmAllowRemote: boolean
+    rmTrustedProxies: string[]
     rmSecretKey: string
     rmDisableControlPanel: boolean
     rmAutoUpdatePanel: boolean
@@ -179,7 +213,7 @@ export type VisualConfigValues = {
     quotaRefreshEnabled: boolean
     quotaRefreshInterval: string
     quotaRefreshMaxInterval: string
-    routingStrategy: 'round-robin' | 'fill-first'
+    routingStrategy: 'round-robin' | 'weighted-round-robin' | 'quota-aware' | 'fill-first'
     routingSessionAffinity: boolean
     routingSessionAffinityTTL: string
     wsAuth: boolean
@@ -216,6 +250,7 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     tlsRequireForAuth: false,
     tlsTrustForwardedProto: false,
     rmAllowRemote: false,
+    rmTrustedProxies: [],
     rmSecretKey: '',
     rmDisableControlPanel: false,
     rmAutoUpdatePanel: false,

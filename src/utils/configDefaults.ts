@@ -86,7 +86,7 @@ auth-auto-refresh-workers: 16
 ws-auth: true
 cors-allowed-origins: []  # Empty = allow all (*); set to restrict browser access
 routing:
-  strategy: round-robin  # round-robin (default), fill-first (优先填充)
+  strategy: round-robin  # round-robin (default), weighted-round-robin, quota-aware, fill-first
   claude-code-session-affinity: false
   session-affinity: false
   session-affinity-ttl: ""

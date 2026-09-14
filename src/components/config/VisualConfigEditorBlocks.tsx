@@ -15,6 +15,7 @@ import {type ModelCatalogRow, modelsApi} from '@/services/api/models'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {
     ApiKeyModelRule,
+    ApiKeyPolicyLimit,
     PayloadFilterRule,
     PayloadModelEntry,
     PayloadParamEntry,
@@ -25,7 +26,8 @@ import type {
     PluginStoreAuthRule,
     PluginStoreAuthType,
 } from '@/types/visualConfig'
-import {makeClientId} from '@/types/visualConfig'
+import {EMPTY_API_KEY_MODEL_RULE, isApiKeyModelRuleEmpty, makeClientId} from '@/types/visualConfig'
+import {cloneApiKeyModelRule, isApiKeyPolicyConfigured, validateApiKeyPolicyDraft} from '@/utils/apiKeyPolicy'
 import {copyToClipboard} from '@/utils/clipboard'
 import {maskApiKey} from '@/utils/format'
 import {
@@ -40,6 +42,7 @@ import {
 import {isValidApiKey} from '@/utils/validation'
 import {Fragment, memo, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {ApiKeyStrengthMeter} from './ApiKeyStrengthMeter'
 import styles from './VisualConfigEditor.module.scss'
 
 type ModelLimitCatalogEntry = {
@@ -401,6 +404,272 @@ function ModelTreePanel({
     )
 }
 
+type ApiKeyMappingDraft = {
+    id: string
+    source: string
+    target: string
+}
+
+type ApiKeyLimitDraft = ApiKeyPolicyLimit & {
+    id: string
+}
+
+const ApiKeyPolicyEditor = memo(function ApiKeyPolicyEditor({
+                                                                target,
+                                                                rule,
+                                                                disabled,
+                                                                onClose,
+                                                                onSave,
+                                                            }: {
+    target: string
+    rule?: ApiKeyModelRule
+    disabled?: boolean
+    onClose: () => void
+    onSave: (rule: ApiKeyModelRule) => void
+}) {
+    const { t: visualT }                    = useTranslation(undefined, { keyPrefix: 'config_management.visual' })
+    const [draftRule, setDraftRule]         = useState<ApiKeyModelRule>(() => cloneApiKeyModelRule(rule))
+    const [mappingDrafts, setMappingDrafts] = useState<ApiKeyMappingDraft[]>(() =>
+                                                                                 Object.entries(rule?.modelMappings ??
+                                                                                                    {})
+                                                                                       .map(([source, mappedTarget]) => ({
+                                                                                           id: makeClientId(),
+                                                                                           source,
+                                                                                           target: mappedTarget,
+                                                                                       })),
+    )
+    const [limitDrafts, setLimitDrafts]     = useState<ApiKeyLimitDraft[]>(() =>
+                                                                               (rule?.limits ??
+                                                                                   []).map((limit) => ({ id: makeClientId(), ...limit })),
+    )
+    const [error, setError]                 = useState('')
+
+    const updateMapping = (id: string, patch: Partial<ApiKeyMappingDraft>) => {
+        setMappingDrafts((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry))
+        setError('')
+    }
+    const updateLimit   = (id: string, patch: Partial<ApiKeyLimitDraft>) => {
+        setLimitDrafts((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry))
+        setError('')
+    }
+
+    const save = () => {
+        const result = validateApiKeyPolicyDraft(draftRule, mappingDrafts, limitDrafts)
+        if (result.error) {
+            setError(visualT(`api_keys.policy_error_${result.error}`))
+            return
+        }
+        onSave(result.rule)
+    }
+
+    return (
+        <Modal
+            open
+            onClose={onClose}
+            width='min(960px, calc(100vw - 48px))'
+            title={visualT('api_keys.policy_title')}
+            footer={
+                <>
+                    <Button variant='secondary' onClick={onClose} disabled={disabled}>
+                        {visualT('common.cancel')}
+                    </Button>
+                    <Button onClick={save} disabled={disabled}>
+                        {visualT('common.update')}
+                    </Button>
+                </>
+            }
+        >
+            <div className={styles.apiKeyPolicyEditor}>
+                <div className={styles.modelLimitTarget}>{target}</div>
+                <div className={styles.modelLimitHint}>{visualT('api_keys.policy_hint')}</div>
+                {error ? <div className='error-box'>{error}</div> : null}
+
+                <div className={styles.apiKeyPolicyGrid}>
+                    <Input
+                        label={visualT('api_keys.policy_profile')}
+                        placeholder={visualT('api_keys.policy_profile_default')}
+                        maxLength={128}
+                        value={draftRule.policyProfile}
+                        onChange={(event) => {
+                            setDraftRule((current) => ({ ...current, policyProfile: event.target.value }))
+                            setError('')
+                        }}
+                        disabled={disabled}
+                    />
+                    <Input
+                        label={visualT('api_keys.policy_ttl')}
+                        placeholder={visualT('api_keys.policy_ttl_default')}
+                        maxLength={128}
+                        value={draftRule.reservationTtl}
+                        onChange={(event) => {
+                            setDraftRule((current) => ({ ...current, reservationTtl: event.target.value }))
+                            setError('')
+                        }}
+                        disabled={disabled}
+                    />
+                </div>
+
+                <div className={styles.apiKeyPolicySection}>
+                    <div>
+                        <strong>{visualT('api_keys.policy_providers')}</strong>
+                        <div className='hint'>{visualT('api_keys.policy_providers_hint')}</div>
+                    </div>
+                    <StringListEditor
+                        value={draftRule.providers}
+                        placeholder='openai'
+                        inputAriaLabel={visualT('api_keys.policy_provider')}
+                        onChange={(providers) => {
+                            setDraftRule((current) => ({ ...current, providers }))
+                            setError('')
+                        }}
+                        disabled={disabled}
+                    />
+                </div>
+
+                <div className={styles.apiKeyPolicySection}>
+                    <div>
+                        <strong>{visualT('api_keys.policy_canonical_models')}</strong>
+                        <div className='hint'>{visualT('api_keys.policy_canonical_models_hint')}</div>
+                    </div>
+                    <StringListEditor
+                        value={draftRule.canonicalModels}
+                        placeholder='gpt-5'
+                        inputAriaLabel={visualT('api_keys.policy_canonical_model')}
+                        onChange={(canonicalModels) => {
+                            setDraftRule((current) => ({ ...current, canonicalModels }))
+                            setError('')
+                        }}
+                        disabled={disabled}
+                    />
+                </div>
+
+                <div className={styles.apiKeyPolicySection}>
+                    <div className={styles.blockHeaderRow}>
+                        <div>
+                            <strong>{visualT('api_keys.policy_mappings')}</strong>
+                            <div className='hint'>{visualT('api_keys.policy_mappings_hint')}</div>
+                        </div>
+                        <Button
+                            type='button'
+                            variant='secondary'
+                            size='sm'
+                            onClick={() => setMappingDrafts((current) => [
+                                ...current,
+                                { id: makeClientId(), source: '', target: '' },
+                            ])}
+                            disabled={disabled}
+                        >
+                            {visualT('common.add')}
+                        </Button>
+                    </div>
+                    {mappingDrafts.length === 0 ? (
+                        <div className={styles.storeAuthEmpty}>{visualT('api_keys.policy_mappings_empty')}</div>
+                    ) : mappingDrafts.map((mapping) => (
+                        <div key={mapping.id} className={styles.apiKeyPolicyMappingRow}>
+                            <Input
+                                placeholder={visualT('api_keys.policy_mapping_source')}
+                                aria-label={visualT('api_keys.policy_mapping_source')}
+                                value={mapping.source}
+                                onChange={(event) => updateMapping(mapping.id, { source: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <span aria-hidden='true'>→</span>
+                            <Input
+                                placeholder={visualT('api_keys.policy_mapping_target')}
+                                aria-label={visualT('api_keys.policy_mapping_target')}
+                                value={mapping.target}
+                                onChange={(event) => updateMapping(mapping.id, { target: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => setMappingDrafts((current) =>
+                                                                    current.filter((entry) => entry.id !== mapping.id),
+                                )}
+                                disabled={disabled}
+                            >
+                                {visualT('common.delete')}
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+
+                <div className={styles.apiKeyPolicySection}>
+                    <div className={styles.blockHeaderRow}>
+                        <div>
+                            <strong>{visualT('api_keys.policy_limits')}</strong>
+                            <div className='hint'>{visualT('api_keys.policy_limits_hint')}</div>
+                        </div>
+                        <Button
+                            type='button'
+                            variant='secondary'
+                            size='sm'
+                            onClick={() => setLimitDrafts((current) => [
+                                ...current,
+                                { id: makeClientId(), window: '', requests: '', tokens: '', costMicro: '' },
+                            ])}
+                            disabled={disabled}
+                        >
+                            {visualT('common.add')}
+                        </Button>
+                    </div>
+                    {limitDrafts.length === 0 ? (
+                        <div className={styles.storeAuthEmpty}>{visualT('api_keys.policy_limits_empty')}</div>
+                    ) : limitDrafts.map((limit) => (
+                        <div key={limit.id} className={styles.apiKeyPolicyLimitRow}>
+                            <Input
+                                label={visualT('api_keys.policy_window')}
+                                placeholder='1h'
+                                maxLength={128}
+                                value={limit.window}
+                                onChange={(event) => updateLimit(limit.id, { window: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <Input
+                                label={visualT('api_keys.policy_requests')}
+                                inputMode='numeric'
+                                maxLength={19}
+                                value={limit.requests}
+                                onChange={(event) => updateLimit(limit.id, { requests: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <Input
+                                label={visualT('api_keys.policy_tokens')}
+                                inputMode='numeric'
+                                maxLength={19}
+                                value={limit.tokens}
+                                onChange={(event) => updateLimit(limit.id, { tokens: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <Input
+                                label={visualT('api_keys.policy_cost_micro')}
+                                inputMode='numeric'
+                                maxLength={19}
+                                value={limit.costMicro}
+                                onChange={(event) => updateLimit(limit.id, { costMicro: event.target.value })}
+                                disabled={disabled}
+                            />
+                            <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => setLimitDrafts((current) =>
+                                                                  current.filter((entry) => entry.id !== limit.id),
+                                )}
+                                disabled={disabled}
+                            >
+                                {visualT('common.delete')}
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </Modal>
+    )
+})
+
 export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                      value,
                                                                      modelRules,
@@ -415,6 +684,9 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     onModelRulesChange: (nextValue: Record<string, ApiKeyModelRule>) => void
 }) {
     const { t }                     = useTranslation()
+    const { t: visualT }            = useTranslation(undefined, {
+        keyPrefix: 'config_management.visual',
+    })
     const showNotification          = useNotificationStore((state) => state.showNotification)
     const apiBase                   = useAuthStore((state) => state.apiBase)
     const connectionStatus          = useAuthStore((state) => state.connectionStatus)
@@ -442,6 +714,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const aliasInputId                                  = useId()
     const apiKeyHintId                                  = `${apiKeyInputId}-hint`
     const apiKeyErrorId                                 = `${apiKeyInputId}-error`
+    const apiKeyStrengthId                              = `${apiKeyInputId}-strength`
     const aliasHintId                                   = `${aliasInputId}-hint`
     const aliasErrorId                                  = `${aliasInputId}-error`
     const [modalOpen, setModalOpen]                     = useState(false)
@@ -457,6 +730,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
     const [modelCatalogError, setModelCatalogError]     = useState('')
     const [modelLimitKey, setModelLimitKey]             = useState<string | null>(null)
+    const [policyKey, setPolicyKey]                     = useState<string | null>(null)
     const [modelLimitQuery, setModelLimitQuery]         = useState('')
     const [draftBlockedModels, setDraftBlockedModels]   = useState<Set<string>>(() => new Set())
     const [selectedAllowed, setSelectedAllowed]         = useState<Set<string>>(() => new Set())
@@ -496,7 +770,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 if (!cancelled) {
                     setModelCatalogLoaded(false)
                     setModelCatalogLoading(false)
-                    setModelCatalogError(t('config_management.visual.api_keys.model_catalog_disconnected', {
+                    setModelCatalogError(visualT('api_keys.model_catalog_disconnected', {
                         defaultValue: '管理端未连接，无法加载模型目录',
                     }))
                 }
@@ -530,7 +804,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         return () => {
             cancelled = true
         }
-    }, [apiBase, connectionStatus, modelLimitKey, t])
+    }, [apiBase, connectionStatus, modelLimitKey, t, visualT])
 
     const aliasLabelsByModel                                   = useMemo(
         () => buildCatalogAliasLabelsByModel(modelCatalogRows),
@@ -615,10 +889,17 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                    :
                                                                    maskApiKey(modelLimitKey)
                                                                  : ''
+    const currentPolicyTitle                                   = policyKey
+                                                                 ? aliases[policyKey]
+                                                                   ?
+                                                                   `${aliases[policyKey]} · ${maskApiKey(policyKey)}`
+                                                                   :
+                                                                   maskApiKey(policyKey)
+                                                                 : ''
     const modelLimitAllowedEmptyText                           = hasModelLimitQuery
                                                                  ?
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_search_empty_allowed',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_search_empty_allowed',
                                                                      {
                                                                          defaultValue: '允许列表中没有匹配模型',
                                                                      },
@@ -626,8 +907,8 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                  :
                                                                  modelCatalogLoading
                                                                  ?
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_loading',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_loading',
                                                                      {
                                                                          defaultValue: '模型列表加载中',
                                                                      },
@@ -635,8 +916,8 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                  :
                                                                  catalogModelNames.length === 0
                                                                  ?
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_registry_empty',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_registry_empty',
                                                                      {
                                                                          defaultValue: '模型列表未加载，请刷新后再配置模型限制',
                                                                      },
@@ -644,15 +925,15 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                  :
                                                                  availableModelNames.length === 0
                                                                  ?
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_global_empty',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_global_empty',
                                                                      {
                                                                          defaultValue: '全局可用模型为空，请先检查模型管理中的全局禁用配置',
                                                                      },
                                                                  )
                                                                  :
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_allowed_empty',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_allowed_empty',
                                                                      {
                                                                          defaultValue: '当前密钥已限制所有模型，将无法发起任何 API 请求',
                                                                      },
@@ -667,8 +948,8 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                  : 'neutral'
     const modelLimitPrimaryEmptyText                           = modelLimitBothPanelsEmpty && hasModelLimitQuery
                                                                  ?
-                                                                 t(
-                                                                     'config_management.visual.api_keys.model_limit_search_empty',
+                                                                 visualT(
+                                                                     'api_keys.model_limit_search_empty',
                                                                      {
                                                                          defaultValue: '没有匹配模型',
                                                                      },
@@ -691,14 +972,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 return null
             }
             if (alias.length > 20) {
-                return t('config_management.visual.api_keys.alias_error_length')
+                return visualT('api_keys.alias_error_length')
             }
             if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
-                return t('config_management.visual.api_keys.alias_error_format')
+                return visualT('api_keys.alias_error_format')
             }
             return null
         },
-        [t],
+        [visualT],
     )
 
     function generateSecureApiKey(alias?: string): string {
@@ -756,13 +1037,32 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         }
         const blockedModels = uniqueSorted(draftBlockedModels)
         const nextRules     = { ...modelRules }
-        if (blockedModels.length > 0) {
-            nextRules[modelLimitKey] = { blockedModels }
-        } else {
+        const nextRule      = {
+            ...EMPTY_API_KEY_MODEL_RULE,
+            ...modelRules[modelLimitKey],
+            blockedModels,
+        }
+        if (isApiKeyModelRuleEmpty(nextRule)) {
             delete nextRules[modelLimitKey]
+        } else {
+            nextRules[modelLimitKey] = nextRule
         }
         onModelRulesChange(nextRules)
         closeModelLimitModal()
+    }
+
+    const savePolicyRule = (rule: ApiKeyModelRule) => {
+        if (!policyKey) {
+            return
+        }
+        const nextRules = { ...modelRules }
+        if (isApiKeyModelRuleEmpty(rule)) {
+            delete nextRules[policyKey]
+        } else {
+            nextRules[policyKey] = rule
+        }
+        onModelRulesChange(nextRules)
+        setPolicyKey(null)
     }
 
     const closeModal = () => {
@@ -853,14 +1153,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         const trimmedAlias = aliasValue.trim()
 
         if (!trimmed) {
-            setFormError(t('config_management.visual.api_keys.error_empty'))
+            setFormError(visualT('api_keys.error_empty'))
             return
         }
         if (!isValidApiKey(trimmed)) {
             setFormError(
                 trimmed.length < 8
-                ? t('config_management.visual.api_keys.error_too_short')
-                : t('config_management.visual.api_keys.error_invalid'),
+                ? visualT('api_keys.error_too_short')
+                : visualT('api_keys.error_invalid'),
             )
             return
         }
@@ -880,7 +1180,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 ([key, alias]) => alias === trimmedAlias && key !== currentKey && key !== trimmed,
             )
             if (duplicate) {
-                setAliasError(t('config_management.visual.api_keys.alias_error_duplicate'))
+                setAliasError(visualT('api_keys.alias_error_duplicate'))
                 return
             }
         }
@@ -952,22 +1252,22 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     return (
         <div className='form-group' style={{ marginBottom: 0 }}>
             <div className={styles.blockHeaderRow}>
-                <label style={{ margin: 0 }}>{t('config_management.visual.api_keys.label')}</label>
+                <label style={{ margin: 0 }}>{visualT('api_keys.label')}</label>
                 <Button size='sm' onClick={openAddModal} disabled={disabled}>
-                    {t('config_management.visual.api_keys.add')}
+                    {visualT('api_keys.add')}
                 </Button>
             </div>
 
             {showSearch && (
                 <Input
-                    placeholder={t('config_management.visual.api_keys.search_placeholder')}
+                    placeholder={visualT('api_keys.search_placeholder')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                 />
             )}
 
             {apiKeys.length === 0 ? (
-                <div className={styles.emptyState}>{t('config_management.visual.api_keys.empty')}</div>
+                <div className={styles.emptyState}>{visualT('api_keys.empty')}</div>
             ) : (
                  <div className='item-list' style={{ marginTop: 4 }}>
                      {pagedKeys.map((item) => (
@@ -976,7 +1276,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                  <div className='pill'>#{item.index + 1}</div>
                                  <div className='item-title'>
                                      {highlightText(
-                                         aliases[item.key] || t('config_management.visual.api_keys.input_label'),
+                                         aliases[item.key] || visualT('api_keys.input_label'),
                                          searchQuery,
                                      )}
                                  </div>
@@ -985,12 +1285,30 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                  </div>
                                  <div className={styles.apiKeyModelLimitSummary}>
                                      {modelRules[item.key]?.blockedModels?.length
-                                      ? t('config_management.visual.api_keys.model_limit_blocked_summary', {
+                                      ? visualT('api_keys.model_limit_blocked_summary', {
                                              count: modelRules[item.key]?.blockedModels.length,
                                              defaultValue: '模型访问：已禁止 {{count}} 个模型',
                                          })
-                                      : t('config_management.visual.api_keys.model_limit_all_allowed', {
+                                      : visualT('api_keys.model_limit_all_allowed', {
                                              defaultValue: '模型访问：全部允许',
+                                         })}
+                                 </div>
+                                 <div className={styles.apiKeyPolicySummary}>
+                                     {isApiKeyPolicyConfigured(modelRules[item.key])
+                                      ? visualT('api_keys.policy_summary', {
+                                             profile: modelRules[item.key]?.policyProfile ||
+                                                      visualT('api_keys.policy_profile_default'),
+                                             ttl: modelRules[item.key]?.reservationTtl ||
+                                                  visualT('api_keys.policy_ttl_default'),
+                                             providers: modelRules[item.key]?.providers.length ?? 0,
+                                             models: modelRules[item.key]?.canonicalModels.length ?? 0,
+                                             mappings: Object.keys(modelRules[item.key]?.modelMappings ?? {}).length,
+                                             limits: modelRules[item.key]?.limits.length ?? 0,
+                                             defaultValue:
+                                                 '策略：{{profile}} · TTL {{ttl}} · 供应商 {{providers}} · 模型 {{models}} · 映射 {{mappings}} · 额度窗口 {{limits}}',
+                                         })
+                                      : visualT('api_keys.policy_unconfigured', {
+                                             defaultValue: '额度策略：未配置',
                                          })}
                                  </div>
                              </div>
@@ -1009,7 +1327,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      onClick={() => openEditModal(renderApiKeyIds[item.index] ?? '')}
                                      disabled={disabled}
                                  >
-                                     {t('config_management.visual.common.edit')}
+                                     {visualT('common.edit')}
                                  </Button>
                                  <Button
                                      variant='secondary'
@@ -1017,9 +1335,17 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      onClick={() => openModelLimitModal(item.key)}
                                      disabled={disabled}
                                  >
-                                     {t('config_management.visual.api_keys.model_limit_button', {
+                                     {visualT('api_keys.model_limit_button', {
                                          defaultValue: '模型限制',
                                      })}
+                                 </Button>
+                                 <Button
+                                     variant='secondary'
+                                     size='sm'
+                                     onClick={() => setPolicyKey(item.key)}
+                                     disabled={disabled}
+                                 >
+                                     {visualT('api_keys.policy_button')}
                                  </Button>
                                  <Button
                                      variant='danger'
@@ -1030,30 +1356,24 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                          const display = alias
                                                          ? `${alias} (${maskApiKey(item.key)})`
                                                          : maskApiKey(item.key)
-                                         useNotificationStore.getState().showConfirmation({
-                                                                                              title: t(
-                                                                                                  'config_management.visual.api_keys.delete_title',
-                                                                                                  {
-                                                                                                      defaultValue: 'Delete API key',
-                                                                                                  },
-                                                                                              ),
-                                                                                              message: t(
-                                                                                                  'config_management.visual.api_keys.delete_confirm',
-                                                                                                  {
-                                                                                                      key: display,
-                                                                                                      defaultValue: `Delete API key "${display}"?`,
-                                                                                                  },
-                                                                                              ),
-                                                                                              variant: 'danger',
-                                                                                              confirmText: t(
-                                                                                                  'config_management.visual.common.delete'),
-                                                                                              onConfirm: () => handleDelete(
-                                                                                                  id),
-                                                                                          })
+                                         useNotificationStore
+                                             .getState()
+                                             .showConfirmation({
+                                                                   title: visualT('api_keys.delete_title', {
+                                                                       defaultValue: 'Delete API key',
+                                                                   }),
+                                                                   message: visualT('api_keys.delete_confirm', {
+                                                                       key: display,
+                                                                       defaultValue: `Delete API key "${display}"?`,
+                                                                   }),
+                                                                   variant: 'danger',
+                                                                   confirmText: visualT('common.delete'),
+                                                                   onConfirm: () => handleDelete(id),
+                                                               })
                                      }}
                                      disabled={disabled}
                                  >
-                                     {t('config_management.visual.common.delete')}
+                                     {visualT('common.delete')}
                                  </Button>
                              </div>
                          </div>
@@ -1071,35 +1391,35 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 />
             )}
 
-            <div className='hint'>{t('config_management.visual.api_keys.hint')}</div>
+            <div className='hint'>{visualT('api_keys.hint')}</div>
 
             <Modal
                 open={modalOpen}
                 onClose={closeModal}
                 title={
                     editingApiKeyId !== null
-                    ? t('config_management.visual.api_keys.edit_title')
-                    : t('config_management.visual.api_keys.add_title')
+                    ? visualT('api_keys.edit_title')
+                    : visualT('api_keys.add_title')
                 }
                 footer={
                     <>
                         <Button variant='secondary' onClick={closeModal} disabled={disabled}>
-                            {t('config_management.visual.common.cancel')}
+                            {visualT('common.cancel')}
                         </Button>
                         <Button onClick={handleSave} disabled={disabled}>
                             {editingApiKeyId !== null
-                             ? t('config_management.visual.common.update')
-                             : t('config_management.visual.common.add')}
+                             ? visualT('common.update')
+                             : visualT('common.add')}
                         </Button>
                     </>
                 }
             >
                 <div className='form-group'>
-                    <label htmlFor={aliasInputId}>{t('config_management.visual.api_keys.alias_label')}</label>
+                    <label htmlFor={aliasInputId}>{visualT('api_keys.alias_label')}</label>
                     <input
                         id={aliasInputId}
                         className='input'
-                        placeholder={t('config_management.visual.api_keys.alias_placeholder')}
+                        placeholder={visualT('api_keys.alias_placeholder')}
                         value={aliasValue}
                         onChange={(e) => {
                             setAliasValue(e.target.value)
@@ -1110,7 +1430,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                         aria-invalid={Boolean(aliasError)}
                     />
                     <div id={aliasHintId} className='hint'>
-                        {t('config_management.visual.api_keys.alias_hint')}
+                        {visualT('api_keys.alias_hint')}
                     </div>
                     {aliasError && (
                         <div id={aliasErrorId} className='error-box'>
@@ -1120,18 +1440,20 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 </div>
 
                 <div className='form-group'>
-                    <label htmlFor={apiKeyInputId}>{t('config_management.visual.api_keys.input_label')}</label>
+                    <label htmlFor={apiKeyInputId}>{visualT('api_keys.input_label')}</label>
                     <div className={styles.apiKeyModalInputRow}>
                         <div className={styles.apiKeyModalSecretInput}>
                             <input
                                 id={apiKeyInputId}
                                 className='input'
                                 type={apiKeyVisible ? 'text' : 'password'}
-                                placeholder={t('config_management.visual.api_keys.input_placeholder')}
+                                placeholder={visualT('api_keys.input_placeholder')}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 disabled={disabled}
-                                aria-describedby={formError ? `${apiKeyErrorId} ${apiKeyHintId}` : apiKeyHintId}
+                                aria-describedby={`${apiKeyStrengthId} ${apiKeyHintId}${
+                                    formError ? ` ${apiKeyErrorId}` : ''
+                                }`}
                                 aria-invalid={Boolean(formError)}
                                 autoComplete='new-password'
                                 spellCheck={false}
@@ -1159,11 +1481,12 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             onClick={handleGenerate}
                             disabled={disabled}
                         >
-                            {t('config_management.visual.api_keys.generate')}
+                            {visualT('api_keys.generate')}
                         </Button>
                     </div>
+                    <ApiKeyStrengthMeter id={apiKeyStrengthId} value={inputValue} />
                     <div id={apiKeyHintId} className='hint'>
-                        {t('config_management.visual.api_keys.input_hint')}
+                        {visualT('api_keys.input_hint')}
                     </div>
                     {formError && (
                         <div id={apiKeyErrorId} className='error-box'>
@@ -1177,16 +1500,16 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 open={modelLimitKey !== null}
                 onClose={closeModelLimitModal}
                 width='min(1180px, calc(100vw - 48px))'
-                title={t('config_management.visual.api_keys.model_limit_title', {
+                title={visualT('api_keys.model_limit_title', {
                     defaultValue: '模型访问限制',
                 })}
                 footer={
                     <>
                         <Button variant='secondary' onClick={closeModelLimitModal} disabled={disabled}>
-                            {t('config_management.visual.common.cancel')}
+                            {visualT('common.cancel')}
                         </Button>
                         <Button onClick={saveModelLimitRules} disabled={disabled || !modelLimitCatalogReady}>
-                            {t('config_management.visual.common.update')}
+                            {visualT('common.update')}
                         </Button>
                     </>
                 }
@@ -1194,7 +1517,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 <div className={styles.modelLimitModal}>
                     <div className={styles.modelLimitTarget}>{currentModelLimitTitle}</div>
                     <div className={styles.modelLimitHint}>
-                        {t('config_management.visual.api_keys.model_limit_hint', {
+                        {visualT('api_keys.model_limit_hint', {
                             defaultValue: '默认允许全部模型，系统新增模型也会默认允许；移入右侧后该 key 将无法访问',
                         })}
                     </div>
@@ -1205,14 +1528,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                     ) : null}
                     {modelCatalogError ? (
                         <div className='error-box'>
-                            {t('config_management.visual.api_keys.model_catalog_load_failed', {
+                            {visualT('api_keys.model_catalog_load_failed', {
                                 error: modelCatalogError,
                                 defaultValue: `模型目录加载失败：${modelCatalogError}`,
                             })}
                         </div>
                     ) : null}
                     <Input
-                        placeholder={t('config_management.visual.api_keys.model_limit_search', {
+                        placeholder={visualT('api_keys.model_limit_search', {
                             defaultValue: '搜索模型或供应商',
                         })}
                         value={modelLimitQuery}
@@ -1220,7 +1543,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                     />
                     <div className={styles.modelLimitTransfer}>
                         <ModelTreePanel
-                            title={t('config_management.visual.api_keys.model_limit_allowed', {
+                            title={visualT('api_keys.model_limit_allowed', {
                                 defaultValue: '允许访问（默认）',
                             })}
                             nodes={filteredAllowedTree}
@@ -1241,7 +1564,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                 disabled={selectedAllowed.size === 0 || disabled}
                             >
                                 <span className={styles.modelLimitActionContent}>
-                                    {t('config_management.visual.api_keys.model_limit_move_blocked', {
+                                    {visualT('api_keys.model_limit_move_blocked', {
                                         defaultValue: '移到禁止',
                                     })}
                                     <IconChevronRight size={14} />
@@ -1256,7 +1579,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             >
                                 <span className={styles.modelLimitActionContent}>
                                     <IconChevronLeft size={14} />
-                                    {t('config_management.visual.api_keys.model_limit_move_allowed', {
+                                    {visualT('api_keys.model_limit_move_allowed', {
                                         defaultValue: '恢复允许',
                                     })}
                                 </span>
@@ -1269,7 +1592,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                 disabled={availableModelNames.length === 0 || availableModelsAllBlocked || disabled}
                             >
                                 <span className={styles.modelLimitActionContent}>
-                                    {t('config_management.visual.api_keys.model_limit_block_all', {
+                                    {visualT('api_keys.model_limit_block_all', {
                                         defaultValue: '全部禁止',
                                     })}
                                     <IconChevronRight size={14} />
@@ -1292,14 +1615,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             >
                                 <span className={styles.modelLimitActionContent}>
                                     <IconChevronLeft size={14} />
-                                    {t('config_management.visual.api_keys.model_limit_allow_all', {
+                                    {visualT('api_keys.model_limit_allow_all', {
                                         defaultValue: '全部允许',
                                     })}
                                 </span>
                             </Button>
                         </div>
                         <ModelTreePanel
-                            title={t('config_management.visual.api_keys.model_limit_blocked', {
+                            title={visualT('api_keys.model_limit_blocked', {
                                 defaultValue: '禁止访问（黑名单）',
                             })}
                             nodes={filteredBlockedTree}
@@ -1308,10 +1631,10 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             onMoveModel={(model) => moveBlockedToAllowed([model])}
                             emptyText={
                                 hasModelLimitQuery
-                                ? t('config_management.visual.api_keys.model_limit_search_empty_blocked', {
+                                ? visualT('api_keys.model_limit_search_empty_blocked', {
                                     defaultValue: '黑名单中没有匹配模型',
                                 })
-                                : t('config_management.visual.api_keys.model_limit_blocked_empty', {
+                                : visualT('api_keys.model_limit_blocked_empty', {
                                     defaultValue: '未限制任何模型，从左侧移入后禁止访问',
                                 })
                             }
@@ -1322,6 +1645,17 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                     </div>
                 </div>
             </Modal>
+
+            {policyKey ? (
+                <ApiKeyPolicyEditor
+                    key={policyKey}
+                    target={currentPolicyTitle}
+                    rule={modelRules[policyKey]}
+                    disabled={disabled}
+                    onClose={() => setPolicyKey(null)}
+                    onSave={savePolicyRule}
+                />
+            ) : null}
         </div>
     )
 })

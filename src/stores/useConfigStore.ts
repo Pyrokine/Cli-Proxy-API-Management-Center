@@ -33,99 +33,55 @@ interface ConfigState {
 let configRequestToken                                                     = 0
 let inFlightConfigRequest: { id: number; promise: Promise<Config> } | null = null
 
-const SECTION_KEYS: RawConfigSection[] = [
-    'debug',
-    'proxy-url',
-    'request-retry',
-    'quota-exceeded',
-    'usage-statistics-enabled',
-    'request-log',
-    'logging-to-file',
-    'logs-max-total-size-mb',
-    'error-logs-max-files',
-    'usage-retention',
-    'image-artifact-cache',
-    'ws-auth',
-    'force-model-prefix',
-    'routing/strategy',
-    'api-keys',
-    'gemini-api-key',
-    'codex-api-key',
-    'claude-api-key',
-    'vertex-api-key',
-    'openai-compatibility',
-    'oauth-excluded-models',
-    'auto-refresh-interval',
-    'model-refresh-interval',
-    'quota-refresh',
-    'remote-management',
-    'plugins',
-]
+interface ConfigSectionDescriptor {
+    get: (config: Config) => unknown
+    set: (config: Config, value: unknown) => void
+}
 
-const extractSectionValue = (config: Config | null, section?: RawConfigSection) => {
-    if (!config) {
-        return undefined
-    }
-    switch (section) {
-        case 'debug':
-            return config.debug
-        case 'proxy-url':
-            return config.proxyUrl
-        case 'request-retry':
-            return config.requestRetry
-        case 'quota-exceeded':
-            return config.quotaExceeded
-        case 'usage-statistics-enabled':
-            return config.usageStatisticsEnabled
-        case 'request-log':
-            return config.requestLog
-        case 'logging-to-file':
-            return config.loggingToFile
-        case 'logs-max-total-size-mb':
-            return config.logsMaxTotalSizeMb
-        case 'error-logs-max-files':
-            return config.errorLogsMaxFiles
-        case 'usage-retention':
-            return config.usageRetention
-        case 'image-artifact-cache':
-            return config.imageArtifactCache
-        case 'ws-auth':
-            return config.wsAuth
-        case 'force-model-prefix':
-            return config.forceModelPrefix
-        case 'routing/strategy':
-            return config.routingStrategy
-        case 'api-keys':
-            return config.apiKeys
-        case 'gemini-api-key':
-            return config.geminiApiKeys
-        case 'codex-api-key':
-            return config.codexApiKeys
-        case 'claude-api-key':
-            return config.claudeApiKeys
-        case 'vertex-api-key':
-            return config.vertexApiKeys
-        case 'openai-compatibility':
-            return config.openaiCompatibility
-        case 'oauth-excluded-models':
-            return config.oauthExcludedModels
-        case 'auto-refresh-interval':
-            return config.autoRefreshInterval
-        case 'model-refresh-interval':
-            return config.modelRefreshInterval
-        case 'quota-refresh':
-            return config.quotaRefresh
-        case 'remote-management':
-            return config.remoteManagement
-        case 'plugins':
-            return config.plugins
-        default:
-            if (!section) {
-                return undefined
-            }
-            return config.raw?.[section]
+function configField<K extends keyof Config>(key: K): ConfigSectionDescriptor {
+    return {
+        get: (config) => config[key],
+        set: (config, value) => {
+            config[key] = value as Config[K]
+        },
     }
 }
+
+const CONFIG_SECTION_DESCRIPTORS: Record<RawConfigSection, ConfigSectionDescriptor> = {
+    'debug': configField('debug'),
+    'proxy-url': configField('proxyUrl'),
+    'request-retry': configField('requestRetry'),
+    'quota-exceeded': configField('quotaExceeded'),
+    'usage-statistics-enabled': configField('usageStatisticsEnabled'),
+    'request-log': configField('requestLog'),
+    'logging-to-file': configField('loggingToFile'),
+    'logs-max-total-size-mb': configField('logsMaxTotalSizeMb'),
+    'error-logs-max-files': configField('errorLogsMaxFiles'),
+    'usage-retention': configField('usageRetention'),
+    'image-artifact-cache': configField('imageArtifactCache'),
+    'ws-auth': configField('wsAuth'),
+    'force-model-prefix': configField('forceModelPrefix'),
+    'routing/strategy': configField('routingStrategy'),
+    'api-keys': configField('apiKeys'),
+    'gemini-api-key': configField('geminiApiKeys'),
+    'interactions-api-key': configField('interactionsApiKeys'),
+    'codex-api-key': configField('codexApiKeys'),
+    'claude-api-key': configField('claudeApiKeys'),
+    'xai-api-key': configField('xaiApiKeys'),
+    'vertex-api-key': configField('vertexApiKeys'),
+    'openai-compatibility': configField('openaiCompatibility'),
+    'oauth-excluded-models': configField('oauthExcludedModels'),
+    'auto-refresh-interval': configField('autoRefreshInterval'),
+    'model-refresh-interval': configField('modelRefreshInterval'),
+    'quota-refresh': configField('quotaRefresh'),
+    'remote-management': configField('remoteManagement'),
+    'plugins': configField('plugins'),
+}
+
+const SECTION_KEYS = Object.keys(CONFIG_SECTION_DESCRIPTORS) as RawConfigSection[]
+
+const extractSectionValue = (config: Config | null, section?: RawConfigSection) =>
+    config && section ? CONFIG_SECTION_DESCRIPTORS[section].get(config) : undefined
 
 export const useConfigStore = create<ConfigState>((set, get) => ({
     config: null,
@@ -217,88 +173,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
             raw[section]             = value
             const nextConfig: Config = { ...(state.config || {}), raw }
 
-            switch (section) {
-                case 'debug':
-                    nextConfig.debug = value as Config['debug']
-                    break
-                case 'proxy-url':
-                    nextConfig.proxyUrl = value as Config['proxyUrl']
-                    break
-                case 'request-retry':
-                    nextConfig.requestRetry = value as Config['requestRetry']
-                    break
-                case 'quota-exceeded':
-                    nextConfig.quotaExceeded = value as Config['quotaExceeded']
-                    break
-                case 'usage-statistics-enabled':
-                    nextConfig.usageStatisticsEnabled = value as Config['usageStatisticsEnabled']
-                    break
-                case 'request-log':
-                    nextConfig.requestLog = value as Config['requestLog']
-                    break
-                case 'logging-to-file':
-                    nextConfig.loggingToFile = value as Config['loggingToFile']
-                    break
-                case 'logs-max-total-size-mb':
-                    nextConfig.logsMaxTotalSizeMb = value as Config['logsMaxTotalSizeMb']
-                    break
-                case 'error-logs-max-files':
-                    nextConfig.errorLogsMaxFiles = value as Config['errorLogsMaxFiles']
-                    break
-                case 'usage-retention':
-                    nextConfig.usageRetention = value as Config['usageRetention']
-                    break
-                case 'image-artifact-cache':
-                    nextConfig.imageArtifactCache = value as Config['imageArtifactCache']
-                    break
-                case 'ws-auth':
-                    nextConfig.wsAuth = value as Config['wsAuth']
-                    break
-                case 'force-model-prefix':
-                    nextConfig.forceModelPrefix = value as Config['forceModelPrefix']
-                    break
-                case 'routing/strategy':
-                    nextConfig.routingStrategy = value as Config['routingStrategy']
-                    break
-                case 'api-keys':
-                    nextConfig.apiKeys = value as Config['apiKeys']
-                    break
-                case 'gemini-api-key':
-                    nextConfig.geminiApiKeys = value as Config['geminiApiKeys']
-                    break
-                case 'codex-api-key':
-                    nextConfig.codexApiKeys = value as Config['codexApiKeys']
-                    break
-                case 'claude-api-key':
-                    nextConfig.claudeApiKeys = value as Config['claudeApiKeys']
-                    break
-                case 'vertex-api-key':
-                    nextConfig.vertexApiKeys = value as Config['vertexApiKeys']
-                    break
-                case 'openai-compatibility':
-                    nextConfig.openaiCompatibility = value as Config['openaiCompatibility']
-                    break
-                case 'oauth-excluded-models':
-                    nextConfig.oauthExcludedModels = value as Config['oauthExcludedModels']
-                    break
-                case 'auto-refresh-interval':
-                    nextConfig.autoRefreshInterval = value as Config['autoRefreshInterval']
-                    break
-                case 'model-refresh-interval':
-                    nextConfig.modelRefreshInterval = value as Config['modelRefreshInterval']
-                    break
-                case 'quota-refresh':
-                    nextConfig.quotaRefresh = value as Config['quotaRefresh']
-                    break
-                case 'remote-management':
-                    nextConfig.remoteManagement = value as Config['remoteManagement']
-                    break
-                case 'plugins':
-                    nextConfig.plugins = value as Config['plugins']
-                    break
-                default:
-                    break
-            }
+            CONFIG_SECTION_DESCRIPTORS[section].set(nextConfig, value)
 
             return { config: nextConfig }
         })
@@ -311,20 +186,20 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         const { cache } = get()
         const newCache  = new Map(cache)
 
+        // 任何配置变更都使更早发出的全量请求失效
+        configRequestToken += 1
+        inFlightConfigRequest = null
+
         if (section) {
             newCache.delete(section)
             // 同时清除完整配置缓存
             newCache.delete('__full__')
 
-            set({ cache: newCache })
+            set({ cache: newCache, loading: false })
             return
         } else {
             newCache.clear()
         }
-
-        // 清除全部缓存一般代表“切换连接/登出/全量刷新”，需要让 in-flight 的旧请求失效
-        configRequestToken += 1
-        inFlightConfigRequest = null
 
         set({ config: null, cache: newCache, loading: false, error: null })
     },

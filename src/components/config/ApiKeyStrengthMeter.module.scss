@@ -1,0 +1,84 @@
+@use '../../styles/variables' as *;
+
+.meter {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 2px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--api-key-strength-color) 22%, var(--border-color));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--api-key-strength-color) 5%, var(--bg-primary));
+}
+
+.summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.title,
+.level,
+.detail {
+    font-size: $font-size-xs;
+    line-height: 1.45;
+}
+
+.title {
+    color: var(--text-secondary);
+    font-weight: $font-weight-semibold;
+}
+
+.level {
+    color: var(--api-key-strength-color);
+    font-weight: $font-weight-semibold;
+}
+
+.track {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.segment {
+    height: 4px;
+    overflow: hidden;
+    border-radius: $radius-full;
+    background: color-mix(in srgb, var(--api-key-strength-color) 16%, var(--bg-tertiary));
+}
+
+.segmentFilled {
+    background: var(--api-key-strength-color);
+}
+
+.detail {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    color: var(--text-secondary);
+}
+
+.detailLabel {
+    color: var(--text-primary);
+    font-weight: $font-weight-semibold;
+}
+
+.suggestions {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding-left: 18px;
+}
+
+@media (forced-colors: active) {
+    .meter,
+    .segment {
+        border: 1px solid CanvasText;
+    }
+
+    .segmentFilled {
+        background: Highlight;
+    }
+}

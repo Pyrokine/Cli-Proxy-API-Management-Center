@@ -1,6 +1,6 @@
 import {apiClient} from './client'
 
-export interface ImageArtifactCacheSizeResponse {
+interface ImageArtifactCacheSizeResponse {
     total_bytes: number
     file_count: number
 }

@@ -16,7 +16,7 @@ type Translate = (key: string) => string
 
 const L = (key: string) => `config_management.visual.${key}`
 
-export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
+const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     {
         fieldId: 'host',
         sectionId: 'connectivity',
@@ -77,6 +77,14 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['remote-management', 'allow-remote'],
     },
     {
+        fieldId: 'rmTrustedProxies',
+        sectionId: 'connectivity',
+        labelKey: L('sections.remote.trusted_proxies'),
+        hintKey: L('sections.remote.trusted_proxies_hint'),
+        yamlKeys: ['remote-management', 'trusted-proxies'],
+        keywords: ['reverse proxy', 'forwarded for', 'real ip'],
+    },
+    {
         fieldId: 'rmSecretKey',
         sectionId: 'connectivity',
         labelKey: L('sections.remote.secret_key'),
@@ -94,8 +102,22 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         fieldId: 'apiKeys',
         sectionId: 'connectivity',
         labelKey: L('api_keys.label'),
-        yamlKeys: ['api-keys'],
-        keywords: ['api key', 'apikey', 'token'],
+        hintKey: L('api_keys.policy_hint'),
+        yamlKeys: [
+            'api-keys',
+            'api-key-rules',
+            'blocked-models',
+            'providers',
+            'canonical-models',
+            'model-mappings',
+            'policy-profile',
+            'reservation-ttl',
+            'limits',
+            'requests',
+            'tokens',
+            'cost-micro',
+        ],
+        keywords: ['api key', 'apikey', 'token', 'quota', 'policy', 'provider', 'canonical model', 'mapping'],
     },
 
     { fieldId: 'proxyUrl', sectionId: 'network', labelKey: L('sections.network.proxy_url'), yamlKeys: ['proxy-url'] },
@@ -145,7 +167,7 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         labelKey: L('sections.network.routing_strategy'),
         hintKey: L('sections.network.routing_strategy_hint'),
         yamlKeys: ['routing', 'strategy'],
-        keywords: ['round-robin', 'fill-first'],
+        keywords: ['round-robin', 'weighted-round-robin', 'wrr', 'quota-aware', 'headroom', 'reset', 'fill-first'],
     },
     {
         fieldId: 'disableImageGeneration',

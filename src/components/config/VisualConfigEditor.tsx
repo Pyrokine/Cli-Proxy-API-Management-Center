@@ -234,6 +234,9 @@ export function VisualConfigEditor({
                                        onChange,
                                    }: VisualConfigEditorProps) {
     const { t }                                     = useTranslation()
+    const { t: sectionT }                           = useTranslation(undefined, {
+        keyPrefix: 'config_management.visual.sections',
+    })
     const timezone                                  = useTimezoneStore((state) => state.timezone)
     const setTimezone                               = useTimezoneStore((state) => state.setTimezone)
     const timezoneOptions                           = useMemo(
@@ -302,90 +305,94 @@ export function VisualConfigEditor({
     const isNonstreamKeepaliveDisabled =
               values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0'
 
-    const portError                           = getValidationMessage(t, validationErrors?.port)
-    const tlsHttpRedirectPortError            = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
-    const logsMaxSizeError                    = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
+    const portError                            = getValidationMessage(t, validationErrors?.port)
+    const tlsHttpRedirectPortError             = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
+    const logsMaxSizeError                     = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb)
     const imageArtifactCacheRetentionDaysError = getValidationMessage(
         t,
         validationErrors?.imageArtifactCacheRetentionDays,
     )
-    const imageArtifactCacheMaxSizeError      = getValidationMessage(
+    const imageArtifactCacheMaxSizeError       = getValidationMessage(
         t,
         validationErrors?.imageArtifactCacheMaxTotalSizeMb,
     )
-    const errorLogsMaxFilesError              = getValidationMessage(t, validationErrors?.errorLogsMaxFiles)
-    const redisUsageQueueRetentionError       = getValidationMessage(
+    const errorLogsMaxFilesError               = getValidationMessage(t, validationErrors?.errorLogsMaxFiles)
+    const redisUsageQueueRetentionError        = getValidationMessage(
         t,
         validationErrors?.redisUsageQueueRetentionSeconds,
     )
-    const authAutoRefreshWorkersError         = getValidationMessage(t, validationErrors?.authAutoRefreshWorkers)
-    const usageRetentionDaysError             = getValidationMessage(t, validationErrors?.usageRetentionDays)
-    const usageRetentionMaxDbSizeMbError      = getValidationMessage(t, validationErrors?.usageRetentionMaxDbSizeMb)
-    const usageRetentionWarningThresholdError = getValidationMessage(
+    const authAutoRefreshWorkersError          = getValidationMessage(t, validationErrors?.authAutoRefreshWorkers)
+    const usageRetentionDaysError              = getValidationMessage(t, validationErrors?.usageRetentionDays)
+    const usageRetentionMaxDbSizeMbError       = getValidationMessage(t, validationErrors?.usageRetentionMaxDbSizeMb)
+    const usageRetentionWarningThresholdError  = getValidationMessage(
         t,
         validationErrors?.usageRetentionWarningThresholdPct,
     )
-    const autoRefreshIntervalError            = getValidationMessage(t, validationErrors?.autoRefreshInterval)
-    const modelRefreshIntervalError           = getValidationMessage(t, validationErrors?.modelRefreshInterval)
-    const logSizeMeta                         = (() => {
+    const autoRefreshIntervalError             = getValidationMessage(t, validationErrors?.autoRefreshInterval)
+    const modelRefreshIntervalError            = getValidationMessage(t, validationErrors?.modelRefreshInterval)
+    const logSizeMeta                          = (() => {
         const logSize = runtimeInfo?.logSize
         if (!logSize || logSize.status === 'loading') {
-            return <FieldMeta>{t('config_management.visual.sections.runtime.log_size_loading')}</FieldMeta>
+            return <FieldMeta>{sectionT('runtime.log_size_loading')}</FieldMeta>
         }
         if (logSize.status === 'error') {
-            return <FieldMeta tone='warning'>{t('config_management.visual.sections.runtime.log_size_error')}</FieldMeta>
+            return <FieldMeta tone='warning'>{sectionT('runtime.log_size_error')}</FieldMeta>
         }
         return (
             <FieldMeta>
-                {t('config_management.visual.sections.runtime.log_size_ready', {
+                {sectionT('runtime.log_size_ready', {
                     size: formatFileSize(logSize.totalBytes),
                     count: logSize.fileCount,
                 })}
             </FieldMeta>
         )
     })()
-    const imageArtifactCacheSizeMeta          = (() => {
+    const imageArtifactCacheSizeMeta           = (() => {
         const imageArtifactCacheSize = runtimeInfo?.imageArtifactCacheSize
         if (!imageArtifactCacheSize || imageArtifactCacheSize.status === 'loading') {
-            return <FieldMeta>{t('config_management.visual.sections.runtime.image_artifact_cache_size_loading')}</FieldMeta>
+            return (
+                <FieldMeta>
+                    {sectionT('runtime.image_artifact_cache_size_loading')}
+                </FieldMeta>
+            )
         }
         if (imageArtifactCacheSize.status === 'error') {
             return (
                 <FieldMeta tone='warning'>
-                    {t('config_management.visual.sections.runtime.image_artifact_cache_size_error')}
+                    {sectionT('runtime.image_artifact_cache_size_error')}
                 </FieldMeta>
             )
         }
         return (
             <FieldMeta>
-                {t('config_management.visual.sections.runtime.image_artifact_cache_size_ready', {
+                {sectionT('runtime.image_artifact_cache_size_ready', {
                     size: formatFileSize(imageArtifactCacheSize.totalBytes),
                     count: imageArtifactCacheSize.fileCount,
                 })}
             </FieldMeta>
         )
     })()
-    const usageDbSizeMeta                     = (() => {
+    const usageDbSizeMeta                      = (() => {
         const usageDbSize = runtimeInfo?.usageDbSize
         if (!usageDbSize || usageDbSize.status === 'loading') {
-            return <FieldMeta>{t('config_management.visual.sections.runtime.db_size_loading')}</FieldMeta>
+            return <FieldMeta>{sectionT('runtime.db_size_loading')}</FieldMeta>
         }
         if (usageDbSize.status === 'error') {
-            return <FieldMeta tone='warning'>{t('config_management.visual.sections.runtime.db_size_error')}</FieldMeta>
+            return <FieldMeta tone='warning'>{sectionT('runtime.db_size_error')}</FieldMeta>
         }
 
         const text       = usageDbSize.maxSizeBytes && usageDbSize.maxSizeBytes > 0
-                           ? t('config_management.visual.sections.runtime.db_size_ready_with_max', {
+                           ? sectionT('runtime.db_size_ready_with_max', {
                 size: formatFileSize(usageDbSize.sizeBytes),
                 max: formatFileSize(usageDbSize.maxSizeBytes),
             })
-                           : t('config_management.visual.sections.runtime.db_size_ready', {
+                           : sectionT('runtime.db_size_ready', {
                 size: formatFileSize(usageDbSize.sizeBytes),
             })
         const statusText = usageDbSize.capped
-                           ? t('config_management.visual.sections.runtime.db_size_capped')
+                           ? sectionT('runtime.db_size_capped')
                            : usageDbSize.warning
-                             ? t('config_management.visual.sections.runtime.db_size_warning', {
+                             ? sectionT('runtime.db_size_warning', {
                     threshold: usageDbSize.warningThresholdPct ?? 80,
                 })
                              : ''
@@ -396,26 +403,30 @@ export function VisualConfigEditor({
             </FieldMeta>
         )
     })()
-    const requestRetryError                   = getValidationMessage(t, validationErrors?.requestRetry)
-    const maxRetryCredentialsError            = getValidationMessage(t, validationErrors?.maxRetryCredentials)
-    const maxRetryIntervalError               = getValidationMessage(t, validationErrors?.maxRetryInterval)
-    const quotaRefreshIntervalError           = getValidationMessage(t, validationErrors?.quotaRefreshInterval)
-    const quotaRefreshMaxIntervalError        = getValidationMessage(t, validationErrors?.quotaRefreshMaxInterval)
-    const keepaliveError                      = getValidationMessage(
+    const requestRetryError                    = getValidationMessage(t, validationErrors?.requestRetry)
+    const maxRetryCredentialsError             = getValidationMessage(t, validationErrors?.maxRetryCredentials)
+    const maxRetryIntervalError                = getValidationMessage(t, validationErrors?.maxRetryInterval)
+    const quotaRefreshIntervalError            = getValidationMessage(t, validationErrors?.quotaRefreshInterval)
+    const quotaRefreshMaxIntervalError         = getValidationMessage(t, validationErrors?.quotaRefreshMaxInterval)
+    const keepaliveError                       = getValidationMessage(
         t,
         validationErrors?.['streaming.keepaliveSeconds'],
     )
-    const bootstrapRetriesError               = getValidationMessage(
+    const bootstrapRetriesError                = getValidationMessage(
         t,
         validationErrors?.['streaming.bootstrapRetries'],
     )
-    const nonstreamKeepaliveError             = getValidationMessage(
+    const nonstreamKeepaliveError              = getValidationMessage(
         t,
         validationErrors?.['streaming.nonstreamKeepaliveInterval'],
     )
 
     const handleApiKeysTextChange             = useCallback(
         (apiKeysText: string) => onChange({ apiKeysText }),
+        [onChange],
+    )
+    const handleTrustedProxiesChange          = useCallback(
+        (rmTrustedProxies: string[]) => onChange({ rmTrustedProxies }),
         [onChange],
     )
     const handleApiKeyRulesChange             = useCallback(
@@ -461,15 +472,15 @@ export function VisualConfigEditor({
         () => [
             {
                 id: 'connectivity',
-                title: t('config_management.visual.sections.connectivity.title'),
-                description: t('config_management.visual.sections.connectivity.description'),
+                title: sectionT('connectivity.title'),
+                description: sectionT('connectivity.description'),
                 icon: IconKey,
                 errorCount: countErrors(['port', 'tlsHttpRedirectPort']),
             },
             {
                 id: 'network',
-                title: t('config_management.visual.sections.network.title'),
-                description: t('config_management.visual.sections.network.description'),
+                title: sectionT('network.title'),
+                description: sectionT('network.description'),
                 icon: IconTrendingUp,
                 errorCount: countErrors([
                                             'requestRetry',
@@ -480,8 +491,8 @@ export function VisualConfigEditor({
             },
             {
                 id: 'logging',
-                title: t('config_management.visual.sections.logging.title'),
-                description: t('config_management.visual.sections.logging.description'),
+                title: sectionT('logging.title'),
+                description: sectionT('logging.description'),
                 icon: IconDiamond,
                 errorCount: countErrors([
                                             'logsMaxTotalSizeMb',
@@ -498,15 +509,15 @@ export function VisualConfigEditor({
             },
             {
                 id: 'quota',
-                title: t('config_management.visual.sections.quota.title'),
-                description: t('config_management.visual.sections.quota.description'),
+                title: sectionT('quota.title'),
+                description: sectionT('quota.description'),
                 icon: IconTimer,
                 errorCount: countErrors(['quotaRefreshInterval', 'quotaRefreshMaxInterval']),
             },
             {
                 id: 'streaming',
-                title: t('config_management.visual.sections.streaming.title'),
-                description: t('config_management.visual.sections.streaming.description'),
+                title: sectionT('streaming.title'),
+                description: sectionT('streaming.description'),
                 icon: IconSatellite,
                 errorCount: countErrors([
                                             'streaming.keepaliveSeconds',
@@ -516,20 +527,20 @@ export function VisualConfigEditor({
             },
             {
                 id: 'advanced',
-                title: t('config_management.visual.sections.advanced.title'),
-                description: t('config_management.visual.sections.advanced.description'),
+                title: sectionT('advanced.title'),
+                description: sectionT('advanced.description'),
                 icon: IconShield,
                 errorCount: 0,
             },
             {
                 id: 'payload',
-                title: t('config_management.visual.sections.payload.title'),
-                description: t('config_management.visual.sections.payload.description'),
+                title: sectionT('payload.title'),
+                description: sectionT('payload.description'),
                 icon: IconCode,
                 errorCount: hasPayloadValidationErrors ? 1 : 0,
             },
         ],
-        [countErrors, hasPayloadValidationErrors, t],
+        [countErrors, hasPayloadValidationErrors, sectionT],
     )
 
     const hasValidationIssues       = sections.some((section) => section.errorCount > 0) || hasPayloadValidationErrors
@@ -715,12 +726,12 @@ export function VisualConfigEditor({
     const hostField = (
         <FieldAnchor fieldId='host'>
             <Input
-                label={t('config_management.visual.sections.server.host')}
+                label={sectionT('server.host')}
                 placeholder='127.0.0.1'
                 value={values.host}
                 onChange={(e) => onChange({ host: e.target.value })}
                 disabled={disabled}
-                hint={t('config_management.visual.sections.server.host_hint')}
+                hint={sectionT('server.host_hint')}
             />
         </FieldAnchor>
     )
@@ -728,7 +739,7 @@ export function VisualConfigEditor({
     const portField = (
         <FieldAnchor fieldId='port'>
             <Input
-                label={t('config_management.visual.sections.server.port')}
+                label={sectionT('server.port')}
                 type='number'
                 placeholder='8317'
                 value={values.port}
@@ -742,7 +753,7 @@ export function VisualConfigEditor({
     const proxyUrlField = (
         <FieldAnchor fieldId='proxyUrl'>
             <Input
-                label={t('config_management.visual.sections.network.proxy_url')}
+                label={sectionT('network.proxy_url')}
                 placeholder='socks5://user:pass@127.0.0.1:1080/'
                 value={values.proxyUrl}
                 onChange={(e) => onChange({ proxyUrl: e.target.value })}
@@ -768,8 +779,8 @@ export function VisualConfigEditor({
     const debugToggle = (
         <FieldAnchor fieldId='debug'>
             <ToggleRow
-                title={t('config_management.visual.sections.system.debug')}
-                description={t('config_management.visual.sections.system.debug_desc')}
+                title={sectionT('system.debug')}
+                description={sectionT('system.debug_desc')}
                 checked={values.debug}
                 disabled={disabled}
                 onChange={(debug) => onChange({ debug })}
@@ -780,8 +791,8 @@ export function VisualConfigEditor({
     const loggingToFileToggle = (
         <FieldAnchor fieldId='loggingToFile'>
             <ToggleRow
-                title={t('config_management.visual.sections.system.logging_to_file')}
-                description={t('config_management.visual.sections.system.logging_to_file_desc')}
+                title={sectionT('system.logging_to_file')}
+                description={sectionT('system.logging_to_file_desc')}
                 checked={values.loggingToFile}
                 disabled={disabled}
                 onChange={(loggingToFile) => onChange({ loggingToFile })}
@@ -792,8 +803,8 @@ export function VisualConfigEditor({
     const quotaSwitchProjectToggle = (
         <FieldAnchor fieldId='quotaSwitchProject'>
             <ToggleRow
-                title={t('config_management.visual.sections.quota.switch_project')}
-                description={t('config_management.visual.sections.quota.switch_project_desc')}
+                title={sectionT('quota.switch_project')}
+                description={sectionT('quota.switch_project_desc')}
                 checked={values.quotaSwitchProject}
                 disabled={disabled}
                 onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
@@ -804,8 +815,8 @@ export function VisualConfigEditor({
     const quotaSwitchPreviewModelToggle = (
         <FieldAnchor fieldId='quotaSwitchPreviewModel'>
             <ToggleRow
-                title={t('config_management.visual.sections.quota.switch_preview_model')}
-                description={t('config_management.visual.sections.quota.switch_preview_model_desc')}
+                title={sectionT('quota.switch_preview_model')}
+                description={sectionT('quota.switch_preview_model_desc')}
                 checked={values.quotaSwitchPreviewModel}
                 disabled={disabled}
                 onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
@@ -1050,8 +1061,8 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='01'
                              icon={<IconKey size={16} />}
-                             title={t('config_management.visual.sections.connectivity.title')}
-                             description={t('config_management.visual.sections.connectivity.description')}
+                             title={sectionT('connectivity.title')}
+                             description={sectionT('connectivity.description')}
                          >
                              <SectionStack>
                                  <SectionGrid>
@@ -1060,14 +1071,14 @@ export function VisualConfigEditor({
                                  </SectionGrid>
 
                                  <SectionSubsection
-                                     title={t('config_management.visual.sections.tls.title')}
-                                     description={t('config_management.visual.sections.tls.description')}
+                                     title={sectionT('tls.title')}
+                                     description={sectionT('tls.description')}
                                  >
                                      <SectionStack>
                                          <FieldAnchor fieldId='tlsEnable'>
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.tls.enable')}
-                                                 description={t('config_management.visual.sections.tls.enable_desc')}
+                                                 title={sectionT('tls.enable')}
+                                                 description={sectionT('tls.enable_desc')}
                                                  checked={values.tlsEnable}
                                                  disabled={disabled}
                                                  onChange={(tlsEnable) => onChange({ tlsEnable })}
@@ -1078,7 +1089,7 @@ export function VisualConfigEditor({
                                          <SectionGrid>
                                              <FieldAnchor fieldId='tlsCert'>
                                                  <Input
-                                                     label={t('config_management.visual.sections.tls.cert')}
+                                                     label={sectionT('tls.cert')}
                                                      placeholder='/path/to/cert.pem'
                                                      value={values.tlsCert}
                                                      onChange={(e) => onChange({ tlsCert: e.target.value })}
@@ -1087,7 +1098,7 @@ export function VisualConfigEditor({
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='tlsKey'>
                                                  <Input
-                                                     label={t('config_management.visual.sections.tls.key')}
+                                                     label={sectionT('tls.key')}
                                                      placeholder='/path/to/key.pem'
                                                      value={values.tlsKey}
                                                      onChange={(e) => onChange({ tlsKey: e.target.value })}
@@ -1096,8 +1107,8 @@ export function VisualConfigEditor({
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='tlsHttpRedirectPort'>
                                                  <Input
-                                                     label={t(
-                                                         'config_management.visual.sections.tls.http_redirect_port',
+                                                     label={sectionT(
+                                                         'tls.http_redirect_port',
                                                          { defaultValue: 'HTTP 跳转端口' },
                                                      )}
                                                      type='number'
@@ -1111,12 +1122,12 @@ export function VisualConfigEditor({
                                          </SectionGrid>
                                          <FieldAnchor fieldId='tlsRequireForAuth'>
                                              <ToggleRow
-                                                 title={t(
-                                                     'config_management.visual.sections.tls.require_for_auth',
+                                                 title={sectionT(
+                                                     'tls.require_for_auth',
                                                      { defaultValue: '认证接口强制 HTTPS' },
                                                  )}
-                                                 description={t(
-                                                     'config_management.visual.sections.tls.require_for_auth_desc',
+                                                 description={sectionT(
+                                                     'tls.require_for_auth_desc',
                                                      { defaultValue: '非本机访问认证接口时要求 HTTPS' },
                                                  )}
                                                  checked={values.tlsRequireForAuth}
@@ -1127,55 +1138,85 @@ export function VisualConfigEditor({
                                          </FieldAnchor>
                                          <FieldAnchor fieldId='tlsTrustForwardedProto'>
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.tls.trust_forwarded_proto')}
-                                                 description={t(
-                                                     'config_management.visual.sections.tls.trust_forwarded_proto_desc',
+                                                 title={sectionT('tls.trust_forwarded_proto')}
+                                                 description={sectionT(
+                                                     'tls.trust_forwarded_proto_desc',
                                                  )}
                                                  checked={values.tlsTrustForwardedProto}
                                                  disabled={disabled}
                                                  tone='danger'
-                                                 onChange={(tlsTrustForwardedProto) => onChange({ tlsTrustForwardedProto })}
+                                                 onChange={(tlsTrustForwardedProto) =>
+                                                     onChange({
+                                                                  tlsTrustForwardedProto,
+                                                              })
+                                                 }
                                              />
                                          </FieldAnchor>
                                      </SectionStack>
                                  </SectionSubsection>
 
                                  <SectionSubsection
-                                     title={t('config_management.visual.sections.remote.title')}
-                                     description={t('config_management.visual.sections.remote.description')}
+                                     title={sectionT('remote.title')}
+                                     description={sectionT('remote.description')}
                                  >
                                      <SectionStack>
                                          <SectionGrid>
                                              <FieldAnchor fieldId='rmAllowRemote'>
                                                  <ToggleRow
-                                                     title={t('config_management.visual.sections.remote.allow_remote')}
-                                                     description={t(
-                                                         'config_management.visual.sections.remote.allow_remote_desc')}
+                                                     title={sectionT('remote.allow_remote')}
+                                                     description={sectionT(
+                                                         'remote.allow_remote_desc')}
                                                      checked={values.rmAllowRemote}
                                                      disabled={disabled}
                                                      tone='warning'
                                                      onChange={(rmAllowRemote) => onChange({ rmAllowRemote })}
                                                  />
                                              </FieldAnchor>
+                                             <FieldAnchor fieldId='rmTrustedProxies'>
+                                                 <div className={styles.fieldShell}>
+                                                     <StringListEditor
+                                                         value={values.rmTrustedProxies}
+                                                         disabled={disabled}
+                                                         placeholder={sectionT(
+                                                             'remote.trusted_proxies_placeholder',
+                                                         )}
+                                                         inputAriaLabel={sectionT(
+                                                             'remote.trusted_proxies',
+                                                         )}
+                                                         onChange={handleTrustedProxiesChange}
+                                                     />
+                                                     <div className={styles.fieldHint}>
+                                                         {sectionT(
+                                                             'remote.trusted_proxies_hint',
+                                                         )}
+                                                     </div>
+                                                 </div>
+                                             </FieldAnchor>
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.remote.disable_panel')}
-                                                 description={t(
-                                                     'config_management.visual.sections.remote.disable_panel_desc')}
+                                                 title={sectionT('remote.disable_panel')}
+                                                 description={sectionT(
+                                                     'remote.disable_panel_desc')}
                                                  checked={values.rmDisableControlPanel}
                                                  disabled={disabled}
-                                                 onChange={(rmDisableControlPanel) => onChange({ rmDisableControlPanel })}
+                                                 onChange={(rmDisableControlPanel) =>
+                                                     onChange({
+                                                                  rmDisableControlPanel,
+                                                              })
+                                                 }
                                              />
                                              <ToggleRow
-                                                 title={t(
-                                                     'config_management.visual.sections.remote.auto_update_panel',
+                                                 title={sectionT(
+                                                     'remote.auto_update_panel',
                                                      {
                                                          defaultValue: 'Auto-install panel updates',
                                                      },
                                                  )}
-                                                 description={t(
-                                                     'config_management.visual.sections.remote.auto_update_panel_desc',
+                                                 description={sectionT(
+                                                     'remote.auto_update_panel_desc',
                                                      {
-                                                         defaultValue: 'Automatically download and install detected panel updates',
+                                                         defaultValue:
+                                                             'Automatically download and install ' +
+                                                             'detected panel updates',
                                                      },
                                                  )}
                                                  checked={values.rmAutoUpdatePanel}
@@ -1183,13 +1224,15 @@ export function VisualConfigEditor({
                                                  onChange={(rmAutoUpdatePanel) => onChange({ rmAutoUpdatePanel })}
                                              />
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.remote.auto_update_cpa', {
+                                                 title={sectionT('remote.auto_update_cpa', {
                                                      defaultValue: 'Auto-update backend',
                                                  })}
-                                                 description={t(
-                                                     'config_management.visual.sections.remote.auto_update_cpa_desc',
+                                                 description={sectionT(
+                                                     'remote.auto_update_cpa_desc',
                                                      {
-                                                         defaultValue: 'Automatically download and install detected CPA backend updates',
+                                                         defaultValue:
+                                                             'Automatically download and install ' +
+                                                             'detected CPA backend updates',
                                                      },
                                                  )}
                                                  checked={values.rmAutoUpdateCPA}
@@ -1198,12 +1241,14 @@ export function VisualConfigEditor({
                                              />
                                          </SectionGrid>
                                          <FieldShell
-                                             label={t('config_management.visual.sections.remote.check_interval', {
+                                             label={sectionT('remote.check_interval', {
                                                  defaultValue: 'Check interval',
                                              })}
-                                             hint={t('config_management.visual.sections.remote.check_interval_hint', {
+                                             hint={sectionT('remote.check_interval_hint', {
                                                  defaultValue:
-                                                     'How often the backend polls for new versions. "Off" disables background checks (manual refresh still works).',
+                                                     'How often the backend polls for new versions. ' +
+                                                     '"Off" disables background checks ' +
+                                                     '(manual refresh still works).',
                                              })}
                                          >
                                              <Select
@@ -1213,8 +1258,8 @@ export function VisualConfigEditor({
                                                  options={[
                                                      {
                                                          value: '0',
-                                                         label: t(
-                                                             'config_management.visual.sections.remote.check_interval_off',
+                                                         label: sectionT(
+                                                             'remote.check_interval_off',
                                                              {
                                                                  defaultValue: 'Off',
                                                              },
@@ -1244,25 +1289,28 @@ export function VisualConfigEditor({
                                          <SectionGrid>
                                              <FieldAnchor fieldId='rmSecretKey'>
                                                  <Input
-                                                     label={t('config_management.visual.sections.remote.secret_key')}
+                                                     label={sectionT('remote.secret_key')}
                                                      type='password'
-                                                     placeholder={t(
-                                                         'config_management.visual.sections.remote.secret_key_placeholder')}
+                                                     placeholder={sectionT(
+                                                         'remote.secret_key_placeholder')}
                                                      value={values.rmSecretKey}
                                                      onChange={(e) => onChange({ rmSecretKey: e.target.value })}
                                                      disabled={disabled}
-                                                     hint={t('config_management.visual.sections.remote.secret_key_hint')}
+                                                     hint={sectionT('remote.secret_key_hint')}
                                                  />
                                              </FieldAnchor>
                                              <Input
-                                                 label={t('config_management.visual.sections.remote.panel_repo')}
-                                                 placeholder='https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
+                                                 label={sectionT('remote.panel_repo')}
+                                                 placeholder={
+                                                     'https://github.com/Pyrokine/' +
+                                                     'Cli-Proxy-API-Management-Center'
+                                                 }
                                                  value={values.rmPanelRepo}
                                                  onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
                                                  disabled={disabled}
                                              />
                                              <Input
-                                                 label={t('config_management.visual.sections.remote.cpa_repo', {
+                                                 label={sectionT('remote.cpa_repo', {
                                                      defaultValue: 'CPA GitHub Repository',
                                                  })}
                                                  placeholder='https://github.com/Pyrokine/CLIProxyAPI'
@@ -1275,18 +1323,18 @@ export function VisualConfigEditor({
                                  </SectionSubsection>
 
                                  <SectionSubsection
-                                     title={t('config_management.visual.sections.auth.title')}
-                                     description={t('config_management.visual.sections.auth.description')}
+                                     title={sectionT('auth.title')}
+                                     description={sectionT('auth.description')}
                                  >
                                      <SectionStack>
                                          <FieldAnchor fieldId='authDir'>
                                              <Input
-                                                 label={t('config_management.visual.sections.auth.auth_dir')}
+                                                 label={sectionT('auth.auth_dir')}
                                                  placeholder='~/.cli-proxy-api'
                                                  value={values.authDir}
                                                  onChange={(e) => onChange({ authDir: e.target.value })}
                                                  disabled={disabled}
-                                                 hint={t('config_management.visual.sections.auth.auth_dir_hint')}
+                                                 hint={sectionT('auth.auth_dir_hint')}
                                              />
                                          </FieldAnchor>
                                          {apiKeysField}
@@ -1302,15 +1350,15 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='02'
                              icon={<IconTrendingUp size={16} />}
-                             title={t('config_management.visual.sections.network.title')}
-                             description={t('config_management.visual.sections.network.description')}
+                             title={sectionT('network.title')}
+                             description={sectionT('network.description')}
                          >
                              <SectionStack>
                                  <SectionGrid>
                                      {proxyUrlField}
                                      <FieldAnchor fieldId='requestRetry'>
                                          <Input
-                                             label={t('config_management.visual.sections.network.request_retry')}
+                                             label={sectionT('network.request_retry')}
                                              type='number'
                                              placeholder='3'
                                              value={values.requestRetry}
@@ -1321,20 +1369,20 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='maxRetryCredentials'>
                                          <Input
-                                             label={t('config_management.visual.sections.network.max_retry_credentials')}
+                                             label={sectionT('network.max_retry_credentials')}
                                              type='number'
                                              placeholder='0'
                                              value={values.maxRetryCredentials}
                                              onChange={(e) => onChange({ maxRetryCredentials: e.target.value })}
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.network.max_retry_credentials_hint')}
+                                             hint={sectionT(
+                                                 'network.max_retry_credentials_hint')}
                                              error={maxRetryCredentialsError}
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='maxRetryInterval'>
                                          <Input
-                                             label={t('config_management.visual.sections.network.max_retry_interval')}
+                                             label={sectionT('network.max_retry_interval')}
                                              type='number'
                                              placeholder='30'
                                              value={values.maxRetryInterval}
@@ -1345,58 +1393,58 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='authAutoRefreshWorkers'>
                                          <Input
-                                             label={t(
-                                                 'config_management.visual.sections.network.auth_auto_refresh_workers')}
+                                             label={sectionT(
+                                                 'network.auth_auto_refresh_workers')}
                                              type='number'
                                              placeholder='16'
                                              value={values.authAutoRefreshWorkers}
                                              onChange={(e) => onChange({ authAutoRefreshWorkers: e.target.value })}
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.network.auth_auto_refresh_workers_hint')}
+                                             hint={sectionT(
+                                                 'network.auth_auto_refresh_workers_hint')}
                                              error={authAutoRefreshWorkersError}
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='gptImage2BaseModel'>
                                          <Input
-                                             label={t(
-                                                 'config_management.visual.sections.network.gpt_image_2_base_model',
+                                             label={sectionT(
+                                                 'network.gpt_image_2_base_model',
                                                  { defaultValue: 'gpt-image-2 基础模型' },
                                              )}
                                              placeholder='gpt-5.4-mini'
                                              value={values.gptImage2BaseModel}
                                              onChange={(e) => onChange({ gptImage2BaseModel: e.target.value })}
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.network.gpt_image_2_base_model_hint',
+                                             hint={sectionT(
+                                                 'network.gpt_image_2_base_model_hint',
                                                  { defaultValue: '代理 gpt-image-2 hosted image_generation tool 时使用' },
                                              )}
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='corsAllowedOrigins'>
                                          <Input
-                                             label={t('config_management.visual.sections.network.cors_allowed_origins')}
+                                             label={sectionT('network.cors_allowed_origins')}
                                              placeholder='https://example.com, https://admin.example.com'
                                              value={values.corsAllowedOrigins}
                                              onChange={(e) => onChange({ corsAllowedOrigins: e.target.value })}
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.network.cors_allowed_origins_hint')}
+                                             hint={sectionT(
+                                                 'network.cors_allowed_origins_hint')}
                                          />
                                      </FieldAnchor>
                                      <Input
-                                         label={t('config_management.visual.sections.network.session_affinity_ttl')}
+                                         label={sectionT('network.session_affinity_ttl')}
                                          placeholder='1h'
                                          value={values.routingSessionAffinityTTL}
                                          onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
                                          disabled={disabled}
-                                         hint={t('config_management.visual.sections.network.session_affinity_ttl_hint')}
+                                         hint={sectionT('network.session_affinity_ttl_hint')}
                                      />
                                      <FieldAnchor fieldId='routingStrategy'>
                                          <FieldShell
-                                             label={t('config_management.visual.sections.network.routing_strategy')}
+                                             label={sectionT('network.routing_strategy')}
                                              labelId={routingStrategyLabelId}
-                                             hint={t('config_management.visual.sections.network.routing_strategy_hint')}
+                                             hint={sectionT('network.routing_strategy_hint')}
                                              hintId={routingStrategyHintId}
                                          >
                                              <Select
@@ -1404,14 +1452,26 @@ export function VisualConfigEditor({
                                                  options={[
                                                      {
                                                          value: 'round-robin',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.strategy_round_robin',
+                                                         label: sectionT(
+                                                             'network.strategy_round_robin',
+                                                         ),
+                                                     },
+                                                     {
+                                                         value: 'weighted-round-robin',
+                                                         label: sectionT(
+                                                             'network.strategy_weighted_round_robin',
+                                                         ),
+                                                     },
+                                                     {
+                                                         value: 'quota-aware',
+                                                         label: sectionT(
+                                                             'network.strategy_quota_aware',
                                                          ),
                                                      },
                                                      {
                                                          value: 'fill-first',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.strategy_fill_first',
+                                                         label: sectionT(
+                                                             'network.strategy_fill_first',
                                                          ),
                                                      },
                                                  ]}
@@ -1419,11 +1479,11 @@ export function VisualConfigEditor({
                                                  disabled={disabled}
                                                  ariaLabelledBy={routingStrategyLabelId}
                                                  ariaDescribedBy={routingStrategyHintId}
-                                                 onChange={(nextValue) =>
-                                                     onChange({
-                                                                  routingStrategy: nextValue as VisualConfigValues['routingStrategy'],
-                                                              })
-                                                 }
+                                                 onChange={(nextValue) => {
+                                                     const routingStrategy =
+                                                               nextValue as VisualConfigValues['routingStrategy']
+                                                     onChange({ routingStrategy })
+                                                 }}
                                              />
                                          </FieldShell>
                                      </FieldAnchor>
@@ -1432,78 +1492,85 @@ export function VisualConfigEditor({
                                  <SectionGrid>
                                      <FieldAnchor fieldId='forceModelPrefix'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.network.force_model_prefix')}
-                                             description={t(
-                                                 'config_management.visual.sections.network.force_model_prefix_desc')}
+                                             title={sectionT('network.force_model_prefix')}
+                                             description={sectionT(
+                                                 'network.force_model_prefix_desc')}
                                              checked={values.forceModelPrefix}
                                              disabled={disabled}
                                              onChange={(forceModelPrefix) => onChange({ forceModelPrefix })}
                                          />
                                      </FieldAnchor>
                                      <ToggleRow
-                                         title={t('config_management.visual.sections.network.enable_gemini_cli_endpoint')}
-                                         description={t(
-                                             'config_management.visual.sections.network.enable_gemini_cli_endpoint_desc')}
+                                         title={sectionT('network.enable_gemini_cli_endpoint')}
+                                         description={sectionT(
+                                             'network.enable_gemini_cli_endpoint_desc')}
                                          checked={values.enableGeminiCliEndpoint}
                                          disabled={disabled}
                                          tone='warning'
                                          onChange={(enableGeminiCliEndpoint) => onChange({ enableGeminiCliEndpoint })}
                                      />
                                      <ToggleRow
-                                         title={t('config_management.visual.sections.network.passthrough_headers')}
-                                         description={t(
-                                             'config_management.visual.sections.network.passthrough_headers_desc')}
+                                         title={sectionT('network.passthrough_headers')}
+                                         description={sectionT(
+                                             'network.passthrough_headers_desc')}
                                          checked={values.passthroughHeaders}
                                          disabled={disabled}
                                          onChange={(passthroughHeaders) => onChange({ passthroughHeaders })}
                                      />
                                      <FieldAnchor fieldId='disableImageGeneration'>
                                          <FieldShell
-                                             label={t(
-                                                 'config_management.visual.sections.network.disable_image_generation')}
-                                             hint={t(
-                                                 'config_management.visual.sections.network.disable_image_generation_hint')}
+                                             label={sectionT(
+                                                 'network.disable_image_generation')}
+                                             hint={sectionT(
+                                                 'network.disable_image_generation_hint')}
                                          >
                                              <Select
                                                  value={values.disableImageGeneration}
                                                  options={[
                                                      {
                                                          value: 'off',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.disable_image_generation_off',
+                                                         label: sectionT(
+                                                             'network.disable_image_generation_off',
                                                              { defaultValue: 'off（启用）' },
                                                          ),
                                                      },
                                                      {
                                                          value: 'all',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.disable_image_generation_all',
+                                                         label: sectionT(
+                                                             'network.disable_image_generation_all',
                                                              { defaultValue: 'all（全部停用）' },
                                                          ),
                                                      },
                                                      {
                                                          value: 'chat',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.disable_image_generation_chat'),
+                                                         label: sectionT(
+                                                             'network.disable_image_generation_chat'),
                                                      },
                                                      {
                                                          value: 'passthrough',
-                                                         label: t(
-                                                             'config_management.visual.sections.network.disable_image_generation_passthrough',
+                                                         label: sectionT(
+                                                             'network.disable_image_generation_passthrough',
                                                              { defaultValue: 'passthrough（透传）' },
                                                          ),
                                                      },
                                                  ]}
                                                  disabled={disabled}
-                                                 onChange={(disableImageGeneration) => onChange({ disableImageGeneration: disableImageGeneration as VisualConfigValues['disableImageGeneration'] })}
+                                                 onChange={(disableImageGeneration) =>
+                                                     onChange({
+                                                                  disableImageGeneration:
+                                                                      disableImageGeneration as VisualConfigValues[
+                                                                          'disableImageGeneration'
+                                                                          ],
+                                                              })
+                                                 }
                                              />
                                          </FieldShell>
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='routingSessionAffinity'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.network.session_affinity')}
-                                             description={t(
-                                                 'config_management.visual.sections.network.session_affinity_desc')}
+                                             title={sectionT('network.session_affinity')}
+                                             description={sectionT(
+                                                 'network.session_affinity_desc')}
                                              checked={values.routingSessionAffinity}
                                              disabled={disabled}
                                              onChange={(routingSessionAffinity) => onChange({ routingSessionAffinity })}
@@ -1511,8 +1578,8 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='wsAuth'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.network.ws_auth')}
-                                             description={t('config_management.visual.sections.network.ws_auth_desc')}
+                                             title={sectionT('network.ws_auth')}
+                                             description={sectionT('network.ws_auth_desc')}
                                              checked={values.wsAuth}
                                              disabled={disabled}
                                              onChange={(wsAuth) => onChange({ wsAuth })}
@@ -1520,9 +1587,9 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='allowQueryAuth'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.network.allow_query_auth')}
-                                             description={t(
-                                                 'config_management.visual.sections.network.allow_query_auth_desc')}
+                                             title={sectionT('network.allow_query_auth')}
+                                             description={sectionT(
+                                                 'network.allow_query_auth_desc')}
                                              checked={values.allowQueryAuth}
                                              disabled={disabled}
                                              tone='danger'
@@ -1540,17 +1607,17 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='03'
                              icon={<IconDiamond size={16} />}
-                             title={t('config_management.visual.sections.logging.title')}
-                             description={t('config_management.visual.sections.logging.description')}
+                             title={sectionT('logging.title')}
+                             description={sectionT('logging.description')}
                          >
                              <SectionStack>
                                  <SectionGrid>
                                      {debugToggle}
                                      <FieldAnchor fieldId='commercialMode'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.system.commercial_mode')}
-                                             description={t(
-                                                 'config_management.visual.sections.system.commercial_mode_desc')}
+                                             title={sectionT('system.commercial_mode')}
+                                             description={sectionT(
+                                                 'system.commercial_mode_desc')}
                                              checked={values.commercialMode}
                                              disabled={disabled}
                                              onChange={(commercialMode) => onChange({ commercialMode })}
@@ -1559,8 +1626,8 @@ export function VisualConfigEditor({
                                      {loggingToFileToggle}
                                      <FieldAnchor fieldId='requestLog'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.system.request_log')}
-                                             description={t('config_management.visual.sections.system.request_log_desc')}
+                                             title={sectionT('system.request_log')}
+                                             description={sectionT('system.request_log_desc')}
                                              checked={values.requestLog}
                                              disabled={disabled}
                                              onChange={(requestLog) => onChange({ requestLog })}
@@ -1568,9 +1635,9 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='usageStatisticsEnabled'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.system.usage_statistics')}
-                                             description={t(
-                                                 'config_management.visual.sections.system.usage_statistics_desc')}
+                                             title={sectionT('system.usage_statistics')}
+                                             description={sectionT(
+                                                 'system.usage_statistics_desc')}
                                              checked={values.usageStatisticsEnabled}
                                              disabled={disabled}
                                              onChange={(usageStatisticsEnabled) => onChange({ usageStatisticsEnabled })}
@@ -1578,12 +1645,12 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='pprofEnable'>
                                          <ToggleRow
-                                             title={t(
-                                                 'config_management.visual.sections.system.pprof_enable',
+                                             title={sectionT(
+                                                 'system.pprof_enable',
                                                  { defaultValue: '启用 pprof' },
                                              )}
-                                             description={t(
-                                                 'config_management.visual.sections.system.pprof_enable_desc',
+                                             description={sectionT(
+                                                 'system.pprof_enable_desc',
                                                  { defaultValue: '启用后端性能调试 HTTP 服务' },
                                              )}
                                              checked={values.pprofEnable}
@@ -1597,7 +1664,7 @@ export function VisualConfigEditor({
                                  <div className={styles.systemFieldGrid}>
                                      <FieldShell
                                          label={t('system_info.timezone_title', { defaultValue: '显示时区' })}
-                                         hint={t('config_management.visual.sections.system.timezone_hint', {
+                                         hint={sectionT('system.timezone_hint', {
                                              defaultValue: 'Only affects timestamps displayed in the management panel.',
                                          })}
                                      >
@@ -1611,8 +1678,8 @@ export function VisualConfigEditor({
                                      </FieldShell>
                                      <FieldAnchor fieldId='logsMaxTotalSizeMb'>
                                          <FieldShell
-                                             label={t('config_management.visual.sections.system.logs_max_size')}
-                                             hint={t('config_management.visual.sections.system.logs_max_size_hint')}
+                                             label={sectionT('system.logs_max_size')}
+                                             hint={sectionT('system.logs_max_size_hint')}
                                              error={logsMaxSizeError}
                                              meta={logSizeMeta}
                                          >
@@ -1628,11 +1695,11 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='imageArtifactCacheMaxTotalSizeMb'>
                                          <FieldShell
-                                             label={t(
-                                                 'config_management.visual.sections.system.image_artifact_cache_max_size',
+                                             label={sectionT(
+                                                 'system.image_artifact_cache_max_size',
                                              )}
-                                             hint={t(
-                                                 'config_management.visual.sections.system.image_artifact_cache_max_size_hint',
+                                             hint={sectionT(
+                                                 'system.image_artifact_cache_max_size_hint',
                                              )}
                                              error={imageArtifactCacheMaxSizeError}
                                              meta={imageArtifactCacheSizeMeta}
@@ -1642,30 +1709,40 @@ export function VisualConfigEditor({
                                                  type='number'
                                                  placeholder='10240'
                                                  value={values.imageArtifactCacheMaxTotalSizeMb}
-                                                 onChange={(e) => onChange({ imageArtifactCacheMaxTotalSizeMb: e.target.value })}
+                                                 onChange={(e) =>
+                                                     onChange({
+                                                                  imageArtifactCacheMaxTotalSizeMb:
+                                                                  e.target.value,
+                                                              })
+                                                 }
                                                  disabled={disabled}
                                              />
                                          </FieldShell>
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='imageArtifactCacheRetentionDays'>
                                          <Input
-                                             label={t(
-                                                 'config_management.visual.sections.system.image_artifact_cache_retention_days',
+                                             label={sectionT(
+                                                 'system.image_artifact_cache_retention_days',
                                              )}
                                              type='number'
                                              placeholder='7'
                                              value={values.imageArtifactCacheRetentionDays}
-                                             onChange={(e) => onChange({ imageArtifactCacheRetentionDays: e.target.value })}
+                                             onChange={(e) =>
+                                                 onChange({
+                                                              imageArtifactCacheRetentionDays:
+                                                              e.target.value,
+                                                          })
+                                             }
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.system.image_artifact_cache_retention_hint',
+                                             hint={sectionT(
+                                                 'system.image_artifact_cache_retention_hint',
                                              )}
                                              error={imageArtifactCacheRetentionDaysError}
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='errorLogsMaxFiles'>
                                          <Input
-                                             label={t('config_management.visual.sections.system.error_logs_max_files')}
+                                             label={sectionT('system.error_logs_max_files')}
                                              type='number'
                                              placeholder='10'
                                              value={values.errorLogsMaxFiles}
@@ -1675,57 +1752,57 @@ export function VisualConfigEditor({
                                          />
                                      </FieldAnchor>
                                      <Input
-                                         label={t('config_management.visual.sections.system.redis_usage_retention')}
+                                         label={sectionT('system.redis_usage_retention')}
                                          type='number'
                                          placeholder='60'
                                          value={values.redisUsageQueueRetentionSeconds}
                                          onChange={(e) => onChange({ redisUsageQueueRetentionSeconds: e.target.value })}
                                          disabled={disabled}
-                                         hint={t('config_management.visual.sections.system.redis_usage_retention_hint')}
+                                         hint={sectionT('system.redis_usage_retention_hint')}
                                          error={redisUsageQueueRetentionError}
                                      />
                                      <Input
-                                         label={t(
-                                             'config_management.visual.sections.system.pprof_addr',
+                                         label={sectionT(
+                                             'system.pprof_addr',
                                              { defaultValue: 'pprof 监听地址' },
                                          )}
                                          placeholder='127.0.0.1:8316'
                                          value={values.pprofAddr}
                                          onChange={(e) => onChange({ pprofAddr: e.target.value })}
                                          disabled={disabled}
-                                         hint={t(
-                                             'config_management.visual.sections.system.pprof_addr_hint',
+                                         hint={sectionT(
+                                             'system.pprof_addr_hint',
                                              { defaultValue: '仅在启用 pprof 时生效' },
                                          )}
                                      />
                                      <FieldAnchor fieldId='usageDataDir'>
                                          <Input
-                                             label={t('config_management.visual.sections.system.usage_data_dir')}
+                                             label={sectionT('system.usage_data_dir')}
                                              placeholder='~/.cli-proxy-api/usage'
                                              value={values.usageDataDir}
                                              onChange={(e) => onChange({ usageDataDir: e.target.value })}
                                              disabled={disabled}
-                                             hint={t('config_management.visual.sections.system.usage_data_dir_hint')}
+                                             hint={sectionT('system.usage_data_dir_hint')}
                                          />
                                      </FieldAnchor>
                                      <Input
-                                         label={t(
-                                             'config_management.visual.sections.system.usage_statistics_file',
+                                         label={sectionT(
+                                             'system.usage_statistics_file',
                                              { defaultValue: '使用统计旧文件路径' },
                                          )}
                                          placeholder=''
                                          value={values.usageStatisticsFile}
                                          onChange={(e) => onChange({ usageStatisticsFile: e.target.value })}
                                          disabled={disabled}
-                                         hint={t(
-                                             'config_management.visual.sections.system.usage_statistics_file_hint',
+                                         hint={sectionT(
+                                             'system.usage_statistics_file_hint',
                                              { defaultValue: '对应 usage-statistics-file，留空使用默认数据目录' },
                                          )}
                                      />
                                      <FieldShell
-                                         label={t('config_management.visual.sections.system.usage_retention_max_db_size')}
-                                         hint={t(
-                                             'config_management.visual.sections.system.usage_retention_max_db_size_hint')}
+                                         label={sectionT('system.usage_retention_max_db_size')}
+                                         hint={sectionT(
+                                             'system.usage_retention_max_db_size_hint')}
                                          error={usageRetentionMaxDbSizeMbError}
                                          meta={usageDbSizeMeta}
                                      >
@@ -1740,49 +1817,54 @@ export function VisualConfigEditor({
                                      </FieldShell>
                                      <FieldAnchor fieldId='usageRetentionDays'>
                                          <Input
-                                             label={t('config_management.visual.sections.system.usage_retention_days')}
+                                             label={sectionT('system.usage_retention_days')}
                                              type='number'
                                              placeholder='0'
                                              value={values.usageRetentionDays}
                                              onChange={(e) => onChange({ usageRetentionDays: e.target.value })}
                                              disabled={disabled}
-                                             hint={t('config_management.visual.sections.system.usage_retention_hint')}
+                                             hint={sectionT('system.usage_retention_hint')}
                                              error={usageRetentionDaysError}
                                          />
                                      </FieldAnchor>
                                      <Input
-                                         label={t(
-                                             'config_management.visual.sections.system.usage_retention_warning_threshold')}
+                                         label={sectionT(
+                                             'system.usage_retention_warning_threshold')}
                                          type='number'
                                          placeholder='80'
                                          value={values.usageRetentionWarningThresholdPct}
-                                         onChange={(e) => onChange({ usageRetentionWarningThresholdPct: e.target.value })}
+                                         onChange={(e) =>
+                                             onChange({
+                                                          usageRetentionWarningThresholdPct:
+                                                          e.target.value,
+                                                      })
+                                         }
                                          disabled={disabled}
-                                         hint={t(
-                                             'config_management.visual.sections.system.usage_retention_warning_threshold_hint')}
+                                         hint={sectionT(
+                                             'system.usage_retention_warning_threshold_hint')}
                                          error={usageRetentionWarningThresholdError}
                                      />
                                      <FieldAnchor fieldId='autoRefreshInterval'>
                                          <Input
-                                             label={t('config_management.visual.sections.system.auto_refresh_interval')}
+                                             label={sectionT('system.auto_refresh_interval')}
                                              type='number'
                                              placeholder='3'
                                              value={values.autoRefreshInterval}
                                              onChange={(e) => onChange({ autoRefreshInterval: e.target.value })}
                                              disabled={disabled}
-                                             hint={t(
-                                                 'config_management.visual.sections.system.auto_refresh_interval_hint')}
+                                             hint={sectionT(
+                                                 'system.auto_refresh_interval_hint')}
                                              error={autoRefreshIntervalError}
                                          />
                                      </FieldAnchor>
                                      <Input
-                                         label={t('config_management.visual.sections.system.model_refresh_interval')}
+                                         label={sectionT('system.model_refresh_interval')}
                                          type='number'
                                          placeholder='3'
                                          value={values.modelRefreshInterval}
                                          onChange={(e) => onChange({ modelRefreshInterval: e.target.value })}
                                          disabled={disabled}
-                                         hint={t('config_management.visual.sections.system.model_refresh_interval_hint')}
+                                         hint={sectionT('system.model_refresh_interval_hint')}
                                          error={modelRefreshIntervalError}
                                      />
                                  </div>
@@ -1796,45 +1878,49 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='04'
                              icon={<IconTimer size={16} />}
-                             title={t('config_management.visual.sections.quota.title')}
-                             description={t('config_management.visual.sections.quota.description')}
+                             title={sectionT('quota.title')}
+                             description={sectionT('quota.description')}
                          >
                              <SectionStack>
                                  <SectionGrid>
                                      <ToggleRow
-                                         title={t('config_management.visual.sections.quota.switch_project')}
-                                         description={t('config_management.visual.sections.quota.switch_project_desc')}
+                                         title={sectionT('quota.switch_project')}
+                                         description={sectionT('quota.switch_project_desc')}
                                          checked={values.quotaSwitchProject}
                                          disabled={disabled}
                                          onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
                                      />
                                      <ToggleRow
-                                         title={t('config_management.visual.sections.quota.switch_preview_model')}
-                                         description={t(
-                                             'config_management.visual.sections.quota.switch_preview_model_desc')}
+                                         title={sectionT('quota.switch_preview_model')}
+                                         description={sectionT(
+                                             'quota.switch_preview_model_desc')}
                                          checked={values.quotaSwitchPreviewModel}
                                          disabled={disabled}
                                          onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
                                      />
                                      <FieldAnchor fieldId='quotaAntigravityCredits'>
                                          <ToggleRow
-                                             title={t('config_management.visual.sections.quota.antigravity_credits')}
-                                             description={t(
-                                                 'config_management.visual.sections.quota.antigravity_credits_desc')}
+                                             title={sectionT('quota.antigravity_credits')}
+                                             description={sectionT(
+                                                 'quota.antigravity_credits_desc')}
                                              checked={values.quotaAntigravityCredits}
                                              disabled={disabled}
                                              tone='warning'
-                                             onChange={(quotaAntigravityCredits) => onChange({ quotaAntigravityCredits })}
+                                             onChange={(quotaAntigravityCredits) =>
+                                                 onChange({
+                                                              quotaAntigravityCredits,
+                                                          })
+                                             }
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='disableCooling'>
                                          <ToggleRow
-                                             title={t(
-                                                 'config_management.visual.sections.quota.disable_cooling',
+                                             title={sectionT(
+                                                 'quota.disable_cooling',
                                                  { defaultValue: '停用冷却调度' },
                                              )}
-                                             description={t(
-                                                 'config_management.visual.sections.quota.disable_cooling_desc',
+                                             description={sectionT(
+                                                 'quota.disable_cooling_desc',
                                                  { defaultValue: '停用配额或失败后的冷却窗口' },
                                              )}
                                              checked={values.disableCooling}
@@ -1845,15 +1931,15 @@ export function VisualConfigEditor({
                                      </FieldAnchor>
                                  </SectionGrid>
                                  <SectionSubsection
-                                     title={t('config_management.visual.sections.quota.refresh_title')}
-                                     description={t('config_management.visual.sections.quota.refresh_desc')}
+                                     title={sectionT('quota.refresh_title')}
+                                     description={sectionT('quota.refresh_desc')}
                                  >
                                      <SectionStack>
                                          <FieldAnchor fieldId='quotaRefreshEnabled'>
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.quota.refresh_enabled')}
-                                                 description={t(
-                                                     'config_management.visual.sections.quota.refresh_enabled_desc')}
+                                                 title={sectionT('quota.refresh_enabled')}
+                                                 description={sectionT(
+                                                     'quota.refresh_enabled_desc')}
                                                  checked={values.quotaRefreshEnabled}
                                                  disabled={disabled}
                                                  onChange={(quotaRefreshEnabled) => onChange({ quotaRefreshEnabled })}
@@ -1862,28 +1948,38 @@ export function VisualConfigEditor({
                                          <SectionGrid>
                                              <FieldAnchor fieldId='quotaRefreshInterval'>
                                                  <Input
-                                                     label={t('config_management.visual.sections.quota.refresh_interval')}
+                                                     label={sectionT('quota.refresh_interval')}
                                                      type='number'
                                                      placeholder='600'
                                                      value={values.quotaRefreshInterval}
-                                                     onChange={(e) => onChange({ quotaRefreshInterval: e.target.value })}
+                                                     onChange={(e) =>
+                                                         onChange({
+                                                                      quotaRefreshInterval:
+                                                                      e.target.value,
+                                                                  })
+                                                     }
                                                      disabled={disabled}
-                                                     hint={t(
-                                                         'config_management.visual.sections.quota.refresh_interval_hint')}
+                                                     hint={sectionT(
+                                                         'quota.refresh_interval_hint')}
                                                      error={quotaRefreshIntervalError}
                                                  />
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='quotaRefreshMaxInterval'>
                                                  <Input
-                                                     label={t(
-                                                         'config_management.visual.sections.quota.refresh_max_interval')}
+                                                     label={sectionT(
+                                                         'quota.refresh_max_interval')}
                                                      type='number'
                                                      placeholder='1800'
                                                      value={values.quotaRefreshMaxInterval}
-                                                     onChange={(e) => onChange({ quotaRefreshMaxInterval: e.target.value })}
+                                                     onChange={(e) =>
+                                                         onChange({
+                                                                      quotaRefreshMaxInterval:
+                                                                      e.target.value,
+                                                                  })
+                                                     }
                                                      disabled={disabled}
-                                                     hint={t(
-                                                         'config_management.visual.sections.quota.refresh_max_interval_hint')}
+                                                     hint={sectionT(
+                                                         'quota.refresh_max_interval_hint')}
                                                      error={quotaRefreshMaxIntervalError}
                                                  />
                                              </FieldAnchor>
@@ -1900,16 +1996,16 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='05'
                              icon={<IconSatellite size={16} />}
-                             title={t('config_management.visual.sections.streaming.title')}
-                             description={t('config_management.visual.sections.streaming.description')}
+                             title={sectionT('streaming.title')}
+                             description={sectionT('streaming.description')}
                          >
                              <SectionStack>
                                  <SectionGrid>
                                      <FieldAnchor fieldId='streamingKeepaliveSeconds'>
                                          <FieldShell
-                                             label={t('config_management.visual.sections.streaming.keepalive_seconds')}
+                                             label={sectionT('streaming.keepalive_seconds')}
                                              htmlFor={keepaliveInputId}
-                                             hint={t('config_management.visual.sections.streaming.keepalive_hint')}
+                                             hint={sectionT('streaming.keepalive_hint')}
                                              hintId={keepaliveHintId}
                                              error={keepaliveError}
                                              errorId={keepaliveErrorId}
@@ -1933,7 +2029,7 @@ export function VisualConfigEditor({
                                                  />
                                                  {isKeepaliveDisabled ? (
                                                      <span className={styles.inlinePill}>
-                                                    {t('config_management.visual.sections.streaming.disabled')}
+                                                    {sectionT('streaming.disabled')}
                                                 </span>
                                                  ) : null}
                                              </div>
@@ -1942,7 +2038,7 @@ export function VisualConfigEditor({
 
                                      <FieldAnchor fieldId='streamingBootstrapRetries'>
                                          <Input
-                                             label={t('config_management.visual.sections.streaming.bootstrap_retries')}
+                                             label={sectionT('streaming.bootstrap_retries')}
                                              type='number'
                                              placeholder='1'
                                              value={values.streaming.bootstrapRetries}
@@ -1955,7 +2051,7 @@ export function VisualConfigEditor({
                                                           })
                                              }
                                              disabled={disabled}
-                                             hint={t('config_management.visual.sections.streaming.bootstrap_hint')}
+                                             hint={sectionT('streaming.bootstrap_hint')}
                                              error={bootstrapRetriesError}
                                          />
                                      </FieldAnchor>
@@ -1964,10 +2060,10 @@ export function VisualConfigEditor({
                                  <SectionGrid>
                                      <FieldAnchor fieldId='streamingNonstreamKeepalive'>
                                          <FieldShell
-                                             label={t('config_management.visual.sections.streaming.nonstream_keepalive')}
+                                             label={sectionT('streaming.nonstream_keepalive')}
                                              htmlFor={nonstreamKeepaliveInputId}
-                                             hint={t(
-                                                 'config_management.visual.sections.streaming.nonstream_keepalive_hint')}
+                                             hint={sectionT(
+                                                 'streaming.nonstream_keepalive_hint')}
                                              hintId={nonstreamKeepaliveHintId}
                                              error={nonstreamKeepaliveError}
                                              errorId={nonstreamKeepaliveErrorId}
@@ -1991,7 +2087,7 @@ export function VisualConfigEditor({
                                                  />
                                                  {isNonstreamKeepaliveDisabled ? (
                                                      <span className={styles.inlinePill}>
-                                                    {t('config_management.visual.sections.streaming.disabled')}
+                                                    {sectionT('streaming.disabled')}
                                                 </span>
                                                  ) : null}
                                              </div>
@@ -2008,21 +2104,21 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='06'
                              icon={<IconShield size={16} />}
-                             title={t('config_management.visual.sections.advanced.title')}
-                             description={t('config_management.visual.sections.advanced.description')}
+                             title={sectionT('advanced.title')}
+                             description={sectionT('advanced.description')}
                          >
                              <SectionStack>
                                  <FieldAnchor fieldId='pluginsEnabled'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.advanced.plugins_title')}
-                                         hint={t('config_management.visual.sections.system.plugin_configs_hint')}
+                                         label={sectionT('advanced.plugins_title')}
+                                         hint={sectionT('system.plugin_configs_hint')}
                                          defaultOpen={false}
                                      >
                                          <SectionStack>
                                              <ToggleRow
-                                                 title={t('config_management.visual.sections.system.plugins_enabled')}
-                                                 description={t(
-                                                     'config_management.visual.sections.system.plugins_enabled_desc')}
+                                                 title={sectionT('system.plugins_enabled')}
+                                                 description={sectionT(
+                                                     'system.plugins_enabled_desc')}
                                                  checked={values.pluginsEnabled}
                                                  disabled={disabled}
                                                  onChange={(pluginsEnabled) => onChange({ pluginsEnabled })}
@@ -2030,51 +2126,51 @@ export function VisualConfigEditor({
                                              <SectionGrid>
                                                  <FieldAnchor fieldId='pluginsDir'>
                                                      <Input
-                                                         label={t('config_management.visual.sections.system.plugins_dir')}
+                                                         label={sectionT('system.plugins_dir')}
                                                          placeholder='plugins'
                                                          value={values.pluginsDir}
                                                          onChange={(e) => onChange({ pluginsDir: e.target.value })}
                                                          disabled={disabled}
-                                                         hint={t(
-                                                             'config_management.visual.sections.system.plugins_dir_hint')}
+                                                         hint={sectionT(
+                                                             'system.plugins_dir_hint')}
                                                      />
                                                  </FieldAnchor>
                                              </SectionGrid>
                                              <FieldAnchor fieldId='pluginStoreSources'>
                                                  <SectionSubsection
-                                                     title={t(
-                                                         'config_management.visual.sections.system.plugin_store_sources')}
-                                                     description={t(
-                                                         'config_management.visual.sections.system.plugin_store_sources_desc')}
+                                                     title={sectionT(
+                                                         'system.plugin_store_sources')}
+                                                     description={sectionT(
+                                                         'system.plugin_store_sources_desc')}
                                                  >
                                                      <div className={styles.fieldShell}>
                                                          <StringListEditor
                                                              value={values.pluginStoreSources}
                                                              disabled={disabled}
-                                                             placeholder={t(
-                                                                 'config_management.visual.sections.system.plugin_store_sources_placeholder',
+                                                             placeholder={sectionT(
+                                                                 'system.plugin_store_sources_placeholder',
                                                              )}
-                                                             inputAriaLabel={t(
-                                                                 'config_management.visual.sections.system.plugin_store_sources_label',
+                                                             inputAriaLabel={sectionT(
+                                                                 'system.plugin_store_sources_label',
                                                              )}
                                                              onChange={handlePluginStoreSourcesChange}
                                                          />
                                                          <div className={styles.fieldHint}>
-                                                             {t('config_management.visual.sections.system.plugin_store_sources_hint')}
+                                                             {sectionT('system.plugin_store_sources_hint')}
                                                          </div>
                                                      </div>
                                                  </SectionSubsection>
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='pluginStoreAuth'>
                                                  <SectionSubsection
-                                                     title={t(
-                                                         'config_management.visual.sections.system.plugin_store_auth')}
-                                                     description={t(
-                                                         'config_management.visual.sections.system.plugin_store_auth_desc')}
+                                                     title={sectionT(
+                                                         'system.plugin_store_auth')}
+                                                     description={sectionT(
+                                                         'system.plugin_store_auth_desc')}
                                                  >
                                                      <div className={styles.fieldShell}>
                                                          <div className={styles.fieldHint}>
-                                                             {t('config_management.visual.sections.system.plugin_store_auth_hint')}
+                                                             {sectionT('system.plugin_store_auth_hint')}
                                                          </div>
                                                          <PluginStoreAuthEditor
                                                              value={values.pluginStoreAuth}
@@ -2086,15 +2182,15 @@ export function VisualConfigEditor({
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='pluginConfigs'>
                                                  <TextAreaField
-                                                     label={t(
-                                                         'config_management.visual.sections.system.plugin_configs',
+                                                     label={sectionT(
+                                                         'system.plugin_configs',
                                                          { defaultValue: '插件实例配置' },
                                                      )}
                                                      value={values.pluginConfigsText}
                                                      placeholder={'{}'}
                                                      disabled={disabled}
-                                                     hint={t(
-                                                         'config_management.visual.sections.system.plugin_configs_hint',
+                                                     hint={sectionT(
+                                                         'system.plugin_configs_hint',
                                                          { defaultValue: '对应 plugins.configs，使用 YAML map 格式' },
                                                      )}
                                                      onChange={(pluginConfigsText) => onChange({ pluginConfigsText })}
@@ -2106,57 +2202,79 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='providerConfig'>
                                      <Collapsible
-                                         label={t(
-                                             'config_management.visual.sections.network.provider_advanced',
+                                         label={sectionT(
+                                             'network.provider_advanced',
                                              { defaultValue: '供应商高级配置' },
                                          )}
-                                         hint={t(
-                                             'config_management.visual.sections.network.provider_advanced_desc',
+                                         hint={sectionT(
+                                             'network.provider_advanced_desc',
                                              { defaultValue: '复杂数组和映射使用 YAML 格式直接暴露，保存后写回源码配置对应路径' },
                                          )}
                                          defaultOpen={false}
                                      >
                                          <SectionStack>
                                              <TextAreaField
-                                                 label={t(
-                                                     'config_management.visual.sections.network.provider_keys',
+                                                 label={sectionT(
+                                                     'network.provider_keys',
                                                      { defaultValue: '供应商 Key 与 OpenAI 兼容配置' },
                                                  )}
                                                  value={values.providerConfigText}
-                                                 placeholder={'gemini-api-key: []\ncodex-api-key: []\nclaude-api-key: []\nvertex-api-key: []\nopenai-compatibility: []'}
+                                                 placeholder={
+                                                     'gemini-api-key: []\n' +
+                                                     'codex-api-key: []\n' +
+                                                     'claude-api-key: []\n' +
+                                                     'vertex-api-key: []\n' +
+                                                     'openai-compatibility: []'
+                                                 }
                                                  disabled={disabled}
                                                  onChange={(providerConfigText) => onChange({ providerConfigText })}
                                              />
                                              <FieldAnchor fieldId='oauthExcludedModels'>
                                                  <TextAreaField
-                                                     label={t(
-                                                         'config_management.visual.sections.network.oauth_excluded_models',
+                                                     label={sectionT(
+                                                         'network.oauth_excluded_models',
                                                          { defaultValue: 'OAuth 排除模型' },
                                                      )}
                                                      value={values.oauthExcludedModelsText}
                                                      placeholder={'{}'}
                                                      disabled={disabled}
-                                                     hint={t(
-                                                         'config_management.visual.sections.network.oauth_excluded_models_hint',
-                                                         { defaultValue: '对应 oauth-excluded-models，按 provider 写模型禁用列表' },
+                                                     hint={sectionT(
+                                                         'network.oauth_excluded_models_hint',
+                                                         {
+                                                             defaultValue:
+                                                                 '对应 oauth-excluded-models，' +
+                                                                 '按 provider 写模型禁用列表',
+                                                         },
                                                      )}
-                                                     onChange={(oauthExcludedModelsText) => onChange({ oauthExcludedModelsText })}
+                                                     onChange={(oauthExcludedModelsText) =>
+                                                         onChange({
+                                                                      oauthExcludedModelsText,
+                                                                  })
+                                                     }
                                                  />
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='oauthModelAlias'>
                                                  <TextAreaField
-                                                     label={t(
-                                                         'config_management.visual.sections.network.oauth_model_alias',
+                                                     label={sectionT(
+                                                         'network.oauth_model_alias',
                                                          { defaultValue: 'OAuth 模型别名' },
                                                      )}
                                                      value={values.oauthModelAliasText}
                                                      placeholder={'{}'}
                                                      disabled={disabled}
-                                                     hint={t(
-                                                         'config_management.visual.sections.network.oauth_model_alias_hint',
-                                                         { defaultValue: '对应 oauth-model-alias，按 provider 写 name/alias/fork 列表' },
+                                                     hint={sectionT(
+                                                         'network.oauth_model_alias_hint',
+                                                         {
+                                                             defaultValue:
+                                                                 '对应 oauth-model-alias，' +
+                                                                 '按 provider 写 name/alias/fork 列表',
+                                                         },
                                                      )}
-                                                     onChange={(oauthModelAliasText) => onChange({ oauthModelAliasText })}
+                                                     onChange={(oauthModelAliasText) =>
+                                                         onChange({
+                                                                      oauthModelAliasText,
+                                                                  })
+                                                     }
                                                  />
                                              </FieldAnchor>
                                          </SectionStack>
@@ -2165,17 +2283,17 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='codexIdentityConfuse'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.advanced.signature_title')}
+                                         label={sectionT('advanced.signature_title')}
                                          defaultOpen={false}
                                      >
                                          <SectionStack>
                                              <ToggleRow
-                                                 title={t(
-                                                     'config_management.visual.sections.network.codex_identity_confuse',
+                                                 title={sectionT(
+                                                     'network.codex_identity_confuse',
                                                      { defaultValue: 'Codex 身份混淆' },
                                                  )}
-                                                 description={t(
-                                                     'config_management.visual.sections.network.codex_identity_confuse_desc',
+                                                 description={sectionT(
+                                                     'network.codex_identity_confuse_desc',
                                                      { defaultValue: '对应 codex.identity-confuse' },
                                                  )}
                                                  checked={values.codexIdentityConfuse}
@@ -2185,26 +2303,41 @@ export function VisualConfigEditor({
                                              />
                                              <FieldAnchor fieldId='codexHeaderDefaults'>
                                                  <TextAreaField
-                                                     label={t(
-                                                         'config_management.visual.sections.network.codex_header_defaults',
+                                                     label={sectionT(
+                                                         'network.codex_header_defaults',
                                                          { defaultValue: 'Codex 默认请求头' },
                                                      )}
                                                      value={values.codexHeaderDefaultsText}
                                                      placeholder={'user-agent: ""\nbeta-features: ""'}
                                                      disabled={disabled}
-                                                     onChange={(codexHeaderDefaultsText) => onChange({ codexHeaderDefaultsText })}
+                                                     onChange={(codexHeaderDefaultsText) =>
+                                                         onChange({
+                                                                      codexHeaderDefaultsText,
+                                                                  })
+                                                     }
                                                  />
                                              </FieldAnchor>
                                              <FieldAnchor fieldId='claudeHeaderDefaults'>
                                                  <TextAreaField
-                                                     label={t(
-                                                         'config_management.visual.sections.network.claude_header_defaults',
+                                                     label={sectionT(
+                                                         'network.claude_header_defaults',
                                                          { defaultValue: 'Claude 默认请求头' },
                                                      )}
                                                      value={values.claudeHeaderDefaultsText}
-                                                     placeholder={'user-agent: ""\npackage-version: ""\nruntime-version: ""\nos: ""\narch: ""\ntimeout: ""'}
+                                                     placeholder={
+                                                         'user-agent: ""\n' +
+                                                         'package-version: ""\n' +
+                                                         'runtime-version: ""\n' +
+                                                         'os: ""\n' +
+                                                         'arch: ""\n' +
+                                                         'timeout: ""'
+                                                     }
                                                      disabled={disabled}
-                                                     onChange={(claudeHeaderDefaultsText) => onChange({ claudeHeaderDefaultsText })}
+                                                     onChange={(claudeHeaderDefaultsText) =>
+                                                         onChange({
+                                                                      claudeHeaderDefaultsText,
+                                                                  })
+                                                     }
                                                  />
                                              </FieldAnchor>
                                          </SectionStack>
@@ -2220,17 +2353,17 @@ export function VisualConfigEditor({
                              }}
                              indexLabel='07'
                              icon={<IconCode size={16} />}
-                             title={t('config_management.visual.sections.payload.title')}
-                             description={t('config_management.visual.sections.payload.description')}
+                             title={sectionT('payload.title')}
+                             description={sectionT('payload.description')}
                          >
                              <SectionStack>
                                  <FieldMeta tone='warning'>
-                                     {t('config_management.visual.sections.payload.advanced_hint')}
+                                     {sectionT('payload.advanced_hint')}
                                  </FieldMeta>
                                  <FieldAnchor fieldId='payloadDefaultRules'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.payload.default_rules')}
-                                         hint={t('config_management.visual.sections.payload.default_rules_desc')}
+                                         label={sectionT('payload.default_rules')}
+                                         hint={sectionT('payload.default_rules_desc')}
                                          defaultOpen={hasPayloadValidationErrors}
                                      >
                                          <PayloadRulesEditor
@@ -2243,8 +2376,8 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='payloadDefaultRawRules'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.payload.default_raw_rules')}
-                                         hint={t('config_management.visual.sections.payload.default_raw_rules_desc')}
+                                         label={sectionT('payload.default_raw_rules')}
+                                         hint={sectionT('payload.default_raw_rules_desc')}
                                          defaultOpen={hasPayloadValidationErrors}
                                      >
                                          <PayloadRulesEditor
@@ -2258,8 +2391,8 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='payloadOverrideRules'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.payload.override_rules')}
-                                         hint={t('config_management.visual.sections.payload.override_rules_desc')}
+                                         label={sectionT('payload.override_rules')}
+                                         hint={sectionT('payload.override_rules_desc')}
                                          defaultOpen={hasPayloadValidationErrors}
                                      >
                                          <PayloadRulesEditor
@@ -2273,8 +2406,8 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='payloadOverrideRawRules'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.payload.override_raw_rules')}
-                                         hint={t('config_management.visual.sections.payload.override_raw_rules_desc')}
+                                         label={sectionT('payload.override_raw_rules')}
+                                         hint={sectionT('payload.override_raw_rules_desc')}
                                          defaultOpen={hasPayloadValidationErrors}
                                      >
                                          <PayloadRulesEditor
@@ -2289,8 +2422,8 @@ export function VisualConfigEditor({
 
                                  <FieldAnchor fieldId='payloadFilterRules'>
                                      <Collapsible
-                                         label={t('config_management.visual.sections.payload.filter_rules')}
-                                         hint={t('config_management.visual.sections.payload.filter_rules_desc')}
+                                         label={sectionT('payload.filter_rules')}
+                                         hint={sectionT('payload.filter_rules_desc')}
                                          defaultOpen={hasPayloadValidationErrors}
                                      >
                                          <PayloadFilterRulesEditor
