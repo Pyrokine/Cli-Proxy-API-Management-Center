@@ -1,11 +1,13 @@
-import type {ModelEntry, OpenAIFormState} from '@/components/providers/types'
+import type {OpenAIFormState} from '@/components/providers/types'
 import {buildApiKeyEntry} from '@/components/providers/utils'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
 import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
 import {providersApi} from '@/services/api'
 import {useConfigStore, useNotificationStore, useOpenAIEditDraftStore} from '@/stores'
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry, OpenAIProviderConfig} from '@/types'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
@@ -44,20 +46,6 @@ export type OpenAIEditOutletContext = {
 /*  Signature helpers                                                  */
 /* ------------------------------------------------------------------ */
 
-const normalizeModelEntries = (entries: ModelEntry[]) =>
-    (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
-        const name = String(entry?.name ?? '').trim()
-        let alias  = String(entry?.alias ?? '').trim()
-        if (name && (alias === '' || alias === name)) {
-            alias = ''
-        }
-        if (!name && !alias) {
-            return acc
-        }
-        acc.push({ name, alias })
-        return acc
-    }, [])
-
 const normalizeKeyHeaders = (headers: ApiKeyEntry['headers']) => {
     if (!headers || typeof headers !== 'object') {
         return []
@@ -80,6 +68,7 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
             apiKey: string
             proxyUrl: string
             authIndex: string
+            weight: number | null
             headers: Array<{ key: string; value: string }>
         }>
     >((acc, entry) => {
@@ -87,10 +76,11 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
         const proxyUrl  = String(entry?.proxyUrl ?? '').trim()
         const authIndex = String(entry?.authIndex ?? '').trim()
         const headers   = normalizeKeyHeaders(entry?.headers)
-        if (!apiKey && !proxyUrl && !authIndex && headers.length === 0) {
+        const weight    = entry?.weight !== undefined && Number.isFinite(entry.weight) ? entry.weight : null
+        if (!apiKey && !proxyUrl && !authIndex && weight === null && headers.length === 0) {
             return acc
         }
-        acc.push({ apiKey, proxyUrl, authIndex, headers })
+        acc.push({ apiKey, proxyUrl, authIndex, weight, headers })
         return acc
     }, [])
 
@@ -106,7 +96,7 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
                        authIndex: String(form.authIndex ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
                        apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
-                       models: normalizeModelEntries(form.modelEntries),
+                       models: normalizeModelEntriesForSignature(form.modelEntries),
                        testModel: String(testModel ?? '').trim(),
                    })
 
@@ -131,7 +121,6 @@ const buildEmptyForm = (): OpenAIFormState => ({
 export function AiProvidersOpenAIEditLayout() {
     const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
-    const fetchConfig          = useConfigStore((state) => state.fetchConfig)
     const updateConfigValue    = useConfigStore((state) => state.updateConfigValue)
 
     /* ---- OpenAI-specific draft store selectors (keyTestStatuses) ---- */
@@ -167,8 +156,7 @@ export function AiProvidersOpenAIEditLayout() {
                            ?
                            data.apiKeyEntries.map((entry) => buildApiKeyEntry({
                                                                                   ...entry,
-                                                                                  authIndex: entry.authIndex ??
-                                                                                             data.authIndex,
+                                                                                  authIndex: entry.authIndex,
                                                                               }))
                            :
                 [buildApiKeyEntry({ authIndex: data.authIndex })],
@@ -208,6 +196,13 @@ export function AiProvidersOpenAIEditLayout() {
                 showNotification(t('notification.openai_provider_required'), 'error')
                 return
             }
+            const weightError = form.apiKeyEntries
+                                    .map((entry) => getCredentialWeightValidationKey(entry.weight))
+                                    .find(Boolean)
+            if (weightError) {
+                showNotification(t(weightError), 'error')
+                return
+            }
 
             setSaving(true)
             try {
@@ -222,6 +217,7 @@ export function AiProvidersOpenAIEditLayout() {
                         proxyUrl: entry.proxyUrl?.trim() || undefined,
                         headers: entry.headers,
                         authIndex: entry.authIndex?.trim() || undefined,
+                        weight: entry.weight,
                     })),
                 }
                 if (form.priority !== undefined && Number.isFinite(form.priority)) {
@@ -236,35 +232,40 @@ export function AiProvidersOpenAIEditLayout() {
                     payload.models = models
                 }
 
-                const nextList =
-                          editIndex !== null
-                          ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-                          : [...configs, payload]
-
-                await providersApi.saveOpenAIProviders(nextList)
-
-                let syncedProviders = nextList
-                try {
-                    syncedProviders = await providersApi.getOpenAIProviders()
-                } catch {
-                    try {
-                        const latest = await fetchConfig('openai-compatibility', true)
-                        if (Array.isArray(latest)) {
-                            syncedProviders = latest as OpenAIProviderConfig[]
-                        }
-                    } catch {
-                        // 保存成功后刷新失败时，回退到本地计算结果，避免页面数据为空或回退
+                let localProviders: OpenAIProviderConfig[]
+                if (editIndex !== null) {
+                    const existing = configs[editIndex]
+                    if (!existing) {
+                        showNotification(
+                            `${t('notification.update_failed')}: ${t('common.invalid_provider_index')}`,
+                            'error',
+                        )
+                        return
                     }
+                    await providersApi.patchOpenAIProvider(editIndex, payload, existing)
+                    localProviders = configs.map((item, index) => index === editIndex ? payload : item)
+                } else {
+                    await providersApi.createOpenAIProvider(payload)
+                    localProviders = [...configs, payload]
                 }
 
-                setConfigs(syncedProviders)
-                updateConfigValue('openai-compatibility', syncedProviders)
                 showNotification(
                     editIndex !== null
                     ? t('notification.openai_provider_updated')
                     : t('notification.openai_provider_added'),
                     'success',
                 )
+
+                let syncedProviders = localProviders
+                try {
+                    syncedProviders = await providersApi.getOpenAIProviders()
+                } catch (refreshError: unknown) {
+                    const message = refreshError instanceof Error ? refreshError.message : ''
+                    showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+                }
+
+                setConfigs(syncedProviders)
+                updateConfigValue('openai-compatibility', syncedProviders)
                 ctx.allowNextNavigation()
                 ctx.updateBaselineSignature(buildOpenAISignature(form, testModel))
                 handleBack()
@@ -274,15 +275,14 @@ export function AiProvidersOpenAIEditLayout() {
                 setSaving(false)
             }
         },
-        [fetchConfig, showNotification, t, updateConfigValue],
+        [showNotification, t, updateConfigValue],
     )
 
     const layout = useProviderEditLayout({
-                                             configKey: 'openai-compatibility',
+                                             loadConfigs: providersApi.getOpenAIProviders,
                                              draftKeyPrefix: 'openai',
                                              routePrefix: '/credentials/openai',
                                              useDraftStore: draftStore,
-                                             extractConfigs: (config) => config?.openaiCompatibility ?? [],
                                              buildEmptyDraftInit,
                                              buildSignature: buildOpenAISignature,
                                              seedDraftInit,

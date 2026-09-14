@@ -73,8 +73,10 @@ export interface Config {
     routingSessionAffinityTTL?: string
     apiKeys?: string[]
     geminiApiKeys?: GeminiKeyConfig[]
+    interactionsApiKeys?: GeminiKeyConfig[]
     codexApiKeys?: ProviderKeyConfig[]
     claudeApiKeys?: ProviderKeyConfig[]
+    xaiApiKeys?: ProviderKeyConfig[]
     vertexApiKeys?: ProviderKeyConfig[]
     openaiCompatibility?: OpenAIProviderConfig[]
     oauthExcludedModels?: Record<string, string[]>
@@ -103,8 +105,10 @@ export type RawConfigSection =
     | 'routing/strategy'
     | 'api-keys'
     | 'gemini-api-key'
+    | 'interactions-api-key'
     | 'codex-api-key'
     | 'claude-api-key'
+    | 'xai-api-key'
     | 'vertex-api-key'
     | 'openai-compatibility'
     | 'oauth-excluded-models'

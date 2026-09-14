@@ -1,5 +1,4 @@
 import type {VertexFormState} from '@/components/providers'
-import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
 import {modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {
@@ -10,15 +9,19 @@ import {
 } from '@/hooks/useProviderEditForm'
 import {providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries} from '@/utils/headers'
+import {normalizeModelThinking} from '@/utils/modelMetadata'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {HeadersField, PrefixField} from './ProviderFormFields'
+import {ProviderConnectionFields} from './ProviderFormFields'
 
 // ---- Form helpers ----
 
 const buildEmptyForm = (): VertexFormState => ({
     apiKey: '',
+    priority: undefined,
+    weight: undefined,
     prefix: '',
     baseUrl: '',
     proxyUrl: '',
@@ -42,20 +45,7 @@ export function AiProvidersVertexEditPage() {
         configKey: 'vertex-api-key',
         buildEmptyForm,
         buildSignature,
-        loadConfigs: async ({ fetchConfig, updateConfigValue, clearCache }) => {
-            const [configResult, vertexResult] = await Promise.all([
-                                                                       fetchConfig('vertex-api-key'),
-                                                                       providersApi.getVertexConfigs(),
-                                                                   ])
-            const list                         = Array.isArray(vertexResult)
-                                                 ? (vertexResult as ProviderKeyConfig[])
-                                                 : Array.isArray(configResult)
-                                                   ? (configResult as ProviderKeyConfig[])
-                                                   : []
-            updateConfigValue('vertex-api-key', list)
-            clearCache('vertex-api-key')
-            return list
-        },
+        loadConfigs: () => providersApi.getVertexConfigs(),
         configToForm: (config) => ({
             ...config,
             headers: headersToEntries(config.headers),
@@ -65,6 +55,7 @@ export function AiProvidersVertexEditPage() {
             apiKey: form.apiKey.trim(),
             priority:
                 form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : undefined,
+            weight: form.weight,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,
@@ -76,11 +67,18 @@ export function AiProvidersVertexEditPage() {
                             if (!name || !alias) {
                                 return null
                             }
-                            return { name, alias }
+                            const thinking = normalizeModelThinking(entry.thinking)
+                            return {
+                                name,
+                                alias,
+                                ...(thinking ? { thinking } : {}),
+                            }
                         })
                         .filter(Boolean) as ProviderKeyConfig['models'],
         }),
-        saveConfigs: (configs) => providersApi.saveVertexConfigs(configs),
+        createConfig: (config) => providersApi.createVertexConfig(config),
+        updateConfig: (index, config, original) => providersApi.patchVertexConfig(index, config, original),
+        validateBeforeSave: (form) => getCredentialWeightValidationKey(form.weight),
         i18n: {
             editTitle: 'ai_providers.vertex_edit_modal_title',
             addTitle: 'ai_providers.vertex_add_modal_title',
@@ -118,33 +116,16 @@ export function AiProvidersVertexEditPage() {
             onSave={handleSave}
             swipeRef={swipeRef}
         >
-            <Input
-                label={t('ai_providers.vertex_add_modal_key_label')}
-                placeholder={t('ai_providers.vertex_add_modal_key_placeholder')}
-                value={form.apiKey}
-                onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+            <ProviderConnectionFields
+                form={form}
+                setForm={setForm}
                 disabled={disabled}
-                secret
-            />
-            <PrefixField form={form} setForm={setForm} disabled={disabled} />
-            <Input
-                label={t('ai_providers.vertex_add_modal_url_label')}
-                placeholder={t('ai_providers.vertex_add_modal_url_placeholder')}
-                value={form.baseUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                disabled={disabled}
-            />
-            <Input
-                label={t('ai_providers.vertex_add_modal_proxy_label')}
-                placeholder={t('ai_providers.vertex_add_modal_proxy_placeholder')}
-                value={form.proxyUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-                disabled={disabled}
-            />
-            <HeadersField
-                entries={form.headers}
-                onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-                disabled={disabled}
+                apiKeyLabel={t('ai_providers.vertex_add_modal_key_label')}
+                apiKeyPlaceholder={t('ai_providers.vertex_add_modal_key_placeholder')}
+                baseUrlLabel={t('ai_providers.vertex_add_modal_url_label')}
+                baseUrlPlaceholder={t('ai_providers.vertex_add_modal_url_placeholder')}
+                proxyUrlLabel={t('ai_providers.vertex_add_modal_proxy_label')}
+                proxyUrlPlaceholder={t('ai_providers.vertex_add_modal_proxy_placeholder')}
             />
             <div className='form-group'>
                 <label>{t('ai_providers.vertex_models_label')}</label>

@@ -1,27 +1,32 @@
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import type {GeminiFormState} from '@/components/providers'
-import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {Input} from '@/components/ui/Input'
+import {buildEmptyGeminiForm, excludedModelsToText, parseTextList} from '@/components/providers/utils'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {useModelDiscovery} from '@/hooks/useModelDiscovery'
-import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
+import {
+    useProviderConnectivityTestModel,
+    useProviderConnectivityTestState,
+} from '@/hooks/useProviderConnectivityTestState'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {apiCallApi, getApiCallErrorMessage, modelsApi, providersApi} from '@/services/api'
-import {useNotificationStore} from '@/stores'
+import {apiCallApi, modelsApi, prepareApiCallAuth, providersApi} from '@/services/api'
 import type {GeminiKeyConfig} from '@/types'
 import {normalizeApiBase} from '@/utils/connection'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
+import {
+    ProviderConnectionFields,
+    ProviderModelSection,
+    QuickFillField,
+} from './ProviderFormFields'
 import {GEMINI_QUICK_FILL_PRESETS} from './providerQuickFill'
-import {HeadersField, PrefixField, PriorityField, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 
 // ---- Gemini-specific helpers ----
 
@@ -53,41 +58,25 @@ const buildGeminiGenerateContentEndpoint = (baseUrl: string, modelName: string):
     return `${trimmed}/v1beta/models/${modelPath}:generateContent`
 }
 
-const buildEmptyForm = (): GeminiFormState => ({
-    apiKey: '',
-    priority: undefined,
-    prefix: '',
-    baseUrl: '',
-    proxyUrl: '',
-    headers: [],
-    modelEntries: [{ name: '', alias: '' }],
-    excludedModels: [],
-    excludedText: '',
-})
-
 const buildSignature = (form: GeminiFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
-                       models: normalizeModelEntriesForSignature(form.modelEntries, (name) =>
-                           stripGeminiModelResourceName(name).trim(),
-                       ),
+                       models: normalizeModelEntriesForSignature(form.modelEntries, {
+                           normalizeName: (name) => stripGeminiModelResourceName(name).trim(),
+                       }),
                        excludedModels: parseTextList(form.excludedText ?? ''),
                    })
 
 // ---- Page component ----
 
 export function AiProvidersGeminiEditPage() {
-    const { t }                = useTranslation()
-    const { showNotification } = useNotificationStore()
+    const { t } = useTranslation()
 
     const editOptions: ProviderEditFormConfig<GeminiFormState, GeminiKeyConfig> = {
         configKey: 'gemini-api-key',
-        buildEmptyForm,
+        buildEmptyForm: buildEmptyGeminiForm,
         buildSignature,
-        loadConfigs: async ({ fetchConfig }) => {
-            const value = await fetchConfig('gemini-api-key')
-            return Array.isArray(value) ? (value as GeminiKeyConfig[]) : []
-        },
+        loadConfigs: () => providersApi.getGeminiKeys(),
         configToForm: (config) => {
             const { headers, models, ...rest } = config
             return {
@@ -108,6 +97,7 @@ export function AiProvidersGeminiEditPage() {
             return {
                 apiKey: form.apiKey.trim(),
                 priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+                weight: form.weight,
                 prefix: form.prefix?.trim() || undefined,
                 baseUrl: form.baseUrl?.trim() || undefined,
                 proxyUrl: form.proxyUrl?.trim() || undefined,
@@ -116,7 +106,9 @@ export function AiProvidersGeminiEditPage() {
                 excludedModels: parseTextList(form.excludedText),
             }
         },
-        saveConfigs: (configs) => providersApi.saveGeminiKeys(configs),
+        createConfig: (config) => providersApi.createGeminiKey(config),
+        updateConfig: (index, config, original) => providersApi.patchGeminiKey(index, config, original),
+        validateBeforeSave: (form) => getCredentialWeightValidationKey(form.weight),
         i18n: {
             editTitle: 'ai_providers.gemini_edit_modal_title',
             addTitle: 'ai_providers.gemini_add_modal_title',
@@ -144,161 +136,102 @@ export function AiProvidersGeminiEditPage() {
 
     // ---- Model discovery and connectivity test ----
 
-    const [testModel, setTestModel]     = useState('')
-    const [testStatus, setTestStatus]   = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-    const [testMessage, setTestMessage] = useState('')
-    const [isTesting, setIsTesting]     = useState(false)
-    const controlsDisabled              = disabled || isTesting
+    const {
+              testModel,
+              setTestModel,
+              modelSelectOptions,
+              availableModels,
+              resolvedTestModel,
+          } = useProviderConnectivityTestModel(form.modelEntries, stripGeminiModelResourceName)
 
-    const modelSelectOptions = useModelSelectOptions(form.modelEntries)
-    const availableModels    = useMemo(
-        () => modelSelectOptions.map((option) => stripGeminiModelResourceName(option.value)).filter(Boolean),
-        [modelSelectOptions],
-    )
-    const resolvedTestModel  = useMemo(() => {
-        const selectedModel = stripGeminiModelResourceName(testModel)
-        if (!selectedModel) {
-            return ''
-        }
-        const stillAvailable = availableModels.some((model) => model.toLowerCase() === selectedModel.toLowerCase())
-        return stillAvailable ? selectedModel : ''
-    }, [availableModels, testModel])
+    const {
+              testStatus,
+              setTestStatus,
+              testMessage,
+              setTestMessage,
+              isTesting,
+              runConnectivityTest,
+              showTestError,
+          }                = useProviderConnectivityTestState({
+                                                                  apiKey: form.apiKey,
+                                                                  baseUrl: form.baseUrl,
+                                                                  proxyUrl: form.proxyUrl,
+                                                                  testModel: resolvedTestModel,
+                                                                  headers: form.headers,
+                                                                  modelEntries: form.modelEntries,
+                                                              })
+    const controlsDisabled = disabled || isTesting
 
-    const connectivityConfigSignature = useMemo(() => {
-        const headersSignature = form.headers.map((entry) => `${entry.key.trim()}:${entry.value.trim()}`).join('|')
-        const modelsSignature  = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
-                                     .join('|')
-        return [
-            form.apiKey.trim(),
-            form.baseUrl?.trim() ?? '',
-            form.proxyUrl?.trim() ?? '',
-            resolvedTestModel,
-            headersSignature,
-            modelsSignature,
-        ].join('||')
-    }, [form.apiKey, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, resolvedTestModel])
-
-    const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
-
-    useEffect(() => {
-        if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
+    const runGeminiConnectivityTest = async () => {
+        if (isTesting) {
             return
         }
-        previousConnectivityConfigRef.current = connectivityConfigSignature
-        setTestStatus('idle')
-        setTestMessage('')
-    }, [connectivityConfigSignature])
 
-    const showTestError = useCallback(
-        (message: string) => {
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
-        },
-        [showNotification],
-    )
+        const modelName = stripGeminiModelResourceName(resolvedTestModel ||
+                                                       availableModels[0] ||
+                                                       DEFAULT_GEMINI_TEST_MODEL)
 
-    const runGeminiConnectivityTest = useCallback(
-        async () => {
-            if (isTesting) {
-                return
-            }
+        const customHeaders       = buildHeaderObject(form.headers)
+        const apiKey              = form.apiKey.trim()
+        const hasCustomGeminiKey  = hasHeader(customHeaders, 'x-goog-api-key')
+        const hasCustomAuthHeader = hasHeader(customHeaders, 'authorization')
 
-            const modelName = stripGeminiModelResourceName(resolvedTestModel ||
-                                                           availableModels[0] ||
-                                                           DEFAULT_GEMINI_TEST_MODEL)
+        if (!apiKey && !hasCustomGeminiKey && !hasCustomAuthHeader) {
+            showTestError(t('ai_providers.gemini_test_key_required'))
+            return
+        }
 
-            const customHeaders       = buildHeaderObject(form.headers)
-            const apiKey              = form.apiKey.trim()
-            const hasCustomGeminiKey  = hasHeader(customHeaders, 'x-goog-api-key')
-            const hasCustomAuthHeader = hasHeader(customHeaders, 'authorization')
+        const endpoint = buildGeminiGenerateContentEndpoint(form.baseUrl ?? '', modelName)
+        if (!endpoint) {
+            showTestError(t('ai_providers.gemini_test_endpoint_invalid'))
+            return
+        }
 
-            if (!apiKey && !hasCustomGeminiKey && !hasCustomAuthHeader) {
-                showTestError(t('ai_providers.gemini_test_key_required'))
-                return
-            }
+        let preparedAuth: ReturnType<typeof prepareApiCallAuth>
+        try {
+            preparedAuth = prepareApiCallAuth({
+                                                  headers: customHeaders,
+                                                  apiKey,
+                                                  authIndex: form.authIndex,
+                                                  preferredHeader: 'x-goog-api-key',
+                                                  headerNames: ['Authorization'],
+                                              })
+        } catch (err: unknown) {
+            showTestError(`${t('ai_providers.gemini_test_failed')}: ${getErrorMessage(err)}`)
+            return
+        }
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...preparedAuth.headers,
+        }
 
-            const endpoint = buildGeminiGenerateContentEndpoint(form.baseUrl ?? '', modelName)
-            if (!endpoint) {
-                showTestError(t('ai_providers.gemini_test_endpoint_invalid'))
-                return
-            }
-
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-                ...customHeaders,
-            }
-            if (apiKey && !hasCustomGeminiKey && !hasCustomAuthHeader) {
-                headers['x-goog-api-key'] = apiKey
-            }
-
-            setIsTesting(true)
-            setTestStatus('loading')
-            setTestMessage(t('ai_providers.gemini_test_running'))
-
-            try {
-                const result = await apiCallApi.request(
-                    {
-                        method: 'POST',
-                        url: endpoint,
-                        header: headers,
-                        data: JSON.stringify({
-                                                 contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
-                                                 generationConfig: { maxOutputTokens: 8 },
-                                             }),
-                        proxyUrl: form.proxyUrl?.trim() || undefined,
-                    },
-                    { timeout: GEMINI_TEST_TIMEOUT_MS },
-                )
-
-                if (result.statusCode < 200 || result.statusCode >= 300) {
-                    const detail   = getApiCallErrorMessage(result) || t('common.unknown_error')
-                    const errorMsg = `${t('ai_providers.gemini_test_failed')}: ${detail}`
-                    setTestStatus('error')
-                    setTestMessage(errorMsg)
-                    showNotification(errorMsg, 'error')
-                } else {
-                    const message = t('ai_providers.gemini_test_success')
-                    setTestStatus('success')
-                    setTestMessage(message)
-                    showNotification(message, 'success')
-                }
-            } catch (err: unknown) {
-                const message         = getErrorMessage(err)
-                const errorCode       =
-                          typeof err === 'object' && err !== null && 'code' in err ?
-                          String((err as { code?: string }).code) :
-                          ''
-                const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
-                const resolvedMessage = isTimeout
-                                        ?
-                                        t(
-                                            'ai_providers.gemini_test_timeout',
-                                            { seconds: GEMINI_TEST_TIMEOUT_MS / 1000 },
-                                        )
-                                        :
-                                        `${t('ai_providers.gemini_test_failed')}: ${message ||
-                                                                                    t('common.unknown_error')}`
-                setTestStatus('error')
-                setTestMessage(resolvedMessage)
-                showNotification(resolvedMessage, 'error')
-            } finally {
-                setIsTesting(false)
-            }
-        },
-        [
-            availableModels,
-            form.apiKey,
-            form.baseUrl,
-            form.headers,
-            form.proxyUrl,
-            isTesting,
-            resolvedTestModel,
-            showNotification,
-            showTestError,
-            t,
-        ],
-    )
+        await runConnectivityTest(
+            () => apiCallApi.request(
+                {
+                    method: 'POST',
+                    url: endpoint,
+                    header: headers,
+                    data: JSON.stringify({
+                                             contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
+                                             generationConfig: { maxOutputTokens: 8 },
+                                         }),
+                    proxyUrl: form.proxyUrl?.trim() || undefined,
+                    authIndex: form.authIndex?.trim() || undefined,
+                    draftToken: preparedAuth.draftToken,
+                },
+                { timeout: GEMINI_TEST_TIMEOUT_MS },
+            ),
+            {
+                running: t('ai_providers.gemini_test_running'),
+                success: t('ai_providers.gemini_test_success'),
+                failed: t('ai_providers.gemini_test_failed'),
+                timeout: t('ai_providers.gemini_test_timeout', {
+                    seconds: GEMINI_TEST_TIMEOUT_MS / 1000,
+                }),
+                unknownError: t('common.unknown_error'),
+            },
+        )
+    }
 
     const discovery = useModelDiscovery(
         form,
@@ -306,8 +239,8 @@ export function AiProvidersGeminiEditPage() {
         { disableControls, saving, loading, invalidIndexParam, invalidIndex },
         {
             buildEndpoint: (baseUrl) => modelsApi.buildGeminiModelsEndpoint(baseUrl),
-            fetchModels: (baseUrl, apiKey, headers, proxyUrl) =>
-                modelsApi.fetchGeminiModelsViaApiCall(baseUrl, apiKey, headers, proxyUrl),
+            fetchModels: (baseUrl, apiKey, headers, proxyUrl, signal) =>
+                modelsApi.fetchGeminiModelsViaApiCall(baseUrl, apiKey, headers, proxyUrl, form.authIndex, signal),
             canAutoFetch: (apiKey, headers) =>
                 Boolean(apiKey) || hasHeader(headers, 'x-goog-api-key') || hasHeader(headers, 'authorization'),
             buildErrorMessage: (err, { apiKey, headers }) => {
@@ -345,34 +278,16 @@ export function AiProvidersGeminiEditPage() {
                 disabled={controlsDisabled}
                 onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
             />
-            <Input
-                label={t('ai_providers.gemini_add_modal_key_label')}
-                placeholder={t('ai_providers.gemini_add_modal_key_placeholder')}
-                value={form.apiKey}
-                onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+            <ProviderConnectionFields
+                form={form}
+                setForm={setForm}
                 disabled={controlsDisabled}
-                secret
-            />
-            <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
-            <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
-            <Input
-                label={t('ai_providers.gemini_base_url_label')}
-                placeholder={t('ai_providers.gemini_base_url_placeholder')}
-                value={form.baseUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                disabled={controlsDisabled}
-            />
-            <Input
-                label={t('ai_providers.gemini_add_modal_proxy_label')}
-                placeholder={t('ai_providers.gemini_add_modal_proxy_placeholder')}
-                value={form.proxyUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-                disabled={controlsDisabled}
-            />
-            <HeadersField
-                entries={form.headers}
-                onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-                disabled={controlsDisabled}
+                apiKeyLabel={t('ai_providers.gemini_add_modal_key_label')}
+                apiKeyPlaceholder={t('ai_providers.gemini_add_modal_key_placeholder')}
+                baseUrlLabel={t('ai_providers.gemini_base_url_label')}
+                baseUrlPlaceholder={t('ai_providers.gemini_base_url_placeholder')}
+                proxyUrlLabel={t('ai_providers.gemini_add_modal_proxy_label')}
+                proxyUrlPlaceholder={t('ai_providers.gemini_add_modal_proxy_placeholder')}
             />
             <ProviderModelSection
                 form={form}

@@ -1,0 +1,72 @@
+@use '../../styles/variables.scss' as *;
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    padding: $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: $spacing-md;
+}
+
+.title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+}
+
+.hint,
+.warning {
+    margin: 0;
+    color: var(--text-tertiary);
+    font-size: $font-size-sm;
+    line-height: 1.5;
+}
+
+.warning {
+    color: var(--warning-color, #d97706);
+}
+
+.modelField {
+    display: grid;
+    gap: $spacing-xs;
+}
+
+.label {
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+}
+
+.preview {
+    max-width: 100%;
+    margin: 0;
+    padding: $spacing-sm;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    // noinspection CssNoGenericFontName
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: $font-size-xs;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+    .header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}

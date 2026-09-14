@@ -1,6 +1,12 @@
+import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useNotificationStore} from '@/stores'
 import {buildHeaderObject} from '@/utils/headers'
 import type {ModelInfo} from '@/utils/models'
+import {
+    canApplyDiscoveredModels,
+    findMissingProviderModelNames,
+    mergeProviderModelEntries,
+} from '@/utils/providerModels'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 
@@ -20,7 +26,8 @@ interface ModelDiscoveryConfig {
         baseUrl: string,
         apiKey: string | undefined,
         headers: Record<string, string>,
-        proxyUrl?: string,
+        proxyUrl: string | undefined,
+        signal: AbortSignal,
     ) => Promise<ModelInfo[]>
 
     /**
@@ -61,9 +68,11 @@ export interface ModelDiscoveryReturn {
     // Actions
     fetchDiscovery: () => Promise<void>
     toggleSelection: (name: string) => void
+    selectMissingModels: () => void
     applySelected: () => void
 
     // Derived
+    missingCount: number
     canOpen: boolean
     canApply: boolean
 }
@@ -73,7 +82,7 @@ interface DiscoveryFormState {
     baseUrl?: string
     proxyUrl?: string
     headers: HeaderEntry[]
-    modelEntries: Array<{ name: string; alias: string }>
+    modelEntries: ModelEntry[]
 }
 
 /**
@@ -104,11 +113,17 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     const [selected, setSelected]                 = useState<Set<string>>(new Set())
     const autoFetchSignatureRef                   = useRef<string>('')
     const requestIdRef                            = useRef(0)
+    const requestControllerRef                    = useRef<AbortController | null>(null)
+    const discoveryConfigRef                      = useRef(discoveryConfig)
 
-    const normalizeName = useMemo(
-        () => discoveryConfig.normalizeName ?? ((n: string) => String(n ?? '').trim()),
-        [discoveryConfig.normalizeName],
-    )
+    useEffect(() => {
+        discoveryConfigRef.current = discoveryConfig
+    }, [discoveryConfig])
+
+    const normalizeName = useCallback((name: string) => {
+        const normalize = discoveryConfigRef.current.normalizeName
+        return normalize ? normalize(name) : String(name ?? '').trim()
+    }, [])
 
     // ---- Filtered models ----
 
@@ -125,6 +140,11 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         })
     }, [discoveredModels, search])
 
+    const missingModelNames = useMemo(
+        () => findMissingProviderModelNames(formState.modelEntries, discoveredModels, normalizeName),
+        [discoveredModels, formState.modelEntries, normalizeName],
+    )
+
     // ---- Merge discovered models into form ----
 
     const mergeDiscoveredModels = useCallback(
@@ -135,85 +155,80 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 
             let addedCount = 0
             setForm((prev) => {
-                const mergedMap = new Map<string, { name: string; alias: string }>()
-                prev.modelEntries.forEach((entry) => {
-                    const name = normalizeName(entry.name)
-                    if (!name) {
-                        return
-                    }
-                    const key = name.toLowerCase()
-                    mergedMap.set(key, { name, alias: entry.alias?.trim() || '' })
-                })
-
-                selectedModels.forEach((model) => {
-                    const name = normalizeName(model.name)
-                    if (!name) {
-                        return
-                    }
-                    const key = name.toLowerCase()
-                    if (mergedMap.has(key)) {
-                        return
-                    }
-                    mergedMap.set(key, { name, alias: model.alias ?? '' })
-                    addedCount += 1
-                })
-
-                const mergedEntries = Array.from(mergedMap.values())
+                const merged = mergeProviderModelEntries(prev.modelEntries, selectedModels, normalizeName)
+                addedCount   = merged.addedCount
                 return {
                     ...prev,
-                    modelEntries: mergedEntries.length ? mergedEntries : [{ name: '', alias: '' }],
+                    modelEntries: merged.entries,
                 }
             })
 
             if (addedCount > 0) {
-                showNotification(
-                    t(`ai_providers.${discoveryConfig.i18nPrefix}_models_fetch_added`, { count: addedCount }),
-                    'success',
-                )
+                const key = `ai_providers.${discoveryConfigRef.current.i18nPrefix}_models_fetch_added`
+                showNotification(t(key, { count: addedCount }), 'success')
             }
         },
-        [discoveryConfig.i18nPrefix, normalizeName, setForm, showNotification, t],
+        [normalizeName, setForm, showNotification, t],
     )
 
     // ---- Fetch models ----
 
-    const fetchDiscovery = useCallback(async () => {
-        const requestId = (requestIdRef.current += 1)
-        setFetching(true)
-        setError('')
+    const fetchDiscovery = useCallback(
+        async () => {
+            requestControllerRef.current?.abort()
+            const controller             = new AbortController()
+            requestControllerRef.current = controller
+            const requestId              = (requestIdRef.current += 1)
+            setFetching(true)
+            setError('')
 
-        try {
-            const headerObject = buildHeaderObject(formState.headers)
-            const apiKey       = formState.apiKey.trim() || undefined
-            const proxyUrl     = formState.proxyUrl?.trim() || undefined
-            const list         = await discoveryConfig.fetchModels(
-                formState.baseUrl ?? '',
-                apiKey,
-                headerObject,
-                proxyUrl,
-            )
-            if (requestIdRef.current !== requestId) {
-                return
+            try {
+                const config       = discoveryConfigRef.current
+                const headerObject = buildHeaderObject(formState.headers)
+                const apiKey       = formState.apiKey.trim() || undefined
+                const proxyUrl     = formState.proxyUrl?.trim() || undefined
+                const list         = await config.fetchModels(
+                    formState.baseUrl ?? '',
+                    apiKey,
+                    headerObject,
+                    proxyUrl,
+                    controller.signal,
+                )
+                if (requestIdRef.current !== requestId || controller.signal.aborted) {
+                    return
+                }
+                setDiscoveredModels(list)
+                setSelected(findMissingProviderModelNames(formState.modelEntries, list, normalizeName))
+            } catch (err: unknown) {
+                if (requestIdRef.current !== requestId || controller.signal.aborted) {
+                    return
+                }
+                setDiscoveredModels([])
+                const headerObject = buildHeaderObject(formState.headers)
+                setError(
+                    discoveryConfigRef.current.buildErrorMessage(err, {
+                        apiKey: formState.apiKey.trim(),
+                        headers: headerObject,
+                    }),
+                )
+            } finally {
+                if (requestControllerRef.current === controller) {
+                    requestControllerRef.current = null
+                }
+                if (requestIdRef.current === requestId) {
+                    setFetching(false)
+                }
             }
-            setDiscoveredModels(list)
-        } catch (err: unknown) {
-            if (requestIdRef.current !== requestId) {
-                return
-            }
-            setDiscoveredModels([])
-            const headerObject = buildHeaderObject(formState.headers)
-            setError(
-                discoveryConfig.buildErrorMessage(err, {
-                    apiKey: formState.apiKey.trim(),
-                    headers: headerObject,
-                }),
-            )
-        } finally {
-            if (requestIdRef.current === requestId) {
-                setFetching(false)
-            }
-        }
-    }, [discoveryConfig, formState.apiKey, formState.baseUrl, formState.headers, formState.proxyUrl])
+        },
+        [
+            formState.apiKey,
+            formState.baseUrl,
+            formState.headers,
+            formState.modelEntries,
+            formState.proxyUrl,
+            normalizeName,
+        ],
+    )
 
     // ---- Auto-fetch when modal opens ----
 
@@ -222,12 +237,20 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             queueMicrotask(() => {
                 if (!open) {
                     autoFetchSignatureRef.current = ''
+                    requestControllerRef.current?.abort()
+                    requestControllerRef.current = null
                     requestIdRef.current += 1
                     setFetching(false)
                     return
                 }
 
-                const nextEndpoint = discoveryConfig.buildEndpoint(formState.baseUrl ?? '')
+                requestControllerRef.current?.abort()
+                requestControllerRef.current = null
+                requestIdRef.current += 1
+                setFetching(false)
+
+                const config       = discoveryConfigRef.current
+                const nextEndpoint = config.buildEndpoint(formState.baseUrl ?? '')
                 setEndpoint(nextEndpoint)
                 setDiscoveredModels([])
                 setSearch('')
@@ -239,7 +262,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 }
 
                 const headerObject = buildHeaderObject(formState.headers)
-                if (!discoveryConfig.canAutoFetch(formState.apiKey.trim(), headerObject)) {
+                if (!config.canAutoFetch(formState.apiKey.trim(), headerObject)) {
                     return
                 }
 
@@ -258,7 +281,6 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             })
         },
         [
-            discoveryConfig,
             fetchDiscovery,
             formState.apiKey,
             formState.baseUrl,
@@ -266,6 +288,13 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             formState.proxyUrl,
             open,
         ],
+    )
+
+    useEffect(
+        () => () => {
+            requestControllerRef.current?.abort()
+        },
+        [],
     )
 
     // ---- Toggle selection ----
@@ -280,6 +309,10 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             }
             return next
         })
+    }
+
+    const selectMissingModels = () => {
+        setSelected(new Set(missingModelNames))
     }
 
     // ---- Apply selected ----
@@ -301,7 +334,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
               !flags.invalidIndexParam &&
               !flags.invalidIndex
 
-    const canApply = !flags.disableControls && !flags.saving && !fetching
+    const canApply = canApplyDiscoveredModels(selected.size, flags.disableControls, flags.saving, fetching)
 
     return {
         open,
@@ -316,7 +349,9 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         selected,
         fetchDiscovery,
         toggleSelection,
+        selectMissingModels,
         applySelected,
+        missingCount: missingModelNames.size,
         canOpen,
         canApply,
     }

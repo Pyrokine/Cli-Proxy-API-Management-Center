@@ -1,14 +1,15 @@
-import {SecondaryScreenShell} from '@/components/common/SecondaryScreenShell'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
-import {Input} from '@/components/ui/Input'
+import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
+import {useProviderEditPresentation} from '@/hooks/useProviderEditPresentation'
 import type {ModelInfo} from '@/utils/models'
+import {canApplyDiscoveredModels, findMissingProviderModelNames} from '@/utils/providerModels'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {useNavigate} from 'react-router-dom'
-import {ModelCheckboxList} from './ModelCheckboxList'
-import styles from './ProviderEditForm.module.scss'
+import {ProviderModelSelectionContent} from './ModelDiscoveryModal'
+import {ProviderPresentationShell} from './ProviderEditShell'
 import layoutStyles from './ProviderEditLayout.module.scss'
 
 export type ProviderModelsPageProps = {
@@ -17,11 +18,12 @@ export type ProviderModelsPageProps = {
     disableControls: boolean
     initialLoading: boolean
     saving: boolean
+    configuredModelEntries: ModelEntry[]
     mergeDiscoveredModels: (selectedModels: ModelInfo[]) => void
     /** Build the display endpoint URL from the current base URL */
     buildEndpoint: () => string
     /** Perform the model discovery fetch; returns the model list */
-    fetchModels: () => Promise<ModelInfo[]>
+    fetchModels: (signal: AbortSignal) => Promise<ModelInfo[]>
     /** Dependencies that trigger endpoint recalculation and auto-fetch */
     fetchDeps: readonly unknown[]
     /** Whether auto-fetch should proceed (e.g. credentials are present) */
@@ -30,6 +32,11 @@ export type ProviderModelsPageProps = {
     buildAutoFetchSignature?: () => string
     /** Optional: build extra error diagnostic string */
     buildErrorDiagnostic?: (message: string) => string
+    fetchTitle?: string
+    fetchHint?: string
+    fetchLoadingLabel?: string
+    fetchEmptyLabel?: string
+    fetchErrorLabel?: string
 }
 
 export function ProviderModelsPage({
@@ -37,6 +44,7 @@ export function ProviderModelsPage({
                                        disableControls,
                                        initialLoading,
                                        saving,
+                                       configuredModelEntries,
                                        mergeDiscoveredModels,
                                        buildEndpoint,
                                        fetchModels,
@@ -44,9 +52,15 @@ export function ProviderModelsPage({
                                        canAutoFetch,
                                        buildAutoFetchSignature,
                                        buildErrorDiagnostic,
+                                       fetchTitle,
+                                       fetchHint,
+                                       fetchLoadingLabel,
+                                       fetchEmptyLabel,
+                                       fetchErrorLabel,
                                    }: ProviderModelsPageProps) {
-    const { t }    = useTranslation()
-    const navigate = useNavigate()
+    const { t }        = useTranslation()
+    const navigate     = useNavigate()
+    const presentation = useProviderEditPresentation()
 
     const [endpoint, setEndpoint] = useState('')
     const [models, setModels]     = useState<ModelInfo[]>([])
@@ -55,6 +69,8 @@ export function ProviderModelsPage({
     const [search, setSearch]     = useState('')
     const [selected, setSelected] = useState<Set<string>>(new Set())
     const autoFetchSignatureRef   = useRef('')
+    const requestGenerationRef    = useRef(0)
+    const requestControllerRef    = useRef<AbortController | null>(null)
 
     const filteredModels = useMemo(() => {
         const filter = search.trim().toLowerCase()
@@ -70,21 +86,42 @@ export function ProviderModelsPage({
         })
     }, [models, search])
 
+    const missingModelNames = useMemo(
+        () => findMissingProviderModelNames(configuredModelEntries, models),
+        [configuredModelEntries, models],
+    )
+
     const doFetch = useCallback(async () => {
+        requestControllerRef.current?.abort()
+        const controller             = new AbortController()
+        requestControllerRef.current = controller
+        const generation             = ++requestGenerationRef.current
         setFetching(true)
         setError('')
         try {
-            const list = await fetchModels()
+            const list = await fetchModels(controller.signal)
+            if (requestGenerationRef.current !== generation || controller.signal.aborted) {
+                return
+            }
             setModels(list)
+            setSelected(findMissingProviderModelNames(configuredModelEntries, list))
         } catch (err: unknown) {
+            if (requestGenerationRef.current !== generation || controller.signal.aborted) {
+                return
+            }
             setModels([])
             const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
             const diag    = buildErrorDiagnostic?.(message) ?? ''
-            setError(`${t(`ai_providers.${i18nPrefix}_fetch_error`)}: ${message}${diag}`)
+            setError(`${fetchErrorLabel ?? t(`ai_providers.${i18nPrefix}_fetch_error`)}: ${message}${diag}`)
         } finally {
-            setFetching(false)
+            if (requestControllerRef.current === controller) {
+                requestControllerRef.current = null
+            }
+            if (requestGenerationRef.current === generation) {
+                setFetching(false)
+            }
         }
-    }, [buildErrorDiagnostic, fetchModels, i18nPrefix, t])
+    }, [buildErrorDiagnostic, configuredModelEntries, fetchErrorLabel, fetchModels, i18nPrefix, t])
 
     // Reset state and auto-fetch when dependencies change
     useEffect(() => {
@@ -92,7 +129,12 @@ export function ProviderModelsPage({
             return
         }
 
+        requestControllerRef.current?.abort()
+        requestControllerRef.current = null
+        ++requestGenerationRef.current
+
         queueMicrotask(() => {
+            setFetching(false)
             setEndpoint(buildEndpoint())
             setModels([])
             setSearch('')
@@ -116,13 +158,27 @@ export function ProviderModelsPage({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialLoading, ...fetchDeps])
 
+    useEffect(
+        () => () => {
+            requestControllerRef.current?.abort()
+        },
+        [],
+    )
+
     const handleBack = useCallback(() => {
-        navigate(-1)
-    }, [navigate])
+        if (presentation) {
+            navigate(-1)
+            return
+        }
+        navigate('..', { replace: true })
+    }, [navigate, presentation])
 
     const swipeRef = useEdgeSwipeBack({ onBack: handleBack })
 
     useEffect(() => {
+        if (presentation) {
+            return
+        }
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 handleBack()
@@ -130,7 +186,7 @@ export function ProviderModelsPage({
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [handleBack])
+    }, [handleBack, presentation])
 
     const toggleSelection = (name: string) => {
         setSelected((prev) => {
@@ -144,6 +200,10 @@ export function ProviderModelsPage({
         })
     }
 
+    const selectMissingModels = () => {
+        setSelected(new Set(missingModelNames))
+    }
+
     const handleApply = () => {
         const selectedModels = models.filter((model) => selected.has(model.name))
         if (selectedModels.length) {
@@ -152,68 +212,55 @@ export function ProviderModelsPage({
         handleBack()
     }
 
-    const canApply = !disableControls && !saving && !fetching
+    const canApply = canApplyDiscoveredModels(selected.size, disableControls, saving, fetching)
+
+    const title             = fetchTitle ?? t(`ai_providers.${i18nPrefix}_fetch_title`)
+    const renderApplyAction = () => (
+        <Button
+            size='sm'
+            onClick={handleApply}
+            disabled={!canApply}
+            className={layoutStyles.floatingSaveButton}
+        >
+            {t(`ai_providers.${i18nPrefix}_fetch_apply`)}{selected.size > 0 ? ` (${selected.size})` : ''}
+        </Button>
+    )
+    const content           = (
+        <Card>
+            <ProviderModelSelectionContent
+                i18nPrefix={i18nPrefix}
+                endpoint={endpoint}
+                discoveredModels={models}
+                filteredModels={filteredModels}
+                fetching={fetching}
+                error={error}
+                search={search}
+                onSearchChange={setSearch}
+                selected={selected}
+                missingCount={missingModelNames.size}
+                onToggleSelection={toggleSelection}
+                onSelectMissing={selectMissingModels}
+                onRefresh={() => void doFetch()}
+                disabled={disableControls || saving}
+                hint={fetchHint}
+                loadingLabel={fetchLoadingLabel}
+                emptyLabel={fetchEmptyLabel}
+            />
+        </Card>
+    )
 
     return (
-        <SecondaryScreenShell
-            ref={swipeRef}
-            contentClassName={layoutStyles.content}
-            title={t(`ai_providers.${i18nPrefix}_fetch_title`)}
+        <ProviderPresentationShell
+            title={title}
+            loading={initialLoading}
+            closeDisabled={saving}
             onBack={handleBack}
-            backLabel={t('common.back')}
-            backAriaLabel={t('common.back')}
-            rightAction={
-                <Button
-                    size='sm'
-                    onClick={handleApply}
-                    disabled={!canApply}
-                    className={layoutStyles.floatingSaveButton}
-                >
-                    {t(`ai_providers.${i18nPrefix}_fetch_apply`)}
-                </Button>
-            }
-            isLoading={initialLoading}
-            loadingLabel={t('common.loading')}
+            swipeRef={swipeRef}
+            presentation={presentation}
+            returnFocusId={presentation?.childReturnFocusId}
+            renderPrimaryAction={renderApplyAction}
         >
-            <Card>
-                <div className={styles.openaiModelsContent}>
-                    <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_fetch_hint`)}</div>
-                    <div className={styles.openaiModelsEndpointSection}>
-                        <label className={styles.openaiModelsEndpointLabel}>
-                            {t(`ai_providers.${i18nPrefix}_fetch_url_label`)}
-                        </label>
-                        <div className={styles.openaiModelsEndpointControls}>
-                            <input className={`input ${styles.openaiModelsEndpointInput}`} readOnly value={endpoint} />
-                            <Button
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => void doFetch()}
-                                loading={fetching}
-                                disabled={disableControls || saving}
-                            >
-                                {t(`ai_providers.${i18nPrefix}_fetch_refresh`)}
-                            </Button>
-                        </div>
-                    </div>
-                    <Input
-                        label={t(`ai_providers.${i18nPrefix}_search_label`)}
-                        placeholder={t(`ai_providers.${i18nPrefix}_search_placeholder`)}
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        disabled={fetching}
-                    />
-                    {error && <div className='error-box'>{error}</div>}
-                    {fetching ? (
-                        <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_fetch_loading`)}</div>
-                    ) : models.length === 0 ? (
-                        <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_fetch_empty`)}</div>
-                    ) : filteredModels.length === 0 ? (
-                        <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_search_empty`)}</div>
-                    ) : (
-                            <ModelCheckboxList models={filteredModels} selected={selected} onToggle={toggleSelection} />
-                        )}
-                </div>
-            </Card>
-        </SecondaryScreenShell>
+            {content}
+        </ProviderPresentationShell>
     )
 }

@@ -3,10 +3,12 @@ import {AiProvidersClaudeEditPage} from '@/pages/AiProvidersClaudeEditPage'
 import {AiProvidersClaudeModelsPage} from '@/pages/AiProvidersClaudeModelsPage'
 import {AiProvidersCodexEditPage} from '@/pages/AiProvidersCodexEditPage'
 import {AiProvidersGeminiEditPage} from '@/pages/AiProvidersGeminiEditPage'
+import {AiProvidersInteractionsEditPage} from '@/pages/AiProvidersInteractionsEditPage'
 import {AiProvidersOpenAIEditLayout} from '@/pages/AiProvidersOpenAIEditLayout'
 import {AiProvidersOpenAIEditPage} from '@/pages/AiProvidersOpenAIEditPage'
 import {AiProvidersOpenAIModelsPage} from '@/pages/AiProvidersOpenAIModelsPage'
 import {AiProvidersVertexEditPage} from '@/pages/AiProvidersVertexEditPage'
+import {AiProvidersXAIEditPage} from '@/pages/AiProvidersXAIEditPage'
 import {ConfigPage} from '@/pages/ConfigPage'
 import CredentialsPage from '@/pages/CredentialsPage'
 import {DashboardPage} from '@/pages/DashboardPage'
@@ -20,7 +22,7 @@ import {SystemPage} from '@/pages/SystemPage'
 import {UsagePage} from '@/pages/UsagePage'
 import {type Location, Navigate, useLocation, useParams, useRoutes} from 'react-router-dom'
 
-const LEGACY_PROVIDER_IDS = new Set(['gemini', 'codex', 'claude', 'vertex', 'openai'])
+const LEGACY_PROVIDER_IDS = new Set(['gemini', 'interactions', 'codex', 'claude', 'xai', 'vertex', 'openai'])
 
 function LegacyAiProviderRedirect() {
     const location     = useLocation()
@@ -45,8 +47,12 @@ const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
     // Credential edit sub-routes
     { path: '/credentials/gemini/new', element: <AiProvidersGeminiEditPage /> },
     { path: '/credentials/gemini/:index', element: <AiProvidersGeminiEditPage /> },
+    { path: '/credentials/interactions/new', element: <AiProvidersInteractionsEditPage /> },
+    { path: '/credentials/interactions/:index', element: <AiProvidersInteractionsEditPage /> },
     { path: '/credentials/codex/new', element: <AiProvidersCodexEditPage /> },
     { path: '/credentials/codex/:index', element: <AiProvidersCodexEditPage /> },
+    { path: '/credentials/xai/new', element: <AiProvidersXAIEditPage /> },
+    { path: '/credentials/xai/:index', element: <AiProvidersXAIEditPage /> },
     {
         path: '/credentials/claude/new',
         element: <AiProvidersClaudeEditLayout />,

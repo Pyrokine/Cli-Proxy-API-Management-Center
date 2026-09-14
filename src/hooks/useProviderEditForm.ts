@@ -1,3 +1,4 @@
+import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
@@ -8,21 +9,24 @@ import {type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, use
 import {useTranslation} from 'react-i18next'
 import {useParams} from 'react-router-dom'
 
+export {normalizeModelEntriesForSignature} from '@/utils/modelMetadata'
+
 // ---- Generic form state constraint ----
 
 interface BaseFormState {
     apiKey: string
     priority?: number
+    weight?: number
     prefix?: string
     baseUrl?: string
     proxyUrl?: string
     headers: Array<{ key: string; value: string }>
-    modelEntries: Array<{ name: string; alias: string }>
+    modelEntries: ModelEntry[]
 }
 
 // ---- Configuration for provider-specific behavior ----
 
-export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
+export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig extends { authIndex?: string }> {
     /** Config key used in config store (e.g. 'codex-api-key') */
     configKey: RawConfigSection
 
@@ -51,10 +55,11 @@ export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
     /** Convert form state to the payload for saving */
     formToPayload: (form: TForm) => TConfig
 
-    /**
-     * Save the full config list to server.
-     */
-    saveConfigs: (configs: TConfig[]) => Promise<unknown>
+    /** Create one provider entry without replacing the current server list. */
+    createConfig: (config: TConfig) => Promise<unknown>
+
+    /** Update one provider entry using its stable server identity when available. */
+    updateConfig: (index: number, config: TConfig, original: TConfig) => Promise<unknown>
 
     /** Optional pre-save validation. Return an error notification key to abort, or undefined to proceed. */
     validateBeforeSave?: (form: TForm) => string | undefined
@@ -70,7 +75,7 @@ export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig> {
 
 // ---- Return type ----
 
-interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig> {
+interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig extends { authIndex?: string }> {
     // Form
     form: TForm
     setForm: Dispatch<SetStateAction<TForm>>
@@ -103,7 +108,7 @@ interface ProviderEditFormReturn<TForm extends BaseFormState, TConfig> {
  * Shared hook for Codex / Gemini / Vertex provider edit pages.
  * Encapsulates: config loading, form state, dirty tracking, unsaved-changes guard, save logic.
  */
-export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
+export function useProviderEditForm<TForm extends BaseFormState, TConfig extends { authIndex?: string }>(
     config: ProviderEditFormConfig<TForm, TConfig>,
 ): ProviderEditFormReturn<TForm, TConfig> {
     const { t }  = useTranslation()
@@ -249,20 +254,42 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
         setSaving(true)
         setError('')
         try {
-            const payload = config.formToPayload(form)
+            const payload  = config.formToPayload(form)
+            const original = editIndex !== null ? configs[editIndex] : undefined
+            if (editIndex !== null && !original) {
+                const message = t('common.invalid_provider_index')
+                setError(message)
+                showNotification(`${t('notification.update_failed')}: ${message}`, 'error')
+                return
+            }
 
-            const nextList =
-                      editIndex !== null
-                      ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-                      : [...configs, payload]
+            if (editIndex !== null && original) {
+                await config.updateConfig(editIndex, payload, original)
+            } else {
+                await config.createConfig(payload)
+            }
 
-            await config.saveConfigs(nextList)
-            updateConfigValue(config.configKey, nextList)
-            clearCache(config.configKey)
+            const localValue = editIndex !== null && original
+                               ? ({ ...payload, authIndex: original.authIndex } as TConfig)
+                               : payload
+            const localList  = editIndex !== null
+                               ? configs.map((item, idx) => (idx === editIndex ? localValue : item))
+                               : [...configs, localValue]
             showNotification(
                 editIndex !== null ? t(config.i18n.saveSuccessEdit) : t(config.i18n.saveSuccessAdd),
                 'success',
             )
+
+            let nextList = localList
+            try {
+                nextList = await config.loadConfigs({ fetchConfig, updateConfigValue, clearCache })
+            } catch (refreshError: unknown) {
+                const message = refreshError instanceof Error ? refreshError.message : ''
+                showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+            }
+
+            setConfigs(nextList)
+            updateConfigValue(config.configKey, nextList)
             allowNextNavigation()
             setBaselineSignature(config.buildSignature(form))
             handleBack()
@@ -280,6 +307,7 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
                                        config,
                                        configs,
                                        editIndex,
+                                       fetchConfig,
                                        form,
                                        handleBack,
                                        showNotification,
@@ -317,29 +345,9 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig>(
 export const buildBaseSignatureFields = (form: BaseFormState) => ({
     apiKey: String(form.apiKey ?? '').trim(),
     priority: form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
+    weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
     prefix: String(form.prefix ?? '').trim(),
     baseUrl: String(form.baseUrl ?? '').trim(),
     proxyUrl: String(form.proxyUrl ?? '').trim(),
     headers: normalizeHeaderEntries(form.headers),
 })
-
-/**
- * Normalize model entries for signature comparison.
- * Strips entries where both name and alias are empty.
- */
-export const normalizeModelEntriesForSignature = (
-    entries: Array<{ name: string; alias: string }>,
-    normalizeName: (name: string) => string = (name) => String(name ?? '').trim(),
-) =>
-    (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
-        const name = normalizeName(entry?.name ?? '')
-        let alias  = String(entry?.alias ?? '').trim()
-        if (name && alias === name) {
-            alias = ''
-        }
-        if (!name && !alias) {
-            return acc
-        }
-        acc.push({ name, alias })
-        return acc
-    }, [])

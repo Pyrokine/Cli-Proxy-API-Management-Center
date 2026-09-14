@@ -16,7 +16,7 @@ export function AiProvidersOpenAIModelsPage() {
 
     const buildEndpoint = useCallback(() => modelsApi.buildV1ModelsEndpoint(form.baseUrl), [form.baseUrl])
 
-    const fetchModels = useCallback(async () => {
+    const fetchModels = useCallback(async (signal: AbortSignal) => {
         const trimmedBaseUrl = form.baseUrl.trim()
         if (!trimmedBaseUrl) {
             return []
@@ -35,6 +35,7 @@ export function AiProvidersOpenAIModelsPage() {
                 headerObject,
                 keyEntry?.proxyUrl,
                 authIndex,
+                signal,
             )
         } catch (v1Error: unknown) {
             try {
@@ -44,6 +45,7 @@ export function AiProvidersOpenAIModelsPage() {
                     headerObject,
                     keyEntry?.proxyUrl,
                     authIndex,
+                    signal,
                 )
             } catch {
                 try {
@@ -53,6 +55,7 @@ export function AiProvidersOpenAIModelsPage() {
                         undefined,
                         undefined,
                         authIndex,
+                        signal,
                     )
                 } catch {
                     try {
@@ -81,6 +84,7 @@ export function AiProvidersOpenAIModelsPage() {
             disableControls={disableControls}
             initialLoading={initialLoading}
             saving={saving}
+            configuredModelEntries={form.modelEntries}
             mergeDiscoveredModels={mergeDiscoveredModels}
             buildEndpoint={buildEndpoint}
             fetchModels={fetchModels}

@@ -1,4 +1,4 @@
-export type ProviderDraftInitAction = 'wait' | 'empty' | 'seed'
+type ProviderDraftInitAction = 'wait' | 'empty' | 'seed'
 
 export function resolveProviderDraftInitAction<C>(options: {
     loading: boolean

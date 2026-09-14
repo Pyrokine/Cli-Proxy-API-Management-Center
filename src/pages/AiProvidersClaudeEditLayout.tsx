@@ -1,15 +1,17 @@
 import type {ProviderFormState} from '@/components/providers/types'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
 import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
-import {providersApi} from '@/services/api'
+import {findProviderConfigIndexByAuthIndex, providersApi} from '@/services/api'
 import {useClaudeEditDraftStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {ProviderKeyConfig} from '@/types'
-import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
+import {buildHeaderObject, getChangedHeaderNames, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
 import type {Dispatch, SetStateAction} from 'react'
-import {useCallback} from 'react'
+import {useCallback, useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Outlet} from 'react-router-dom'
 
@@ -23,8 +25,13 @@ export type ClaudeEditOutletContext = {
     disableControls: boolean
     loading: boolean
     saving: boolean
+    apiKeyIsMasked: boolean
+    maskedCredentialHeaderNames: string[]
+    credentialIdentityAvailable: boolean
     form: ProviderFormState
     setForm: Dispatch<SetStateAction<ProviderFormState>>
+    updateApiKey: (value: string) => void
+    updateHeaders: (entries: ProviderFormState['headers']) => void
     testModel: string
     setTestModel: Dispatch<SetStateAction<string>>
     testStatus: TestStatus
@@ -40,20 +47,6 @@ export type ClaudeEditOutletContext = {
 /* ------------------------------------------------------------------ */
 /*  Signature helpers                                                  */
 /* ------------------------------------------------------------------ */
-
-const normalizeClaudeModelEntries = (entries: Array<{ name: string; alias: string }>) =>
-    (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
-        const name = String(entry?.name ?? '').trim()
-        let alias  = String(entry?.alias ?? '').trim()
-        if (name) {
-            alias = alias || name
-        }
-        if (!name && !alias) {
-            return acc
-        }
-        acc.push({ name, alias })
-        return acc
-    }, [])
 
 const normalizeCloakConfig = (cloak: ProviderFormState['cloak']) => {
     if (!cloak) {
@@ -80,11 +73,12 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                        priority: form.priority !== undefined && Number.isFinite(form.priority) ?
                                  Math.trunc(form.priority) :
                                  null,
+                       weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        proxyUrl: String(form.proxyUrl ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
-                       models: normalizeClaudeModelEntries(form.modelEntries),
+                       models: normalizeModelEntriesForSignature(form.modelEntries, { aliasFallbackToName: true }),
                        excludedModels: parseTextList(form.excludedText ?? ''),
                        cloak: normalizeCloakConfig(form.cloak),
                    })
@@ -92,6 +86,7 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
     priority: undefined,
+    weight: undefined,
     prefix: '',
     baseUrl: '',
     proxyUrl: '',
@@ -111,7 +106,6 @@ export function AiProvidersClaudeEditLayout() {
     const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
     const updateConfigValue    = useConfigStore((state) => state.updateConfigValue)
-    const clearCache           = useConfigStore((state) => state.clearCache)
 
     const buildEmptyDraftInit = useCallback(
         () => ({
@@ -119,6 +113,11 @@ export function AiProvidersClaudeEditLayout() {
             testModel: '',
             testStatus: 'idle' as const,
             testMessage: '',
+            apiKeyEdited: false,
+            editedCredentialHeaderNames: [],
+            originalAuthIndex: '',
+            originalApiKey: '',
+            originalHeaders: {},
         }),
         [],
     )
@@ -136,6 +135,11 @@ export function AiProvidersClaudeEditLayout() {
             testModel: available[0] || '',
             testStatus: 'idle' as const,
             testMessage: '',
+            apiKeyEdited: false,
+            editedCredentialHeaderNames: [],
+            originalAuthIndex: data.authIndex?.trim() ?? '',
+            originalApiKey: data.apiKey.trim(),
+            originalHeaders: { ...(data.headers ?? {}) },
         }
     }, [])
 
@@ -151,52 +155,68 @@ export function AiProvidersClaudeEditLayout() {
             handleBack: () => void
         }) => {
             const { form, editIndex, configs, setConfigs, setSaving, handleBack } = ctx
+            const weightError                                                     = getCredentialWeightValidationKey(
+                form.weight)
+            if (weightError) {
+                showNotification(t(weightError), 'error')
+                return
+            }
 
             setSaving(true)
             try {
                 const payload: ProviderKeyConfig = {
                     apiKey: form.apiKey.trim(),
                     priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+                    weight: form.weight,
                     prefix: form.prefix?.trim() || undefined,
                     baseUrl: (form.baseUrl ?? '').trim() || undefined,
                     proxyUrl: form.proxyUrl?.trim() || undefined,
                     headers: buildHeaderObject(form.headers),
-                    models: form.modelEntries
-                                .map((entry) => {
-                                    const name = entry.name.trim()
-                                    if (!name) {
-                                        return null
-                                    }
-                                    const alias = entry.alias.trim()
-                                    return { name, alias: alias || name }
-                                })
-                                .filter(Boolean) as ProviderKeyConfig['models'],
+                    models: entriesToModels(form.modelEntries).map((model) => ({
+                        ...model,
+                        alias: model.alias ?? model.name,
+                    })),
                     excludedModels: parseTextList(form.excludedText),
                     cloak: form.cloak,
                 }
 
-                let nextList: ProviderKeyConfig[]
+                let localList: ProviderKeyConfig[]
                 if (editIndex !== null) {
-                    const existing = configs[editIndex]
-                    if (!existing) {
-                        throw new Error(t('common.invalid_provider_index'))
+                    const stableIndex = findProviderConfigIndexByAuthIndex(configs, form.authIndex ?? '')
+                    if (stableIndex < 0) {
+                        showNotification(
+                            `${t('notification.update_failed')}: ${t('common.invalid_provider_index')}`,
+                            'error',
+                        )
+                        return
                     }
-                    await providersApi.patchClaudeConfig(editIndex, payload, existing)
-                    nextList = await providersApi.getClaudeConfigs()
+                    const existing = configs[stableIndex]
+                    await providersApi.patchClaudeConfig(stableIndex, payload, existing)
+                    localList = configs.map((item, index) => index === stableIndex ? {
+                        ...payload,
+                        authIndex: existing.authIndex,
+                    } : item)
                 } else {
-                    nextList = [...configs, payload]
-                    await providersApi.saveClaudeConfigs(nextList)
+                    await providersApi.createClaudeConfig(payload)
+                    localList = [...configs, payload]
                 }
 
-                setConfigs(nextList)
-                updateConfigValue('claude-api-key', nextList)
-                clearCache('claude-api-key')
                 showNotification(
                     editIndex !== null
                     ? t('notification.claude_config_updated')
                     : t('notification.claude_config_added'),
                     'success',
                 )
+
+                let nextList = localList
+                try {
+                    nextList = await providersApi.getClaudeConfigs()
+                } catch (refreshError: unknown) {
+                    const message = refreshError instanceof Error ? refreshError.message : ''
+                    showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+                }
+                setConfigs(nextList)
+                updateConfigValue('claude-api-key', nextList)
                 ctx.allowNextNavigation()
                 ctx.updateBaselineSignature(buildClaudeSignature(form, ''))
                 handleBack()
@@ -206,21 +226,78 @@ export function AiProvidersClaudeEditLayout() {
                 setSaving(false)
             }
         },
-        [clearCache, showNotification, t, updateConfigValue],
+        [showNotification, t, updateConfigValue],
     )
 
-    const layout = useProviderEditLayout({
-                                             configKey: 'claude-api-key',
-                                             draftKeyPrefix: 'claude',
-                                             routePrefix: '/credentials/claude',
-                                             useDraftStore: useClaudeEditDraftStore,
-                                             extractConfigs: (config) => config?.claudeApiKeys ?? [],
-                                             buildEmptyDraftInit,
-                                             buildSignature: buildClaudeSignature,
-                                             seedDraftInit,
-                                             mergeNotificationKey: 'ai_providers.claude_models_fetch_added',
-                                             onSave,
-                                         })
+    const layout                      = useProviderEditLayout({
+                                                                  loadConfigs: providersApi.getClaudeConfigs,
+                                                                  draftKeyPrefix: 'claude',
+                                                                  routePrefix: '/credentials/claude',
+                                                                  useDraftStore: useClaudeEditDraftStore,
+                                                                  buildEmptyDraftInit,
+                                                                  buildSignature: buildClaudeSignature,
+                                                                  seedDraftInit,
+                                                                  mergeNotificationKey: 'ai_providers.claude_models_fetch_added',
+                                                                  onSave,
+                                                              })
+    const credentialDraft             = useClaudeEditDraftStore((state) => state.drafts[layout.draftKey])
+    const markApiKeyEdited            = useClaudeEditDraftStore((state) => state.markDraftApiKeyEdited)
+    const markCredentialHeadersEdited = useClaudeEditDraftStore(
+        (state) => state.markDraftCredentialHeadersEdited,
+    )
+    const formAuthIndex               = layout.form.authIndex?.trim() ?? ''
+    const stableIndex                 = findProviderConfigIndexByAuthIndex(layout.configs, formAuthIndex)
+    const originalConfig              = stableIndex >= 0 ? layout.configs[stableIndex] : undefined
+    const originalAuthIndex           = originalConfig?.authIndex?.trim() ?? credentialDraft?.originalAuthIndex ?? ''
+    const originalApiKey              = originalConfig?.apiKey.trim() ?? credentialDraft?.originalApiKey ?? ''
+    const credentialIdentityAvailable = layout.editIndex === null || Boolean(
+        formAuthIndex && originalAuthIndex === formAuthIndex,
+    )
+    const apiKeyIsMasked              = Boolean(
+        credentialIdentityAvailable &&
+        formAuthIndex &&
+        originalApiKey &&
+        !credentialDraft?.apiKeyEdited &&
+        layout.form.apiKey.trim() === originalApiKey,
+    )
+    const maskedCredentialHeaderNames = useMemo(() => {
+        if (!credentialIdentityAvailable || !formAuthIndex) {
+            return []
+        }
+        const editedNames     = new Set(credentialDraft?.editedCredentialHeaderNames ?? [])
+        const originalHeaders = originalConfig?.headers ?? credentialDraft?.originalHeaders ?? {}
+        return Object.entries(buildHeaderObject(layout.form.headers)).flatMap(([name, value]) => {
+            if (editedNames.has(name.toLowerCase())) {
+                return []
+            }
+            const original = Object.entries(originalHeaders).find(([key]) => key.toLowerCase() === name.toLowerCase())
+            return original?.[1] === value ? [name] : []
+        })
+    }, [
+                                                    credentialDraft?.editedCredentialHeaderNames,
+                                                    credentialDraft?.originalHeaders,
+                                                    credentialIdentityAvailable,
+                                                    formAuthIndex,
+                                                    layout.form.headers,
+                                                    originalConfig?.headers,
+                                                ])
+    const draftKey                    = layout.draftKey
+    const setForm                     = layout.setForm
+    const currentHeaders              = layout.form.headers
+    const updateApiKey                = useCallback(
+        (value: string) => {
+            markApiKeyEdited(draftKey)
+            setForm((previous) => ({ ...previous, apiKey: value }))
+        },
+        [draftKey, markApiKeyEdited, setForm],
+    )
+    const updateHeaders               = useCallback(
+        (entries: ProviderFormState['headers']) => {
+            markCredentialHeadersEdited(draftKey, getChangedHeaderNames(currentHeaders, entries))
+            setForm((previous) => ({ ...previous, headers: entries }))
+        },
+        [currentHeaders, draftKey, markCredentialHeadersEdited, setForm],
+    )
 
     return (
         <Outlet
@@ -233,8 +310,13 @@ export function AiProvidersClaudeEditLayout() {
                     disableControls: layout.disableControls,
                     loading: layout.loading,
                     saving: layout.saving,
+                    apiKeyIsMasked,
+                    maskedCredentialHeaderNames,
+                    credentialIdentityAvailable,
                     form: layout.form,
                     setForm: layout.setForm,
+                    updateApiKey,
+                    updateHeaders,
                     testModel: layout.testModel,
                     setTestModel: layout.setTestModel,
                     testStatus: layout.testStatus,

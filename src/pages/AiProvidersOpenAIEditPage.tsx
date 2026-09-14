@@ -1,5 +1,6 @@
 import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
+import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
 import {buildApiKeyEntry} from '@/components/providers/utils'
 import {Button} from '@/components/ui/Button'
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
@@ -7,23 +8,26 @@ import {Input} from '@/components/ui/Input'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {useEscapeKey} from '@/hooks/useEscapeKey'
+import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
 import {modelsApi} from '@/services/api'
-import {apiCallApi, getApiCallErrorMessage} from '@/services/api/apiCall'
+import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api/apiCall'
 import {useNotificationStore} from '@/stores'
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry} from '@/types'
+import {MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
-import {useMemo, useState} from 'react'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate, useOutletContext} from 'react-router-dom'
+import {useLocation, useNavigate, useOutletContext} from 'react-router-dom'
 import type {OpenAIEditOutletContext} from './AiProvidersOpenAIEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
-import {applyProviderQuickFill, OPENAI_QUICK_FILL_PRESETS} from './providerQuickFill'
 import {HeadersField, PrefixField, PriorityField, QuickFillField} from './ProviderFormFields'
+import {applyProviderQuickFill, OPENAI_QUICK_FILL_PRESETS} from './providerQuickFill'
 
-const OPENAI_TEST_TIMEOUT_MS = 30000
+const OPENAI_TEST_TIMEOUT_MS           = 30000
+const OPENAI_MODEL_DISCOVERY_BUTTON_ID = 'provider-model-discovery-openai'
 
 const buildOpenAIChatCompletionsEndpoint = (baseUrl: string) =>
     modelsApi.buildV1ModelsEndpoint(baseUrl).replace(/\/models$/i, '/chat/completions')
@@ -33,6 +37,8 @@ const idleKeyTestStatus = (): KeyTestStatus => ({ status: 'idle', message: '' })
 export function AiProvidersOpenAIEditPage() {
     const { t }                = useTranslation()
     const navigate             = useNavigate()
+    const location             = useLocation()
+    const modalPresentation    = resolveProviderEditModalState(location.state, location.pathname)
     const { showNotification } = useNotificationStore()
     const {
               hasIndexParam,
@@ -62,8 +68,10 @@ export function AiProvidersOpenAIEditPage() {
     const swipeRef                                  = useEdgeSwipeBack({ onBack: handleBack })
     const [visibleApiKeyRows, setVisibleApiKeyRows] = useState<Record<number, boolean>>({})
     const [isTesting, setIsTesting]                 = useState(false)
+    const activeTestAbortRef                        = useRef<AbortController | null>(null)
+    const activeTestRequestIdRef                    = useRef(0)
 
-    useEscapeKey(handleBack)
+    useEscapeKey(handleBack, !modalPresentation)
 
     const modelSelectOptions = useMemo(
         () => availableModels.map((model) => ({ value: model, label: model })),
@@ -72,13 +80,56 @@ export function AiProvidersOpenAIEditPage() {
 
     const resolvedTestModel = testModel || availableModels[0] || ''
 
+    const connectivityConfigSignature   = useMemo(
+        () => JSON.stringify({
+                                 baseUrl: form.baseUrl.trim(),
+                                 headers: form.headers.map((entry) => [entry.key.trim(), entry.value.trim()]),
+                                 authIndex: form.authIndex?.trim() ?? '',
+                                 model: resolvedTestModel.trim(),
+                                 keys: form.apiKeyEntries.map((entry) => ({
+                                     apiKey: entry.apiKey.trim(),
+                                     authIndex: entry.authIndex?.trim() ?? '',
+                                     proxyUrl: entry.proxyUrl?.trim() ?? '',
+                                 })),
+                             }),
+        [form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers, resolvedTestModel],
+    )
+    const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
+
+    const cancelActiveTest = useCallback(() => {
+        ++activeTestRequestIdRef.current
+        activeTestAbortRef.current?.abort()
+        activeTestAbortRef.current = null
+    }, [])
+
+    useEffect(() => () => cancelActiveTest(), [cancelActiveTest])
+
+    useEffect(() => {
+        if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
+            return
+        }
+        previousConnectivityConfigRef.current = connectivityConfigSignature
+        cancelActiveTest()
+        setIsTesting(false)
+        setTestStatus('idle')
+        setTestMessage('')
+        setDraftKeyTestStatuses(form.apiKeyEntries.map(idleKeyTestStatus))
+    }, [
+                  cancelActiveTest,
+                  connectivityConfigSignature,
+                  form.apiKeyEntries,
+                  setDraftKeyTestStatuses,
+                  setTestMessage,
+                  setTestStatus,
+              ])
+
     const canSave          = !disableControls &&
                              !loading &&
                              !saving &&
                              !invalidIndexParam &&
                              !invalidIndex &&
                              !isTesting
-    const controlsDisabled = saving || disableControls
+    const controlsDisabled = saving || disableControls || isTesting
 
     const openOpenaiModelDiscovery = () => {
         const baseUrl = form.baseUrl.trim()
@@ -86,7 +137,9 @@ export function AiProvidersOpenAIEditPage() {
             showNotification(t('ai_providers.openai_models_fetch_invalid_url'), 'error')
             return
         }
-        navigate('models')
+        navigate('models', {
+            state: withProviderEditReturnFocus(location.state, OPENAI_MODEL_DISCOVERY_BUTTON_ID),
+        })
     }
 
     const runOpenAIConnectivityTest = async (keyIndex?: number) => {
@@ -116,7 +169,7 @@ export function AiProvidersOpenAIEditPage() {
         const keyEntry     = keyIndex !== undefined
                              ? form.apiKeyEntries[keyIndex]
                              : form.apiKeyEntries.find((entry) => entry.apiKey?.trim() || entry.authIndex?.trim())
-        const authIndex    = keyEntry?.authIndex?.trim() || form.authIndex?.trim()
+        const authIndex    = keyEntry?.authIndex?.trim()
         const apiKey       = keyEntry?.apiKey?.trim()
         const hasAuth      = hasHeader(headerObject, 'authorization')
         if (!apiKey && !hasAuth && !authIndex) {
@@ -139,10 +192,33 @@ export function AiProvidersOpenAIEditPage() {
             return
         }
 
-        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...headerObject }
-        if (apiKey && !hasAuth) {
-            headers.Authorization = `Bearer ${apiKey}`
+        let preparedAuth: ReturnType<typeof prepareApiCallAuth>
+        try {
+            preparedAuth = prepareApiCallAuth({
+                                                  headers: headerObject,
+                                                  apiKey,
+                                                  authIndex,
+                                                  preferredHeader: 'Authorization',
+                                                  authorizationScheme: 'Bearer',
+                                              })
+        } catch (err: unknown) {
+            const message = `${t('ai_providers.openai_test_failed')}: ${getErrorMessage(err)}`
+            setTestStatus('error')
+            setTestMessage(message)
+            if (keyIndex !== undefined) {
+                setDraftKeyTestStatus(keyIndex, { status: 'error', message })
+            }
+            showNotification(message, 'error')
+            return
         }
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...preparedAuth.headers,
+        }
+        const requestId                       = ++activeTestRequestIdRef.current
+        const controller                      = new AbortController()
+        activeTestAbortRef.current            = controller
 
         const runningMessage = t('ai_providers.openai_test_running')
         setIsTesting(true)
@@ -165,10 +241,14 @@ export function AiProvidersOpenAIEditPage() {
                                          }),
                     proxyUrl: keyEntry?.proxyUrl?.trim() || undefined,
                     authIndex,
+                    draftToken: preparedAuth.draftToken,
                 },
-                { timeout: OPENAI_TEST_TIMEOUT_MS },
+                { timeout: OPENAI_TEST_TIMEOUT_MS, signal: controller.signal },
             )
 
+            if (requestId !== activeTestRequestIdRef.current || controller.signal.aborted) {
+                return
+            }
             if (result.statusCode < 200 || result.statusCode >= 300) {
                 const detail  = getApiCallErrorMessage(result) || t('common.unknown_error')
                 const message = `${t('ai_providers.openai_test_failed')}: ${detail}`
@@ -188,11 +268,17 @@ export function AiProvidersOpenAIEditPage() {
                 showNotification(message, 'success')
             }
         } catch (err: unknown) {
-            const message         = getErrorMessage(err)
-            const errorCode       =
-                      typeof err === 'object' && err !== null && 'code' in err ?
-                      String((err as { code?: string }).code) :
-                      ''
+            const message   = getErrorMessage(err)
+            const errorCode = typeof err === 'object' && err !== null && 'code' in err
+                              ? String((err as { code?: string }).code)
+                              : ''
+            if (
+                requestId !== activeTestRequestIdRef.current ||
+                controller.signal.aborted ||
+                errorCode === 'ERR_CANCELED'
+            ) {
+                return
+            }
             const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
             const resolvedMessage = isTimeout
                                     ? t('ai_providers.openai_test_timeout', { seconds: OPENAI_TEST_TIMEOUT_MS / 1000 })
@@ -204,15 +290,18 @@ export function AiProvidersOpenAIEditPage() {
             }
             showNotification(resolvedMessage, 'error')
         } finally {
-            setIsTesting(false)
+            if (requestId === activeTestRequestIdRef.current) {
+                activeTestAbortRef.current = null
+                setIsTesting(false)
+            }
         }
     }
 
     const renderKeyEntries = (entries: ApiKeyEntry[]) => {
         const list = entries.length ? entries : [buildApiKeyEntry()]
 
-        const updateEntry = (idx: number, field: keyof ApiKeyEntry, value: string) => {
-            const next = list.map((entry, i) => (i === idx ? { ...entry, [field]: value } : entry))
+        const updateEntry = (idx: number, patch: Partial<ApiKeyEntry>) => {
+            const next = list.map((entry, i) => (i === idx ? { ...entry, ...patch } : entry))
             setForm((prev) => ({ ...prev, apiKeyEntries: next }))
             setDraftKeyTestStatus(idx, idleKeyTestStatus())
         }
@@ -265,6 +354,7 @@ export function AiProvidersOpenAIEditPage() {
                         <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
                         <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div>
                         <div className={styles.keyTableColAuth}>{t('usage_stats.request_events_auth_index')}</div>
+                        <div className={styles.keyTableColWeight}>{t('ai_providers.weight_label')}</div>
                         <div className={styles.keyTableColAction}>{t('common.action')}</div>
                     </div>
 
@@ -277,7 +367,7 @@ export function AiProvidersOpenAIEditPage() {
                                     <input
                                         type={visibleApiKeyRows[index] ? 'text' : 'password'}
                                         value={entry.apiKey}
-                                        onChange={(e) => updateEntry(index, 'apiKey', e.target.value)}
+                                        onChange={(e) => updateEntry(index, { apiKey: e.target.value })}
                                         disabled={controlsDisabled}
                                         className={`input ${styles.keyTableInput} ${styles.keyTableSecretInput}`}
                                         placeholder={t('ai_providers.openai_key_placeholder')}
@@ -308,7 +398,7 @@ export function AiProvidersOpenAIEditPage() {
                                 <input
                                     type='text'
                                     value={entry.proxyUrl ?? ''}
-                                    onChange={(e) => updateEntry(index, 'proxyUrl', e.target.value)}
+                                    onChange={(e) => updateEntry(index, { proxyUrl: e.target.value })}
                                     disabled={controlsDisabled}
                                     className={`input ${styles.keyTableInput}`}
                                     placeholder={t('ai_providers.openai_proxy_placeholder')}
@@ -323,7 +413,7 @@ export function AiProvidersOpenAIEditPage() {
                                 <input
                                     type='text'
                                     value={entry.authIndex ?? ''}
-                                    onChange={(e) => updateEntry(index, 'authIndex', e.target.value)}
+                                    readOnly
                                     disabled={controlsDisabled}
                                     className={`input ${styles.keyTableInput}`}
                                     placeholder='auth_index'
@@ -331,6 +421,22 @@ export function AiProvidersOpenAIEditPage() {
                                     spellCheck={false}
                                     autoCapitalize='none'
                                     autoCorrect='off'
+                                />
+                            </div>
+
+                            <div className={styles.keyTableColWeight}>
+                                <input
+                                    type='number'
+                                    step={1}
+                                    max={MAX_CREDENTIAL_WEIGHT}
+                                    value={entry.weight ?? ''}
+                                    onChange={(e) => updateEntry(index, {
+                                        weight: e.target.value.trim() === '' ? undefined : Number(e.target.value),
+                                    })}
+                                    disabled={controlsDisabled}
+                                    className={`input ${styles.keyTableInput}`}
+                                    placeholder='1'
+                                    aria-label={t('ai_providers.weight_label')}
                                 />
                             </div>
 
@@ -434,6 +540,7 @@ export function AiProvidersOpenAIEditPage() {
                     entries={form.modelEntries}
                     setForm={setForm}
                     onFetchModels={openOpenaiModelDiscovery}
+                    fetchButtonId={OPENAI_MODEL_DISCOVERY_BUTTON_ID}
                     disabled={controlsDisabled}
                 >
                     <ModelTestPanel
@@ -451,6 +558,8 @@ export function AiProvidersOpenAIEditPage() {
                         onTest={() => void runOpenAIConnectivityTest()}
                     />
                 </ModelConfigSection>
+
+                <ClaudeCodeConfigPanel models={form.modelEntries} disabled={controlsDisabled} />
 
                 <div className={styles.keyEntriesSection}>
                     <div className={styles.keyEntriesHeader}>

@@ -7,75 +7,51 @@
     margin: 0 auto;
 }
 
-.subtitle {
-    margin: 0 0 12px;
-    color: var(--text-secondary);
-    font-size: $font-size-sm;
-    line-height: $line-height-base;
-}
-
 .floatingSaveButton {
     min-width: 88px;
 }
 
-.upstreamApiKeyRow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 16px;
-}
-
-.upstreamApiKeyHint {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: $font-size-base;
-}
-
-.sectionHeaderRow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-}
-
-.upstreamApiKeysList {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.upstreamApiKeysItem {
-    display: grid;
-    grid-template-columns: minmax(160px, 0.9fr) minmax(220px, 1.1fr) auto;
-    gap: 8px;
-    align-items: start;
-    padding: 10px;
-    border: 1px solid var(--border-color);
-    border-radius: $radius-md;
-    background: var(--bg-secondary);
-
+.providerModalOverlay {
     @include mobile {
-        grid-template-columns: 1fr;
+        align-items: stretch;
+        padding: 0;
     }
 }
 
-.upstreamApiKeysItemTitle {
-    grid-column: 1 / -1;
-    font-size: $font-size-sm;
-    font-weight: $font-weight-semibold;
-    color: var(--text-secondary);
+.providerModal {
+    max-height: min(92vh, 980px);
+
+    :global(.modal-body) {
+        max-height: none;
+        min-height: 0;
+        overflow: auto;
+    }
+
+    @include mobile {
+        width: 100% !important;
+        height: 100dvh;
+        max-height: 100dvh;
+        border: 0;
+        border-radius: 0;
+
+        :global(.modal-body) {
+            flex: 1;
+            padding: $spacing-md;
+        }
+    }
 }
 
-.upstreamApiKeysInput,
-.upstreamApiKeysClientInput {
+.providerModalContent {
     width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
 }
 
-.upstreamApiKeysClientInput {
-    min-height: 84px;
-    resize: vertical;
-    line-height: $line-height-base;
+.providerModalLoading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: $spacing-sm;
+    min-height: 180px;
+    color: var(--text-secondary);
 }

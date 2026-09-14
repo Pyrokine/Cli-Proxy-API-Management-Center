@@ -1,10 +1,8 @@
+import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import type {ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
 import type {HeaderEntry} from '@/utils/headers'
 
-export interface ModelEntry {
-    name: string
-    alias: string
-}
+export type {ModelEntry} from '@/components/ui/modelInputListUtils'
 
 export interface OpenAIFormState {
     name: string

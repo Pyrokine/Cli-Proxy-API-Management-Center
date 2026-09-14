@@ -1,4 +1,5 @@
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
+import {resolveProviderEditModalState} from '@/hooks/useProviderEditPresentation'
 import {useCallback, useEffect} from 'react'
 import {useLocation, useNavigate} from 'react-router-dom'
 
@@ -9,8 +10,9 @@ type LocationState = { fromAiProviders?: boolean } | null
  * handleBack (with history-aware fallback), Escape key listener, and edge swipe support.
  */
 export function useEditPageNavigation(fallbackPath = '/credentials') {
-    const navigate = useNavigate()
-    const location = useLocation()
+    const navigate          = useNavigate()
+    const location          = useLocation()
+    const modalPresentation = resolveProviderEditModalState(location.state, location.pathname)
 
     const handleBack = useCallback(() => {
         const state = location.state as LocationState
@@ -24,6 +26,9 @@ export function useEditPageNavigation(fallbackPath = '/credentials') {
     const swipeRef = useEdgeSwipeBack({ onBack: handleBack })
 
     useEffect(() => {
+        if (modalPresentation) {
+            return
+        }
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 handleBack()
@@ -31,7 +36,7 @@ export function useEditPageNavigation(fallbackPath = '/credentials') {
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [handleBack])
+    }, [handleBack, modalPresentation])
 
     return { handleBack, swipeRef }
 }

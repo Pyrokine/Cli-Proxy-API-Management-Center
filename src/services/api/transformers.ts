@@ -7,7 +7,9 @@ import type {
     ProviderKeyConfig,
 } from '@/types'
 import type {Config, ImageArtifactCacheConfig, PluginsConfig, RemoteManagementConfig} from '@/types/config'
+import {readCredentialWeight} from '@/utils/credentialWeight'
 import {buildHeaderObject} from '@/utils/headers'
+import {normalizeModelMetadataFromManagement} from '@/utils/modelMetadata'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -60,7 +62,10 @@ const normalizeModelAliases = (models: unknown): ModelAlias[] => {
             const alias             = item.alias
             const priority          = item.priority
             const testModel         = item['test-model']
-            const entry: ModelAlias = { name: String(name) }
+            const entry: ModelAlias = {
+                name: String(name),
+                ...normalizeModelMetadataFromManagement(item),
+            }
             if (alias && alias !== name) {
                 entry.alias = String(alias)
             }
@@ -128,6 +133,31 @@ const normalizePriority = (record: Record<string, unknown> | null): number | und
     return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const normalizeProviderKeyBase = (record: Record<string, unknown> | null): Partial<ProviderKeyConfig> => {
+    const config: Partial<ProviderKeyConfig> = {}
+    const authIndex                          = record?.['auth-index'] ?? record?.authIndex
+    if (typeof authIndex === 'string' && authIndex.trim()) {
+        config.authIndex = authIndex.trim()
+    }
+    const priority = normalizePriority(record)
+    if (priority !== undefined) {
+        config.priority = priority
+    }
+    const weight = readCredentialWeight(record?.weight)
+    if (weight !== undefined) {
+        config.weight = weight
+    }
+    const prefix = normalizePrefix(record?.prefix)
+    if (prefix) {
+        config.prefix = prefix
+    }
+    const baseUrl = record?.['base-url']
+    if (baseUrl) {
+        config.baseUrl = String(baseUrl)
+    }
+    return config
+}
+
 const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
     if (entry === undefined || entry === null) {
         return null
@@ -135,7 +165,7 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
     const record  = isRecord(entry) ? entry : null
     const apiKey  = record?.['api-key'] ?? (typeof entry === 'string' ? entry : '')
     const trimmed = String(apiKey || '').trim()
-    if (!trimmed) {
+    if (!trimmed && !record) {
         return null
     }
 
@@ -149,6 +179,7 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
         proxyUrl: proxyUrl ? String(proxyUrl) : undefined,
         headers,
         authIndex: normalized || undefined,
+        weight: readCredentialWeight(record?.weight),
     }
 }
 
@@ -163,27 +194,15 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
         return null
     }
 
-    const config: ProviderKeyConfig = { apiKey: trimmed }
-    const authIndex                 = record?.['auth-index'] ?? record?.authIndex
-    if (typeof authIndex === 'string' && authIndex.trim()) {
-        config.authIndex = authIndex.trim()
-    }
-    const priority = normalizePriority(record)
-    if (priority !== undefined) {
-        config.priority = priority
-    }
-    const prefix = normalizePrefix(record?.prefix)
-    if (prefix) {
-        config.prefix = prefix
-    }
-    const baseUrl  = record?.['base-url']
-    const proxyUrl = record?.['proxy-url']
-    if (baseUrl) {
-        config.baseUrl = String(baseUrl)
-    }
-    const websockets = normalizeBoolean(record?.websockets ?? record?.['websockets'])
+    const config: ProviderKeyConfig = { apiKey: trimmed, ...normalizeProviderKeyBase(record) }
+    const proxyUrl                  = record?.['proxy-url']
+    const websockets                = normalizeBoolean(record?.websockets)
     if (websockets !== undefined) {
         config.websockets = websockets
+    }
+    const disableCooling = normalizeBoolean(record?.['disable-cooling'])
+    if (disableCooling !== undefined) {
+        config.disableCooling = disableCooling
     }
     if (proxyUrl) {
         config.proxyUrl = String(proxyUrl)
@@ -238,20 +257,8 @@ const normalizeGeminiKeyConfig = (item: unknown): GeminiKeyConfig | null => {
         return null
     }
 
-    const config: GeminiKeyConfig = { apiKey: trimmed }
-    const priority                = normalizePriority(record)
-    if (priority !== undefined) {
-        config.priority = priority
-    }
-    const prefix = normalizePrefix(record?.prefix)
-    if (prefix) {
-        config.prefix = prefix
-    }
-    const baseUrl = record?.['base-url']
-    if (baseUrl) {
-        config.baseUrl = String(baseUrl)
-    }
-    const proxyUrl = record?.['proxy-url']
+    const config: GeminiKeyConfig = { apiKey: trimmed, ...normalizeProviderKeyBase(record) }
+    const proxyUrl                = record?.['proxy-url']
     if (proxyUrl) {
         config.proxyUrl = String(proxyUrl)
     }
@@ -326,11 +333,7 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
     if (typeof authIndex === 'string' || typeof authIndex === 'number') {
         const normalizedAuthIndex = String(authIndex).trim()
         if (normalizedAuthIndex) {
-            result.authIndex     = normalizedAuthIndex
-            result.apiKeyEntries = result.apiKeyEntries.map((entry) => ({
-                ...entry,
-                authIndex: entry.authIndex ?? normalizedAuthIndex,
-            }))
+            result.authIndex = normalizedAuthIndex
         }
     }
     return result
@@ -464,6 +467,55 @@ const normalizeRemoteManagementConfig = (payload: unknown): RemoteManagementConf
     return Object.keys(config).length ? config : undefined
 }
 
+const authIndexAt = (value: unknown, index: number): string | undefined => {
+    if (!Array.isArray(value)) {
+        return undefined
+    }
+    const authIndex = value[index]
+    if (typeof authIndex !== 'string') {
+        return undefined
+    }
+    const normalized = authIndex.trim()
+    return normalized || undefined
+}
+
+const applyConfigAuthIndexes = (config: Config, payload: unknown): void => {
+    if (!isRecord(payload)) {
+        return
+    }
+    const applyList = <T extends { authIndex?: string }>(items: T[] | undefined, indexes: unknown): void => {
+        items?.forEach((item, index) => {
+            const authIndex = authIndexAt(indexes, index)
+            if (authIndex) {
+                item.authIndex = authIndex
+            }
+        })
+    }
+
+    applyList(config.geminiApiKeys, payload.gemini)
+    applyList(config.interactionsApiKeys, payload.interactions)
+    applyList(config.claudeApiKeys, payload.claude)
+    applyList(config.codexApiKeys, payload.codex)
+    applyList(config.xaiApiKeys, payload.xai)
+    applyList(config.vertexApiKeys, payload.vertex)
+
+    const entryIndexes    = payload['openai-entries']
+    const fallbackIndexes = payload['openai-fallback']
+    config.openaiCompatibility?.forEach((provider, providerIndex) => {
+        const fallbackAuthIndex = authIndexAt(fallbackIndexes, providerIndex)
+        if (fallbackAuthIndex && provider.apiKeyEntries.length === 0) {
+            provider.authIndex = fallbackAuthIndex
+        }
+        const providerEntryIndexes = Array.isArray(entryIndexes) ? entryIndexes[providerIndex] : undefined
+        provider.apiKeyEntries.forEach((entry, entryIndex) => {
+            const authIndex = authIndexAt(providerEntryIndexes, entryIndex)
+            if (authIndex) {
+                entry.authIndex = authIndex
+            }
+        })
+    })
+}
+
 /**
  * 规范化 /config 返回值
  */
@@ -590,6 +642,13 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
             .filter(Boolean) as GeminiKeyConfig[]
     }
 
+    const interactionsList = raw['interactions-api-key']
+    if (Array.isArray(interactionsList)) {
+        config.interactionsApiKeys = interactionsList
+            .map((item) => normalizeGeminiKeyConfig(item))
+            .filter(Boolean) as GeminiKeyConfig[]
+    }
+
     const codexList = raw['codex-api-key']
     if (Array.isArray(codexList)) {
         config.codexApiKeys = codexList
@@ -600,6 +659,13 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
     const claudeList = raw['claude-api-key']
     if (Array.isArray(claudeList)) {
         config.claudeApiKeys = claudeList
+            .map((item) => normalizeProviderKeyConfig(item))
+            .filter(Boolean) as ProviderKeyConfig[]
+    }
+
+    const xaiList = raw['xai-api-key']
+    if (Array.isArray(xaiList)) {
+        config.xaiApiKeys = xaiList
             .map((item) => normalizeProviderKeyConfig(item))
             .filter(Boolean) as ProviderKeyConfig[]
     }
@@ -617,6 +683,7 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
             .map((item) => normalizeOpenAIProvider(item))
             .filter(Boolean) as OpenAIProviderConfig[]
     }
+    applyConfigAuthIndexes(config, raw['auth-indexes'])
 
     const oauthExcluded = normalizeOauthExcluded(raw['oauth-excluded-models'])
     if (oauthExcluded) {

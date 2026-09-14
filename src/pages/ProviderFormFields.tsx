@@ -2,7 +2,10 @@ import {Button} from '@/components/ui/Button'
 import {HeaderInputList} from '@/components/ui/HeaderInputList'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
+import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import type {ModelDiscoveryReturn} from '@/hooks/useModelDiscovery'
+import {getCredentialWeightValidationKey, MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
+import type {HeaderEntry} from '@/utils/headers'
 import type {Dispatch, ReactNode, SetStateAction} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ModelDiscoveryModal} from './ModelDiscoveryModal'
@@ -12,7 +15,7 @@ import styles from './ProviderEditForm.module.scss'
 
 type FormUpdater<T> = Dispatch<SetStateAction<T>>
 
-const fieldChange = <T extends Record<string, unknown>>(setForm: FormUpdater<T>, field: keyof T, value: unknown) =>
+const fieldChange = <T extends object>(setForm: FormUpdater<T>, field: keyof T, value: unknown) =>
     setForm((prev) => ({ ...prev, [field]: value }))
 
 // ---- Priority Input ----
@@ -46,6 +49,38 @@ export function PriorityField<T extends { priority?: number }>({ form, setForm, 
     )
 }
 
+interface WeightFieldProps<T extends { weight?: number }> {
+    form: T
+    setForm: FormUpdater<T>
+    disabled: boolean
+}
+
+function WeightField<T extends { weight?: number }>({ form, setForm, disabled }: WeightFieldProps<T>) {
+    const { t }         = useTranslation()
+    const validationKey = getCredentialWeightValidationKey(form.weight)
+    return (
+        <Input
+            label={t('ai_providers.weight_label')}
+            hint={t('ai_providers.weight_hint')}
+            error={validationKey ? t(validationKey) : undefined}
+            type='number'
+            step={1}
+            max={MAX_CREDENTIAL_WEIGHT}
+            value={form.weight ?? ''}
+            onChange={(e) => {
+                const raw    = e.target.value
+                const parsed = raw.trim() === '' ? undefined : Number(raw)
+                fieldChange(
+                    setForm,
+                    'weight' as keyof T,
+                    parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
+                )
+            }}
+            disabled={disabled}
+        />
+    )
+}
+
 // ---- Prefix Input ----
 
 interface PrefixFieldProps<T extends { prefix?: string }> {
@@ -68,11 +103,102 @@ export function PrefixField<T extends { prefix?: string }>({ form, setForm, disa
     )
 }
 
+interface ProviderConnectionForm {
+    apiKey: string
+    priority?: number
+    weight?: number
+    prefix?: string
+    baseUrl?: string
+    proxyUrl?: string
+    headers: HeaderEntry[]
+}
+
+interface ProviderConnectionFieldsProps<T extends ProviderConnectionForm> {
+    form: T
+    setForm: FormUpdater<T>
+    disabled: boolean
+    apiKeyLabel: string
+    apiKeyPlaceholder?: string
+    baseUrlLabel: string
+    baseUrlPlaceholder?: string
+    proxyUrlLabel?: string
+    proxyUrlPlaceholder?: string
+    onApiKeyChange?: (value: string) => void
+    onHeadersChange?: (headers: HeaderEntry[]) => void
+    afterBaseUrl?: ReactNode
+}
+
+export function ProviderConnectionFields<T extends ProviderConnectionForm>({
+                                                                               form,
+                                                                               setForm,
+                                                                               disabled,
+                                                                               apiKeyLabel,
+                                                                               apiKeyPlaceholder,
+                                                                               baseUrlLabel,
+                                                                               baseUrlPlaceholder,
+                                                                               proxyUrlLabel,
+                                                                               proxyUrlPlaceholder,
+                                                                               onApiKeyChange,
+                                                                               onHeadersChange,
+                                                                               afterBaseUrl,
+                                                                           }: ProviderConnectionFieldsProps<T>) {
+    return (
+        <>
+            <Input
+                label={apiKeyLabel}
+                placeholder={apiKeyPlaceholder}
+                value={form.apiKey}
+                onChange={(event) => {
+                    if (onApiKeyChange) {
+                        onApiKeyChange(event.target.value)
+                        return
+                    }
+                    fieldChange(setForm, 'apiKey', event.target.value)
+                }}
+                disabled={disabled}
+                secret
+            />
+            <PriorityField form={form} setForm={setForm} disabled={disabled} />
+            <WeightField form={form} setForm={setForm} disabled={disabled} />
+            <PrefixField form={form} setForm={setForm} disabled={disabled} />
+            <Input
+                label={baseUrlLabel}
+                placeholder={baseUrlPlaceholder}
+                value={form.baseUrl ?? ''}
+                onChange={(event) => fieldChange(setForm, 'baseUrl', event.target.value)}
+                disabled={disabled}
+            />
+            {afterBaseUrl}
+            {proxyUrlLabel ? (
+                <Input
+                    label={proxyUrlLabel}
+                    placeholder={proxyUrlPlaceholder}
+                    value={form.proxyUrl ?? ''}
+                    onChange={(event) => fieldChange(setForm, 'proxyUrl', event.target.value)}
+                    disabled={disabled}
+                />
+            ) : null}
+            <HeadersField
+                entries={form.headers}
+                onChange={(headers) => {
+                    if (onHeadersChange) {
+                        onHeadersChange(headers)
+                        return
+                    }
+                    fieldChange(setForm, 'headers', headers)
+                }}
+                disabled={disabled}
+            />
+        </>
+    )
+}
+
 // ---- Provider Quick Fill ----
 
 interface QuickFillPreset {
     id: string
     label: string
+    labelKey?: string
     baseUrl: string
     name?: string
 }
@@ -95,7 +221,7 @@ export function QuickFillField({ presets, disabled, onApply }: QuickFillFieldPro
                     {t('ai_providers.quick_fill_title', { defaultValue: 'Quick fill' })}
                 </div>
                 <div className={styles.quickFillHint}>
-                    {t('ai_providers.quick_fill_hint', { defaultValue: "Apply the provider's default Base URL" })}
+                    {t('ai_providers.quick_fill_hint', { defaultValue: 'Apply the provider\'s default Base URL' })}
                 </div>
             </div>
             <div className={styles.quickFillActions}>
@@ -108,7 +234,7 @@ export function QuickFillField({ presets, disabled, onApply }: QuickFillFieldPro
                         onClick={() => onApply(preset)}
                         disabled={disabled}
                     >
-                        {preset.label}
+                        {preset.labelKey ? t(preset.labelKey, { defaultValue: preset.label }) : preset.label}
                     </Button>
                 ))}
             </div>
@@ -143,8 +269,8 @@ export function HeadersField({ entries, onChange, disabled }: HeadersFieldProps)
 // ---- Model Config Section (with optional discovery button) ----
 
 interface ModelConfigSectionProps {
-    entries: Array<{ name: string; alias: string }>
-    onChange: (entries: Array<{ name: string; alias: string }>) => void
+    entries: ModelEntry[]
+    onChange: (entries: ModelEntry[]) => void
     onAddRow: () => void
     disabled: boolean
     /** Translation key prefix for labels (e.g. 'codex', 'gemini') */
@@ -189,6 +315,7 @@ function ModelConfigSection({
                 aliasPlaceholder={t('common.model_alias_placeholder')}
                 disabled={disabled}
                 hideAddButton
+                metadataEditing
                 className={styles.modelInputList}
                 rowClassName={styles.modelInputRow}
                 inputClassName={styles.modelInputField}
@@ -231,7 +358,7 @@ export function ExcludedModelsField({ value, onChange, disabled }: ExcludedModel
 // Used by Codex and Gemini pages to avoid duplicated prop wiring.
 
 interface ProviderModelSectionProps<
-    T extends { modelEntries: Array<{ name: string; alias: string }>; excludedText: string },
+    T extends { modelEntries: ModelEntry[]; excludedText: string },
 > {
     form: T
     setForm: FormUpdater<T>
@@ -243,7 +370,7 @@ interface ProviderModelSectionProps<
 }
 
 export function ProviderModelSection<
-    T extends { modelEntries: Array<{ name: string; alias: string }>; excludedText: string },
+    T extends { modelEntries: ModelEntry[]; excludedText: string },
 >({ form, setForm, disabled, discovery, discoveryDisabled, i18nPrefix, children }: ProviderModelSectionProps<T>) {
     return (
         <>
@@ -278,7 +405,9 @@ export function ProviderModelSection<
                 search={discovery.search}
                 onSearchChange={discovery.setSearch}
                 selected={discovery.selected}
+                missingCount={discovery.missingCount}
                 onToggleSelection={discovery.toggleSelection}
+                onSelectMissing={discovery.selectMissingModels}
                 onApply={discovery.applySelected}
                 onRefresh={() => void discovery.fetchDiscovery()}
                 canApply={discovery.canApply}

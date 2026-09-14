@@ -12,11 +12,11 @@
 import type {ModelEntry} from '@/components/providers/types'
 import {resolveProviderDraftInitAction} from '@/hooks/providerEditLayoutState'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
-import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import type {BaseDraft, DraftSliceState} from '@/stores/createDraftSlice'
-import type {Config, RawConfigSection} from '@/types/config'
 import {getErrorMessage, parseIndexParam} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
+import {mergeProviderModelEntries} from '@/utils/providerModels'
 import type {Dispatch, SetStateAction} from 'react'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -37,10 +37,10 @@ type TestStatus = 'idle' | 'loading' | 'success' | 'error'
  * Contains all fields the draft store needs except `initialized` and `baselineSignature`,
  * which the hook computes automatically.
  */
-export type DraftInitPayload<D extends BaseDraft> = Omit<D, 'initialized' | 'baselineSignature'>
+type DraftInitPayload<D extends BaseDraft> = Omit<D, 'initialized' | 'baselineSignature'>
 
 /** Save context passed to the provider-specific `onSave` callback. */
-export interface SaveContext<F, C> {
+interface SaveContext<F, C> {
     form: F
     testModel: string
     editIndex: number | null
@@ -53,9 +53,9 @@ export interface SaveContext<F, C> {
 }
 
 /** Configuration for the hook, parameterizing provider-specific differences. */
-export interface ProviderEditLayoutOptions<F, C, D extends BaseDraft> {
-    /** Config section key for fetching and caching. */
-    configKey: RawConfigSection
+interface ProviderEditLayoutOptions<F, C, D extends BaseDraft> {
+    /** Load provider entries from the endpoint that includes stable runtime identities. */
+    loadConfigs: () => Promise<C[]>
 
     /** Prefix for the draft key (e.g. 'claude' or 'openai'). */
     draftKeyPrefix: string
@@ -65,9 +65,6 @@ export interface ProviderEditLayoutOptions<F, C, D extends BaseDraft> {
 
     /** Zustand draft store hook. */
     useDraftStore: UseBoundStore<StoreApi<DraftSliceState<D>>>
-
-    /** Extract the provider config array from the global config object. */
-    extractConfigs: (config: Config | null) => C[]
 
     /** Build draft init payload for an empty (new) form. */
     buildEmptyDraftInit: () => DraftInitPayload<D>
@@ -86,7 +83,7 @@ export interface ProviderEditLayoutOptions<F, C, D extends BaseDraft> {
 }
 
 /** Return value of the hook. */
-export interface ProviderEditLayoutResult<F, C> {
+interface ProviderEditLayoutResult<F, C> {
     hasIndexParam: boolean
     editIndex: number | null
     invalidIndexParam: boolean
@@ -123,11 +120,10 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
     options: ProviderEditLayoutOptions<F, C, D>,
 ): ProviderEditLayoutResult<F, C> {
     const {
-              configKey,
+              loadConfigs,
               draftKeyPrefix,
               routePrefix,
               useDraftStore,
-              extractConfigs,
               buildEmptyDraftInit,
               buildSignature,
               seedDraftInit,
@@ -150,11 +146,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
     const disableControls  = connectionStatus !== 'connected'
 
-    /* ---- Config store ---- */
-    const config      = useConfigStore((state) => state.config)
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
-
-    const [configs, setConfigs] = useState<C[]>(() => extractConfigs(config))
+    const [configs, setConfigs] = useState<C[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving]   = useState(false)
 
@@ -271,12 +263,12 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
             }
             setLoading(true)
 
-            fetchConfig(configKey)
+            loadConfigs()
                 .then((value) => {
                     if (cancelled) {
                         return
                     }
-                    setConfigs(Array.isArray(value) ? (value as C[]) : [])
+                    setConfigs(value)
                 })
                 .catch((err: unknown) => {
                     if (cancelled) {
@@ -296,7 +288,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         return () => {
             cancelled = true
         }
-    }, [configKey, fetchConfig, showNotification, t])
+    }, [loadConfigs, showNotification, t])
 
     /* ---- Draft initialization ---- */
     useEffect(() => {
@@ -311,7 +303,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
             return
         }
 
-        const payload =
+        const payload           =
                   action === 'seed' && initialData !== undefined ? seedDraftInit(initialData) : buildEmptyDraftInit()
         const baselineSignature = buildSignature(payload.form as F, payload.testModel)
         initDraft(draftKey, { ...payload, baselineSignature } as Omit<D, 'initialized'>)
@@ -396,28 +388,11 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
             let addedCount = 0
             setForm((prev) => {
                 const prevWithEntries = prev as F & { modelEntries: ModelEntry[] }
-                const mergedMap       = new Map<string, ModelEntry>()
-                prevWithEntries.modelEntries.forEach((entry) => {
-                    const name = entry.name.trim()
-                    if (!name) {
-                        return
-                    }
-                    mergedMap.set(name, { name, alias: entry.alias?.trim() || '' })
-                })
-
-                selectedModels.forEach((model) => {
-                    const name = model.name.trim()
-                    if (!name || mergedMap.has(name)) {
-                        return
-                    }
-                    mergedMap.set(name, { name, alias: model.alias ?? '' })
-                    addedCount += 1
-                })
-
-                const mergedEntries = Array.from(mergedMap.values())
+                const merged          = mergeProviderModelEntries(prevWithEntries.modelEntries, selectedModels)
+                addedCount            = merged.addedCount
                 return {
                     ...prev,
-                    modelEntries: mergedEntries.length ? mergedEntries : [{ name: '', alias: '' }],
+                    modelEntries: merged.entries,
                 }
             })
 

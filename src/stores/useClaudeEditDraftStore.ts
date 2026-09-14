@@ -22,15 +22,23 @@ type ClaudeEditDraft = {
     testModel: string
     testStatus: ClaudeTestStatus
     testMessage: string
+    apiKeyEdited: boolean
+    editedCredentialHeaderNames: string[]
+    originalAuthIndex: string
+    originalApiKey: string
+    originalHeaders: Record<string, string>
 }
 
 interface ClaudeEditDraftState extends DraftSliceState<ClaudeEditDraft> {
     setDraftForm: (key: string, action: SetStateAction<ProviderFormState>) => void
     setDraftTestStatus: (key: string, action: SetStateAction<ClaudeTestStatus>) => void
+    markDraftApiKeyEdited: (key: string) => void
+    markDraftCredentialHeadersEdited: (key: string, names: string[]) => void
 }
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
+    weight: undefined,
     prefix: '',
     baseUrl: '',
     proxyUrl: '',
@@ -48,8 +56,47 @@ const buildEmptyDraft = (): ClaudeEditDraft => ({
     testModel: '',
     testStatus: 'idle',
     testMessage: '',
+    apiKeyEdited: false,
+    editedCredentialHeaderNames: [],
+    originalAuthIndex: '',
+    originalApiKey: '',
+    originalHeaders: {},
 })
 
 export const useClaudeEditDraftStore = create<ClaudeEditDraftState>((set, get) => ({
     ...createDraftSlice<ClaudeEditDraft, ClaudeEditDraftState>(buildEmptyDraft, { set, get }),
+    markDraftApiKeyEdited: (key) => {
+        if (!key) {
+            return
+        }
+        set((state) => {
+            const existing = state.drafts[key] ?? buildEmptyDraft()
+            return {
+                drafts: {
+                    ...state.drafts,
+                    [key]: { ...existing, initialized: true, apiKeyEdited: true },
+                },
+            }
+        })
+    },
+    markDraftCredentialHeadersEdited: (key, names) => {
+        if (!key || names.length === 0) {
+            return
+        }
+        set((state) => {
+            const existing = state.drafts[key] ?? buildEmptyDraft()
+            const edited   = new Set(existing.editedCredentialHeaderNames)
+            names.map((name) => name.trim().toLowerCase()).filter(Boolean).forEach((name) => edited.add(name))
+            return {
+                drafts: {
+                    ...state.drafts,
+                    [key]: {
+                        ...existing,
+                        initialized: true,
+                        editedCredentialHeaderNames: Array.from(edited),
+                    },
+                },
+            }
+        })
+    },
 }))

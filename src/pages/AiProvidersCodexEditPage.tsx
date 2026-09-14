@@ -1,27 +1,31 @@
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import type {ProviderFormState} from '@/components/providers'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {Input} from '@/components/ui/Input'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
+import {useProviderConnectivityTestState} from '@/hooks/useProviderConnectivityTestState'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {apiCallApi, getApiCallErrorMessage, modelsApi, providersApi} from '@/services/api'
-import {useNotificationStore} from '@/stores'
+import {apiCallApi, modelsApi, prepareApiCallAuth, providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
-import {useEffect, useMemo, useRef, useState} from 'react'
+import {useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
+import {
+    ProviderConnectionFields,
+    ProviderModelSection,
+    QuickFillField,
+} from './ProviderFormFields'
 import {CODEX_QUICK_FILL_PRESETS} from './providerQuickFill'
-import {HeadersField, PrefixField, PriorityField, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 
 // ---- Form helpers ----
 
@@ -34,6 +38,7 @@ const buildCodexChatCompletionsEndpoint = (baseUrl: string) =>
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
     priority: undefined,
+    weight: undefined,
     prefix: '',
     baseUrl: '',
     websockets: false,
@@ -62,10 +67,7 @@ export function AiProvidersCodexEditPage() {
         configKey: 'codex-api-key',
         buildEmptyForm,
         buildSignature,
-        loadConfigs: async ({ fetchConfig }) => {
-            const value = await fetchConfig('codex-api-key')
-            return Array.isArray(value) ? (value as ProviderKeyConfig[]) : []
-        },
+        loadConfigs: () => providersApi.getCodexConfigs(),
         configToForm: (config) => ({
             ...config,
             websockets: Boolean(config.websockets),
@@ -76,6 +78,7 @@ export function AiProvidersCodexEditPage() {
         formToPayload: (form) => ({
             apiKey: form.apiKey.trim(),
             priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+            weight: form.weight,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             websockets: Boolean(form.websockets),
@@ -84,8 +87,13 @@ export function AiProvidersCodexEditPage() {
             models: entriesToModels(form.modelEntries),
             excludedModels: parseTextList(form.excludedText),
         }),
-        saveConfigs: (configs) => providersApi.saveCodexConfigs(configs),
+        createConfig: (config) => providersApi.createCodexConfig(config),
+        updateConfig: (index, config, original) => providersApi.patchCodexConfig(index, config, original),
         validateBeforeSave: (form) => {
+            const weightError = getCredentialWeightValidationKey(form.weight)
+            if (weightError) {
+                return weightError
+            }
             if (!(form.baseUrl ?? '').trim()) {
                 return 'notification.codex_base_url_required'
             }
@@ -124,13 +132,15 @@ export function AiProvidersCodexEditPage() {
         { disableControls, saving, loading, invalidIndexParam, invalidIndex },
         {
             buildEndpoint: (baseUrl) => modelsApi.buildV1ModelsEndpoint(baseUrl),
-            fetchModels: (baseUrl, apiKey, headers, proxyUrl) => {
+            fetchModels: (baseUrl, apiKey, headers, proxyUrl, signal) => {
                 const hasCustomAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
                 return modelsApi.fetchV1ModelsViaApiCall(
                     baseUrl,
                     hasCustomAuthorization ? undefined : apiKey,
                     headers,
                     proxyUrl,
+                    form.authIndex,
+                    signal,
                 )
             },
             canAutoFetch: (apiKey, headers) => {
@@ -142,41 +152,29 @@ export function AiProvidersCodexEditPage() {
         },
     )
 
-    const [testModel, setTestModel]     = useState('')
-    const [testStatus, setTestStatus]   = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-    const [testMessage, setTestMessage] = useState('')
-    const [isTesting, setIsTesting]     = useState(false)
-    const { showNotification }          = useNotificationStore()
-    const controlsDisabled              = disabled || isTesting
+    const [testModel, setTestModel] = useState('')
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
     const availableModels    = useMemo(() => modelSelectOptions.map((option) => option.value), [modelSelectOptions])
     const canOpenDiscovery   = discovery.canOpen && Boolean((form.baseUrl ?? '').trim())
 
-    const connectivityConfigSignature = useMemo(() => {
-        const headersSignature = form.headers.map((entry) => `${entry.key.trim()}:${entry.value.trim()}`).join('|')
-        const modelsSignature  = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
-                                     .join('|')
-        return [
-            form.apiKey.trim(),
-            form.baseUrl?.trim() ?? '',
-            form.proxyUrl?.trim() ?? '',
-            testModel.trim(),
-            headersSignature,
-            modelsSignature,
-        ].join('||')
-    }, [form.apiKey, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
-
-    const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
-
-    useEffect(() => {
-        if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
-            return
-        }
-        previousConnectivityConfigRef.current = connectivityConfigSignature
-        setTestStatus('idle')
-        setTestMessage('')
-    }, [connectivityConfigSignature])
+    const {
+              testStatus,
+              setTestStatus,
+              testMessage,
+              setTestMessage,
+              isTesting,
+              runConnectivityTest,
+              showTestError,
+          }                = useProviderConnectivityTestState({
+                                                                  apiKey: form.apiKey,
+                                                                  baseUrl: form.baseUrl,
+                                                                  proxyUrl: form.proxyUrl,
+                                                                  testModel,
+                                                                  headers: form.headers,
+                                                                  modelEntries: form.modelEntries,
+                                                              })
+    const controlsDisabled = disabled || isTesting
 
     const runCodexConnectivityTest = async () => {
         if (isTesting) {
@@ -185,10 +183,7 @@ export function AiProvidersCodexEditPage() {
 
         const baseUrl = (form.baseUrl ?? '').trim()
         if (!baseUrl) {
-            const message = t('notification.codex_base_url_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
+            showTestError(t('notification.codex_base_url_required'))
             return
         }
 
@@ -197,33 +192,30 @@ export function AiProvidersCodexEditPage() {
         const apiKey        = form.apiKey.trim()
         const hasAuth       = hasHeader(customHeaders, 'authorization')
         if (!apiKey && !hasAuth) {
-            const message = t('ai_providers.codex_test_key_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
+            showTestError(t('ai_providers.codex_test_key_required'))
             return
         }
 
         const endpoint = buildCodexChatCompletionsEndpoint(baseUrl)
         if (!endpoint) {
-            const message = t('notification.codex_base_url_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
+            showTestError(t('notification.codex_base_url_required'))
             return
         }
 
-        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...customHeaders }
-        if (apiKey && !hasAuth) {
-            headers.Authorization = `Bearer ${apiKey}`
+        const preparedAuth                    = prepareApiCallAuth({
+                                                                       headers: customHeaders,
+                                                                       apiKey,
+                                                                       authIndex: form.authIndex,
+                                                                       preferredHeader: 'Authorization',
+                                                                       authorizationScheme: 'Bearer',
+                                                                   })
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...preparedAuth.headers,
         }
 
-        setIsTesting(true)
-        setTestStatus('loading')
-        setTestMessage(t('ai_providers.codex_test_running'))
-
-        try {
-            const result = await apiCallApi.request(
+        await runConnectivityTest(
+            () => apiCallApi.request(
                 {
                     method: 'POST',
                     url: endpoint,
@@ -234,38 +226,19 @@ export function AiProvidersCodexEditPage() {
                                              max_tokens: 8,
                                          }),
                     proxyUrl: form.proxyUrl?.trim() || undefined,
+                    authIndex: form.authIndex?.trim() || undefined,
+                    draftToken: preparedAuth.draftToken,
                 },
                 { timeout: CODEX_TEST_TIMEOUT_MS },
-            )
-
-            if (result.statusCode < 200 || result.statusCode >= 300) {
-                const detail  = getApiCallErrorMessage(result) || t('common.unknown_error')
-                const message = `${t('ai_providers.codex_test_failed')}: ${detail}`
-                setTestStatus('error')
-                setTestMessage(message)
-                showNotification(message, 'error')
-            } else {
-                const message = t('ai_providers.codex_test_success')
-                setTestStatus('success')
-                setTestMessage(message)
-                showNotification(message, 'success')
-            }
-        } catch (err: unknown) {
-            const message         = getErrorMessage(err)
-            const errorCode       =
-                      typeof err === 'object' && err !== null && 'code' in err ?
-                      String((err as { code?: string }).code) :
-                      ''
-            const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
-            const resolvedMessage = isTimeout
-                                    ? t('ai_providers.codex_test_timeout', { seconds: CODEX_TEST_TIMEOUT_MS / 1000 })
-                                    : `${t('ai_providers.codex_test_failed')}: ${message || t('common.unknown_error')}`
-            setTestStatus('error')
-            setTestMessage(resolvedMessage)
-            showNotification(resolvedMessage, 'error')
-        } finally {
-            setIsTesting(false)
-        }
+            ),
+            {
+                running: t('ai_providers.codex_test_running'),
+                success: t('ai_providers.codex_test_success'),
+                failed: t('ai_providers.codex_test_failed'),
+                timeout: t('ai_providers.codex_test_timeout', { seconds: CODEX_TEST_TIMEOUT_MS / 1000 }),
+                unknownError: t('common.unknown_error'),
+            },
+        )
     }
 
     return (
@@ -286,41 +259,25 @@ export function AiProvidersCodexEditPage() {
                 disabled={controlsDisabled}
                 onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
             />
-            <Input
-                label={t('ai_providers.codex_add_modal_key_label')}
-                value={form.apiKey}
-                onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+            <ProviderConnectionFields
+                form={form}
+                setForm={setForm}
                 disabled={controlsDisabled}
-                secret
-            />
-            <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
-            <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
-            <Input
-                label={t('ai_providers.codex_add_modal_url_label')}
-                value={form.baseUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                disabled={controlsDisabled}
-            />
-            <div className='form-group'>
-                <label>{t('ai_providers.codex_websockets_label')}</label>
-                <ToggleSwitch
-                    checked={Boolean(form.websockets)}
-                    onChange={(value) => setForm((prev) => ({ ...prev, websockets: value }))}
-                    disabled={controlsDisabled}
-                    ariaLabel={t('ai_providers.codex_websockets_label')}
-                />
-                <div className='hint'>{t('ai_providers.codex_websockets_hint')}</div>
-            </div>
-            <Input
-                label={t('ai_providers.codex_add_modal_proxy_label')}
-                value={form.proxyUrl ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-                disabled={controlsDisabled}
-            />
-            <HeadersField
-                entries={form.headers}
-                onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-                disabled={controlsDisabled}
+                apiKeyLabel={t('ai_providers.codex_add_modal_key_label')}
+                baseUrlLabel={t('ai_providers.codex_add_modal_url_label')}
+                proxyUrlLabel={t('ai_providers.codex_add_modal_proxy_label')}
+                afterBaseUrl={
+                    <div className='form-group'>
+                        <label>{t('ai_providers.codex_websockets_label')}</label>
+                        <ToggleSwitch
+                            checked={Boolean(form.websockets)}
+                            onChange={(value) => setForm((prev) => ({ ...prev, websockets: value }))}
+                            disabled={controlsDisabled}
+                            ariaLabel={t('ai_providers.codex_websockets_label')}
+                        />
+                        <div className='hint'>{t('ai_providers.codex_websockets_hint')}</div>
+                    </div>
+                }
             />
             <ProviderModelSection
                 form={form}

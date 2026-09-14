@@ -1,44 +1,39 @@
 import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
+import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
 import {buildClaudeMessagesEndpoint, parseTextList} from '@/components/providers/utils'
-import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {useEscapeKey} from '@/hooks/useEscapeKey'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
-import {apiCallApi, getApiCallErrorMessage} from '@/services/api'
+import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
+import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api'
 import {useNotificationStore} from '@/stores'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate, useOutletContext} from 'react-router-dom'
+import {useLocation, useNavigate, useOutletContext} from 'react-router-dom'
 import type {ClaudeEditOutletContext} from './AiProvidersClaudeEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
-import {CLAUDE_QUICK_FILL_PRESETS} from './providerQuickFill'
-import {ExcludedModelsField, HeadersField, PrefixField, PriorityField, QuickFillField} from './ProviderFormFields'
+import {
+    ExcludedModelsField,
+    ProviderConnectionFields,
+    QuickFillField,
+} from './ProviderFormFields'
+import {CLAUDE_QUICK_FILL_PRESETS, resolveClaudeModelDiscovery} from './providerQuickFill'
 
-const CLAUDE_TEST_TIMEOUT_MS    = 30_000
-const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
-
-const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): string => {
-    const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === 'authorization')
-    if (!entry) {
-        return ''
-    }
-    const value = String(entry[1] ?? '').trim()
-    if (!value) {
-        return ''
-    }
-    const match = value.match(/^Bearer\s+(?<token>.+)$/i)
-    return match?.groups?.token?.trim() || ''
-}
+const CLAUDE_TEST_TIMEOUT_MS           = 30_000
+const DEFAULT_ANTHROPIC_VERSION        = '2023-06-01'
+const CLAUDE_MODEL_DISCOVERY_BUTTON_ID = 'provider-model-discovery-claude'
 
 export function AiProvidersClaudeEditPage() {
     const { t }                = useTranslation()
     const navigate             = useNavigate()
+    const location             = useLocation()
+    const modalPresentation    = resolveProviderEditModalState(location.state, location.pathname)
     const { showNotification } = useNotificationStore()
     const {
               hasIndexParam,
@@ -47,8 +42,13 @@ export function AiProvidersClaudeEditPage() {
               disableControls,
               loading,
               saving,
+              apiKeyIsMasked,
+              maskedCredentialHeaderNames,
+              credentialIdentityAvailable,
               form,
               setForm,
+              updateApiKey,
+              updateHeaders,
               testModel,
               setTestModel,
               testStatus,
@@ -66,7 +66,7 @@ export function AiProvidersClaudeEditPage() {
     const [isTesting, setIsTesting] = useState(false)
     const lastCloakConfigRef        = useRef<typeof form.cloak>(null)
 
-    useEscapeKey(handleBack)
+    useEscapeKey(handleBack, !modalPresentation)
 
     useEffect(() => {
         if (!form.cloak) {
@@ -79,6 +79,9 @@ export function AiProvidersClaudeEditPage() {
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
     const controlsDisabled   = saving || disableControls || isTesting
+    const modelDiscovery     = useMemo(() => resolveClaudeModelDiscovery(form.baseUrl ?? ''), [form.baseUrl])
+    const modelFetchLabel    = modelDiscovery ? t('ai_providers.provider_models_fetch_button') :
+                               t('ai_providers.claude_models_fetch_button')
 
     const cloakModeOptions = useMemo(
         () => [
@@ -109,12 +112,14 @@ export function AiProvidersClaudeEditPage() {
                                      .join('|')
         return [
             form.apiKey.trim(),
+            form.authIndex?.trim() ?? '',
             form.baseUrl?.trim() ?? '',
+            form.proxyUrl?.trim() ?? '',
             testModel.trim(),
             headersSignature,
             modelsSignature,
         ].join('||')
-    }, [form.apiKey, form.baseUrl, form.headers, form.modelEntries, testModel])
+    }, [form.apiKey, form.authIndex, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
 
     const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
 
@@ -128,11 +133,20 @@ export function AiProvidersClaudeEditPage() {
     }, [connectivityConfigSignature, setTestMessage, setTestStatus])
 
     const openClaudeModelDiscovery = () => {
-        navigate('models')
+        navigate('models', {
+            state: withProviderEditReturnFocus(location.state, CLAUDE_MODEL_DISCOVERY_BUTTON_ID),
+        })
     }
 
     const runClaudeConnectivityTest = useCallback(async () => {
         if (isTesting) {
+            return
+        }
+        if (!credentialIdentityAvailable) {
+            const message = t('common.invalid_provider_index')
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
             return
         }
 
@@ -145,13 +159,12 @@ export function AiProvidersClaudeEditPage() {
             return
         }
 
-        const customHeaders           = buildHeaderObject(form.headers)
-        const apiKey                  = form.apiKey.trim()
-        const hasApiKeyHeader         = hasHeader(customHeaders, 'x-api-key')
-        const apiKeyFromAuthorization = resolveBearerTokenFromAuthorization(customHeaders)
-        const resolvedApiKey          = apiKey || apiKeyFromAuthorization
+        const customHeaders    = buildHeaderObject(form.headers)
+        const apiKey           = form.apiKey.trim()
+        const hasApiKeyHeader  = hasHeader(customHeaders, 'x-api-key')
+        const hasAuthorization = hasHeader(customHeaders, 'authorization')
 
-        if (!resolvedApiKey && !hasApiKeyHeader) {
+        if (!apiKey && !hasApiKeyHeader && !hasAuthorization && !form.authIndex?.trim()) {
             const message = t('ai_providers.claude_test_key_required')
             setTestStatus('error')
             setTestMessage(message)
@@ -168,23 +181,31 @@ export function AiProvidersClaudeEditPage() {
             return
         }
 
+        let preparedAuth: ReturnType<typeof prepareApiCallAuth>
+        try {
+            preparedAuth = prepareApiCallAuth({
+                                                  headers: customHeaders,
+                                                  apiKey,
+                                                  authIndex: form.authIndex,
+                                                  preferredHeader: 'x-api-key',
+                                                  headerNames: ['Authorization'],
+                                                  apiKeyIsMasked,
+                                                  maskedHeaderNames: maskedCredentialHeaderNames,
+                                              })
+        } catch (err: unknown) {
+            const message = `${t('ai_providers.claude_test_failed')}: ${getErrorMessage(err)}`
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
+            return
+        }
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            ...customHeaders,
+            ...preparedAuth.headers,
         }
 
         if (!hasHeader(headers, 'anthropic-version')) {
             headers['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
-        }
-        if (!Object.prototype.hasOwnProperty.call(headers, 'Anthropic-Version')) {
-            headers['Anthropic-Version'] = headers['anthropic-version'] ?? DEFAULT_ANTHROPIC_VERSION
-        }
-
-        if (!hasApiKeyHeader && resolvedApiKey) {
-            headers['x-api-key'] = resolvedApiKey
-        }
-        if (!Object.prototype.hasOwnProperty.call(headers, 'X-Api-Key') && resolvedApiKey) {
-            headers['X-Api-Key'] = resolvedApiKey
         }
 
         setIsTesting(true)
@@ -202,6 +223,9 @@ export function AiProvidersClaudeEditPage() {
                                              max_tokens: 8,
                                              messages: [{ role: 'user', content: 'Hi' }],
                                          }),
+                    proxyUrl: form.proxyUrl?.trim() || undefined,
+                    authIndex: form.authIndex?.trim() || undefined,
+                    draftToken: preparedAuth.draftToken,
                 },
                 { timeout: CLAUDE_TEST_TIMEOUT_MS },
             )
@@ -235,11 +259,16 @@ export function AiProvidersClaudeEditPage() {
             setIsTesting(false)
         }
     }, [
+                                                      apiKeyIsMasked,
                                                       availableModels,
+                                                      credentialIdentityAvailable,
                                                       form.apiKey,
+                                                      form.authIndex,
                                                       form.baseUrl,
                                                       form.headers,
+                                                      form.proxyUrl,
                                                       isTesting,
+                                                      maskedCredentialHeaderNames,
                                                       setTestMessage,
                                                       setTestStatus,
                                                       showNotification,
@@ -265,41 +294,26 @@ export function AiProvidersClaudeEditPage() {
                     disabled={controlsDisabled}
                     onApply={(preset) => setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl }))}
                 />
-                <Input
-                    label={t('ai_providers.claude_add_modal_key_label')}
-                    value={form.apiKey}
-                    onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                <ProviderConnectionFields
+                    form={form}
+                    setForm={setForm}
                     disabled={controlsDisabled}
-                    secret
-                />
-                <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
-                <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
-                <Input
-                    label={t('ai_providers.claude_add_modal_url_label')}
-                    value={form.baseUrl ?? ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                    disabled={controlsDisabled}
-                />
-                <Input
-                    label={t('ai_providers.claude_add_modal_proxy_label')}
-                    value={form.proxyUrl ?? ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-                    disabled={controlsDisabled}
-                />
-                <HeadersField
-                    entries={form.headers}
-                    onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-                    disabled={controlsDisabled}
+                    apiKeyLabel={t('ai_providers.claude_add_modal_key_label')}
+                    baseUrlLabel={t('ai_providers.claude_add_modal_url_label')}
+                    proxyUrlLabel={t('ai_providers.claude_add_modal_proxy_label')}
+                    onApiKeyChange={updateApiKey}
+                    onHeadersChange={updateHeaders}
                 />
 
                 <ModelConfigSection
                     title={t('ai_providers.claude_models_label')}
                     hint={t('ai_providers.claude_models_hint')}
                     addLabel={t('ai_providers.claude_models_add_btn')}
-                    fetchLabel={t('ai_providers.claude_models_fetch_button')}
+                    fetchLabel={modelFetchLabel}
                     entries={form.modelEntries}
                     setForm={setForm}
                     onFetchModels={openClaudeModelDiscovery}
+                    fetchButtonId={CLAUDE_MODEL_DISCOVERY_BUTTON_ID}
                     disabled={controlsDisabled}
                 >
                     <ModelTestPanel
@@ -317,6 +331,8 @@ export function AiProvidersClaudeEditPage() {
                         onTest={() => void runClaudeConnectivityTest()}
                     />
                 </ModelConfigSection>
+
+                <ClaudeCodeConfigPanel models={form.modelEntries} disabled={controlsDisabled} />
 
                 <ExcludedModelsField
                     value={form.excludedText}
