@@ -452,8 +452,9 @@ export function PluginManagementPage() {
                                     <div className={styles.detailLabel}>{t('plugin_management.config_fields')}</div>
                                     <div className={styles.fieldPills}>
                                         {plugin.config_fields.length === 0 ? (
-                                            <span
-                                                className={styles.muted}>{t('plugin_management.no_config_fields')}</span>
+                                            <span className={styles.muted}>
+                                                {t('plugin_management.no_config_fields')}
+                                            </span>
                                         ) : plugin.config_fields.map((field) => (
                                             <span key={field.name} className={styles.fieldPill}
                                                   title={field.description}>

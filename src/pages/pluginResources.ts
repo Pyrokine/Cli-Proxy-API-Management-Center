@@ -3,7 +3,7 @@ import {normalizeApiBase} from '@/utils/connection'
 
 export const PLUGIN_RESOURCES_REFRESH_EVENT = 'plugin-resources-refresh'
 
-export interface PluginResourceEntry {
+interface PluginResourceEntry {
     pluginID: string
     pluginTitle: string
     pluginLogo: string
@@ -19,7 +19,7 @@ export const notifyPluginResourcesChanged = () => {
     window.dispatchEvent(new Event(PLUGIN_RESOURCES_REFRESH_EVENT))
 }
 
-export const getPluginTitle = (plugin: PluginEntry): string => plugin.metadata?.name?.trim() || plugin.id
+const getPluginTitle = (plugin: PluginEntry): string => plugin.metadata?.name?.trim() || plugin.id
 
 export const pluginResourceKey = (path: string): string => path.trim()
 
@@ -57,7 +57,7 @@ const DEFAULT_PLUGIN_STORE_SOURCE_ID   = 'official'
 const DEFAULT_PLUGIN_STORE_SOURCE_NAME = 'official'
 const GITHUB_REPOSITORY_HOSTS          = new Set(['github.com', 'www.github.com'])
 
-export const getPluginRepositorySlug = (repository: string | undefined): string => {
+const getPluginRepositorySlug = (repository: string | undefined): string => {
     const trimmed = (repository ?? '').trim()
     if (!trimmed) {
         return ''

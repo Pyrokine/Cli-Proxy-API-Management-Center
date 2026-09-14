@@ -30,7 +30,11 @@ export const getGitHubRepositorySlug = (repository?: string | null): string => {
     try {
         const repositoryURL = /^https?:\/\//i.test(trimmed) ?
                               new URL(trimmed) :
-                              new URL(`https://github.com/${trimmed.replace(/^github\.com\//i, '').replace(/^\/+/, '')}`)
+                              new URL(
+                                  `https://github.com/${trimmed
+                                      .replace(/^github\.com\//i, '')
+                                      .replace(/^\/+/, '')}`,
+                              )
         if (!GITHUB_HOSTS.has(repositoryURL.hostname.toLowerCase())) {
             return ''
         }
@@ -39,7 +43,7 @@ export const getGitHubRepositorySlug = (repository?: string | null): string => {
             return ''
         }
         const [owner = '', rawRepo = ''] = segments
-        const repo                      = stripGitSuffix(rawRepo)
+        const repo   = stripGitSuffix(rawRepo)
         if (!owner || !repo || !/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(repo)) {
             return ''
         }

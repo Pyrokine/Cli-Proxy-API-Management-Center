@@ -45,13 +45,13 @@ export interface PluginEntry {
     metadata: PluginMetadata | null
 }
 
-export interface PluginListResponse {
+interface PluginListResponse {
     plugins_enabled: boolean
     plugins_dir: string
     plugins: PluginEntry[]
 }
 
-export interface PluginDeleteResult {
+interface PluginDeleteResult {
     status: string
     id: string
     path: string
@@ -116,7 +116,7 @@ export interface PluginStoreResponse {
     plugins: PluginStoreEntry[]
 }
 
-export interface PluginStoreInstallResult {
+interface PluginStoreInstallResult {
     status: string
     source_id: string
     source_name: string
@@ -129,12 +129,12 @@ export interface PluginStoreInstallResult {
     restart_required: boolean
 }
 
-export interface PluginStoreInstallOptions {
+interface PluginStoreInstallOptions {
     sourceId?: string
     version?: string
 }
 
-export interface PluginStoreRelease {
+interface PluginStoreRelease {
     tag_name: string
     name: string
     published_at: string

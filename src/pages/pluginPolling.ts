@@ -1,11 +1,4 @@
-import {
-    type PluginEntry,
-    type PluginListResponse,
-    pluginsApi,
-    pluginStoreApi,
-    type PluginStoreEntry,
-    type PluginStoreResponse,
-} from '@/services/api/plugins'
+import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
 
 const PLUGIN_STATE_TIMEOUT_MS  = 15000
 const PLUGIN_STATE_INTERVAL_MS = 500
@@ -31,15 +24,9 @@ const wait = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, r
     signal?.addEventListener('abort', onAbort, { once: true })
 })
 
-export interface PluginStoreStateWaitResult {
+interface PluginStoreStateWaitResult {
     response: PluginStoreResponse
     plugin: PluginStoreEntry | null
-    timedOut: boolean
-}
-
-export interface PluginStateWaitResult {
-    response: PluginListResponse
-    plugin: PluginEntry | null
     timedOut: boolean
 }
 
@@ -67,30 +54,5 @@ export async function waitForPluginStoreState(
         await wait(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal)
         throwIfAborted(signal)
         latest = await pluginStoreApi.list({ signal })
-    }
-}
-
-export async function waitForPluginState(
-    id: string,
-    predicate: (plugin: PluginEntry, response: PluginListResponse) => boolean,
-    timeoutMs  = PLUGIN_STATE_TIMEOUT_MS,
-    intervalMs = PLUGIN_STATE_INTERVAL_MS,
-    signal?: AbortSignal,
-): Promise<PluginStateWaitResult> {
-    const deadline = Date.now() + timeoutMs
-    throwIfAborted(signal)
-    let latest = await pluginsApi.list({ signal })
-
-    for (; ;) {
-        const plugin = latest.plugins.find((item) => item.id === id) ?? null
-        if (plugin && predicate(plugin, latest)) {
-            return { response: latest, plugin, timedOut: false }
-        }
-        if (Date.now() >= deadline) {
-            return { response: latest, plugin, timedOut: true }
-        }
-        await wait(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal)
-        throwIfAborted(signal)
-        latest = await pluginsApi.list({ signal })
     }
 }

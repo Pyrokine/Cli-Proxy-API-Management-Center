@@ -26,8 +26,8 @@ import {
     fetchPluginReleaseVersions,
     getGitHubRepositorySlug,
     isValidManualReleaseTag,
-    supportsPluginVersionSelection,
     type PluginReleaseVersion,
+    supportsPluginVersionSelection,
 } from './pluginReleaseVersions'
 import {
     buildRepositoryURL,
@@ -92,23 +92,23 @@ export function PluginStorePage() {
     const installAbortRef      = useRef<AbortController | null>(null)
     const releaseAbortRef      = useRef<AbortController | null>(null)
 
-    const [data, setData]                                 = useState<PluginStoreResponse | null>(null)
-    const [loading, setLoading]                           = useState(true)
-    const [error, setError]                               = useState('')
-    const [filter, setFilter]                             = useState('')
-    const [statusFilter, setStatusFilter]                 = useState<StoreStatusFilter>('all')
-    const [installingKey, setInstallingKey]               = useState('')
-    const [installEntry, setInstallEntry]                 = useState<PluginStoreEntry | null>(null)
-    const [installVersion, setInstallVersion]             = useState('')
-    const [releaseVersions, setReleaseVersions]           = useState<PluginReleaseVersion[]>([])
+    const [data, setData]                                     = useState<PluginStoreResponse | null>(null)
+    const [loading, setLoading]                               = useState(true)
+    const [error, setError]                                   = useState('')
+    const [filter, setFilter]                                 = useState('')
+    const [statusFilter, setStatusFilter]                     = useState<StoreStatusFilter>('all')
+    const [installingKey, setInstallingKey]                   = useState('')
+    const [installEntry, setInstallEntry]                     = useState<PluginStoreEntry | null>(null)
+    const [installVersion, setInstallVersion]                 = useState('')
+    const [releaseVersions, setReleaseVersions]               = useState<PluginReleaseVersion[]>([])
     const [releaseVersionsLoading, setReleaseVersionsLoading] = useState(false)
-    const [releaseVersionsError, setReleaseVersionsError] = useState('')
-    const [gateEntry, setGateEntry]                       = useState<PluginStoreEntry | null>(null)
-    const [gateIsUpdate, setGateIsUpdate]                 = useState(false)
-    const [gateRequestedVersion, setGateRequestedVersion] = useState('')
-    const [gateStep, setGateStep]                         = useState(1)
-    const [gateTyped, setGateTyped]                       = useState('')
-    const [restartRequiredKeys, setRestartRequiredKeys]   = useState<string[]>([])
+    const [releaseVersionsError, setReleaseVersionsError]     = useState('')
+    const [gateEntry, setGateEntry]                           = useState<PluginStoreEntry | null>(null)
+    const [gateIsUpdate, setGateIsUpdate]                     = useState(false)
+    const [gateRequestedVersion, setGateRequestedVersion]     = useState('')
+    const [gateStep, setGateStep]                             = useState(1)
+    const [gateTyped, setGateTyped]                           = useState('')
+    const [restartRequiredKeys, setRestartRequiredKeys]       = useState<string[]>([])
 
     const loadStore = useCallback(async (options?: { skipLeadingState?: boolean }) => {
         loadAbortRef.current?.abort()
@@ -216,7 +216,7 @@ export function PluginStorePage() {
             return
         }
 
-        const controller         = new AbortController()
+        const controller        = new AbortController()
         releaseAbortRef.current = controller
         setReleaseVersionsLoading(true)
         try {
@@ -244,7 +244,10 @@ export function PluginStorePage() {
     const releaseVersionOptions = useMemo(
         () => releaseVersions.map((release) => ({
             value: release.tagName,
-            label: `${release.tagName}${release.name && release.name !== release.tagName ? ` · ${release.name}` : ''}${release.prerelease ? ` · ${t('plugin_store.prerelease')}` : ''}`,
+            label:
+                `${release.tagName}` +
+                `${release.name && release.name !== release.tagName ? ` · ${release.name}` : ''}` +
+                `${release.prerelease ? ` · ${t('plugin_store.prerelease')}` : ''}`,
         })),
         [releaseVersions, t],
     )
@@ -545,24 +548,26 @@ export function PluginStorePage() {
         )
     }
 
-    const gateToken                    = gateEntry ? getPluginConfirmToken(gateEntry) : ''
-    const installIsUpdate              = Boolean(installEntry?.installed && installEntry.update_available)
-    const installSupportsVersion       = Boolean(installEntry &&
-                                                  supportsPluginVersionSelection(installEntry.install_type))
-    const installReleasesURL           = installSupportsVersion ?
-                                         buildGitHubReleasesPageURL(installEntry?.repository) :
-                                         ''
-    const selectedReleaseVersion       = releaseVersionOptions.some((option) => option.value === installVersion.trim()) ?
-                                         installVersion.trim() :
-                                         ''
-    const installVersionError          = installSupportsVersion &&
-                                         installVersion.trim() &&
-                                         !isValidManualReleaseTag(installVersion) ?
-                                         t(
-                                             'plugin_store.install_version_invalid',
-                                             { defaultValue: '版本号必须以数字或 v 加数字开头，且只能包含字母、数字、点号、加号和连字符' },
-                                         ) :
-                                         ''
+    const gateToken              = gateEntry ? getPluginConfirmToken(gateEntry) : ''
+    const installIsUpdate        = Boolean(installEntry?.installed && installEntry.update_available)
+    const installSupportsVersion = Boolean(installEntry &&
+                                           supportsPluginVersionSelection(installEntry.install_type))
+    const installReleasesURL     = installSupportsVersion ?
+                                   buildGitHubReleasesPageURL(installEntry?.repository) :
+                                   ''
+    const selectedReleaseVersion = releaseVersionOptions.some(
+        (option) => option.value === installVersion.trim(),
+    ) ?
+                                   installVersion.trim() :
+                                   ''
+    const installVersionError    = installSupportsVersion &&
+                                   installVersion.trim() &&
+                                   !isValidManualReleaseTag(installVersion) ?
+                                   t(
+                                       'plugin_store.install_version_invalid',
+                                       { defaultValue: '版本号必须以数字或 v 加数字开头，且只能包含字母、数字、点号、加号和连字符' },
+                                   ) :
+                                   ''
 
     return (
         <div className={styles.page}>
@@ -596,8 +601,9 @@ export function PluginStorePage() {
                 <div className={styles.warningBox}>
                     <strong>{t('plugin_store.source_errors_title', { defaultValue: '部分插件源拉取失败' })}</strong>
                     {(data?.source_errors ?? []).map((sourceError, index) => (
-                        <div key={`${sourceError.source_id}-${index}`}>{sourceError.source_name ||
-                                                                        sourceError.source_url}: {sourceError.message}</div>
+                        <div key={`${sourceError.source_id}-${index}`}>
+                            {sourceError.source_name || sourceError.source_url}: {sourceError.message}
+                        </div>
                     ))}
                 </div>
             )}
@@ -715,7 +721,10 @@ export function PluginStorePage() {
                                             >
                                                 {releaseVersionsLoading ?
                                                  t('common.loading') :
-                                                 t('plugin_store.release_versions_reload', { defaultValue: '重新获取' })}
+                                                 t(
+                                                     'plugin_store.release_versions_reload',
+                                                     { defaultValue: '重新获取' },
+                                                 )}
                                             </button>
                                         </div>
                                         {releaseVersionOptions.length > 0 ? (
@@ -730,7 +739,7 @@ export function PluginStorePage() {
                                                 disabled={releaseVersionsLoading || Boolean(installingKey)}
                                             />
                                         ) : (
-                                              <p>{releaseVersionsLoading ?
+                                             <p>{releaseVersionsLoading ?
                                                  t(
                                                      'plugin_store.release_versions_loading',
                                                      { defaultValue: '正在获取 GitHub Releases...' },
@@ -739,8 +748,10 @@ export function PluginStorePage() {
                                                      'plugin_store.release_versions_empty',
                                                      { defaultValue: '未获取到 GitHub Release，可手动输入版本' },
                                                  )}</p>
-                                          )}
-                                        {releaseVersionsError && <div className='error-box'>{releaseVersionsError}</div>}
+                                         )}
+                                        {releaseVersionsError && (
+                                            <div className='error-box'>{releaseVersionsError}</div>
+                                        )}
                                         <a href={installReleasesURL} target='_blank' rel='noreferrer'>
                                             {t('plugin_store.open_releases', { defaultValue: '打开 GitHub Releases' })}
                                         </a>
