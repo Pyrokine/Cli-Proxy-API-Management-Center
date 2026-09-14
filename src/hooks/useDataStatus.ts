@@ -1,6 +1,6 @@
 import {useMemo} from 'react'
 
-export type DataStatusValue = 'checking' | 'missing' | 'loading' | 'loaded' | 'empty' | 'error' | 'refreshing' | 'ready'
+type DataStatusValue = 'checking' | 'missing' | 'loading' | 'loaded' | 'empty' | 'error' | 'refreshing' | 'ready'
 
 interface UseDataStatusOptions<T> {
     loading: boolean

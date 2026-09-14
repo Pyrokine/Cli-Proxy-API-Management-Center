@@ -24,6 +24,8 @@ interface ModelConfigSectionProps<F extends { modelEntries: ModelEntry[] }> {
     disabled: boolean
     /** Extra disabled condition for the fetch button */
     fetchDisabled?: boolean
+    /** Stable focus target used when returning from route-backed discovery */
+    fetchButtonId?: string
     /** Content rendered after the ModelInputList (e.g. ModelTestPanel) */
     children?: ReactNode
 }
@@ -42,6 +44,7 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                                                                                  onFetchModels,
                                                                                  disabled,
                                                                                  fetchDisabled,
+                                                                                 fetchButtonId,
                                                                                  children,
                                                                              }: ModelConfigSectionProps<F>) {
     const { t } = useTranslation()
@@ -64,7 +67,13 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                     >
                         {addLabel}
                     </Button>
-                    <Button variant='secondary' size='sm' onClick={onFetchModels} disabled={disabled || fetchDisabled}>
+                    <Button
+                        id={fetchButtonId}
+                        variant='secondary'
+                        size='sm'
+                        onClick={onFetchModels}
+                        disabled={disabled || fetchDisabled}
+                    >
                         {fetchLabel}
                     </Button>
                 </div>
@@ -79,6 +88,7 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                 aliasPlaceholder={t('common.model_alias_placeholder')}
                 disabled={disabled}
                 hideAddButton
+                metadataEditing
                 className={styles.modelInputList}
                 rowClassName={styles.modelInputRow}
                 inputClassName={styles.modelInputField}

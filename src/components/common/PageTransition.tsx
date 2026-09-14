@@ -6,6 +6,7 @@ import {type LayerStatus, PageTransitionLayerContext} from './PageTransitionLaye
 import './PageTransition.scss'
 
 interface PageTransitionProps {
+    location?: Location
     render: (location: Location) => ReactNode
     getRouteOrder?: (pathname: string) => number | null
     getTransitionVariant?: (fromPathname: string, toPathname: string) => TransitionVariant
@@ -51,12 +52,14 @@ const getLayerKey = (location: Location) =>
     `${location.key}:${location.pathname}${location.search}${location.hash}`
 
 export function PageTransition({
+                                   location: controlledLocation,
                                    render,
                                    getRouteOrder,
                                    getTransitionVariant,
                                    scrollContainerRef,
                                }: PageTransitionProps) {
-    const location               = useLocation()
+    const routerLocation         = useLocation()
+    const location               = controlledLocation ?? routerLocation
     const currentLayerRef        = useRef<HTMLDivElement>(null)
     const exitingLayerRef        = useRef<HTMLDivElement>(null)
     const transitionDirectionRef = useRef<TransitionDirection>('forward')

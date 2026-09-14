@@ -1,7 +1,7 @@
 import type {ReactNode} from 'react'
 import styles from './Tabs.module.scss'
 
-export type TabItem<T extends string = string> = {
+type TabItem<T extends string = string> = {
     value: T
     label: ReactNode
     disabled?: boolean

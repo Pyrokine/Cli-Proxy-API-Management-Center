@@ -1,0 +1,32 @@
+@use '../../styles/variables' as *;
+
+.overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-full;
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+}
+
+.spinner {
+    border-color: rgba($primary-color, 0.25);
+    border-top-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba($primary-color, 0.25);
+}

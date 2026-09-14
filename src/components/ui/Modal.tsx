@@ -1,4 +1,13 @@
-import {type PropsWithChildren, type ReactNode, useCallback, useEffect, useRef, useState} from 'react'
+import {
+    type MouseEvent as ReactMouseEvent,
+    type PropsWithChildren,
+    type ReactNode,
+    useCallback,
+    useEffect,
+    useId,
+    useRef,
+    useState,
+} from 'react'
 import {createPortal} from 'react-dom'
 import {IconX} from './icons'
 
@@ -9,12 +18,28 @@ interface ModalProps {
     footer?: ReactNode
     width?: number | string
     className?: string
+    overlayClassName?: string
     closeDisabled?: boolean
+    closeBehavior?: 'after-animation' | 'immediate'
+    closeOnOverlay?: boolean
+    closeOnEscape?: boolean
+    closeLabel?: string
+    initialFocusId?: string
+    returnFocusId?: string
 }
 
-const CLOSE_ANIMATION_DURATION = 350
-const MODAL_LOCK_CLASS         = 'modal-open'
-let activeModalCount           = 0
+const CLOSE_ANIMATION_DURATION   = 350
+const MODAL_LOCK_CLASS           = 'modal-open'
+const FOCUSABLE_SELECTOR         = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',')
+let activeModalCount             = 0
+const activeModalStack: string[] = []
 
 const scrollLockSnapshot = {
     scrollY: 0,
@@ -105,6 +130,22 @@ const unlockScroll = () => {
     }
 }
 
+const removeActiveModal = (modalId: string) => {
+    const index = activeModalStack.lastIndexOf(modalId)
+    if (index >= 0) {
+        activeModalStack.splice(index, 1)
+    }
+}
+
+const focusableElements = (root: HTMLElement): HTMLElement[] =>
+    Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+        if (element.getAttribute('aria-hidden') === 'true' || element.closest('[aria-hidden="true"], [inert]')) {
+            return false
+        }
+        const style = window.getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    })
+
 export function Modal({
                           open,
                           title,
@@ -112,12 +153,29 @@ export function Modal({
                           footer,
                           width = 520,
                           className,
+                          overlayClassName,
                           closeDisabled = false,
+                          closeBehavior = 'after-animation',
+                          closeOnOverlay = true,
+                          closeOnEscape = true,
+                          closeLabel = 'Close',
+                          initialFocusId,
+                          returnFocusId,
                           children,
                       }: PropsWithChildren<ModalProps>) {
     const [isVisible, setIsVisible] = useState(false)
     const [isClosing, setIsClosing] = useState(false)
     const closeTimerRef             = useRef<number | null>(null)
+    const dialogRef                 = useRef<HTMLDivElement | null>(null)
+    const previousFocusRef          = useRef<HTMLElement | null>(null)
+    const focusCapturedRef          = useRef(false)
+    const returnFocusIdRef          = useRef(returnFocusId)
+    const modalId                   = useId()
+    const titleId                   = useId()
+
+    useEffect(() => {
+        returnFocusIdRef.current = returnFocusId
+    }, [returnFocusId])
 
     const startClose = useCallback(
         (notifyParent: boolean) => {
@@ -167,16 +225,44 @@ export function Modal({
     }, [open, isVisible, startClose])
 
     const handleClose = useCallback(() => {
+        if (closeDisabled) {
+            return
+        }
+        if (closeBehavior === 'immediate') {
+            onClose()
+            return
+        }
         startClose(true)
-    }, [startClose])
+    }, [closeBehavior, closeDisabled, onClose, startClose])
+
+    const restoreFocus = useCallback(() => {
+        if (!focusCapturedRef.current || typeof document === 'undefined') {
+            return
+        }
+        focusCapturedRef.current = false
+        const previousFocus      = previousFocusRef.current
+        previousFocusRef.current = null
+        const restore            = () => {
+            const currentReturnFocusId = returnFocusIdRef.current
+            const explicitTarget       = currentReturnFocusId ? document.getElementById(currentReturnFocusId) : null
+            const target               = explicitTarget ?? (previousFocus?.isConnected ? previousFocus : null)
+            target?.focus({ preventScroll: true })
+        }
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(restore)
+        } else {
+            restore()
+        }
+    }, [])
 
     useEffect(() => {
         return () => {
             if (closeTimerRef.current !== null) {
                 window.clearTimeout(closeTimerRef.current)
             }
+            restoreFocus()
         }
-    }, [])
+    }, [restoreFocus])
 
     const shouldLockScroll = open || isVisible
 
@@ -184,31 +270,137 @@ export function Modal({
         if (!shouldLockScroll) {
             return
         }
+        activeModalStack.push(modalId)
         lockScroll()
-        return () => unlockScroll()
-    }, [shouldLockScroll])
+        return () => {
+            removeActiveModal(modalId)
+            unlockScroll()
+        }
+    }, [modalId, shouldLockScroll])
+
+    useEffect(() => {
+        if (!open || !isVisible || focusCapturedRef.current || typeof document === 'undefined') {
+            return
+        }
+        const active             = document.activeElement
+        previousFocusRef.current = active instanceof HTMLElement ? active : null
+        focusCapturedRef.current = true
+        const frame              = window.requestAnimationFrame(() => {
+            const dialog = dialogRef.current
+            if (!dialog || activeModalStack[activeModalStack.length - 1] !== modalId) {
+                return
+            }
+            const explicitTarget = initialFocusId ? document.getElementById(initialFocusId) : null
+            if (explicitTarget && dialog.contains(explicitTarget)) {
+                explicitTarget.focus({ preventScroll: true })
+                return
+            }
+            const current = document.activeElement
+            if (current instanceof HTMLElement && dialog.contains(current)) {
+                return
+            }
+            const first = focusableElements(dialog)[0]
+            ;(first ?? dialog).focus({ preventScroll: true })
+        })
+        return () => window.cancelAnimationFrame(frame)
+    }, [initialFocusId, isVisible, modalId, open])
+
+    useEffect(() => {
+        if (!open && !isVisible) {
+            restoreFocus()
+        }
+    }, [isVisible, open, restoreFocus])
+
+    useEffect(() => {
+        if (!shouldLockScroll || typeof document === 'undefined') {
+            return
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (activeModalStack[activeModalStack.length - 1] !== modalId) {
+                return
+            }
+            if (event.key === 'Escape' && closeOnEscape) {
+                event.preventDefault()
+                event.stopPropagation()
+                handleClose()
+                return
+            }
+            if (event.key !== 'Tab') {
+                return
+            }
+            const dialog = dialogRef.current
+            if (!dialog) {
+                return
+            }
+            const elements = focusableElements(dialog)
+            if (elements.length === 0) {
+                event.preventDefault()
+                dialog.focus({ preventScroll: true })
+                return
+            }
+            const active = document.activeElement
+            const first  = elements[0]
+            const last   = elements[elements.length - 1]
+            if (event.shiftKey && (active === first || !dialog.contains(active))) {
+                event.preventDefault()
+                last.focus({ preventScroll: true })
+            } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+                event.preventDefault()
+                first.focus({ preventScroll: true })
+            }
+        }
+        document.addEventListener('keydown', handleKeyDown, true)
+        return () => document.removeEventListener('keydown', handleKeyDown, true)
+    }, [closeOnEscape, handleClose, modalId, shouldLockScroll])
 
     if (!open && !isVisible) {
         return null
     }
 
-    const overlayClass = `modal-overlay ${isClosing ? 'modal-overlay-closing' : 'modal-overlay-entering'}`
-    const modalClass   = `modal ${isClosing ? 'modal-closing' : 'modal-entering'}${className ? ` ${className}` : ''}`
+    const overlayClass = [
+        'modal-overlay',
+        isClosing ? 'modal-overlay-closing' : 'modal-overlay-entering',
+        overlayClassName,
+    ]
+        .filter(Boolean)
+        .join(' ')
+    const modalClass   = [
+        'modal',
+        isClosing ? 'modal-closing' : 'modal-entering',
+        className,
+    ]
+        .filter(Boolean)
+        .join(' ')
+
+    const handleOverlayMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+        if (closeOnOverlay && event.target === event.currentTarget) {
+            handleClose()
+        }
+    }
 
     const modalContent = (
-        <div className={overlayClass}>
-            <div className={modalClass} style={{ width }} role='dialog' aria-modal='true'>
+        <div className={overlayClass} onMouseDown={handleOverlayMouseDown}>
+            <div
+                ref={dialogRef}
+                className={modalClass}
+                style={{ width }}
+                role='dialog'
+                aria-modal='true'
+                aria-labelledby={title ? titleId : undefined}
+                aria-label={title ? undefined : closeLabel}
+                tabIndex={-1}
+            >
                 <button
                     type='button'
                     className='modal-close-floating'
-                    onClick={closeDisabled ? undefined : handleClose}
-                    aria-label='Close'
+                    onClick={handleClose}
+                    aria-label={closeLabel}
                     disabled={closeDisabled}
                 >
                     <IconX size={20} />
                 </button>
                 <div className='modal-header'>
-                    <div className='modal-title'>{title}</div>
+                    <div className='modal-title' id={titleId}>{title}</div>
                 </div>
                 <div className='modal-body'>{children}</div>
                 {footer && <div className='modal-footer'>{footer}</div>}

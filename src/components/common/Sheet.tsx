@@ -1,8 +1,8 @@
 import {Input} from '@/components/ui/Input'
-import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import {Pagination} from '@/components/ui/Pagination'
 import {Fragment, type ReactNode, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {BusyOverlay} from './BusyOverlay'
 import {DataStatusCard, type DataStatusValue} from './DataStatusCard'
 import styles from './Sheet.module.scss'
 
@@ -248,14 +248,7 @@ export function Sheet<T>({
                 skeletonRowCount={skeletonRowCount}
             >
                 <div className={styles.busyShell}>
-                    {refreshing && (
-                        <div className={styles.busyOverlay} aria-busy='true'>
-                            <div className={styles.busyPill}>
-                                <LoadingSpinner size={16} className={styles.busySpinner} />
-                                <span>{refreshingText || t('common.loading')}</span>
-                            </div>
-                        </div>
-                    )}
+                    {refreshing && <BusyOverlay label={refreshingText || t('common.loading')} />}
                     <div className={scrollClasses}>
                         <div className={tableWrapClasses}>
                             <table className={tableClasses}>

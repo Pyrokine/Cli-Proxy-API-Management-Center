@@ -24,7 +24,7 @@ import styles from './DataStatusCard.module.scss'
  */
 export type DataStatusValue = 'checking' | 'missing' | 'loading' | 'loaded' | 'empty' | 'error' | 'refreshing' | 'ready'
 
-export interface DataStatusCardProps {
+interface DataStatusCardProps {
     status: DataStatusValue
     children?: ReactNode
     loadingText?: string

@@ -201,6 +201,25 @@
     }
 }
 
+@mixin management-stat-card {
+    strong {
+        display: block;
+        margin-bottom: 4px;
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: $font-size-xl;
+        font-weight: $font-weight-semibold;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    span {
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+    }
+}
+
 @mixin management-page-shell {
     .page {
         display: flex;

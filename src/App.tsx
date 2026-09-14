@@ -2,6 +2,7 @@ import {ConfirmationModal} from '@/components/common/ConfirmationModal'
 import {NotificationContainer} from '@/components/common/NotificationContainer'
 import {MainLayout} from '@/components/layout/MainLayout'
 import {UnsavedChangesBlockerHost} from '@/hooks/useUnsavedChangesGuard'
+import i18n from '@/i18n'
 import {LoginPage} from '@/pages/LoginPage'
 import {ProtectedRoute} from '@/router/ProtectedRoute'
 import {useLanguageStore, useThemeStore} from '@/stores'
@@ -19,9 +20,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
         if (this.state.hasError) {
             return (
                 <div style={{ padding: 40, textAlign: 'center' }}>
-                    <h2>Something went wrong</h2>
+                    <h2>{i18n.t('common.unexpected_error')}</h2>
                     <pre style={{ whiteSpace: 'pre-wrap', color: '#888' }}>{this.state.error?.message}</pre>
-                    <button onClick={() => window.location.reload()}>Reload</button>
+                    <button onClick={() => window.location.reload()}>{i18n.t('common.reload')}</button>
                 </div>
             )
         }

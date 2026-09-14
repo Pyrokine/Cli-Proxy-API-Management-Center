@@ -3,11 +3,21 @@
  * 基于原项目 src/modules/ai-providers.js
  */
 
+export interface ModelThinking {
+    min?: number
+    max?: number
+    zeroAllowed?: boolean
+    dynamicAllowed?: boolean
+    levels?: string[]
+}
+
 export interface ModelAlias {
     name: string
     alias?: string
     priority?: number
     testModel?: string
+    maxContextLength?: number
+    thinking?: ModelThinking
 }
 
 export interface ApiKeyEntry {
@@ -15,6 +25,7 @@ export interface ApiKeyEntry {
     proxyUrl?: string
     headers?: Record<string, string>
     authIndex?: string
+    weight?: number
 }
 
 export interface CloakConfig {
@@ -25,7 +36,9 @@ export interface CloakConfig {
 
 export interface GeminiKeyConfig {
     apiKey: string
+    authIndex?: string
     priority?: number
+    weight?: number
     prefix?: string
     baseUrl?: string
     proxyUrl?: string
@@ -38,9 +51,11 @@ export interface ProviderKeyConfig {
     apiKey: string
     authIndex?: string
     priority?: number
+    weight?: number
     prefix?: string
     baseUrl?: string
     websockets?: boolean
+    disableCooling?: boolean
     proxyUrl?: string
     headers?: Record<string, string>
     models?: ModelAlias[]
