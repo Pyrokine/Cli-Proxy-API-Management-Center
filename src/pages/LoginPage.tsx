@@ -5,12 +5,11 @@ import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {rateLimitsApi} from '@/services/api/rateLimits'
-import {isSecureStorageProtected, secureStorage} from '@/services/storage/secureStorage'
+import {isSecureStorageProtected} from '@/services/storage/secureStorage'
 import {useAuthStore, useLanguageStore, useNotificationStore} from '@/stores'
 import type {ApiError} from '@/types'
 import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
-import {isEncodedStorageValue} from '@/utils/encryption'
 import {isSupportedLanguage} from '@/utils/language'
 import React, {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -64,7 +63,26 @@ const appendBackendDetail = (baseMessage: string, detail: string) => {
     return `${baseMessage}: ${detail}`
 }
 
-function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): string {
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+const rateLimitDeadlineFromError = (error: unknown): number | null => {
+    const apiError = error as Partial<ApiError>
+    if (apiError.status !== 429) {
+        return null
+    }
+    const explicitDeadline = typeof apiError.rateLimitUntil === 'string' ?
+                             Date.parse(apiError.rateLimitUntil) :
+                             Number.NaN
+    if (Number.isFinite(explicitDeadline) && explicitDeadline > Date.now()) {
+        return explicitDeadline
+    }
+    if (typeof apiError.retryAfterSeconds === 'number' && apiError.retryAfterSeconds > 0) {
+        return Date.now() + apiError.retryAfterSeconds * 1000
+    }
+    return null
+}
+
+function getLocalizedErrorMessage(error: unknown, t: Translate): string {
     const apiError      = error as Partial<ApiError>
     const status        = typeof apiError.status === 'number' ? apiError.status : undefined
     const code          = typeof apiError.code === 'string' ? apiError.code : undefined
@@ -78,6 +96,9 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
                   : ''
     const backendDetail = readBackendErrorDetail(apiError.details) || readBackendErrorDetail(apiError.data) || message
 
+    if (status === 429) {
+        return t('login.error_rate_limited')
+    }
     if (status === 401) {
         return appendBackendDetail(t('login.error_unauthorized'), backendDetail)
     }
@@ -132,6 +153,23 @@ export function LoginPage() {
     const [autoLoginSuccess, setAutoLoginSuccess] = useState(false)
     const [error, setError]                       = useState('')
     const [storageWarning, setStorageWarning]     = useState('')
+    const [rateLimitUntil, setRateLimitUntil]     = useState<number | null>(null)
+    const [clock, setClock]                       = useState(() => Date.now())
+
+    const rateLimitRemaining = rateLimitUntil === null ? 0 : Math.max(0, Math.ceil((rateLimitUntil - clock) / 1000))
+    const displayedError     = rateLimitRemaining > 0
+                               ? t('login.error_rate_limited_countdown', { count: rateLimitRemaining })
+                               : error
+    const applyLoginError    = useCallback(
+        (nextError: unknown) => {
+            const deadline = rateLimitDeadlineFromError(nextError)
+            setRateLimitUntil(deadline)
+            setClock(Date.now())
+            setError(getLocalizedErrorMessage(nextError, t))
+            return deadline
+        },
+        [t],
+    )
 
     const detectedBase         = useMemo(() => detectApiBaseFromLocation(), [])
     const insecureStorage      = useMemo(() => !isSecureStorageProtected(), [])
@@ -154,15 +192,36 @@ export function LoginPage() {
     )
 
     useEffect(() => {
+        if (rateLimitUntil === null) {
+            return
+        }
+        const tick = () => {
+            const now = Date.now()
+            setClock(now)
+            if (now >= rateLimitUntil) {
+                setRateLimitUntil(null)
+                setError('')
+            }
+        }
+        tick()
+        const intervalID = window.setInterval(tick, 1000)
+        return () => window.clearInterval(intervalID)
+    }, [rateLimitUntil])
+
+    useEffect(() => {
         const init = async () => {
             let autoLoggedIn = false
             try {
                 autoLoggedIn        = await restoreSession()
                 const restoredState = useAuthStore.getState()
                 if (autoLoggedIn) {
-                    if (restoredState.storageRestoreFailed) {
+                    if (restoredState.storageClearFailed) {
+                        showNotification(t('login.storage_clear_failed'), 'warning')
+                    } else if (restoredState.storageRestoreFailed) {
                         showNotification(t('login.storage_restore_failed'), 'warning')
                         useAuthStore.setState({ storageRestoreFailed: false })
+                    } else if (restoredState.storagePersistenceFailed) {
+                        showNotification(t('login.storage_warning'), 'warning')
                     }
                     setAutoLoginSuccess(true)
                     // 延迟跳转，让用户看到成功动画
@@ -173,24 +232,22 @@ export function LoginPage() {
                     return
                 }
 
+                if (restoredState.sessionRestoreError) {
+                    applyLoginError(restoredState.sessionRestoreError)
+                }
                 const restoredBase = resolveApiBase(restoredState.apiBase, storedBase, detectedBase)
-                const restoredKey  = [restoredState.managementKey, storedKey].find(
-                    (key) => key && !isEncodedStorageValue(key),
-                ) || ''
+                const restoredKey  = restoredState.managementKey || storedKey || ''
                 setApiBase(restoredBase || detectedBase)
                 setManagementKey(restoredKey)
-                setRememberPassword(restoredState.rememberPassword || storedRememberPassword || Boolean(restoredKey))
-                let invalidStoredAuth = false
-                const authRaw         = await secureStorage.getItem<string>('cli-proxy-auth', {
-                    encrypt: true,
-                    persistent: false,
-                    onInvalidEncryptedValue: () => {
-                        invalidStoredAuth = true
-                    },
-                })
-                if (invalidStoredAuth || restoredState.storageRestoreFailed) {
+                setRememberPassword(
+                    !insecureStorage &&
+                    (restoredState.rememberPassword || storedRememberPassword),
+                )
+                if (restoredState.storageClearFailed) {
+                    setStorageWarning(t('login.storage_clear_failed'))
+                } else if (restoredState.storageRestoreFailed) {
                     setStorageWarning(t('login.storage_restore_failed'))
-                } else if (authRaw && insecureStorage) {
+                } else if (insecureStorage || restoredState.storagePersistenceFailed) {
                     setStorageWarning(t('login.storage_warning'))
                 }
             } finally {
@@ -206,6 +263,9 @@ export function LoginPage() {
 
     const handleSubmit = useCallback(
         async () => {
+            if (rateLimitRemaining > 0) {
+                return
+            }
             if (!managementKey.trim()) {
                 setError(t('login.error_required'))
                 return
@@ -218,12 +278,24 @@ export function LoginPage() {
                 await login({
                                 apiBase: baseToUse,
                                 managementKey: managementKey.trim(),
-                                rememberPassword,
+                                rememberPassword: rememberPassword && !insecureStorage,
                             })
-                setStorageWarning(insecureStorage ? t('login.storage_warning') : '')
-                showNotification(t('common.connected_status'), 'success')
+                const authState                = useAuthStore.getState()
+                const storagePersistenceFailed = authState.storagePersistenceFailed
+                const storageClearFailed       = authState.storageClearFailed
+                const storageUnavailable       = insecureStorage || storagePersistenceFailed
+                const storageMessage           = storageClearFailed ?
+                                                 t('login.storage_clear_failed') :
+                                                 storageUnavailable ? t('login.storage_warning') : ''
+                setRememberPassword(rememberPassword && !storageUnavailable)
+                setStorageWarning(storageMessage)
                 const rateLimitStatus    = await rateLimitsApi.getStatus({ consumeFailedLoginNotices: true })
-                                                              .catch(() => null)
+                                                              .catch((error: unknown) => {
+                                                                  if ((error as Partial<ApiError>).status === 401) {
+                                                                      throw error
+                                                                  }
+                                                                  return null
+                                                              })
                 const failedLoginNotices = rateLimitStatus?.failed_login_notices ?? []
                 const failedLoginCount   = failedLoginNotices.reduce(
                     (sum, item) => sum + Math.max(0, item.count || 0),
@@ -245,18 +317,36 @@ export function LoginPage() {
                         { dedupeKey: `security:failed-login:${failedLoginCount}:${latestFailure || 0}` },
                     )
                 }
+                showNotification(t('common.connected_status'), 'success')
+                if (storageMessage) {
+                    showNotification(storageMessage, 'warning')
+                }
                 navigate('/', { replace: true })
             } catch (err: unknown) {
-                const message = getLocalizedErrorMessage(err, t)
-                setError(message)
+                const deadline = applyLoginError(err)
+                const message  = getLocalizedErrorMessage(err, t)
+                const apiError = err as Partial<ApiError>
+                if (useAuthStore.getState().storageClearFailed) {
+                    const storageMessage = t('login.storage_clear_failed')
+                    setStorageWarning(storageMessage)
+                    showNotification(storageMessage, 'warning')
+                }
                 showNotification(`${t('notification.login_failed')}: ${message}`, 'error')
                 addPersistentNotification(
-                    t('notifications.security_login_failed', {
-                        defaultValue: '登录失败，请检查管理密钥或访问限制',
+                    apiError.status === 429
+                    ? t('notifications.security_login_rate_limited', {
+                        count: apiError.retryAfterSeconds ?? 0,
+                    })
+                    : t('notifications.security_login_failed', {
+                        defaultValue: '登录失败，请检查管理密钥',
                     }),
                     'error',
                     'security',
-                    { dedupeKey: 'security:login-failed:current' },
+                    {
+                        dedupeKey: apiError.status === 429
+                                   ? `security:login-rate-limited:${deadline ?? 0}`
+                                   : 'security:login-failed:current',
+                    },
                 )
             } finally {
                 setLoading(false)
@@ -265,11 +355,13 @@ export function LoginPage() {
         [
             addPersistentNotification,
             apiBase,
+            applyLoginError,
             detectedBase,
             insecureStorage,
             login,
             managementKey,
             navigate,
+            rateLimitRemaining,
             rememberPassword,
             showNotification,
             t,
@@ -278,12 +370,12 @@ export function LoginPage() {
 
     const handleSubmitKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
-            if (event.key === 'Enter' && !loading) {
+            if (event.key === 'Enter' && !loading && rateLimitRemaining === 0) {
                 event.preventDefault()
                 void handleSubmit()
             }
         },
-        [loading, handleSubmit],
+        [loading, rateLimitRemaining, handleSubmit],
     )
 
     if (isAuthenticated && !autoLoading && !autoLoginSuccess) {
@@ -397,21 +489,31 @@ export function LoginPage() {
 
                              <div className={styles.toggleAdvanced}>
                                  <SelectionCheckbox
-                                     checked={rememberPassword}
+                                     checked={!insecureStorage && rememberPassword}
                                      onChange={setRememberPassword}
                                      ariaLabel={t('login.remember_password_label')}
                                      label={t('login.remember_password_label')}
                                      labelClassName={styles.toggleLabel}
+                                     disabled={insecureStorage}
                                  />
                              </div>
 
                              {storageWarning && <div className={styles.warningBox}>{storageWarning}</div>}
 
-                             <Button fullWidth onClick={handleSubmit} loading={loading}>
+                             <Button
+                                 fullWidth
+                                 onClick={handleSubmit}
+                                 loading={loading}
+                                 disabled={rateLimitRemaining > 0}
+                             >
                                  {loading ? t('login.submitting') : t('login.submit_button')}
                              </Button>
 
-                             {error && <div className={styles.errorBox}>{error}</div>}
+                             {displayedError && (
+                                 <div className={styles.errorBox} aria-live='polite'>
+                                     {displayedError}
+                                 </div>
+                             )}
                          </div>
                      </div>
                  )}
