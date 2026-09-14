@@ -5,14 +5,12 @@ import path from 'path'
 import {defineConfig} from 'vite'
 import {viteSingleFile} from 'vite-plugin-singlefile'
 
-// Get version from environment, git tag, or package.json
+// Resolve the version from VERSION, git describe, a non-placeholder package version, or dev.
 function getVersion(): string {
-    // 1. Environment variable (set by GitHub Actions)
     if (process.env.VERSION) {
         return process.env.VERSION
     }
 
-    // 2. Try git tag
     try {
         const gitTag = execSync(
             'git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo ""',
@@ -22,17 +20,16 @@ function getVersion(): string {
             return gitTag
         }
     } catch {
-        // Git not available or no tags
+        // Git is unavailable or the repository has no tags.
     }
 
-    // 3. Fall back to package.json version
     try {
-        const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'))
+        const pkg = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'package.json'), 'utf8'))
         if (pkg.version && pkg.version !== '0.0.0') {
             return pkg.version
         }
     } catch {
-        // package.json not readable
+        // package.json is unavailable or invalid.
     }
 
     return 'dev'
@@ -55,7 +52,7 @@ export default defineConfig({
                                 },
                                 resolve: {
                                     alias: {
-                                        '@': path.resolve(__dirname, './src'),
+                                        '@': path.resolve(import.meta.dirname, './src'),
                                     },
                                 },
                                 css: {
@@ -75,11 +72,5 @@ export default defineConfig({
                                     assetsInlineLimit: 100000000,
                                     chunkSizeWarningLimit: 100000000,
                                     cssCodeSplit: false,
-                                    rollupOptions: {
-                                        output: {
-                                            inlineDynamicImports: true,
-                                            manualChunks: undefined,
-                                        },
-                                    },
                                 },
                             })

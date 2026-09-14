@@ -8,6 +8,11 @@
             "DOM.Iterable"
         ],
         "module": "ESNext",
+        "types": [
+            "bun",
+            "node",
+            "vite/client"
+        ],
         "skipLibCheck": true,
         /* Bundler mode */
         "moduleResolution": "bundler",
@@ -29,11 +34,7 @@
         }
     },
     "include": [
-        "src"
-    ],
-    "references": [
-        {
-            "path": "./tsconfig.node.json"
-        }
+        "src",
+        "tests"
     ]
 }

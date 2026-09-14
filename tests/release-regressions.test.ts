@@ -32,7 +32,7 @@ describe('system runtime models', () => {
         const originalFetchRuntimeModels = modelsApi.fetchRuntimeModels
         let signal: AbortSignal | undefined
         modelsApi.fetchRuntimeModels = (config) => new Promise((_, reject) => {
-            signal = config?.signal
+            signal = config?.signal as AbortSignal | undefined
             signal?.addEventListener('abort', () => reject(new Error('runtime aborted')), {once: true})
         })
         useModelsStore.getState().clearCache()
