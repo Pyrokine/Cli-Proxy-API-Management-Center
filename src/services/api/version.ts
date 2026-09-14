@@ -8,7 +8,7 @@ export interface ServerFeatureFlags {
     plugins?: boolean
 }
 
-export interface ServerVersionInfo {
+interface ServerVersionInfo {
     version: string
     build_time: string
     commit: string
@@ -16,16 +16,27 @@ export interface ServerVersionInfo {
     features?: ServerFeatureFlags
 }
 
-let inflightVersionRequest: Promise<ServerVersionInfo> | null = null
+let inflightVersionRequest: {
+                                generation: number
+                                promise: Promise<ServerVersionInfo>
+                            } | null = null
 
 function getRunningVersion(): Promise<ServerVersionInfo> {
-    if (inflightVersionRequest) {
-        return inflightVersionRequest
+    const generation = apiClient.getAuthGeneration()
+    if (inflightVersionRequest?.generation === generation) {
+        return inflightVersionRequest.promise
     }
-    inflightVersionRequest = apiClient.get<ServerVersionInfo>('/version').finally(() => {
-        inflightVersionRequest = null
-    })
-    return inflightVersionRequest
+
+    const promise          = apiClient.get<ServerVersionInfo>('/version')
+    const request          = { generation, promise }
+    inflightVersionRequest = request
+    const clearRequest     = () => {
+        if (inflightVersionRequest === request) {
+            inflightVersionRequest = null
+        }
+    }
+    void promise.then(clearRequest, clearRequest)
+    return promise
 }
 
 /**

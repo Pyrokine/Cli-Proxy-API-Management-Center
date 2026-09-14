@@ -42,27 +42,28 @@ export function useApiKeysResolver() {
             return inFlightRequest.current
         }
 
-        const generation = requestGeneration.current
-        const controller = new AbortController()
-        const request    = (async () => {
+        const generation          = requestGeneration.current
+        const controller          = new AbortController()
+        const request             = (async () => {
+            let normalized: string[]
             try {
-                const list       = await apiKeysApi.list({ signal: controller.signal })
-                const normalized = normalizeApiKeyList(list)
-                if (generation !== requestGeneration.current) {
-                    const error = new Error('API key resolution invalidated')
-                    error.name  = 'AbortError'
-                    throw error
-                }
-                if (normalized.length) {
-                    apiKeysCache.current = normalized
-                }
-                return normalized
+                const list = await apiKeysApi.list({ signal: controller.signal })
+                normalized = normalizeApiKeyList(list)
             } catch (error: unknown) {
                 if (generation !== requestGeneration.current || controller.signal.aborted) {
                     throw error
                 }
                 return []
             }
+            if (generation !== requestGeneration.current) {
+                const error = new Error('API key resolution invalidated')
+                error.name  = 'AbortError'
+                throw error
+            }
+            if (normalized.length) {
+                apiKeysCache.current = normalized
+            }
+            return normalized
         })()
         requestController.current = controller
         inFlightRequest.current   = request

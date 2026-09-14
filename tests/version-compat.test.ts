@@ -1,10 +1,10 @@
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
-import {compareLooseSemver, parseLooseSemver} from '../src/utils/looseSemver'
+import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
 
 const viteConfigPath = fileURLToPath(new URL('../vite.config.ts', import.meta.url))
-const viteConfig = readFileSync(viteConfigPath, 'utf8')
+const viteConfig     = readFileSync(viteConfigPath, 'utf8')
 
 describe('version compatibility', () => {
     test('compares augmented versions after their semantic base version', () => {
@@ -22,7 +22,7 @@ describe('version compatibility', () => {
     })
 
     test('requires CLIProxyAPI v7.2.67-aug.2', () => {
-        expect(viteConfig).toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.2')")
-        expect(viteConfig).not.toContain("__COMPAT_MIN_SERVER__: JSON.stringify('7.2.67-aug.1')")
+        expect(viteConfig).toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.2.67-aug.2\')')
+        expect(viteConfig).not.toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.2.67-aug.1\')')
     })
 })

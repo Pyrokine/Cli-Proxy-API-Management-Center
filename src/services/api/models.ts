@@ -6,7 +6,7 @@ import {normalizeApiBase} from '@/utils/connection'
 import {REQUEST_TIMEOUT_MS} from '@/utils/constants'
 import {normalizeModelList} from '@/utils/models'
 import axios, {type AxiosRequestConfig} from 'axios'
-import {apiCallApi, getApiCallErrorMessage} from './apiCall'
+import {apiCallApi, getApiCallErrorMessage, isCredentialHeaderName, prepareApiCallAuth} from './apiCall'
 import {apiClient} from './client'
 
 const DEFAULT_CLAUDE_BASE_URL   = 'https://api.anthropic.com'
@@ -15,10 +15,43 @@ const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 const CLAUDE_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
 const GEMINI_MODELS_IN_FLIGHT   = new Map<string, Promise<ReturnType<typeof normalizeModelList>>>()
 
-export type ModelCatalogPrice = {
-    prompt: number
-    completion: number
-    cache: number
+export type ClaudeModelDiscoveryOptions = {
+    endpoint: string
+    authMode: 'anthropic' | 'bearer'
+    addAnthropicVersion: boolean
+}
+
+export type ModelCatalogPriceStatus = 'complete' | 'partial' | 'unpriced'
+
+export type ModelCatalogTokenRates = {
+    prompt?: number
+    completion?: number
+    cache?: number
+    cache_read?: number
+    cache_write?: number
+    cache_write_5m?: number
+    cache_write_1h?: number
+}
+
+export type ModelCatalogUtcRateBand = ModelCatalogTokenRates & {
+    weekdays: string[]
+    start: string
+    end: string
+}
+
+export type ModelCatalogPrice = ModelCatalogTokenRates & {
+    utc_rate_bands?: ModelCatalogUtcRateBand[]
+    status?: ModelCatalogPriceStatus
+    auto_apply?: boolean
+    currency?: string
+    source?: string
+    checked_at?: string
+    effective_from?: string
+    effective_until?: string
+    region?: string
+    service_tier?: string
+    unpriced_reason?: string
+    limitations?: string[]
 }
 
 export type ModelCatalogFileModel = {
@@ -36,7 +69,13 @@ export type ModelCatalogFileModel = {
 export type ModelCatalogRow = ModelCatalogFileModel & {
     id: string
     runtime_available: boolean
+    runtime_only?: boolean
     runtime_providers?: string[]
+    runtime_available_providers?: string[]
+    runtime_configured_clients?: number
+    runtime_available_clients?: number
+    runtime_quota_cooldown_clients?: number
+    runtime_suspended_clients?: number
     requestable: boolean
     not_requestable_reason?: string
     api_key_blocked_count?: number
@@ -44,9 +83,22 @@ export type ModelCatalogRow = ModelCatalogFileModel & {
     credential_configured_count?: number
 }
 
+export type ModelCatalogLoadSource = 'current' | 'previous' | 'initialized'
+
+export type ModelCatalogMeta = {
+    models_config: string
+    previous_models_config: string
+    load_source: ModelCatalogLoadSource
+    recovered_from_previous: boolean
+    current_error?: string
+    defaults_version: string
+    schema_version: number
+    removed_default_count: number
+}
+
 export type ModelCatalogResponse = {
     models: ModelCatalogRow[]
-    meta?: Record<string, unknown>
+    meta: ModelCatalogMeta
     recalculation_pending?: boolean
 }
 
@@ -105,6 +157,8 @@ async function fetchModelList(
     headers: Record<string, string>,
     proxyUrl?: string,
     authIndex?: string,
+    draftToken?: string,
+    signal?: AbortSignal,
 ): Promise<ReturnType<typeof normalizeModelList>> {
     const result = await apiCallApi.request({
                                                 method: 'GET',
@@ -112,7 +166,8 @@ async function fetchModelList(
                                                 header: Object.keys(headers).length ? headers : undefined,
                                                 proxyUrl,
                                                 authIndex: authIndex?.trim() || undefined,
-                                            })
+                                                draftToken,
+                                            }, { signal })
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
         throw new Error(getApiCallErrorMessage(result))
@@ -125,12 +180,30 @@ async function fetchModelList(
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
 
-const buildRequestSignature = (url: string, headers: Record<string, string>, proxyUrl?: string, authIndex?: string) => {
+const TOKEN_HEADER_TEMPLATE_PATTERN = /^(?:\$TOKEN\$|(?:Bearer|Basic|ApiKey)\s+\$TOKEN\$)$/i
+
+const canDeduplicateModelRequest = (
+    headers: Record<string, string>,
+    proxyUrl?: string,
+    draftToken?: string,
+) => {
+    if (draftToken || proxyUrl?.trim()) {
+        return false
+    }
+    return Object.entries(headers).every(
+        ([key, value]) => !isCredentialHeaderName(key) || TOKEN_HEADER_TEMPLATE_PATTERN.test(value.trim()),
+    )
+}
+
+const buildRequestSignature = (
+    url: string,
+    headers: Record<string, string>,
+    authIndex?: string,
+) => {
     const headerSignature = Object.entries(headers)
                                   .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                  .map(([key, value]) => `${key}:${value}`)
-                                  .join('|')
-    return `${url}||${proxyUrl ?? ''}||${authIndex ?? ''}||${headerSignature}`
+                                  .map(([key, value]) => [key, value])
+    return JSON.stringify({ url, authIndex: authIndex ?? '', headers: headerSignature })
 }
 
 const buildModelsEndpoint = (baseUrl: string): string => {
@@ -160,7 +233,14 @@ const buildV1ModelsEndpoint = (baseUrl: string): string => {
     return `${trimmed}/v1/models`
 }
 
-const buildClaudeModelsEndpoint = (baseUrl: string): string => {
+const buildClaudeModelsEndpoint = (
+    baseUrl: string,
+    discovery?: ClaudeModelDiscoveryOptions,
+): string => {
+    const discoveryEndpoint = normalizeApiBase(discovery?.endpoint)
+    if (discoveryEndpoint) {
+        return discoveryEndpoint
+    }
     const normalized = normalizeApiBase(baseUrl)
     const fallback   = normalized || DEFAULT_CLAUDE_BASE_URL
     let trimmed      = fallback.replace(/\/+$/g, '')
@@ -186,22 +266,73 @@ const stripGeminiModelResourceName = (value: string): string => {
     return trimmed.replace(/^\/?models\//i, '')
 }
 
-const hasHeader = (headers: Record<string, string>, name: string) => {
+const headerKeys = (headers: Record<string, string>, name: string) => {
     const target = name.toLowerCase()
-    return Object.keys(headers).some((key) => key.toLowerCase() === target)
+    return Object.keys(headers).filter((key) => key.toLowerCase() === target)
 }
 
-const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): string => {
-    const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === 'authorization')
-    if (!entry) {
-        return ''
+const hasHeader = (headers: Record<string, string>, name: string) => headerKeys(headers, name).length > 0
+
+const assertSingleCredentialHeaders = (headers: Record<string, string>) => {
+    const credentialNames = ['authorization', 'x-api-key']
+    credentialNames.forEach((name) => {
+        const keys = headerKeys(headers, name)
+        if (keys.length > 1) {
+            throw new Error(`Duplicate credential header: ${keys[1]}`)
+        }
+    })
+}
+
+const removeHeader = (headers: Record<string, string>, name: string) => {
+    headerKeys(headers, name).forEach((key) => delete headers[key])
+}
+
+type NormalizedDiscoveryHeaders = {
+    headers: Record<string, string>
+    maskedHeaderNames?: string[]
+}
+
+const renameMaskedHeader = (
+    names: string[] | undefined,
+    from: string,
+    to: string,
+): string[] | undefined => names?.map((name) => name.toLowerCase() === from ? to : name)
+
+const normalizeBearerDiscoveryHeaders = (
+    headers: Record<string, string>,
+    maskedHeaderNames?: string[],
+): NormalizedDiscoveryHeaders => {
+    const normalized = { ...headers }
+    assertSingleCredentialHeaders(normalized)
+
+    const authorizationKey          = headerKeys(normalized, 'authorization')[0]
+    const apiKeyHeader              = headerKeys(normalized, 'x-api-key')[0]
+    let normalizedMaskedHeaderNames = maskedHeaderNames
+    if (!authorizationKey && apiKeyHeader) {
+        normalized.Authorization = normalized[apiKeyHeader]
+        delete normalized[apiKeyHeader]
+        normalizedMaskedHeaderNames = renameMaskedHeader(maskedHeaderNames, 'x-api-key', 'authorization')
     }
-    const value = String(entry[1] ?? '').trim()
-    if (!value) {
-        return ''
+    return { headers: normalized, maskedHeaderNames: normalizedMaskedHeaderNames }
+}
+
+const normalizeAnthropicDiscoveryHeaders = (
+    headers: Record<string, string>,
+    maskedHeaderNames?: string[],
+): NormalizedDiscoveryHeaders => {
+    const normalized = { ...headers }
+    assertSingleCredentialHeaders(normalized)
+
+    const authorizationKey          = headerKeys(normalized, 'authorization')[0]
+    const apiKeyHeader              = headerKeys(normalized, 'x-api-key')[0]
+    let normalizedMaskedHeaderNames = maskedHeaderNames
+    if (!apiKeyHeader && authorizationKey) {
+        const authorization     = normalized[authorizationKey].trim()
+        normalized['x-api-key'] = authorization.replace(/^Bearer\s+/i, '')
+        delete normalized[authorizationKey]
+        normalizedMaskedHeaderNames = renameMaskedHeader(maskedHeaderNames, 'authorization', 'x-api-key')
     }
-    const match = value.match(/^Bearer\s+(?<token>.+)$/i)
-    return match?.groups?.token?.trim() || ''
+    return { headers: normalized, maskedHeaderNames: normalizedMaskedHeaderNames }
 }
 
 const fetchModelsViaApiCallWithEndpoint = async (
@@ -210,18 +341,21 @@ const fetchModelsViaApiCallWithEndpoint = async (
     headers: Record<string, string> = {},
     proxyUrl?: string,
     authIndex?: string,
+    signal?: AbortSignal,
 ) => {
     if (!endpoint) {
         throw new Error('Invalid base url')
     }
 
-    const resolvedHeaders = { ...headers }
-    const hasAuthHeader   = Boolean(resolvedHeaders.Authorization || resolvedHeaders.authorization)
-    if (apiKey && !hasAuthHeader) {
-        resolvedHeaders.Authorization = `Bearer ${apiKey}`
-    }
+    const prepared = prepareApiCallAuth({
+                                            headers,
+                                            apiKey,
+                                            authIndex,
+                                            preferredHeader: 'Authorization',
+                                            authorizationScheme: 'Bearer',
+                                        })
 
-    return fetchModelList(endpoint, resolvedHeaders, proxyUrl, authIndex)
+    return fetchModelList(endpoint, prepared.headers, proxyUrl, authIndex, prepared.draftToken, signal)
 }
 
 export const modelsApi = {
@@ -235,10 +369,6 @@ export const modelsApi = {
 
     async fetchModelCatalog() {
         return apiClient.get<ModelCatalogResponse>('/model-catalog')
-    },
-
-    async saveModelCatalog(models: ModelCatalogFileModel[]) {
-        return apiClient.put<ModelCatalogResponse>('/model-catalog', { models })
     },
 
     async patchModelCatalogModel(request: ModelCatalogPatchRequest) {
@@ -299,8 +429,16 @@ export const modelsApi = {
         headers: Record<string, string> = {},
         proxyUrl?: string,
         authIndex?: string,
+        signal?: AbortSignal,
     ) {
-        return fetchModelsViaApiCallWithEndpoint(buildV1ModelsEndpoint(baseUrl), apiKey, headers, proxyUrl, authIndex)
+        return fetchModelsViaApiCallWithEndpoint(
+            buildV1ModelsEndpoint(baseUrl),
+            apiKey,
+            headers,
+            proxyUrl,
+            authIndex,
+            signal,
+        )
     },
 
     /**
@@ -312,16 +450,24 @@ export const modelsApi = {
         headers: Record<string, string> = {},
         proxyUrl?: string,
         authIndex?: string,
+        signal?: AbortSignal,
     ) {
-        return fetchModelsViaApiCallWithEndpoint(buildModelsEndpoint(baseUrl), apiKey, headers, proxyUrl, authIndex)
+        return fetchModelsViaApiCallWithEndpoint(
+            buildModelsEndpoint(baseUrl),
+            apiKey,
+            headers,
+            proxyUrl,
+            authIndex,
+            signal,
+        )
     },
 
     buildV1ModelsEndpoint(baseUrl: string) {
         return buildV1ModelsEndpoint(baseUrl)
     },
 
-    buildClaudeModelsEndpoint(baseUrl: string) {
-        return buildClaudeModelsEndpoint(baseUrl)
+    buildClaudeModelsEndpoint(baseUrl: string, discovery?: ClaudeModelDiscoveryOptions) {
+        return buildClaudeModelsEndpoint(baseUrl, discovery)
     },
 
     buildGeminiModelsEndpoint(baseUrl: string) {
@@ -337,33 +483,62 @@ export const modelsApi = {
         apiKey?: string,
         headers: Record<string, string> = {},
         proxyUrl?: string,
+        authIndex?: string,
+        discovery?: ClaudeModelDiscoveryOptions,
+        apiKeyIsMasked?: boolean,
+        maskedHeaderNames?: string[],
+        signal?: AbortSignal,
     ) {
-        const endpoint = buildClaudeModelsEndpoint(baseUrl)
+        const endpoint = buildClaudeModelsEndpoint(baseUrl, discovery)
         if (!endpoint) {
             throw new Error('Invalid base url')
         }
 
-        const resolvedHeaders = { ...headers }
-        let resolvedApiKey    = String(apiKey ?? '').trim()
-        if (!resolvedApiKey && !hasHeader(resolvedHeaders, 'x-api-key')) {
-            resolvedApiKey = resolveBearerTokenFromAuthorization(resolvedHeaders)
+        const usesBearerAuth = discovery?.authMode === 'bearer'
+        const normalizedAuth = usesBearerAuth ?
+                               normalizeBearerDiscoveryHeaders(headers, maskedHeaderNames) :
+                               normalizeAnthropicDiscoveryHeaders(headers, maskedHeaderNames)
+        const prepared       = prepareApiCallAuth({
+                                                      headers: normalizedAuth.headers,
+                                                      apiKey,
+                                                      authIndex,
+                                                      preferredHeader: usesBearerAuth ? 'Authorization' : 'x-api-key',
+                                                      headerNames: usesBearerAuth ? ['x-api-key'] : ['Authorization'],
+                                                      authorizationScheme: usesBearerAuth ? 'Bearer' : undefined,
+                                                      apiKeyIsMasked,
+                                                      maskedHeaderNames: normalizedAuth.maskedHeaderNames,
+                                                  })
+        if (usesBearerAuth) {
+            const credentialHeaders = Object.entries(prepared.headers)
+                                            .filter(([name, value]) =>
+                                                        isCredentialHeaderName(name) || value.includes('$TOKEN$'),
+                                            )
+                                            .map(([name]) => name)
+            if (prepared.draftToken || credentialHeaders.length > 0) {
+                for (const name of credentialHeaders) {
+                    removeHeader(prepared.headers, name)
+                }
+                removeHeader(prepared.headers, 'authorization')
+                prepared.headers.Authorization = 'Bearer $TOKEN$'
+            }
+        }
+        if (discovery?.addAnthropicVersion === false) {
+            removeHeader(prepared.headers, 'anthropic-version')
+        } else if (!hasHeader(prepared.headers, 'anthropic-version')) {
+            prepared.headers['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
         }
 
-        if (resolvedApiKey && !hasHeader(resolvedHeaders, 'x-api-key')) {
-            resolvedHeaders['x-api-key'] = resolvedApiKey
-        }
-        if (!hasHeader(resolvedHeaders, 'anthropic-version')) {
-            resolvedHeaders['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
+        if (signal || !canDeduplicateModelRequest(prepared.headers, proxyUrl, prepared.draftToken)) {
+            return fetchModelList(endpoint, prepared.headers, proxyUrl, authIndex, prepared.draftToken, signal)
         }
 
-        const signature = buildRequestSignature(endpoint, resolvedHeaders, proxyUrl)
+        const signature = buildRequestSignature(endpoint, prepared.headers, authIndex)
         const existing  = CLAUDE_MODELS_IN_FLIGHT.get(signature)
         if (existing) {
             return existing
         }
 
-        const request = fetchModelList(endpoint, resolvedHeaders, proxyUrl)
-
+        const request = fetchModelList(endpoint, prepared.headers, proxyUrl, authIndex)
         CLAUDE_MODELS_IN_FLIGHT.set(signature, request)
         try {
             return await request
@@ -373,7 +548,7 @@ export const modelsApi = {
     },
 
     /**
-     * Fetch Gemini models from /v1beta/models via api-call.
+     * Fetch Gemini model metadata through the configured endpoint.
      * Gemini API accepts API key via query param or `x-goog-api-key` header.
      */
     async fetchGeminiModelsViaApiCall(
@@ -381,27 +556,23 @@ export const modelsApi = {
         apiKey?: string,
         headers: Record<string, string> = {},
         proxyUrl?: string,
+        authIndex?: string,
+        signal?: AbortSignal,
     ) {
         const endpoint = buildGeminiModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
         }
 
-        const resolvedHeaders = { ...headers }
-        const resolvedApiKey  = String(apiKey ?? '').trim()
-        if (resolvedApiKey &&
-            !hasHeader(resolvedHeaders, 'x-goog-api-key') &&
-            !hasHeader(resolvedHeaders, 'authorization')) {
-            resolvedHeaders['x-goog-api-key'] = resolvedApiKey
-        }
+        const prepared = prepareApiCallAuth({
+                                                headers,
+                                                apiKey,
+                                                authIndex,
+                                                preferredHeader: 'x-goog-api-key',
+                                                headerNames: ['Authorization'],
+                                            })
 
-        const signature = buildRequestSignature(endpoint, resolvedHeaders, proxyUrl)
-        const existing  = GEMINI_MODELS_IN_FLIGHT.get(signature)
-        if (existing) {
-            return existing
-        }
-
-        const request = (async () => {
+        const fetchPages = async () => {
             const seen                                             = new Set<string>()
             const collected: ReturnType<typeof normalizeModelList> = []
             let pageToken                                          = ''
@@ -415,11 +586,13 @@ export const modelsApi = {
                 const result = await apiCallApi.request({
                                                             method: 'GET',
                                                             url: url.toString(),
-                                                            header: Object.keys(resolvedHeaders).length ?
-                                                                    resolvedHeaders :
+                                                            header: Object.keys(prepared.headers).length ?
+                                                                    prepared.headers :
                                                                     undefined,
                                                             proxyUrl,
-                                                        })
+                                                            authIndex: authIndex?.trim() || undefined,
+                                                            draftToken: prepared.draftToken,
+                                                        }, { signal })
 
                 if (result.statusCode < 200 || result.statusCode >= 300) {
                     throw new Error(getApiCallErrorMessage(result))
@@ -450,8 +623,19 @@ export const modelsApi = {
             }
 
             return collected
-        })()
+        }
 
+        if (signal || !canDeduplicateModelRequest(prepared.headers, proxyUrl, prepared.draftToken)) {
+            return fetchPages()
+        }
+
+        const signature = buildRequestSignature(endpoint, prepared.headers, authIndex)
+        const existing  = GEMINI_MODELS_IN_FLIGHT.get(signature)
+        if (existing) {
+            return existing
+        }
+
+        const request = fetchPages()
         GEMINI_MODELS_IN_FLIGHT.set(signature, request)
         try {
             return await request

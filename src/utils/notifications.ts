@@ -18,7 +18,7 @@ export type NotificationSourceId =
     | 'release'
     | 'security'
 
-export interface NotificationSourceDef {
+interface NotificationSourceDef {
     /** Stable id passed to addPersistentNotification(source) */
     id: NotificationSourceId
     /** What triggers it (documentation for the code reader) */

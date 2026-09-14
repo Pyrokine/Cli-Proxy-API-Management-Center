@@ -6,7 +6,7 @@ export type ModelTreeNode = {
     children?: ModelTreeNode[]
 }
 
-export type ModelMetadata = {
+type ModelMetadata = {
     provider: string
     generation: string
     family: string
@@ -18,12 +18,12 @@ const providerChannels: Record<string, string[]> = {
     GPT: ['codex', 'openai'],
     Claude: ['claude'],
     Gemini: ['gemini-cli', 'vertex', 'aistudio', 'antigravity'],
-    Kimi: ['kimi'],
+    Kimi: ['kimi', 'iflow'],
     Qwen: ['qwen', 'iflow'],
-    GLM: ['glm'],
+    GLM: ['glm', 'iflow'],
     Grok: ['xai'],
     DeepSeek: ['deepseek', 'iflow'],
-    MiniMax: ['minimax'],
+    MiniMax: ['minimax', 'iflow'],
     Other: [],
 }
 
@@ -237,12 +237,13 @@ export function getModelMetadata(model: string): ModelMetadata {
         }
     }
     if (provider === 'DeepSeek') {
+        const version = lower.match(/^deepseek-v(?<version>\d+(?:\.\d+)?)/)?.groups?.version
         return {
             provider,
             generation: lower.startsWith('deepseek-r1') ?
                         'DeepSeek R1' :
-                        lower.startsWith('deepseek-v3') ? 'DeepSeek V3' : 'DeepSeek',
-            family: lower.startsWith('deepseek-r1') ? 'R1' : lower.startsWith('deepseek-v3') ? 'V3' : 'DeepSeek',
+                        version ? `DeepSeek V${version}` : 'DeepSeek',
+            family: lower.startsWith('deepseek-r1') ? 'R1' : version ? `V${version}` : 'DeepSeek',
         }
     }
     if (provider === 'Grok') {
@@ -254,10 +255,24 @@ export function getModelMetadata(model: string): ModelMetadata {
         }
     }
     if (provider === 'Kimi') {
+        const version = lower.match(/^kimi-k(?<version>\d+(?:\.\d+)?)/)?.groups?.version
         return {
             provider,
-            generation: lower.startsWith('kimi-k2') ? 'Kimi K2' : 'Kimi',
-            family: lower.startsWith('kimi-k2') ? 'K2' : 'Kimi',
+            generation: version ? `Kimi K${version}` : 'Kimi',
+            family: version ? `K${version}` : 'Kimi',
+        }
+    }
+    if (provider === 'GLM') {
+        const major = lower.match(/^(?:chat)?glm-(?<major>\d+)/)?.groups?.major
+        const group = major ? `GLM ${major}` : 'GLM'
+        return { provider, generation: group, family: group }
+    }
+    if (provider === 'MiniMax') {
+        const version = lower.match(/(?:^|-)m(?<version>\d+(?:\.\d+)?)/)?.groups?.version
+        return {
+            provider,
+            generation: 'MiniMax',
+            family: version ? `M${version}` : 'MiniMax',
         }
     }
 
@@ -354,26 +369,6 @@ export function modelLeaves(node: ModelTreeNode): string[] {
 
 export function countModelLeaves(nodes: ModelTreeNode[]): number {
     return nodes.reduce((count, node) => count + modelLeaves(node).length, 0)
-}
-
-export function filterModelTree(nodes: ModelTreeNode[], query: string): ModelTreeNode[] {
-    const q = query.trim().toLowerCase()
-    if (!q) {
-        return nodes
-    }
-    const filtered: ModelTreeNode[] = []
-    for (const node of nodes) {
-        const selfMatches = node.label.toLowerCase().includes(q) || node.provider.toLowerCase().includes(q)
-        if (selfMatches) {
-            filtered.push(node)
-            continue
-        }
-        const children = node.children ? filterModelTree(node.children, q) : []
-        if (children.length > 0) {
-            filtered.push({ ...node, children })
-        }
-    }
-    return filtered
 }
 
 export function selectionState(node: ModelTreeNode, selected: Set<string>): 'none' | 'partial' | 'all' {

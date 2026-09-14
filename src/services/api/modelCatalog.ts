@@ -4,7 +4,7 @@
 
 import {apiClient} from './client'
 
-export interface ModelCatalogMeta {
+export interface ModelCatalogRefreshMeta {
     last_refresh_at: string
     next_refresh_at: string
     interval_hours: number
@@ -14,6 +14,6 @@ export interface ModelCatalogMeta {
 }
 
 export const modelCatalogApi = {
-    getMeta: () => apiClient.get<ModelCatalogMeta>('/models-catalog-meta'),
-    refresh: () => apiClient.post<ModelCatalogMeta>('/models-catalog-refresh'),
+    getMeta: () => apiClient.get<ModelCatalogRefreshMeta>('/models-catalog-meta'),
+    refresh: () => apiClient.post<ModelCatalogRefreshMeta>('/models-catalog-refresh'),
 }

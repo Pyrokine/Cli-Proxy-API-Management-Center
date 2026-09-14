@@ -13,6 +13,30 @@
     flex-wrap: wrap;
 }
 
+.recoveryWarning {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: $spacing-md;
+    border: 1px solid color-mix(in srgb, var(--warning-color) 32%, var(--border-color));
+    border-radius: $radius-lg;
+    background: color-mix(in srgb, var(--warning-color) 8%, var(--bg-secondary));
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    strong {
+        color: var(--warning-text);
+        font-weight: $font-weight-semibold;
+    }
+
+    code {
+        overflow-wrap: anywhere;
+        color: var(--text-primary);
+        font-size: $font-size-xs;
+    }
+}
+
 .statCard {
     strong {
         display: block;
@@ -114,25 +138,6 @@
     line-height: $line-height-base;
 }
 
-.endpointList {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.endpointCode {
-    overflow: hidden;
-    width: fit-content;
-    max-width: 100%;
-    padding: 5px 7px;
-    border-radius: $radius-sm;
-    background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
-    color: var(--text-primary);
-    font-size: $font-size-xs;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .treeMeta {
     color: var(--text-secondary);
     font-size: $font-size-sm;
@@ -148,7 +153,11 @@
     max-height: clamp(360px, calc(100vh - 300px), 680px);
     border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
     border-radius: $radius-lg;
-    background: radial-gradient(circle at 0 0, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 32%),
+    background: radial-gradient(
+        circle at 0 0,
+        color-mix(in srgb, var(--primary-color) 10%, transparent),
+        transparent 32%
+    ),
     color-mix(in srgb, var(--bg-primary) 94%, transparent);
 }
 
@@ -260,7 +269,11 @@
 }
 
 .providerRow {
-    background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color) 10%, transparent), color-mix(in srgb, var(--bg-secondary) 54%, transparent));
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--primary-color) 10%, transparent),
+        color-mix(in srgb, var(--bg-secondary) 54%, transparent)
+    );
 }
 
 .groupLevelRow {
@@ -273,15 +286,6 @@
     &:hover {
         background: color-mix(in srgb, var(--primary-color) 7%, transparent);
         box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 70%, transparent);
-    }
-}
-
-.priceOnlyRow {
-    background: color-mix(in srgb, var(--bg-secondary) 24%, transparent);
-
-    .modelName,
-    .modelMeta {
-        color: var(--text-secondary);
     }
 }
 
@@ -363,28 +367,12 @@
     }
 }
 
-.busyPill {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 3;
-    display: inline-flex;
-    align-items: center;
-    gap: $spacing-sm;
-    padding: 7px 10px;
-    border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
-    border-radius: $radius-full;
-    background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
-    color: var(--text-secondary);
-    font-size: $font-size-xs;
-    box-shadow: var(--shadow-md);
-    backdrop-filter: blur(10px);
-}
-
 .countBadge,
 .requestableBadge,
 .aliasMore,
-.userCreatedPill {
+.userCreatedPill,
+.runtimeOnlyPill,
+.priceStatus {
     @include token-soft(
         var(--text-secondary),
         color-mix(in srgb, var(--bg-secondary) 72%, transparent),
@@ -427,22 +415,27 @@
     color: var(--text-secondary);
 }
 
-.enableUnavailable {
-    @include token-soft(
-        var(--text-tertiary),
-        color-mix(in srgb, var(--bg-secondary) 56%, transparent),
-        color-mix(in srgb, var(--border-color) 58%, transparent),
-        24px,
-        8px,
-        $font-size-xs,
-        $font-weight-medium
-    );
+.userCreatedPill,
+.runtimeOnlyPill {
+    width: fit-content;
+    min-width: 56px;
 }
 
 .userCreatedPill {
-    width: fit-content;
-    min-width: 56px;
     color: var(--warning-text);
+}
+
+.runtimeOnlyPill {
+    color: var(--primary-color);
+}
+
+.runtimeMeta {
+    overflow: hidden;
+    color: var(--text-tertiary);
+    font-size: $font-size-xs;
+    line-height: $line-height-heading;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .modelNameRow {
@@ -478,6 +471,38 @@
     color: var(--text-secondary);
     font-size: $font-size-xs;
     font-variant-numeric: tabular-nums;
+}
+
+.priceStatus {
+    width: fit-content;
+    justify-self: end;
+}
+
+.priceStatusComplete {
+    color: var(--success-color);
+}
+
+.priceStatusPartial {
+    color: var(--warning-text);
+}
+
+.priceStatusUnpriced {
+    color: var(--text-tertiary);
+}
+
+.priceSource {
+    overflow: hidden;
+    max-width: 140px;
+    justify-self: end;
+    color: var(--primary-color);
+    font-size: $font-size-xs;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:hover {
+        text-decoration: underline;
+    }
 }
 
 .priceItem {
@@ -532,15 +557,9 @@
     min-height: 28px;
 }
 
-.muted,
-.groupSummary {
+.muted {
     color: var(--text-secondary);
     font-size: $font-size-xs;
-}
-
-.emptyCell {
-    display: block;
-    min-height: 1px;
 }
 
 .aliasMore {
@@ -593,53 +612,6 @@
     @include mobile {
         grid-template-columns: minmax(0, 1fr);
     }
-}
-
-.aliasSection {
-    display: flex;
-    flex-direction: column;
-    gap: $spacing-sm;
-}
-
-.aliasHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: $spacing-sm;
-    color: var(--text-secondary);
-    font-size: $font-size-sm;
-    font-weight: $font-weight-medium;
-}
-
-.aliasRow {
-    display: grid;
-    grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.3fr) minmax(120px, auto) auto;
-    gap: $spacing-sm;
-    align-items: end;
-
-    > * {
-        min-width: 0;
-    }
-
-    :global(.form-group) {
-        margin-bottom: 0;
-    }
-
-    @include mobile {
-        grid-template-columns: minmax(0, 1fr);
-    }
-}
-
-.aliasForkCell,
-.aliasRemoveCell {
-    display: flex;
-    align-items: center;
-    min-height: 32px;
-}
-
-.aliasForkCell {
-    justify-content: center;
-    padding-bottom: 2px;
 }
 
 .textareaField {

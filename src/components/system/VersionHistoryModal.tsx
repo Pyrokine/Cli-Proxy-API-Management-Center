@@ -8,7 +8,7 @@ import {updateApi} from '@/services/api/update'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import {formatDateTime} from '@/utils/format'
 import {safeExternalUrl} from '@/utils/validation'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VersionHistoryModal.module.scss'
 
@@ -19,8 +19,14 @@ const OFFICIAL_REPOSITORIES: Record<ReleasesTarget, string> = {
     panel: 'Pyrokine/Cli-Proxy-API-Management-Center',
 }
 const BREAKING_PATTERN                                      = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
-const COMPATIBILITY_PATTERN                                 = /\b(?:required|requires|compatib|breaking|migration|migrate|incompatible)\b|要求|兼容|相容|不兼容|迁移|遷移|⚠/i
+const COMPATIBILITY_PATTERN                                 = new RegExp(
+    String.raw`\b(?:required|requires|compatible|compatibility|` +
+    String.raw`incompatible|incompatibility|breaking|migration|migrate)\b|` +
+    '要求|兼容|相容|不兼容|迁移|遷移|⚠',
+    'i',
+)
 const UPDATE_POLL_INTERVAL                                  = 2000
+const UPDATE_POLL_FAILURE_LIMIT                             = 3
 const PAGE_SIZE                                             = 10
 
 /* ---------- types ---------- */
@@ -80,7 +86,12 @@ interface ReleaseSections {
     other: string[]
 }
 
-const FEATURE_SECTION_PATTERN = /^(?:#+\s*)?(?:features?|enhancements?|新增|特性|功能|added|new|what's changed|whats changed|更新内容|变更)\b/i
+const FEATURE_SECTION_PATTERN = new RegExp(
+    String.raw`^(?:#+\s*)?(?:features?|enhancements?|` +
+    String.raw`新增|特性|功能|added|new|what's changed|whats changed|` +
+    String.raw`更新内容|变更)\b`,
+    'i',
+)
 const FIX_SECTION_PATTERN     = /^(?:#+\s*)?(?:fix(?:es)?|bug\s*fix(?:es)?|修复|bugs?)\b/i
 
 function classifyReleaseBody(body: string): ReleaseSections {
@@ -219,7 +230,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     const [updateStatus, setUpdateStatus]       = useState<UpdateStatus | null>(null)
     const [updatingVersion, setUpdatingVersion] = useState<string | null>(null)
     const [checkingVersion, setCheckingVersion] = useState<string | null>(null)
-    const pollTimerRef                          = useRef<ReturnType<typeof setInterval> | null>(null)
+    const [pollingReady, setPollingReady]       = useState(false)
 
     // Fetch releases when modal opens
     const [prevOpen, setPrevOpen] = useState(false)
@@ -263,14 +274,6 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             cancelled = true
         }
     }, [open, target])
-
-    // Clean up poll timer when modal closes
-    useEffect(() => {
-        if (!open && pollTimerRef.current) {
-            clearInterval(pollTimerRef.current)
-            pollTimerRef.current = null
-        }
-    }, [open])
 
     // Flat sorted list of all non-draft releases (newest first)
     const sortedReleases = useMemo(() => {
@@ -345,33 +348,72 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
               updateStatus?.status === 'verifying' ||
               updateStatus?.status === 'replacing'
 
-    const startPolling = () => {
-        if (pollTimerRef.current) {
+    useEffect(() => {
+        if (!open || target !== 'cpa' || !pollingReady || !isUpdating) {
             return
         }
-        pollTimerRef.current = setInterval(async () => {
+
+        const controller                                = new AbortController()
+        let timer: ReturnType<typeof setTimeout> | null = null
+        let active                                      = true
+        let failureCount                                = 0
+
+        const poll = async () => {
             try {
-                const status = target === 'panel' ? null : await updateApi.status()
-                if (!status) {
+                const status = await updateApi.status({ signal: controller.signal })
+                if (!active || controller.signal.aborted) {
                     return
                 }
+                failureCount = 0
                 setUpdateStatus(status)
                 if (status.status === 'done' || status.status === 'error' || status.status === 'idle') {
-                    if (pollTimerRef.current) {
-                        clearInterval(pollTimerRef.current)
-                        pollTimerRef.current = null
-                    }
+                    setPollingReady(false)
+                    setUpdatingVersion(null)
                     if (status.status === 'done') {
                         showNotification(status.message, 'success')
                     } else if (status.status === 'error') {
                         showNotification(status.message, 'error')
                     }
+                    return
                 }
-            } catch {
-                // Ignore poll errors
+            } catch (err: unknown) {
+                if (!active || controller.signal.aborted) {
+                    return
+                }
+                ++failureCount
+                if (failureCount >= UPDATE_POLL_FAILURE_LIMIT) {
+                    const detail  = err instanceof Error ? err.message : String(err)
+                    const message = `${t('version_history.status_poll_failed')}${detail ? `: ${detail}` : ''}`
+                    setUpdateStatus((current) => ({
+                        status: 'error',
+                        message,
+                        target_version: current?.target_version ?? updatingVersion ?? '',
+                        percent: current?.percent ?? 0,
+                        current_version: current?.current_version ?? currentVersion,
+                    }))
+                    setPollingReady(false)
+                    setUpdatingVersion(null)
+                    showNotification(message, 'error')
+                    return
+                }
             }
+            timer = setTimeout(() => {
+                void poll()
+            }, UPDATE_POLL_INTERVAL)
+        }
+
+        timer = setTimeout(() => {
+            void poll()
         }, UPDATE_POLL_INTERVAL)
-    }
+
+        return () => {
+            active = false
+            controller.abort()
+            if (timer) {
+                clearTimeout(timer)
+            }
+        }
+    }, [currentVersion, isUpdating, open, pollingReady, showNotification, t, target, updatingVersion])
 
     const handleUpdate = async (tag: string) => {
         const direction = getUpdateDirection(tag)
@@ -532,6 +574,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                                 : 'version_history.confirm_upgrade_to', { version: tag }),
                                  onConfirm: async () => {
                                      setUpdatingVersion(tag)
+                                     setPollingReady(false)
                                      setUpdateStatus({
                                                          status: 'downloading',
                                                          message: '',
@@ -560,9 +603,11 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                              return
                                          }
                                          await updateApi.trigger(tag)
-                                         startPolling()
+                                         setPollingReady(true)
                                      } catch (err) {
                                          const msg = err instanceof Error ? err.message : String(err)
+                                         setPollingReady(false)
+                                         setUpdatingVersion(null)
                                          setUpdateStatus({
                                                              status: 'error',
                                                              message: msg,

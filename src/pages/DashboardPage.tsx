@@ -74,11 +74,11 @@ export function DashboardPage() {
     const [loading, setLoading]                           = useState(true)
     const [modelsRequestLoading, setModelsRequestLoading] = useState(false)
     const [timeOfDay, setTimeOfDay]                       = useState<TimeOfDay>(getTimeOfDay)
-    const [currentTime, setCurrentTime] = useState(() => new Date())
+    const [currentTime, setCurrentTime]                   = useState(() => new Date())
 
     const { resolve: resolveApiKeys, clearCache: clearApiKeysCache } = useApiKeysResolver()
-    const modelsRequestGeneration                                  = useRef(0)
-    const invalidateModelsRequest                                  = useCallback(() => {
+    const modelsRequestGeneration                                    = useRef(0)
+    const invalidateModelsRequest                                    = useCallback(() => {
         ++modelsRequestGeneration.current
     }, [])
 
@@ -122,7 +122,7 @@ export function DashboardPage() {
     }, [pageLayerStatus, connectionStatus, apiBase, resolveApiKeys, fetchModelsFromStore])
 
     useEffect(() => {
-        let cancelled = false
+        let cancelled    = false
         const fetchStats = async () => {
             setLoading(true)
             try {
@@ -226,16 +226,24 @@ export function DashboardPage() {
                                       ? '-'
                                       : routingStrategyRaw === 'round-robin'
                                         ? t('basic_settings.routing_strategy_round_robin')
-                                        : routingStrategyRaw === 'fill-first'
-                                          ? t('basic_settings.routing_strategy_fill_first')
-                                          : routingStrategyRaw
+                                        : routingStrategyRaw === 'weighted-round-robin'
+                                          ? t('basic_settings.routing_strategy_weighted_round_robin')
+                                          : routingStrategyRaw === 'quota-aware'
+                                            ? t('basic_settings.routing_strategy_quota_aware')
+                                            : routingStrategyRaw === 'fill-first'
+                                              ? t('basic_settings.routing_strategy_fill_first')
+                                              : routingStrategyRaw
     const routingStrategyBadgeClass = !routingStrategyRaw
                                       ? styles.configBadgeUnknown
                                       : routingStrategyRaw === 'round-robin'
                                         ? styles.configBadgeRoundRobin
-                                        : routingStrategyRaw === 'fill-first'
-                                          ? styles.configBadgeFillFirst
-                                          : styles.configBadgeUnknown
+                                        : routingStrategyRaw === 'weighted-round-robin'
+                                          ? styles.configBadgeWeightedRoundRobin
+                                          : routingStrategyRaw === 'quota-aware'
+                                            ? styles.configBadgeQuotaAware
+                                            : routingStrategyRaw === 'fill-first'
+                                              ? styles.configBadgeFillFirst
+                                              : styles.configBadgeUnknown
     const greetingKey               = `dashboard.greeting_${timeOfDay}`
     const caringKey                 = `dashboard.caring_${timeOfDay}`
     const formattedDate             = currentTime.toLocaleDateString(i18n.language, {

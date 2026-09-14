@@ -40,7 +40,8 @@ export const updateApi = {
             version,
         }),
 
-    status: () => apiClient.get<UpdateStatus>('/update-status'),
+    status: (options?: { signal?: AbortSignal }) =>
+        apiClient.get<UpdateStatus>('/update-status', { signal: options?.signal }),
 
     compatibility: (version: string) =>
         apiClient.get<UpdateCompatibility>(`/update-compatibility?version=${encodeURIComponent(version)}`),

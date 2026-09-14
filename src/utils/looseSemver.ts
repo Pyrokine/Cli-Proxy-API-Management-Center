@@ -1,4 +1,4 @@
-export type LooseSemver = [number, number, number, number]
+type LooseSemver = [number, number, number, number]
 
 export function parseLooseSemver(input: string): LooseSemver | null {
     const trimmed = String(input ?? '').trim()

@@ -58,7 +58,7 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
     runtimeCache: null,
 
     fetchModels: async (apiBase, apiKey, forceRefresh = false) => {
-        const requestKey               = getPublicRequestKey(apiBase, apiKey)
+        const requestKey              = getPublicRequestKey(apiBase, apiKey)
         const { cache, isCacheValid } = get()
         const canUseCache             = !apiKey
 
@@ -80,7 +80,12 @@ export const useModelsStore = create<ModelsState>((set, get) => ({
         const requestGeneration = ++publicRequestGeneration
         const controller        = new AbortController()
         const requestPromise    = modelsApi.fetchModels(apiBase, apiKey, {}, { signal: controller.signal })
-        publicRequest           = { key: requestKey, generation: requestGeneration, controller, promise: requestPromise }
+        publicRequest           = {
+            key: requestKey,
+            generation: requestGeneration,
+            controller,
+            promise: requestPromise,
+        }
         set({ loading: true, error: null })
 
         try {

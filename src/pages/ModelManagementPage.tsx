@@ -5,18 +5,20 @@ import {Card} from '@/components/ui/Card'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {modelPricesApi} from '@/services/api/modelPrices'
+import {CostRecalculationCard} from '@/components/usage/CostRecalculationCard'
 import {
     type ModelCatalogApplyDecision,
     type ModelCatalogDefaultUpdateChange,
+    type ModelCatalogMeta,
     type ModelCatalogPatchRequest,
     type ModelCatalogPrice,
+    type ModelCatalogPriceStatus,
+    type ModelCatalogResponse,
     type ModelCatalogRow,
     modelsApi,
 } from '@/services/api/models'
 import {useNotificationStore} from '@/stores'
 import {buildModelTree, getModelMetadata, modelLeaves, type ModelTreeNode} from '@/utils/modelTree'
-import {formatUsd} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './ModelManagementPage.module.scss'
@@ -36,6 +38,13 @@ type ModelRow = {
     price: ModelCatalogPrice | null
     userCreated: boolean
     runtimeAvailable: boolean
+    runtimeOnly: boolean
+    runtimeProviders: string[]
+    runtimeAvailableProviders: string[]
+    runtimeConfiguredClients: number
+    runtimeAvailableClients: number
+    runtimeQuotaCooldown: number
+    runtimeSuspended: number
     catalogGroup: string
 }
 
@@ -61,11 +70,16 @@ type EditDraft = {
     aliasesText: string
     prompt: string
     completion: string
-    cache: string
+    cacheRead: string
+    cacheWrite: string
+    cacheWrite5m: string
+    cacheWrite1h: string
+    originalPrice: ModelCatalogPrice | null
     enabled: boolean
     originalEnabled: boolean
     userCreated: boolean
     runtimeAvailable: boolean
+    runtimeOnly: boolean
 }
 
 type AddDraft = {
@@ -77,7 +91,10 @@ type AddDraft = {
     aliasesText: string
     prompt: string
     completion: string
-    cache: string
+    cacheRead: string
+    cacheWrite: string
+    cacheWrite5m: string
+    cacheWrite1h: string
 }
 
 type OptionalPriceParseResult =
@@ -85,18 +102,23 @@ type OptionalPriceParseResult =
     | { ok: false }
 
 const BUILTIN_GROUP_OPTIONS = [
-    'GPT-5.1',
-    'GPT-5.2',
-    'GPT-5.3',
-    'GPT-5.4',
+    'GPT-5.6',
     'GPT-5.5',
     'GPT Image',
+    'Claude 5',
     'Claude 4.7',
-    'Claude 4.6',
-    'Claude 4.5',
-    'Gemini 3',
-    'Gemini 2.5',
-    'Qwen Other',
+    'Gemini 3.7',
+    'Gemini 3.5',
+    'DeepSeek V4',
+    'GLM 5',
+    'GLM 4',
+    'Grok 4.6',
+    'Kimi K3',
+    'Kimi K2.5',
+    'MiniMax M3',
+    'MiniMax M2.7',
+    'MiniMax M2.5',
+    'Qwen 3',
     'Other',
 ]
 
@@ -119,27 +141,88 @@ function uniqueSorted(models: Iterable<string>): string[] {
     return out.sort((left, right) => left.localeCompare(right))
 }
 
-function parseOptionalPrice(prompt: string, completion: string, cache: string): OptionalPriceParseResult {
-    const promptText     = prompt.trim()
-    const completionText = completion.trim()
-    const cacheText      = cache.trim()
-    if (!promptText && !completionText && !cacheText) {
-        return { ok: true, price: null }
-    }
-    const promptValue     = Number(promptText || 0)
-    const completionValue = Number(completionText || 0)
-    const cacheValue      = Number(cacheText || promptText || 0)
-    if (![promptValue, completionValue, cacheValue].every((value) => Number.isFinite(value) && value >= 0)) {
-        return { ok: false }
-    }
-    return { ok: true, price: { prompt: promptValue, completion: completionValue, cache: cacheValue } }
+function priceInput(value: number | undefined): string {
+    return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function priceToInputs(price: ModelCatalogPrice | null) {
     return {
-        prompt: price ? String(price.prompt) : '',
-        completion: price ? String(price.completion) : '',
-        cache: price ? String(price.cache) : '',
+        prompt: priceInput(price?.prompt),
+        completion: priceInput(price?.completion),
+        cacheRead: priceInput(price?.cache_read ?? price?.cache),
+        cacheWrite: priceInput(price?.cache_write),
+        cacheWrite5m: priceInput(price?.cache_write_5m),
+        cacheWrite1h: priceInput(price?.cache_write_1h),
+    }
+}
+
+function parseOptionalPrice(
+    prompt: string,
+    completion: string,
+    cacheRead: string,
+    cacheWrite: string,
+    cacheWrite5m: string,
+    cacheWrite1h: string,
+    original: ModelCatalogPrice | null = null,
+): OptionalPriceParseResult {
+    const inputs         = {
+        prompt: prompt.trim(),
+        completion: completion.trim(),
+        cacheRead: cacheRead.trim(),
+        cacheWrite: cacheWrite.trim(),
+        cacheWrite5m: cacheWrite5m.trim(),
+        cacheWrite1h: cacheWrite1h.trim(),
+    }
+    const originalInputs = priceToInputs(original)
+    if (original && Object.entries(inputs).every(([key, value]) =>
+                                                     value === originalInputs[key as keyof typeof originalInputs])) {
+        return { ok: true, price: original }
+    }
+    if (Object.values(inputs).every((value) => !value)) {
+        return { ok: true, price: null }
+    }
+
+    const promptValue       = Number(inputs.prompt || 0)
+    const completionValue   = Number(inputs.completion || 0)
+    const cacheReadValue    = Number(inputs.cacheRead || inputs.prompt || 0)
+    const cacheWriteValue   = inputs.cacheWrite ? Number(inputs.cacheWrite) : undefined
+    const cacheWrite5mValue = inputs.cacheWrite5m ? Number(inputs.cacheWrite5m) : undefined
+    const cacheWrite1hValue = inputs.cacheWrite1h ? Number(inputs.cacheWrite1h) : undefined
+    const values            = [
+        promptValue,
+        completionValue,
+        cacheReadValue,
+        cacheWriteValue,
+        cacheWrite5mValue,
+        cacheWrite1hValue,
+    ].filter((value): value is number => value !== undefined)
+    if (!values.every((value) => Number.isFinite(value) && value >= 0)) {
+        return { ok: false }
+    }
+
+    const metadata: ModelCatalogPrice = original ? { ...original } : {}
+    delete metadata.prompt
+    delete metadata.completion
+    delete metadata.cache
+    delete metadata.cache_read
+    delete metadata.cache_write
+    delete metadata.cache_write_5m
+    delete metadata.cache_write_1h
+    return {
+        ok: true,
+        price: {
+            ...metadata,
+            prompt: promptValue,
+            completion: completionValue,
+            cache: cacheReadValue,
+            cache_read: cacheReadValue,
+            ...(cacheWriteValue === undefined ? {} : { cache_write: cacheWriteValue }),
+            ...(cacheWrite5mValue === undefined ? {} : { cache_write_5m: cacheWrite5mValue }),
+            ...(cacheWrite1hValue === undefined ? {} : { cache_write_1h: cacheWrite1hValue }),
+            status: metadata.status ?? 'complete',
+            auto_apply: metadata.auto_apply ?? true,
+            currency: metadata.currency ?? 'USD',
+        },
     }
 }
 
@@ -153,6 +236,101 @@ function aliasesToText(aliases: string[]): string {
 
 function catalogGroupLabel(row: ModelCatalogRow): string {
     return String(row.group || '').trim()
+}
+
+function effectivePriceStatus(price: ModelCatalogPrice): ModelCatalogPriceStatus {
+    return price.status === 'partial' || price.status === 'unpriced' ? price.status : 'complete'
+}
+
+function priceStatusLabel(
+    status: ModelCatalogPriceStatus,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    return t(`model_management.price_status_${status}`)
+}
+
+function priceSourceLabel(price: ModelCatalogPrice, t: ReturnType<typeof useTranslation>['t']): string {
+    if (!price.source) {
+        return ''
+    }
+    try {
+        return new URL(price.source).hostname.replace(/^www\./, '')
+    } catch {
+        return t('model_management.price_source', { defaultValue: '来源' })
+    }
+}
+
+function priceTooltip(price: ModelCatalogPrice, t: ReturnType<typeof useTranslation>['t']): string {
+    const status = effectivePriceStatus(price)
+    const parts  = [priceStatusLabel(status, t)]
+    if (typeof price.prompt === 'number') {
+        parts.push(`${t('model_management.prompt_price')}: $${price.prompt.toFixed(4)}`)
+    }
+    if (typeof price.completion === 'number') {
+        parts.push(`${t('model_management.completion_price')}: $${price.completion.toFixed(4)}`)
+    }
+    const cacheRead = price.cache_read ?? price.cache
+    if (typeof cacheRead === 'number') {
+        parts.push(`${t('model_management.cache_read_price')}: $${cacheRead.toFixed(4)}`)
+    }
+    if (typeof price.cache_write === 'number') {
+        parts.push(`${t('model_management.cache_write_price')}: $${price.cache_write.toFixed(4)}`)
+    }
+    if (typeof price.cache_write_5m === 'number') {
+        parts.push(`${t('model_management.cache_write_5m_price')}: $${price.cache_write_5m.toFixed(4)}`)
+    }
+    if (typeof price.cache_write_1h === 'number') {
+        parts.push(`${t('model_management.cache_write_1h_price')}: $${price.cache_write_1h.toFixed(4)}`)
+    }
+    if (price.region) {
+        parts.push(`${t('model_management.price_region')}: ${price.region}`)
+    }
+    if (price.service_tier) {
+        parts.push(`${t('model_management.price_service_tier')}: ${price.service_tier}`)
+    }
+    if (price.checked_at) {
+        parts.push(`${t('model_management.price_checked_at')}: ${price.checked_at}`)
+    }
+    if (price.unpriced_reason) {
+        parts.push(price.unpriced_reason)
+    }
+    parts.push(...(price.limitations ?? []))
+    if (price.source) {
+        parts.push(price.source)
+    }
+    return parts.join('\n')
+}
+
+function runtimeSummary(row: ModelRow, t: ReturnType<typeof useTranslation>['t']): string {
+    if (row.runtimeConfiguredClients === 0) {
+        return t('model_management.runtime_clients_none', { defaultValue: '无运行时凭证' })
+    }
+    const parts = [
+        t('model_management.runtime_clients_summary', {
+            defaultValue: '{{available}} / {{configured}} 个运行时凭证可用',
+            available: row.runtimeAvailableClients,
+            configured: row.runtimeConfiguredClients,
+        }),
+    ]
+    if (row.runtimeQuotaCooldown > 0) {
+        parts.push(t('model_management.runtime_quota_cooldown', {
+            defaultValue: '{{count}} 个额度冷却',
+            count: row.runtimeQuotaCooldown,
+        }))
+    }
+    if (row.runtimeSuspended > 0) {
+        parts.push(t('model_management.runtime_suspended', {
+            defaultValue: '{{count}} 个已暂停',
+            count: row.runtimeSuspended,
+        }))
+    }
+    const providers = row.runtimeAvailableProviders.length > 0 ?
+                      row.runtimeAvailableProviders :
+                      row.runtimeProviders
+    if (providers.length > 0) {
+        parts.push(providers.join(', '))
+    }
+    return parts.join(' · ')
 }
 
 function buildTreeTableRows(
@@ -245,7 +423,12 @@ function modelSubtitle(row: ModelRow): string {
 function notRequestableFallback(reason: string, t: (key: string) => string): string {
     const labels: Record<string, string> = {
         disabled: t('model_management.not_requestable_disabled'),
+        access_restricted: t('model_management.not_requestable_access_restricted'),
+        credentials_excluded: t('model_management.not_requestable_credentials_excluded'),
         not_runtime: t('model_management.not_requestable_not_runtime'),
+        quota_cooldown: t('model_management.not_requestable_quota_cooldown'),
+        suspended: t('model_management.not_requestable_suspended'),
+        runtime_unavailable: t('model_management.not_requestable_runtime_unavailable'),
     }
     return labels[reason] ?? reason
 }
@@ -296,33 +479,40 @@ export function ModelManagementPage() {
     const { t }                                  = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
 
-    const [catalogRows, setCatalogRows]         = useState<ModelCatalogRow[]>([])
-    const [loading, setLoading]                 = useState(true)
-    const [error, setError]                     = useState('')
-    const [savingModel, setSavingModel]         = useState<string | null>(null)
-    const [expandedRows, setExpandedRows]       = useState<Set<string>>(() => new Set())
-    const [collapsedRows, setCollapsedRows]     = useState<Set<string>>(() => new Set())
-    const [searchValue, setSearchValue]         = useState('')
-    const [editDraft, setEditDraft]             = useState<EditDraft | null>(null)
-    const [addDraft, setAddDraft]               = useState<AddDraft | null>(null)
-    const [updateChanges, setUpdateChanges]     = useState<ModelCatalogDefaultUpdateChange[]>([])
-    const [updateModalOpen, setUpdateModalOpen] = useState(false)
-    const [updateLoading, setUpdateLoading]     = useState(false)
-    const [updateApplying, setUpdateApplying]   = useState(false)
-    const [updatePage, setUpdatePage]           = useState(0)
+    const [catalogRows, setCatalogRows]                   = useState<ModelCatalogRow[]>([])
+    const [catalogMeta, setCatalogMeta]                   = useState<ModelCatalogMeta | null>(null)
+    const [loading, setLoading]                           = useState(true)
+    const [error, setError]                               = useState('')
+    const [savingModel, setSavingModel]                   = useState<string | null>(null)
+    const [expandedRows, setExpandedRows]                 = useState<Set<string>>(() => new Set())
+    const [collapsedRows, setCollapsedRows]               = useState<Set<string>>(() => new Set())
+    const [searchValue, setSearchValue]                   = useState('')
+    const [editDraft, setEditDraft]                       = useState<EditDraft | null>(null)
+    const [addDraft, setAddDraft]                         = useState<AddDraft | null>(null)
+    const [updateChanges, setUpdateChanges]               = useState<ModelCatalogDefaultUpdateChange[]>([])
+    const [updateModalOpen, setUpdateModalOpen]           = useState(false)
+    const [updateLoading, setUpdateLoading]               = useState(false)
+    const [updateApplying, setUpdateApplying]             = useState(false)
+    const [updatePage, setUpdatePage]                     = useState(0)
+    const [recalculationRefresh, setRecalculationRefresh] = useState(0)
+
+    const applyCatalogResponse = useCallback((catalog: ModelCatalogResponse) => {
+        setCatalogRows(catalog.models ?? [])
+        setCatalogMeta(catalog.meta)
+    }, [])
 
     const loadAll = useCallback(async () => {
         setLoading(true)
         setError('')
         try {
             const catalog = await modelsApi.fetchModelCatalog()
-            setCatalogRows(catalog.models ?? [])
+            applyCatalogResponse(catalog)
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : String(err ?? ''))
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [applyCatalogResponse])
 
     const loadDefaultUpdatePreview = useCallback(async () => {
         setUpdateLoading(true)
@@ -339,35 +529,8 @@ export function ModelManagementPage() {
     }, [showNotification, t])
 
     const observePriceRecalculation = useCallback(() => {
+        setRecalculationRefresh((value) => value + 1)
         showNotification(t('usage_stats.recalculate_started'), 'success')
-        void modelPricesApi.waitForRecalculation().then((status) => {
-            if (!status) {
-                showNotification(t('usage_stats.recalculate_timeout'), 'warning')
-                return
-            }
-            if (status.status === 'error') {
-                showNotification(
-                    `${t('usage_stats.recalculate_failed')}${status.error ? `: ${status.error}` : ''}`,
-                    'error',
-                )
-                return
-            }
-            if (status.status === 'ok') {
-                showNotification(
-                    t('usage_stats.recalculate_success', {
-                        days: status.recalculated_days ?? 0,
-                        cost: formatUsd(status.total_cost ?? 0),
-                    }),
-                    'success',
-                )
-            }
-        }).catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : ''
-            showNotification(
-                `${t('usage_stats.recalculate_failed')}${message ? `: ${message}` : ''}`,
-                'error',
-            )
-        })
     }, [showNotification, t])
 
     useEffect(() => {
@@ -391,9 +554,7 @@ export function ModelManagementPage() {
         const model                = catalogRow.name.trim()
         const metadata             = getModelMetadata(model)
         const configuredProvider   = String(catalogRow.provider || '').trim()
-        const provider             = metadata.provider === 'Other' ?
-                                     (configuredProvider || metadata.provider) :
-                                     metadata.provider
+        const provider             = configuredProvider || metadata.provider
         const channel              = String(catalogRow.channel || '').trim()
         const catalogGroup         = catalogGroupLabel(catalogRow)
         const requestable          = Boolean(catalogRow.requestable)
@@ -407,7 +568,7 @@ export function ModelManagementPage() {
             displayName: catalogRow.display_name?.trim() || model,
             provider,
             channel,
-            generation: metadata.generation,
+            generation: catalogGroup || metadata.generation,
             family: metadata.family,
             enabled: catalogRow.enabled,
             requestable,
@@ -416,12 +577,23 @@ export function ModelManagementPage() {
             price: catalogRow.price ?? null,
             userCreated: catalogRow.user_created,
             runtimeAvailable: catalogRow.runtime_available,
+            runtimeOnly: Boolean(catalogRow.runtime_only),
+            runtimeProviders: uniqueSorted(catalogRow.runtime_providers ?? []),
+            runtimeAvailableProviders: uniqueSorted(catalogRow.runtime_available_providers ?? []),
+            runtimeConfiguredClients: Number(catalogRow.runtime_configured_clients ?? 0),
+            runtimeAvailableClients: Number(catalogRow.runtime_available_clients ?? 0),
+            runtimeQuotaCooldown: Number(catalogRow.runtime_quota_cooldown_clients ?? 0),
+            runtimeSuspended: Number(catalogRow.runtime_suspended_clients ?? 0),
             catalogGroup,
         }
     }).filter((row) => row.model), [catalogRows])
 
     const modelTree              = useMemo(
-        () => buildModelTree(modelRows.map((row) => ({ model: row.model, provider: row.provider }))),
+        () => buildModelTree(modelRows.map((row) => ({
+            model: row.model,
+            provider: row.provider,
+            group: row.catalogGroup,
+        }))),
         [modelRows],
     )
     const treeTableRows          = useMemo(() => {
@@ -461,7 +633,7 @@ export function ModelManagementPage() {
             setSavingModel(row.model)
             try {
                 const catalog = await modelsApi.patchModelCatalogModel({ name: row.model, enabled })
-                setCatalogRows(catalog.models ?? [])
+                applyCatalogResponse(catalog)
                 showNotification(
                     enabled
                     ? t('model_management.enable_success', { defaultValue: '模型已启用' })
@@ -475,7 +647,7 @@ export function ModelManagementPage() {
                 setSavingModel(null)
             }
         },
-        [showNotification, t],
+        [applyCatalogResponse, showNotification, t],
     )
 
     const openEditModal = useCallback((row: ModelRow) => {
@@ -489,10 +661,12 @@ export function ModelManagementPage() {
                          group: row.catalogGroup,
                          aliasesText: aliasesToText(row.aliases),
                          ...priceInputs,
+                         originalPrice: row.price,
                          enabled: row.enabled,
                          originalEnabled: row.enabled,
                          userCreated: row.userCreated,
                          runtimeAvailable: row.runtimeAvailable,
+                         runtimeOnly: row.runtimeOnly,
                      })
     }, [])
 
@@ -500,7 +674,15 @@ export function ModelManagementPage() {
         if (!editDraft) {
             return
         }
-        const parsedPrice = parseOptionalPrice(editDraft.prompt, editDraft.completion, editDraft.cache)
+        const parsedPrice = parseOptionalPrice(
+            editDraft.prompt,
+            editDraft.completion,
+            editDraft.cacheRead,
+            editDraft.cacheWrite,
+            editDraft.cacheWrite5m,
+            editDraft.cacheWrite1h,
+            editDraft.originalPrice,
+        )
         if (!parsedPrice.ok) {
             showNotification(
                 t('model_management.price_invalid', { defaultValue: '价格必须是大于等于 0 的数字' }),
@@ -523,7 +705,7 @@ export function ModelManagementPage() {
                 request.enabled = editDraft.enabled
             }
             const catalog = await modelsApi.patchModelCatalogModel(request)
-            setCatalogRows(catalog.models ?? [])
+            applyCatalogResponse(catalog)
             setEditDraft(null)
             showNotification(t('model_management.save_success', { defaultValue: '模型配置已保存' }), 'success')
             if (catalog.recalculation_pending) {
@@ -535,7 +717,7 @@ export function ModelManagementPage() {
         } finally {
             setSavingModel(null)
         }
-    }, [editDraft, observePriceRecalculation, showNotification, t])
+    }, [applyCatalogResponse, editDraft, observePriceRecalculation, showNotification, t])
 
     const handleAddModel = useCallback(async () => {
         if (!addDraft) {
@@ -550,7 +732,14 @@ export function ModelManagementPage() {
             showNotification(t('model_management.model_exists', { defaultValue: '模型已存在' }), 'error')
             return
         }
-        const parsedPrice = parseOptionalPrice(addDraft.prompt, addDraft.completion, addDraft.cache)
+        const parsedPrice = parseOptionalPrice(
+            addDraft.prompt,
+            addDraft.completion,
+            addDraft.cacheRead,
+            addDraft.cacheWrite,
+            addDraft.cacheWrite5m,
+            addDraft.cacheWrite1h,
+        )
         if (!parsedPrice.ok) {
             showNotification(
                 t('model_management.price_invalid', { defaultValue: '价格必须是大于等于 0 的数字' }),
@@ -572,7 +761,7 @@ export function ModelManagementPage() {
                                                                            { price: parsedPrice.price } :
                                                                            {}),
                                                                    })
-            setCatalogRows(catalog.models ?? [])
+            applyCatalogResponse(catalog)
             setAddDraft(null)
             showNotification(t('model_management.add_success', { defaultValue: '模型已添加' }), 'success')
             if (catalog.recalculation_pending) {
@@ -584,7 +773,7 @@ export function ModelManagementPage() {
         } finally {
             setSavingModel(null)
         }
-    }, [addDraft, allModelNames, observePriceRecalculation, showNotification, t])
+    }, [addDraft, allModelNames, applyCatalogResponse, observePriceRecalculation, showNotification, t])
 
     const deleteModel = useCallback(
         (row: ModelRow) => {
@@ -608,7 +797,7 @@ export function ModelManagementPage() {
                                      setSavingModel(row.model)
                                      try {
                                          const catalog = await modelsApi.deleteModelCatalogModel(row.model)
-                                         setCatalogRows(catalog.models ?? [])
+                                         applyCatalogResponse(catalog)
                                          showNotification(t(
                                              'model_management.delete_success',
                                              { defaultValue: '模型已删除' },
@@ -624,7 +813,7 @@ export function ModelManagementPage() {
                                  },
                              })
         },
-        [showConfirmation, showNotification, t],
+        [applyCatalogResponse, showConfirmation, showNotification, t],
     )
 
     const openDefaultUpdateModal = useCallback(() => {
@@ -640,7 +829,7 @@ export function ModelManagementPage() {
         setUpdateApplying(true)
         try {
             const response = await modelsApi.applyDefaultUpdate([{ name: change.name, action }])
-            setCatalogRows(response.catalog.models ?? [])
+            applyCatalogResponse(response.catalog)
             await loadDefaultUpdatePreview()
             showNotification(
                 t('model_management.default_update_applied', { defaultValue: '默认模型更新已处理' }),
@@ -655,7 +844,7 @@ export function ModelManagementPage() {
         } finally {
             setUpdateApplying(false)
         }
-    }, [loadDefaultUpdatePreview, observePriceRecalculation, showNotification, t])
+    }, [applyCatalogResponse, loadDefaultUpdatePreview, observePriceRecalculation, showNotification, t])
 
     const initialLoading              = loading && modelRows.length === 0
     const refreshing                  = Boolean(savingModel) || (loading && modelRows.length > 0)
@@ -789,6 +978,7 @@ export function ModelManagementPage() {
                 )
             }
             const firstAlias          = row.aliases[0]
+            const runtimeLabel        = runtimeSummary(row, t)
             const notRequestableLabel = row.notRequestableReason
                                         ?
                                         t(
@@ -797,6 +987,10 @@ export function ModelManagementPage() {
                                         )
                                         :
                                         ''
+            const priceStatus         = row.price ? effectivePriceStatus(row.price) : null
+            const cacheRead           = row.price?.cache_read ?? row.price?.cache
+            const priceSource         = row.price ? priceSourceLabel(row.price, t) : ''
+            const priceDetails        = row.price ? priceTooltip(row.price, t) : ''
             return (
                 <tr className={rowClassName}>
                     <td>
@@ -811,8 +1005,17 @@ export function ModelManagementPage() {
                                      { defaultValue: '用户新增' },
                                  )}</span> :
                                  null}
+                                {row.runtimeOnly ?
+                                 <span className={styles.runtimeOnlyPill}>{t(
+                                     'model_management.status_runtime_only',
+                                     { defaultValue: '运行时发现' },
+                                 )}</span> :
+                                 null}
                             </span>
                                 <span className={styles.modelMeta}>{modelSubtitle(row)}</span>
+                                <span className={styles.runtimeMeta} title={runtimeLabel}>
+                                    {runtimeLabel}
+                                </span>
                             </div>
                         </div>
                     </td>
@@ -856,42 +1059,84 @@ export function ModelManagementPage() {
                     </td>
                     <td className={styles.centerCell}>
                         <div className={styles.centerContent}>
-                            {row.price ?
-                             (
-                                 <div
-                                     className={styles.priceCell}
-                                     title={`${t(
-                                         'model_management.prompt_price',
-                                         { defaultValue: '输入' },
-                                     )}: $${row.price.prompt.toFixed(4)} · ${t(
-                                         'model_management.completion_price',
-                                         { defaultValue: '输出' },
-                                     )}: $${row.price.completion.toFixed(4)} · ${t(
-                                         'model_management.cache_price',
-                                         { defaultValue: '缓存' },
-                                     )}: $${row.price.cache.toFixed(4)}`}
-                                 >
-                                <span className={styles.priceItem}>
-                                    <span>{t('model_management.prompt_price_short', { defaultValue: '输入' })}</span>
-                                    <strong>${row.price.prompt.toFixed(4)}</strong>
-                                </span>
-                                     <span className={styles.priceItem}>
-                                    <span>{t(
-                                        'model_management.completion_price_short',
-                                        { defaultValue: '输出' },
-                                    )}</span>
-                                    <strong>${row.price.completion.toFixed(4)}</strong>
-                                </span>
-                                     <span className={styles.priceItem}>
-                                    <span>{t('model_management.cache_price_short', { defaultValue: '缓存' })}</span>
-                                    <strong>${row.price.cache.toFixed(4)}</strong>
-                                </span>
-                                 </div>
-                             ) :
-                             <span className={styles.unconfigured}>{t(
-                                 'model_management.price_unconfigured',
-                                 { defaultValue: '未配置价格' },
-                             )}</span>}
+                            {row.price && priceStatus ? (
+                                <div className={styles.priceCell} title={priceDetails}>
+                                    <span className={`${styles.priceStatus} ${
+                                        priceStatus === 'complete' ?
+                                        styles.priceStatusComplete :
+                                        priceStatus === 'partial' ?
+                                        styles.priceStatusPartial :
+                                        styles.priceStatusUnpriced
+                                    }`}>
+                                        {priceStatusLabel(priceStatus, t)}
+                                    </span>
+                                    {typeof row.price.prompt === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>
+                                                {t('model_management.prompt_price_short', {
+                                                    defaultValue: '输入',
+                                                })}
+                                            </span>
+                                            <strong>${row.price.prompt.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {typeof row.price.completion === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>{t(
+                                                'model_management.completion_price_short',
+                                                { defaultValue: '输出' },
+                                            )}</span>
+                                            <strong>${row.price.completion.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {typeof cacheRead === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>{t(
+                                                'model_management.cache_read_price_short',
+                                                { defaultValue: '读缓存' },
+                                            )}</span>
+                                            <strong>${cacheRead.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {typeof row.price.cache_write === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>{t(
+                                                'model_management.cache_write_price_short',
+                                                { defaultValue: '写缓存' },
+                                            )}</span>
+                                            <strong>${row.price.cache_write.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {typeof row.price.cache_write_5m === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>{t('model_management.cache_write_5m_price_short')}</span>
+                                            <strong>${row.price.cache_write_5m.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {typeof row.price.cache_write_1h === 'number' ? (
+                                        <span className={styles.priceItem}>
+                                            <span>{t('model_management.cache_write_1h_price_short')}</span>
+                                            <strong>${row.price.cache_write_1h.toFixed(4)}</strong>
+                                        </span>
+                                    ) : null}
+                                    {row.price.source ? (
+                                        <a
+                                            className={styles.priceSource}
+                                            href={row.price.source}
+                                            target='_blank'
+                                            rel='noreferrer'
+                                            title={row.price.source}
+                                        >
+                                            {priceSource || t('model_management.price_source')}
+                                        </a>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                 <span className={styles.unconfigured}>{t(
+                                     'model_management.price_unconfigured',
+                                     { defaultValue: '未配置价格' },
+                                 )}</span>
+                             )}
                         </div>
                     </td>
                     <td className={styles.centerCell}>
@@ -901,10 +1146,12 @@ export function ModelManagementPage() {
                                         disabled={savingModel === row.model}>
                                     {t('common.edit')}
                                 </Button>
-                                <Button variant='danger' size='xs' onClick={() => deleteModel(row)}
-                                        disabled={savingModel === row.model}>
-                                    {t('common.delete')}
-                                </Button>
+                                {!row.runtimeOnly ? (
+                                    <Button variant='danger' size='xs' onClick={() => deleteModel(row)}
+                                            disabled={savingModel === row.model}>
+                                        {t('common.delete')}
+                                    </Button>
+                                ) : null}
                             </div>
                         </div>
                     </td>
@@ -949,12 +1196,29 @@ export function ModelManagementPage() {
                                                                              aliasesText: '',
                                                                              prompt: '',
                                                                              completion: '',
-                                                                             cache: '',
+                                                                             cacheRead: '',
+                                                                             cacheWrite: '',
+                                                                             cacheWrite5m: '',
+                                                                             cacheWrite1h: '',
                                                                          })}>
                         {t('model_management.add_model')}
                     </Button>
                 </div>
             </div>
+
+            <CostRecalculationCard refreshKey={recalculationRefresh} />
+
+            {catalogMeta?.recovered_from_previous ? (
+                <div className={styles.recoveryWarning} role='status'>
+                    <strong>{t('model_management.recovery_warning_title')}</strong>
+                    <span>{t('model_management.recovery_warning_detail')}</span>
+                    {catalogMeta.current_error ? (
+                        <code>
+                            {t('model_management.recovery_warning_error')}: {catalogMeta.current_error}
+                        </code>
+                    ) : null}
+                </div>
+            ) : null}
 
             <div className={styles.statsGrid}>
                 <Card className={styles.statCard}
@@ -1030,7 +1294,9 @@ export function ModelManagementPage() {
                         <div className={styles.treeSummary}>
                             <span className={styles.treeMeta}>
                                 {t('model_management.matrix_summary', {
-                                    defaultValue: '{{providers}} 个供应商 · {{total}} 个模型 · {{requestable}} 个可请求 · {{enabled}} 个启用',
+                                    defaultValue:
+                                        '{{providers}} 个供应商 · {{total}} 个模型 · ' +
+                                        '{{requestable}} 个可请求 · {{enabled}} 个启用',
                                     providers: modelTree.length,
                                     total: modelRows.length,
                                     requestable: requestableRows.length,
@@ -1039,7 +1305,10 @@ export function ModelManagementPage() {
                             </span>
                             <span className={styles.sourceHelp}>
                                 {t('model_management.source_help', {
-                                    defaultValue: '模型清单、价格、别名和启用状态都来自后端 models.json；可请求由启用状态、当前服务支持情况和 API key / 凭证访问规则共同决定',
+                                    defaultValue:
+                                        '模型清单、价格、别名和启用状态都来自后端 models.json；' +
+                                        '可请求由启用状态、当前服务支持情况和 API key / ' +
+                                        '凭证访问规则共同决定',
                                 })}
                             </span>
                         </div>
@@ -1150,13 +1419,43 @@ export function ModelManagementPage() {
                                                                             prev)}
                             />
                             <Input
-                                label={`${t('model_management.cache_price')} ($/1M)`}
-                                value={editDraft.cache}
+                                label={`${t('model_management.cache_read_price')} ($/1M)`}
+                                value={editDraft.cacheRead}
                                 type='number'
                                 step='0.0001'
                                 placeholder={t('model_management.price_empty_placeholder')}
                                 onChange={(event) => setEditDraft((prev) => prev ?
-                                    { ...prev, cache: event.target.value } :
+                                    { ...prev, cacheRead: event.target.value } :
+                                                                            prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_price')} ($/1M)`}
+                                value={editDraft.cacheWrite}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setEditDraft((prev) => prev ?
+                                    { ...prev, cacheWrite: event.target.value } :
+                                                                            prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_5m_price')} ($/1M)`}
+                                value={editDraft.cacheWrite5m}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setEditDraft((prev) => prev ?
+                                    { ...prev, cacheWrite5m: event.target.value } :
+                                                                            prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_1h_price')} ($/1M)`}
+                                value={editDraft.cacheWrite1h}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setEditDraft((prev) => prev ?
+                                    { ...prev, cacheWrite1h: event.target.value } :
                                                                             prev)}
                             />
                         </div>
@@ -1174,16 +1473,20 @@ export function ModelManagementPage() {
                             />
                         </label>
                         <div className={styles.inlineHint}>
-                            <strong>{editDraft.userCreated ?
+                            <strong>{editDraft.runtimeOnly ?
+                                     t('model_management.status_runtime_only', { defaultValue: '运行时发现' }) :
+                                     editDraft.userCreated ?
                                      t('model_management.status_user_created', { defaultValue: '用户新增' }) :
                                      t('model_management.status_default_model', { defaultValue: '默认模型' })}</strong>
-                            <span>{editDraft.runtimeAvailable
-                                   ?
+                            <span>{editDraft.runtimeOnly ?
+                                   t('model_management.runtime_only_save_hint', {
+                                       defaultValue: '保存后会把当前运行时模型写入 models.json',
+                                   }) :
+                                   editDraft.runtimeAvailable ?
                                    t(
                                        'model_management.enable_runtime_hint',
                                        { defaultValue: '启用状态已保存；当前服务支持请求该模型时才会变为可请求' },
-                                   )
-                                   :
+                                   ) :
                                    t(
                                        'model_management.enable_not_runtime_hint',
                                        { defaultValue: '当前服务暂不可请求；仍可先保存启用状态' },
@@ -1284,13 +1587,43 @@ export function ModelManagementPage() {
                                                                            prev)}
                             />
                             <Input
-                                label={`${t('model_management.cache_price')} ($/1M)`}
-                                value={addDraft.cache}
+                                label={`${t('model_management.cache_read_price')} ($/1M)`}
+                                value={addDraft.cacheRead}
                                 type='number'
                                 step='0.0001'
                                 placeholder={t('model_management.price_empty_placeholder')}
                                 onChange={(event) => setAddDraft((prev) => prev ?
-                                    { ...prev, cache: event.target.value } :
+                                    { ...prev, cacheRead: event.target.value } :
+                                                                           prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_price')} ($/1M)`}
+                                value={addDraft.cacheWrite}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setAddDraft((prev) => prev ?
+                                    { ...prev, cacheWrite: event.target.value } :
+                                                                           prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_5m_price')} ($/1M)`}
+                                value={addDraft.cacheWrite5m}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setAddDraft((prev) => prev ?
+                                    { ...prev, cacheWrite5m: event.target.value } :
+                                                                           prev)}
+                            />
+                            <Input
+                                label={`${t('model_management.cache_write_1h_price')} ($/1M)`}
+                                value={addDraft.cacheWrite1h}
+                                type='number'
+                                step='0.0001'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setAddDraft((prev) => prev ?
+                                    { ...prev, cacheWrite1h: event.target.value } :
                                                                            prev)}
                             />
                         </div>
