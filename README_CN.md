@@ -1,167 +1,185 @@
 # CLI Proxy API 管理中心
 
-用于管理与故障排查 **CLI Proxy API** 的单文件 Web UI（React + TypeScript），通过 **Management API** 完成配置、凭据、日志与统计等管理操作。
+用于管理和排查 [CLI Proxy API](https://github.com/Pyrokine/CLIProxyAPI) 的 React 单文件 Web UI，通过 Management API
+读取和修改后端状态
 
 [English](README.md)
 
-**主项目**: https://github.com/Pyrokine/CLIProxyAPI
-**示例地址**: https://remote.router-for.me/
-**最低版本要求**: CLIProxyAPI ≥ v7.2.67-aug.2（推荐最新）
+- 示例地址：https://remote.router-for.me/
+- Management API 基础路径：`/v0/management`
+- 最低兼容后端：CLIProxyAPI `v7.2.67-aug.2`
 
-从6.0.19版本开始，Web UI 随主程序一起提供；服务运行后，通过 API 端口上的"/management.html"访问它。
+本仓库只提供管理面板，不转发模型流量
 
-## 这是什么（以及不是什么）
+## 使用管理面板
 
-- 本仓库只包含 Web 管理界面本身，通过 CLI Proxy API 的 **Management API**（`/v0/management`）读取/修改配置、上传凭据、查看日志与使用统计。
-- 它 **不是** 代理本体，不参与流量转发。
+### 使用 CLI Proxy API 管理的面板
 
-## 快速开始
+CLI Proxy API 在以下地址提供面板：
 
-### 方式 A：使用 CLI Proxy API 自带的 Web UI（推荐）
+```text
+http://<host>:<api_port>/management.html
+```
 
-1. 启动 CLI Proxy API 服务。
-2. 打开：`http://<host>:<api_port>/management.html`
-3. 输入 **管理密钥** 并连接。
+打开页面后输入管理密钥。面板会根据当前 URL 推导 API 地址，也支持手动填写
 
-页面会根据当前地址自动推断 API 地址，也支持手动修改。
+CLI Proxy API 默认从本仓库的最新 Release 下载 `management.html`，并定期检查更新。相关后端配置为：
 
-### 方式 B：开发调试
+```yaml
+remote-management:
+  disable-control-panel: false
+  disable-auto-update-panel: false
+  panel-github-repository: "https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
+```
+
+需要固定已部署版本时设置 `disable-auto-update-panel: true`。设置 `disable-control-panel: true` 会同时关闭面板文件下载和
+`/management.html` 路由
+
+### 手动安装或更新 `management.html`
+
+从 GitHub Release 下载 `management.html`，或者构建 `dist/index.html` 后将其重命名。CLI Proxy API 按以下顺序确定管理面板文件位置：
+
+1. 已设置的 `MANAGEMENT_STATIC_PATH`，该变量可以指向文件本身或所在目录
+2. 后端存在可写数据目录时的 `<writable-data-dir>/static/management.html`
+3. 其他情况下的 `<config-dir>/static/management.html`
+
+替换该文件后，刷新页面即可获取新的 HTML
+
+### 运行开发服务器
 
 ```bash
 bun install --frozen-lockfile
 bun run dev
 ```
 
-打开 `http://localhost:5173`，然后连接到你的 CLI Proxy API 后端实例。
+打开 `http://localhost:5173`，然后连接到 CLI Proxy API 实例
 
-### 方式 C：构建单文件 HTML
+### 构建单文件面板
 
 ```bash
 bun install --frozen-lockfile
 bun run build
 ```
 
-- 构建产物：`dist/index.html`（资源已全部内联）。
-- 在 CLI Proxy API 的发布流程里会重命名为 `management.html`。
-- 本地预览：`bun run preview`
+构建产物是 `dist/index.html`。JavaScript、CSS、字体和其他构建资源由 `vite-plugin-singlefile` 内联，发布流程会将其重命名为
+`management.html`
 
-提示：直接用 `file://` 打开 `dist/index.html` 可能遇到浏览器 CORS 限制；更稳妥的方式是用预览/静态服务器打开。
+建议使用 `bun run preview` 预览。直接通过 `file://` 打开时，浏览器 CORS 规则可能阻止请求
 
-## 连接说明
+## 连接 CLI Proxy API
 
-### API 地址怎么填
+面板接受以下地址格式：
 
-以下格式均可，Web UI 会自动归一化：
+```text
+localhost:8317
+http://192.168.1.10:8317
+https://example.com:8317
+http://example.com:8317/v0/management
+```
 
-- `localhost:8317`
-- `http://192.168.1.10:8317`
-- `https://example.com:8317`
-- `http://example.com:8317/v0/management`（也可填写，后缀会被自动去除）
+地址末尾的 `/v0/management` 会在归一化时移除
 
-### 管理密钥（注意：不是 API Keys）
+管理密钥按以下 Header 发送：
 
-管理密钥会以如下方式随请求发送：
+```http
+Authorization: Bearer <MANAGEMENT_KEY>
+```
 
-- `Authorization: Bearer <MANAGEMENT_KEY>`（默认）
+管理密钥用于保护 Management API 请求，与面板中维护的代理客户端 `api-keys` 不同
 
-这与 Web UI 中"API Keys"页面管理的 `api-keys` 不同：后者是代理对外接口（如 OpenAI 兼容接口）给客户端使用的鉴权 key。
-
-### 远程管理
-
-当你从非 localhost 的浏览器访问时，服务端通常需要开启远程管理：
+从远程浏览器连接时，需要在后端允许远程管理：
 
 ```yaml
 remote-management:
   allow-remote: true
 ```
 
-## 功能一览（按页面对应）
+完整认证规则和服务端限制见 [Management API 文档](https://help.router-for.me/cn/management/api)
 
-- **仪表盘**：连接状态、服务版本/构建时间、关键数量概览、可用模型概览。
-- **基础设置**：调试开关、代理 URL、请求重试、配额回退（达到上限时切换项目或预览模型）、使用统计、请求日志、文件日志、WebSocket
-  鉴权。
-- **API Keys**：管理代理 `api-keys`（增/改/删）。
-- **AI 提供商**：
-    - Gemini/Codex/Claude/Vertex 配置（Base URL、Headers、代理、模型别名、排除模型、Prefix）。
-    - OpenAI 兼容提供商（多 Key、Header、快速填充预设、并发刷新期间保留草稿、自助从 `/v1/models` 拉取并导入模型别名、可选浏览器侧 `chat/completions` 测试）。
-- **认证文件**：上传/下载/删除 JSON 凭据，筛选/搜索/分页，标记 runtime-only；查看单个凭据可用模型（依赖后端支持）；查看最近请求分桶；管理
-  OAuth
-  排除模型（支持 `*` 通配符）；配置 OAuth 模型别名映射。
-- **OAuth**：对支持的提供商发起 OAuth/设备码流程，轮询状态；可选提交回调 `redirect_url`；包含 iFlow Cookie 导入。
-- **配额管理**：管理 Claude、Antigravity、Codex、Gemini CLI、Kimi 等提供商的配额上限与使用情况，支持后端定时刷新状态与手动刷新。
-- **使用统计**：按小时/天图表、按 API / 模型 / 凭证统计、缓存/推理 Token 拆分、RPM/TPM 时间窗、全部时间范围解析、服务健康卡、后端统一管理的模型价格和后台历史费用重算状态。
-- **配置文件**：浏览器内编辑 `/config.yaml`（YAML 高亮 + 搜索），保存/重载。
-- **日志**：增量拉取日志、页面自动刷新间隔控制、搜索、隐藏管理端流量、查看原始日志、清空日志；下载请求错误日志文件。
-- **系统信息**：快捷链接、通过 Management API 获取并分组展示运行时模型、查看模型目录来源与刷新信息、管理图片 artifact cache、选择 plugin release、查看本地/远端最新版本与构建时间、浏览发布历史并执行更新动作。
+## 功能
 
-## 技术栈
+- 仪表盘：连接状态、后端版本与构建时间、数量概览和模型可用性
+- 基础设置：调试模式、代理 URL、请求重试、配额回退、使用量收集、请求/文件日志和 WebSocket 鉴权
+- API Keys：新增、编辑和删除代理客户端密钥
+- AI 提供商：管理 Gemini、Codex、Claude、Vertex 和 OpenAI 兼容配置，包括 Base URL、代理、Headers、模型别名、排除模型、Prefix、多
+  Key 与连接测试
+- Claude Code 配置：当前选择仍有效时保持不变，否则依次选择 DeepSeek V4.1 Flash（`deepseek-flash`）、`deepseek-v4-pro`
+  和配置列表中的第一个模型
+- 认证文件：上传、下载、删除、筛选和搜索凭据，查看支持的模型与近期请求分桶，维护 OAuth 排除模型和模型别名
+- OAuth：发起受支持的浏览器或设备码流程，轮询状态，按需提交回调 URL，并导入 iFlow Cookie
+- 配额管理：查看各提供商配额，通过后端任务刷新状态，显示后端返回的主动重置可用次数与过期时间
+- 使用统计：请求与 Token 图表、API/模型/凭证明细、RPM/TPM 时间窗、服务健康状态、当前目录价格、请求时不可变价格凭据和历史重算状态
+- 配置文件：使用 YAML 高亮和搜索编辑、重载 `/config.yaml`
+- 日志：增量轮询、刷新间隔、筛选、原始日志、清空操作和请求错误日志下载
+- 系统信息：运行时模型、模型目录来源与刷新元数据、图片 artifact cache、plugin release、后端版本和发布历史
 
-- React 19 + TypeScript 6.0
-- Vite 8（单文件构建）
-- Zustand（状态管理）
-- Axios（HTTP 客户端）
-- react-router-dom v7（HashRouter）
-- Chart.js（数据可视化）
-- CodeMirror 6（YAML 编辑器）
-- SCSS Modules（样式）
-- i18next（国际化）
+## 技术栈与工具链
 
-## 多语言支持
+- React 19.3
+- 应用代码、测试、类型检查和构建使用 TypeScript native 7.0.2
+- TypeScript 6 compatibility package 只供 `typescript-eslint` 使用，在其支持的 compiler API 覆盖 TypeScript 7 后再移除
+- Vite 8.3 与 `vite-plugin-singlefile`
+- Bun 1.4.0，作为包管理器和测试运行时
+- ESLint 10、`typescript-eslint` 8.70 和 Stylelint 17
+- Zustand、Axios、react-router-dom 7、Chart.js、CodeMirror 6、SCSS Modules 和 i18next
 
-目前支持四种语言：
+根 TypeScript project 包含 `src` 与 `tests`，`vite.config.ts` 由 `tsconfig.node.json` 单独检查
 
-- 英文 (en)
-- 简体中文 (zh-CN)
-- 繁体中文 (zh-TW)
-- 俄文 (ru)
+构建目标是 `ES2020`。界面支持当前版本的 Chrome、Firefox、Safari 和 Edge，并提供手机与平板响应式布局
 
-界面语言会根据浏览器设置自动切换，也可在页面底部手动切换。
+## 版本与发布行为
 
-## 浏览器兼容性
+页脚版本在构建时按以下顺序确定：
 
-- 构建目标：`ES2020`
-- 支持 Chrome、Firefox、Safari、Edge 等现代浏览器
-- 支持移动端响应式布局，可通过手机/平板访问
+1. `VERSION` 环境变量
+2. `git describe`
+3. 非 `0.0.0` 的 `package.json` version
+4. `dev`
 
-## 构建与发布说明
+构建还会写入 `__COMPAT_MIN_SERVER__`，用于提示后端版本不兼容
 
-- 使用 Vite 输出 **单文件 HTML**（`dist/index.html`），资源全部内联（`vite-plugin-singlefile`）。
-- 打 `vX.Y.Z` 标签会触发 `.github/workflows/release.yml`，发布 `dist/management.html`。
-- 页脚显示的 UI 版本在构建期注入（优先使用环境变量 `VERSION`，否则使用 git tag / `package.json`）。
-- 面板还会注入最低后端兼容版本标记（`__COMPAT_MIN_SERVER__`），用于在 UI 中提示后端过旧。
+匹配 `v*` 的 tag 会触发 `.github/workflows/release.yml`。流程会安装 frozen Bun lockfile，执行类型检查、ESLint、测试与构建，然后发布
+`dist/management.html`
 
-## 安全提示
+本地增强版本使用 `v<upstream>-aug.N`，基于新上游版本的首个本地版本从 `aug.1` 开始
 
-- 管理密钥会存入浏览器 `localStorage`，并使用轻量混淆格式（`enc::v1::...`）避免明文；仍应视为敏感信息。
-- 建议使用独立浏览器配置/设备进行管理；开启远程管理时请谨慎评估暴露面。
+## 安全说明
+
+浏览器中的敏感存储使用 `enc::v2::` 格式，数据由 AES-256-GCM 和随机 12 字节 IV 保护。不可导出的密钥通过 PBKDF2-SHA-256
+派生，迭代 100,000 次，并包含浏览器 origin 信息
+
+浏览器本身仍是安全边界，同源脚本可以访问页面上下文并派生相同密钥。Management API 应保持受保护状态，管理浏览器配置中不应加载不可信脚本或扩展，远程访问应使用
+HTTPS
+
+旧 `enc::v1::` 和 `plain::` 值会在成功读取后迁移到 `enc::v2::`
+。旧数据无法解密、重新加密或安全写入时，面板会删除未受保护的值，不会写入明文。加密存储不可用时，新敏感值只保留在内存中
+
+## 开发检查
+
+```bash
+bun install --frozen-lockfile
+bun run type-check
+bun run lint
+bun run lint:css
+bun test
+bun run build
+```
+
+`bun run lint` 将 warning 视为失败
 
 ## 常见问题
 
-- **无法连接 / 401**：确认 API 地址与管理密钥；远程访问可能需要服务端开启远程管理。
-- **反复输错密钥**：服务端可能对远程 IP 进行临时封禁。
-- **日志页面不显示**：需要在“基础设置”里开启“写入日志文件”，导航项才会出现。
-- **功能提示不支持**：多为后端版本较旧或接口未启用/不存在（如：认证文件模型列表、排除模型、日志相关接口）。
-- **OpenAI 提供商测试失败**：测试在浏览器侧执行，会受网络与 CORS 影响；这里失败不一定代表服务端不可用。
-
-## 开发命令
-
-```bash
-bun run dev          # 启动开发服务器
-bun run build        # tsc + Vite 构建
-bun run preview      # 本地预览 dist
-bun run lint         # ESLint（warnings 视为失败）
-bun run lint:css     # CSS/SCSS 的 Stylelint 检查
-bun run type-check   # tsc --noEmit
-```
+- 无法连接或收到 401：检查 API 地址与管理密钥；远程访问还需要 `allow-remote: true`
+- 反复认证失败：后端可能临时限制来源 IP 或凭证
+- 日志页面不存在：在基础设置中启用文件日志
+- 功能提示不支持：检查后端版本和对应 Management API 路由是否启用
+- OpenAI 兼容提供商的浏览器测试失败：分别检查 Provider 网络与 CORS，不要把该结果直接等同于后端连接能力
+- `/management.html` 返回 404：检查控制面板是否启用，并确认解析出的静态文件路径中存在 `management.html`
 
 ## 贡献
 
-欢迎提 Issue 与 PR。建议附上：
-
-- 复现步骤（服务端版本 + UI 版本）
-- UI 改动截图
-- 验证记录（`bun run lint`、`bun run type-check`）
+Issue 和 Pull Request 应包含后端版本、面板版本、复现步骤、视觉变化截图和相关开发检查输出
 
 ## 许可证
 
-MIT
+[MIT](LICENSE)

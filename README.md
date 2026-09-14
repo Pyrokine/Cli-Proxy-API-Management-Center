@@ -1,189 +1,205 @@
 # CLI Proxy API Management Center
 
-A single-file Web UI (React + TypeScript) for operating and troubleshooting the **CLI Proxy API** via its **Management
-API** (config, credentials, logs, and usage).
+A single-file React Web UI for operating and troubleshooting [CLI Proxy API](https://github.com/Pyrokine/CLIProxyAPI)
+through its Management API
 
 [中文文档](README_CN.md)
 
-**Main Project**: https://github.com/Pyrokine/CLIProxyAPI  
-**Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: CLIProxyAPI ≥ v7.2.67-aug.2 (recommended latest)
+- Example: https://remote.router-for.me/
+- Management API base path: `/v0/management`
+- Minimum compatible backend: CLIProxyAPI `v7.2.67-aug.2`
 
-Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the
-service is running.
+The panel manages the backend. It does not proxy model traffic
 
-## What this is (and isn’t)
+## Use the panel
 
-- This repository is the Web UI only. It talks to the CLI Proxy API **Management API** (`/v0/management`) to read/update
-  config, upload credentials, view logs, and inspect usage.
-- It is **not** a proxy and does not forward traffic.
+### Panel managed by CLI Proxy API
 
-## Quick start
+CLI Proxy API serves the panel at:
 
-### Option A: Use the Web UI bundled in CLI Proxy API (recommended)
+```text
+http://<host>:<api_port>/management.html
+```
 
-1. Start your CLI Proxy API service.
-2. Open: `http://<host>:<api_port>/management.html`
-3. Enter your **management key** and connect.
+Enter the management key after opening the page. The panel derives the API address from the current URL and also accepts
+a manual address
 
-The address is auto-detected from the current page URL; manual override is supported.
+By default, CLI Proxy API downloads `management.html` from the latest release of this repository and periodically checks
+for updates. The relevant backend settings are:
 
-### Option B: Run the dev server
+```yaml
+remote-management:
+  disable-control-panel: false
+  disable-auto-update-panel: false
+  panel-github-repository: "https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
+```
+
+Set `disable-auto-update-panel: true` when the deployed panel must remain fixed. Set `disable-control-panel: true` to
+disable both the asset download and `/management.html` route
+
+### Install or update `management.html` manually
+
+Download `management.html` from a GitHub Release, or build `dist/index.html` and rename it. Place the file where CLI
+Proxy API resolves its management asset:
+
+1. `MANAGEMENT_STATIC_PATH`, when set. It may name the file itself or its containing directory
+2. `<writable-data-dir>/static/management.html`, when the backend has a writable data directory
+3. `<config-dir>/static/management.html` otherwise
+
+Replacing that file updates the panel served by the backend. Reload the page to fetch the new HTML
+
+### Run the development server
 
 ```bash
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Open `http://localhost:5173`, then connect to your CLI Proxy API backend instance.
+Open `http://localhost:5173`, then connect to a CLI Proxy API instance
 
-### Option C: Build a single HTML file
+### Build the single-file panel
 
 ```bash
 bun install --frozen-lockfile
 bun run build
 ```
 
-- Output: `dist/index.html` (all assets are inlined).
-- For CLI Proxy API bundling, the release workflow renames it to `management.html`.
-- To preview locally: `bun run preview`
+The output is `dist/index.html`. JavaScript, CSS, fonts, and other build assets are inlined by `vite-plugin-singlefile`.
+The release workflow renames it to `management.html`
 
-Tip: opening `dist/index.html` via `file://` may be blocked by browser CORS; serving it (preview/static server) is more
-reliable.
+Use `bun run preview` instead of opening the file through `file://`, where browser CORS rules can block requests
 
-## Connecting to the server
+## Connect to CLI Proxy API
 
-### API address
+The panel accepts addresses such as:
 
-You can enter any of the following; the UI will normalize it:
+```text
+localhost:8317
+http://192.168.1.10:8317
+https://example.com:8317
+http://example.com:8317/v0/management
+```
 
-- `localhost:8317`
-- `http://192.168.1.10:8317`
-- `https://example.com:8317`
-- `http://example.com:8317/v0/management` (also accepted; the suffix is removed internally)
+A trailing `/v0/management` is removed during normalization
 
-### Management key (not the same as API keys)
+The management key is sent as:
 
-The management key is sent with every request as:
+```http
+Authorization: Bearer <MANAGEMENT_KEY>
+```
 
-- `Authorization: Bearer <MANAGEMENT_KEY>` (default)
+This key protects Management API requests. It is separate from the proxy `api-keys` managed inside the panel
 
-This is different from the proxy `api-keys` you manage inside the UI (those are for client requests to the proxy
-endpoints).
-
-### Remote management
-
-If you connect from a non-localhost browser, the server must allow remote management:
+Remote browsers require the backend to allow remote management:
 
 ```yaml
 remote-management:
   allow-remote: true
 ```
 
-See `api.md` for the full authentication rules, server-side limits, and edge cases.
+See the [Management API documentation](https://help.router-for.me/management/api) for authentication rules and
+server-side limits
 
-## What you can manage (mapped to the UI pages)
+## Features
 
-- **Dashboard**: connection status, server version/build date, quick counts, model availability snapshot.
-- **Basic Settings**: debug, proxy URL, request retry, quota fallback (switch project or preview models when limits
-  reached), usage statistics, request logging, file logging, WebSocket auth.
-- **API Keys**: manage proxy `api-keys` (add/edit/delete).
-- **AI Providers**:
-    - Gemini/Codex/Claude/Vertex key entries (base URL, headers, proxy, model aliases, excluded models, prefix).
-    - OpenAI-compatible providers (multiple API keys, custom headers, quick-fill presets, concurrency-safe drafts, model
-      alias import via `/v1/models`, and an optional browser-side "chat/completions" test).
-- **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view
-  supported models per credential (when the server supports it), recent request buckets, manage OAuth excluded models
-  (supports `*` wildcards), and configure OAuth model alias mappings.
-- **OAuth**: start OAuth/device flows for supported providers, poll status, optionally submit callback `redirect_url`;
-  includes iFlow cookie import.
-- **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Gemini CLI, Kimi and other
-  providers, with backend-scheduled refresh status and manual refresh.
-- **Usage**: requests/tokens charts (hour/day), per-API / per-model / per-credential breakdown, cached/reasoning token
-  breakdown, RPM/TPM window, all-time range resolution, service health cards, server-managed model pricing, and background
-  historical repricing status.
-- **Config**: edit `/config.yaml` in-browser with YAML highlighting + search, then save/reload.
-- **Logs**: tail logs with incremental polling, page auto-refresh interval control, search, hide management traffic,
-  show raw logs, clear logs, and download request error log files.
-- **System**: quick links, grouped runtime models from the Management API, model catalog source/refresh metadata, image
-  artifact cache settings, plugin release selection, latest local/remote version and build time, and release history with
-  update actions.
+- Dashboard: connection state, backend version and build time, quick totals, and model availability
+- Basic Settings: debug mode, proxy URL, retry behavior, quota fallback, usage collection, request/file logging, and
+  WebSocket authentication
+- API Keys: create, edit, and remove proxy client keys
+- AI Providers: manage Gemini, Codex, Claude, Vertex, and OpenAI-compatible entries, including base URLs, proxies,
+  headers, model aliases, excluded models, prefixes, multiple keys, and connection tests
+- Claude Code configuration: keep a valid selected model; otherwise prefer DeepSeek V4.1 Flash (`deepseek-flash`), then
+  `deepseek-v4-pro`, then the first configured model
+- Auth Files: upload, download, delete, filter, search, inspect supported models and recent request buckets, and manage
+  OAuth exclusions and model aliases
+- OAuth: start supported browser or device flows, poll their state, submit callback URLs where required, and import
+  iFlow cookies
+- Quota Management: inspect provider quotas, refresh state through backend tasks, and view active-reset availability and
+  expiration data supplied by the backend
+- Usage: request and token charts, API/model/credential breakdowns, RPM/TPM windows, service health, current catalog
+  prices, immutable request-time pricing receipts, and historical repricing status
+- Config: edit and reload `/config.yaml` with YAML highlighting and search
+- Logs: incremental polling, refresh interval controls, filtering, raw log view, clear actions, and request-error file
+  downloads
+- System: runtime models, catalog source and refresh metadata, image artifact cache settings, plugin releases, backend
+  versions, and release history
 
-## Tech Stack
+## Technology and toolchain
 
-- React 19 + TypeScript 6.0
-- Vite 8 (single-file build)
-- Zustand (state management)
-- Axios (HTTP client)
-- react-router-dom v7 (HashRouter)
-- Chart.js (data visualization)
-- CodeMirror 6 (YAML editor)
-- SCSS Modules (styling)
-- i18next (internationalization)
+- React 19.3
+- TypeScript native 7.0.2 for application code, tests, type checking, and builds
+- TypeScript 6 compatibility package for `typescript-eslint` only, retained until its supported compiler API includes
+  TypeScript 7
+- Vite 8.3 with `vite-plugin-singlefile`
+- Bun 1.4.0 as the package manager and test runtime
+- ESLint 10, `typescript-eslint` 8.70, and Stylelint 17
+- Zustand, Axios, react-router-dom 7, Chart.js, CodeMirror 6, SCSS Modules, and i18next
 
-## Internationalization
+The root TypeScript project includes `src` and `tests`. `vite.config.ts` is checked separately through
+`tsconfig.node.json`
 
-Currently, supports four languages:
+The build target is `ES2020`. The interface supports current Chrome, Firefox, Safari, and Edge releases, including
+responsive mobile and tablet layouts
 
-- English (en)
-- Simplified Chinese (zh-CN)
-- Traditional Chinese (zh-TW)
-- Russian (ru)
+## Version and release behavior
 
-The UI language is automatically detected from browser settings and can be manually switched at the bottom of the page.
+The footer version is resolved at build time in this order:
 
-## Browser Compatibility
+1. `VERSION` environment variable
+2. `git describe`
+3. A `package.json` version other than `0.0.0`
+4. `dev`
 
-- Build target: `ES2020`
-- Supports modern browsers (Chrome, Firefox, Safari, Edge)
-- Responsive layout for mobile and tablet access
+The build also embeds `__COMPAT_MIN_SERVER__`, which lets the panel report an incompatible backend
 
-## Build & release notes
+Tags matching `v*` trigger `.github/workflows/release.yml`. The workflow installs the frozen Bun lockfile, runs type
+checking, ESLint, tests, and the build, then publishes `dist/management.html`
 
-- Vite produces a **single HTML** output (`dist/index.html`) with all assets inlined (via `vite-plugin-singlefile`).
-- Tagging `vX.Y.Z` triggers `.github/workflows/release.yml` to publish `dist/management.html`.
-- The UI version shown in the footer is injected at build time (env `VERSION`, git tag, or `package.json` fallback).
-- The panel also carries a minimum backend compatibility marker (`__COMPAT_MIN_SERVER__`) so stale CPA builds can be
-  flagged in the UI.
+Local augmented releases use `v<upstream>-aug.N`; the first release based on a new upstream version uses `aug.1`
 
-## Security notes
+## Security
 
-- The management key is stored in browser `localStorage` using a lightweight obfuscation format (`enc::v1::...`) to
-  avoid plaintext storage; treat it as sensitive.
-- Use a dedicated browser profile/device for management. Be cautious when enabling remote management and evaluate its
-  exposure surface.
+Sensitive browser storage uses `enc::v2::` values protected with AES-256-GCM and a random 12-byte IV. The non-exportable
+key is derived with PBKDF2-SHA-256 using 100,000 iterations and browser origin material
+
+The browser security boundary still applies: same-origin scripts can access the page context and derive the same key
+material. Protect the Management API, avoid untrusted scripts and extensions in the management profile, and use HTTPS
+for remote access
+
+Legacy `enc::v1::` and `plain::` values are migrated to `enc::v2::` after a successful read. If legacy data cannot be
+decrypted, re-encrypted, or stored safely, the panel removes the unprotected value instead of writing plaintext. When
+encrypted storage is unavailable, new sensitive values remain memory-only
+
+## Development checks
+
+```bash
+bun install --frozen-lockfile
+bun run type-check
+bun run lint
+bun run lint:css
+bun test
+bun run build
+```
+
+`bun run lint` treats warnings as failures
 
 ## Troubleshooting
 
-- **Can’t connect / 401**: confirm the API address and management key; remote access may require enabling remote
-  management in the server config.
-- **Repeated auth failures**: the server may temporarily block remote IPs.
-- **Logs page missing**: enable “Logging to file” in Basic Settings; the navigation item is shown only when file logging
-  is enabled.
-- **Some features show “unsupported”**: the backend may be too old or the endpoint is disabled/absent (common for model
-  lists per auth file, excluded models, logs).
-- **OpenAI provider test fails**: the test runs in the browser and depends on network/CORS of the provider endpoint; a
-  failure here does not always mean the server cannot reach it.
-
-## Development
-
-```bash
-bun run dev          # Vite dev server
-bun run build        # tsc + Vite build
-bun run preview      # serve dist locally
-bun run lint         # ESLint (fails on warnings)
-bun run lint:css     # Stylelint for CSS/SCSS
-bun run type-check   # tsc --noEmit
-```
+- Cannot connect or receives 401: verify the API address and management key; remote access also requires
+  `allow-remote: true`
+- Repeated authentication failures: the backend may temporarily limit the source IP or credential
+- Logs page is absent: enable file logging in Basic Settings
+- A feature reports unsupported: check the backend version and whether the corresponding Management API route is enabled
+- OpenAI-compatible provider test fails in the browser: verify provider network access and CORS separately from backend
+  connectivity
+- `/management.html` returns 404: verify that the control panel is enabled and that the resolved asset path contains
+  `management.html`
 
 ## Contributing
 
-Issues and PRs are welcome. Please include:
-
-- Reproduction steps (server version + UI version)
-- Screenshots for UI changes
-- Verification notes (`bun run lint`, `bun run type-check`)
+Include the backend version, panel version, reproduction steps, screenshots for visual changes, and the relevant
+development-check output in issues and pull requests
 
 ## License
 
-MIT
+[MIT](LICENSE)
