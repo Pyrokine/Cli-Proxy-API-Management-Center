@@ -326,7 +326,12 @@
 }
 
 .modelName {
+    min-width: 0;
+    overflow: visible;
     font-size: $font-size-sm;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
 }
 
 .groupMeta,

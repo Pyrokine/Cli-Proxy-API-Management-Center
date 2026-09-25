@@ -1,6 +1,5 @@
 import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
 import {IconBot, IconKey, IconSatellite} from '@/components/ui/icons'
-import {useApiKeysResolver} from '@/hooks/useApiKeysResolver'
 import {apiKeysApi, authFilesApi, providersApi} from '@/services/api'
 import {useAuthStore, useConfigStore, useModelsStore} from '@/stores'
 import {formatDateTime} from '@/utils/format'
@@ -51,10 +50,10 @@ export function DashboardPage() {
     const apiBase          = useAuthStore((state) => state.apiBase)
     const config           = useConfigStore((state) => state.config)
 
-    const models               = useModelsStore((state) => state.models)
-    const modelsLoading        = useModelsStore((state) => state.loading)
-    const modelsError          = useModelsStore((state) => state.error)
-    const fetchModelsFromStore = useModelsStore((state) => state.fetchModels)
+    const models               = useModelsStore((state) => state.runtimeModels)
+    const modelsLoading        = useModelsStore((state) => state.runtimeLoading)
+    const modelsError          = useModelsStore((state) => state.runtimeError)
+    const fetchModelsFromStore = useModelsStore((state) => state.fetchRuntimeModels)
 
     const [stats, setStats] = useState<{
         apiKeys: number | null
@@ -76,15 +75,10 @@ export function DashboardPage() {
     const [timeOfDay, setTimeOfDay]                       = useState<TimeOfDay>(getTimeOfDay)
     const [currentTime, setCurrentTime]                   = useState(() => new Date())
 
-    const { resolve: resolveApiKeys, clearCache: clearApiKeysCache } = useApiKeysResolver()
-    const modelsRequestGeneration                                    = useRef(0)
-    const invalidateModelsRequest                                    = useCallback(() => {
+    const modelsRequestGeneration = useRef(0)
+    const invalidateModelsRequest = useCallback(() => {
         ++modelsRequestGeneration.current
     }, [])
-
-    useEffect(() => {
-        clearApiKeysCache()
-    }, [apiBase, config?.apiKeys, clearApiKeysCache])
 
     useEffect(() => {
         const id = window.setInterval(() => {
@@ -106,20 +100,15 @@ export function DashboardPage() {
 
         setModelsRequestLoading(true)
         try {
-            const apiKeys = await resolveApiKeys()
-            if (requestGeneration !== modelsRequestGeneration.current) {
-                return
-            }
-            const primaryKey = apiKeys[0]
-            await fetchModelsFromStore(apiBase, primaryKey)
+            await fetchModelsFromStore(apiBase)
         } catch {
-            // Ignore model fetch errors on dashboard
+            // 共享状态保存的请求错误会显示在模型统计卡片中
         } finally {
             if (requestGeneration === modelsRequestGeneration.current) {
                 setModelsRequestLoading(false)
             }
         }
-    }, [pageLayerStatus, connectionStatus, apiBase, resolveApiKeys, fetchModelsFromStore])
+    }, [pageLayerStatus, connectionStatus, apiBase, fetchModelsFromStore])
 
     useEffect(() => {
         let cancelled    = false
@@ -217,7 +206,7 @@ export function DashboardPage() {
             icon: <IconSatellite size={24} />,
             path: '/system',
             loading: modelsRequestLoading || modelsLoading,
-            sublabel: t('dashboard.available_models_desc'),
+            sublabel: modelsError || t('dashboard.available_models_desc'),
         },
     ]
 

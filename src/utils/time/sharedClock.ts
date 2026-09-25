@@ -1,4 +1,4 @@
-import {MINUTE_MS} from './durations'
+import {MINUTE_MS, SECOND_MS} from './durations'
 
 interface SharedClock {
     subscribe(listener: () => void): () => void
@@ -62,4 +62,5 @@ export function createSharedClock(options: SharedClockOptions = {}): TestableSha
     }
 }
 
+export const SECOND_CLOCK: SharedClock = createSharedClock({intervalMs: SECOND_MS})
 export const MINUTE_CLOCK: SharedClock = createSharedClock()

@@ -24,6 +24,7 @@ import {type Release, releasesApi} from '@/services/api/releases'
 import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useThemeStore} from '@/stores'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
 import {formatDateTime} from '@/utils/format'
+import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
 import {classifyModels, getLocalizedOtherLabel} from '@/utils/models'
 import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -48,40 +49,13 @@ const MIN_UPDATE_CHECK_INTERVAL_MINUTES     = 30
 
 type VersionCheckTarget = 'panel' | 'cpa'
 
-const parseVersionSegments = (version?: string | null) => {
-    if (!version) {
-        return null
-    }
-    const cleaned = version.trim().replace(/^v/i, '')
-    if (!cleaned) {
-        return null
-    }
-    const parts = cleaned
-        .split(/[^0-9]+/)
-        .filter(Boolean)
-        .map((segment) => Number.parseInt(segment, 10))
-        .filter(Number.isFinite)
-    return parts.length ? parts : null
-}
-
 const compareVersions = (latest?: string | null, current?: string | null) => {
-    const latestParts  = parseVersionSegments(latest)
-    const currentParts = parseVersionSegments(current)
+    const latestParts  = parseLooseSemver(latest ?? '')
+    const currentParts = parseLooseSemver(current ?? '')
     if (!latestParts || !currentParts) {
         return null
     }
-    const length = Math.max(latestParts.length, currentParts.length)
-    for (let i = 0; i < length; i++) {
-        const l = latestParts[i] || 0
-        const c = currentParts[i] || 0
-        if (l > c) {
-            return 1
-        }
-        if (l < c) {
-            return -1
-        }
-    }
-    return 0
+    return compareLooseSemver(latestParts, currentParts)
 }
 
 export function SystemPage() {

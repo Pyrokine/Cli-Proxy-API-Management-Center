@@ -1247,7 +1247,7 @@ export function ModelManagementPage() {
                     <strong>{modelRows.length}</strong>
                     <span>{t(
                         'model_management.total_models_hint',
-                        { defaultValue: '来自后端 models.json 的完整模型表' },
+                        { defaultValue: '合并 models.json 与运行时发现的模型' },
                     )}</span>
                     <span>{t(
                         'model_management.user_created_summary',
@@ -1306,9 +1306,9 @@ export function ModelManagementPage() {
                             <span className={styles.sourceHelp}>
                                 {t('model_management.source_help', {
                                     defaultValue:
-                                        '模型清单、价格、别名和启用状态都来自后端 models.json；' +
-                                        '可请求由启用状态、当前服务支持情况和 API key / ' +
-                                        '凭证访问规则共同决定',
+                                        '已保存的模型、价格、别名和启用状态来自后端 models.json；' +
+                                        '运行时发现结果会追加尚未保存的模型。可请求由启用状态、' +
+                                        '当前服务支持情况和 API key / 凭证访问规则共同决定',
                                 })}
                             </span>
                         </div>

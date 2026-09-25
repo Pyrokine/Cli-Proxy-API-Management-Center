@@ -37,6 +37,7 @@ import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import {buildClaudeQuotaWindows, buildKimiQuotaRows} from '@/utils/quota/builders'
 import {resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
+import {parseDevinQuotaPayload} from '@/utils/quota/devin'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
 import {parseXaiQuotaPayload} from '@/utils/quota/xaiBilling'
@@ -146,7 +147,7 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                 const rejectedAt = new Date().toISOString()
                 for (const [credentialKey, entry] of Object.entries(status.credentials)) {
                     const fileName = entry.file_name?.trim() || credentialKey
-                    const metaKey  = quotaCredentialKey(entry.type, fileName)
+                    const metaKey  = quotaCredentialKey(entry.type, fileName, entry.auth_index)
                     seenKeys.add(metaKey)
 
                     let data: unknown
@@ -475,7 +476,7 @@ function refreshMetaKeysForTarget(target: QuotaRefreshTaskTarget, meta: Record<s
     const fileName = target.file_name?.trim()
     const provider = target.provider?.trim()
     if (entryKey) {
-        keys.add(entryKey)
+        return [entryKey]
     }
     if (fileName && provider) {
         keys.add(quotaCredentialKey(provider, fileName))
@@ -495,10 +496,10 @@ function refreshMetaKeysForTask(task: QuotaRefreshTask, meta: Record<string, Ent
 }
 
 function emptyMetaForKey(metaKey: string): EntryMeta {
-    const separatorIndex = metaKey.indexOf('::')
+    const [type = '', fileName = metaKey] = metaKey.split('::')
     return {
-        fileName: separatorIndex >= 0 ? metaKey.slice(separatorIndex + 2) : metaKey,
-        type: separatorIndex >= 0 ? metaKey.slice(0, separatorIndex) : '',
+        fileName,
+        type,
         lastRefresh: null,
         nextRefresh: null,
         status: 'idle',
@@ -568,6 +569,13 @@ function mapQuotaPayload(type: string, data: unknown): QuotaCachePayload {
             return { provider: type, value: mapClaude(data) }
         case 'codex':
             return { provider: type, value: mapCodex(data) }
+        case 'devin': {
+            const value = parseDevinQuotaPayload(data)
+            if (!value) {
+                throw invalidQuotaPayload('Devin')
+            }
+            return { provider: type, value }
+        }
         case 'gemini-cli':
             return { provider: type, value: mapGemini(data) }
         case 'kimi':

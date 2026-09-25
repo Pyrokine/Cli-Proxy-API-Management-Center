@@ -45,7 +45,8 @@ interface VersionHistoryModalProps {
 function parseVersion(tag: string) {
     const match = tag
         .replace(/^v/i, '')
-        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?:aug|augmented)\.(?<aug>\d+))?$/i)
+        .replace(/\+[0-9a-z-]+(?:\.[0-9a-z-]+)*$/i, '')
+        .match(/^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?:aug|augmented)\.(?<aug>\d+)|-sync\.\d{8})?$/i)
     if (!match?.groups) {
         return null
     }

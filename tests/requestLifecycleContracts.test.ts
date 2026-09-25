@@ -160,7 +160,7 @@ describe('request cancellation contracts', () => {
     })
 
     test('keeps component request lifetimes abortable and polling serial', () => {
-        expect(logsPageSource).toContain('logRequestControllerRef.current?.abort()')
+        expect(logsPageSource).toContain('requests.logs.invalidate()')
         expect(versionModalSource).not.toContain('setInterval(async')
         expect(versionModalSource).toContain('UPDATE_POLL_FAILURE_LIMIT')
         expect(eventsCardSource).toContain('.getEvents(eventsParams, { signal: controller.signal })')

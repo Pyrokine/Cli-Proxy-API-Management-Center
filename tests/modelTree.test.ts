@@ -41,6 +41,39 @@ describe('model tree metadata', () => {
                                                        })
     })
 
+    test('classifies the current Claude, GPT, Qwen, Gemini, and Grok model families', () => {
+        expect(getModelMetadata('claude-opus-5-5')).toEqual({
+                                                                    provider: 'Claude',
+                                                                    generation: 'Claude 5.5',
+                                                                    family: 'Opus',
+                                                                })
+        expect(getModelMetadata('gpt-6-sol')).toEqual({
+                                                          provider: 'GPT',
+                                                          generation: 'GPT-6',
+                                                          family: 'GPT-6',
+                                                      })
+        expect(getModelMetadata('qwen3.8-max')).toEqual({
+                                                            provider: 'Qwen',
+                                                            generation: 'Qwen 3.8',
+                                                            family: 'Max',
+                                                        })
+        expect(getModelMetadata('gemini-3.1-flash-lite-image')).toEqual({
+                                                                           provider: 'Gemini',
+                                                                           generation: 'Gemini 3.1',
+                                                                           family: 'Flash',
+                                                                       })
+        expect(getModelMetadata('grok-4.7')).toEqual({
+                                                         provider: 'Grok',
+                                                         generation: 'Grok 4.7',
+                                                         family: 'Grok 4.7',
+                                                     })
+        expect(getModelMetadata('grok-imagine-image-2.0')).toEqual({
+                                                                      provider: 'Grok',
+                                                                      generation: 'Grok Imagine',
+                                                                      family: 'Image',
+                                                                  })
+    })
+
     test('groups current DeepSeek models from catalog metadata', () => {
         const tree = buildModelTree([
                                         { model: 'deepseek-flash', provider: 'DeepSeek', group: 'V4.1' },

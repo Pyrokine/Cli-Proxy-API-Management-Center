@@ -4,7 +4,7 @@ import {useState} from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string
-    hint?: string
+    hint?: ReactNode
     error?: string
     leftElement?: ReactNode
     rightElement?: ReactNode

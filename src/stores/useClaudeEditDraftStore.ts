@@ -38,6 +38,7 @@ interface ClaudeEditDraftState extends DraftSliceState<ClaudeEditDraft> {
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
+    fingerprintProfile: '',
     weight: undefined,
     prefix: '',
     baseUrl: '',

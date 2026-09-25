@@ -1,6 +1,7 @@
 import type {
     ApiKeyEntry,
     CloakConfig,
+    CredentialOverrides,
     GeminiKeyConfig,
     ModelAlias,
     OpenAIProviderConfig,
@@ -133,8 +134,27 @@ const normalizePriority = (record: Record<string, unknown> | null): number | und
     return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const normalizeCredentialOverrides = (record: Record<string, unknown> | null): CredentialOverrides => {
+    const overrides: CredentialOverrides = {}
+    const cooling = record?.['disable-cooling']
+    const retry = record?.['request-retry']
+    if (cooling !== undefined && cooling !== null) {
+        if (typeof cooling !== 'boolean') {
+            throw new Error('disable-cooling must be a boolean')
+        }
+        overrides.disableCooling = cooling
+    }
+    if (retry !== undefined && retry !== null) {
+        if (typeof retry !== 'number' || !Number.isSafeInteger(retry)) {
+            throw new Error('request-retry must be a safe integer')
+        }
+        overrides.requestRetry = retry
+    }
+    return overrides
+}
+
 const normalizeProviderKeyBase = (record: Record<string, unknown> | null): Partial<ProviderKeyConfig> => {
-    const config: Partial<ProviderKeyConfig> = {}
+    const config: Partial<ProviderKeyConfig> = normalizeCredentialOverrides(record)
     const authIndex                          = record?.['auth-index'] ?? record?.authIndex
     if (typeof authIndex === 'string' && authIndex.trim()) {
         config.authIndex = authIndex.trim()
@@ -183,6 +203,17 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
     }
 }
 
+export const normalizeClaudeFingerprintProfile = (value: unknown): string => {
+    if (value === undefined) {
+        return ''
+    }
+    if (typeof value !== 'string') {
+        throw new Error('Claude fingerprint-profile must be a string')
+    }
+    const normalized = value.trim().toLowerCase()
+    return normalized === 'oauth-cli' ? 'claude-code-cli' : normalized
+}
+
 const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => {
     if (item === undefined || item === null) {
         return null
@@ -200,10 +231,6 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
     if (websockets !== undefined) {
         config.websockets = websockets
     }
-    const disableCooling = normalizeBoolean(record?.['disable-cooling'])
-    if (disableCooling !== undefined) {
-        config.disableCooling = disableCooling
-    }
     if (proxyUrl) {
         config.proxyUrl = String(proxyUrl)
     }
@@ -218,6 +245,10 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
     const excludedModels = normalizeExcludedModels(record?.['excluded-models'])
     if (excludedModels.length) {
         config.excludedModels = excludedModels
+    }
+
+    if (record && Object.prototype.hasOwnProperty.call(record, 'fingerprint-profile')) {
+        config.fingerprintProfile = normalizeClaudeFingerprintProfile(record['fingerprint-profile'])
     }
 
     const cloakRaw = record?.cloak
@@ -306,6 +337,7 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
     const authIndex = provider['auth-index']
 
     const result: OpenAIProviderConfig = {
+        ...normalizeCredentialOverrides(provider),
         name: String(name),
         baseUrl: String(baseUrl),
         apiKeyEntries,

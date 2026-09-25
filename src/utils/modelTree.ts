@@ -178,7 +178,7 @@ function geminiFamily(lower: string): string | null {
 }
 
 function qwenGeneration(lower: string): string | null {
-    const qwen = lower.match(/^qwen(?<version>\d+)/)
+    const qwen = lower.match(/^qwen(?<version>\d+(?:\.\d+)?)/)
     if (qwen?.groups?.version) {
         return `Qwen ${qwen.groups.version}`
     }
@@ -247,6 +247,12 @@ export function getModelMetadata(model: string): ModelMetadata {
         }
     }
     if (provider === 'Grok') {
+        if (lower.startsWith('grok-imagine-image')) {
+            return { provider, generation: 'Grok Imagine', family: 'Image' }
+        }
+        if (lower.startsWith('grok-imagine-video')) {
+            return { provider, generation: 'Grok Imagine', family: 'Video' }
+        }
         const generation = lower.match(/^grok-(?<version>\d+(?:\.\d+)?)/)?.groups?.version
         return {
             provider,
