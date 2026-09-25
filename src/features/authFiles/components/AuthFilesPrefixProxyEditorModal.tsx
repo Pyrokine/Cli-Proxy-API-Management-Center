@@ -1,4 +1,7 @@
 import {Button} from '@/components/ui/Button'
+import {CredentialOverrideFields} from '@/components/providers/CredentialOverrideFields'
+import type {CredentialOverrides} from '@/types'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
@@ -10,8 +13,9 @@ import type {
 } from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 import {useNotificationStore} from '@/stores'
 import {MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
-import {useCallback, useState} from 'react'
-import {useTranslation} from 'react-i18next'
+import {type MouseEvent, useCallback, useState} from 'react'
+import {Trans, useTranslation} from 'react-i18next'
+import {Link, useNavigate} from 'react-router-dom'
 import styles from './AuthFilesPrefixProxyEditorModal.module.scss'
 
 type AuthFilesPrefixProxyEditorModalProps = {
@@ -19,7 +23,8 @@ type AuthFilesPrefixProxyEditorModalProps = {
     dirty: boolean
     onClose: () => void
     onChange: (field: PrefixProxyEditorField, value: PrefixProxyEditorFieldValue) => void
-    onBooleanChange: (field: 'disableCooling' | 'usingApi', value: boolean) => void
+    onBooleanChange: (value: boolean) => void
+    onOverridesChange: (overrides: CredentialOverrides) => void
     onSave: () => void | Promise<void>
 }
 
@@ -55,20 +60,30 @@ export function AuthFilesPrefixProxyEditorModal({
                                                     onClose,
                                                     onChange,
                                                     onBooleanChange,
+                                                    onOverridesChange,
                                                     onSave,
                                                 }: AuthFilesPrefixProxyEditorModalProps) {
     const { t }              = useTranslation()
+    const navigate           = useNavigate()
     const showConfirmation   = useNotificationStore((state) => state.showConfirmation)
     const readOnly           = editor?.readOnly ?? false
     const hasValidationError = Boolean(
-        editor?.weightError || (editor?.headersTouched && editor.headersError),
+        editor?.weightError || (editor?.headersTouched && editor.headersError) ||
+        (editor?.requestRetryTouched && getCredentialRetryValidationKey(editor.requestRetry)),
     )
     const canSave            = Boolean(
         editor?.json && dirty && !readOnly && !editor.saving && !editor.loading && !hasValidationError,
     )
-    const requestClose       = useCallback(() => {
-        if (!dirty || readOnly) {
+    const requestClose = useCallback((afterClose?: () => void) => {
+        if (editor?.saving) {
+            return
+        }
+        const close = () => {
             onClose()
+            afterClose?.()
+        }
+        if (!dirty || readOnly) {
+            close()
             return
         }
         showConfirmation({
@@ -77,9 +92,13 @@ export function AuthFilesPrefixProxyEditorModal({
                              confirmText: t('common.leave'),
                              cancelText: t('common.stay'),
                              variant: 'danger',
-                             onConfirm: onClose,
+                             onConfirm: close,
                          })
-    }, [dirty, onClose, readOnly, showConfirmation, t])
+    }, [dirty, editor?.saving, onClose, readOnly, showConfirmation, t])
+    const handleRoutingSettingsClick = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault()
+        requestClose(() => navigate('/config?field=routingStrategy'))
+    }, [navigate, requestClose])
 
     return (
         <Modal
@@ -94,7 +113,7 @@ export function AuthFilesPrefixProxyEditorModal({
                 )
                 : ''
             }
-            onClose={requestClose}
+            onClose={() => requestClose()}
             width='min(980px, 92vw)'
             className={styles.modal}
             closeDisabled={editor?.saving}
@@ -102,7 +121,7 @@ export function AuthFilesPrefixProxyEditorModal({
             closeLabel={t('common.close')}
             footer={
                 <>
-                    <Button variant='secondary' onClick={requestClose} disabled={editor?.saving}>
+                    <Button variant='secondary' onClick={() => requestClose()} disabled={editor?.saving}>
                         {t(readOnly ? 'common.close' : 'common.cancel')}
                     </Button>
                     {!readOnly && (
@@ -157,7 +176,22 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        step={1}
                                                        max={MAX_CREDENTIAL_WEIGHT}
                                                        placeholder='1'
-                                                       hint={t('auth_files.weight_hint')}
+                                                       hint={
+                                                           <Trans
+                                                               i18nKey='auth_files.weight_hint'
+                                                               components={{
+                                                                   settingsLink: (
+                                                                       <Link
+                                                                           className={styles.settingsLink}
+                                                                           to='/config?field=routingStrategy'
+                                                                           onClick={handleRoutingSettingsClick}
+                                                                           aria-disabled={editor.saving}
+                                                                           tabIndex={editor.saving ? -1 : undefined}
+                                                                       />
+                                                                   ),
+                                                               }}
+                                                           />
+                                                       }
                                                        error={editor.weightError ?? undefined}
                                                        value={editor.weight}
                                                        onChange={(event) => onChange('weight', event.target.value)}
@@ -171,25 +205,25 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        onChange={(event) => onChange('note', event.target.value)}
                                                        readOnly={readOnly}
                                                    />
-                                               </div>
-                                               <div className={styles.switches}>
-                                                   <ToggleSwitch
-                                                       checked={editor.disableCooling}
+                                                   <CredentialOverrideFields
+                                                       disableCooling={editor.disableCooling}
+                                                       requestRetry={editor.requestRetry}
                                                        disabled={editor.saving || readOnly}
-                                                       onChange={(value) => onBooleanChange('disableCooling', value)}
-                                                       label={t('auth_files.disable_cooling_label')}
+                                                       onChange={onOverridesChange}
                                                    />
-                                                   {editor.supportsUsingApi && (
+                                               </div>
+                                               {editor.supportsUsingApi && (
+                                                   <div className={styles.switches}>
                                                        <ToggleSwitch
                                                            checked={editor.usingApi}
                                                            disabled={editor.saving || readOnly}
-                                                           onChange={(value) => onBooleanChange('usingApi', value)}
+                                                           onChange={onBooleanChange}
                                                            label={t('auth_files.using_api_label', {
                                                                defaultValue: 'Use official xAI API (using_api)',
                                                            })}
                                                        />
-                                                   )}
-                                               </div>
+                                                   </div>
+                                               )}
                                                <AuthFileExcludedModelsField
                                                    fileName={editor.fileName}
                                                    value={editor.excludedModelsText}

@@ -9,11 +9,10 @@ import {deriveAuthFileIdentity} from '@/features/authFiles/identity'
 import {useCredentialQuota} from '@/hooks/useCredentialQuota'
 import {createProviderEditModalState, providerEditTriggerId} from '@/hooks/useProviderEditPresentation'
 import type {AccountInspectionResult} from '@/services/api/accountInspection'
+import {authFilesApi} from '@/services/api/authFiles'
 import type {OAuthProvider} from '@/services/api/oauth'
-import {quotaApi} from '@/services/api/quota'
 import type {SummaryApiKeyStats, SummaryTimePoint} from '@/services/api/usage'
 import {useNotificationStore} from '@/stores/useNotificationStore'
-import {useQuotaStore} from '@/stores/useQuotaStore'
 import type {
     CodexRateLimitResetCredit,
     CodexResetCreditCountState,
@@ -25,12 +24,6 @@ import type {
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime, maskApiKey} from '@/utils/format'
 import {isModelScopedProviderError, parseProviderError} from '@/utils/providerError'
-import {
-    canUseCodexResetCredit,
-    codexResetCreditAvailability,
-    type CodexResetCreditAvailability,
-    runCodexResetCreditAction,
-} from '@/utils/quota/codexResetCredits'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {normalizePlanType} from '@/utils/quota/parsers'
 import {resolveCodexPlanType, resolveCodexSubscriptionActiveUntil} from '@/utils/quota/resolvers'
@@ -120,7 +113,8 @@ const authFileProviderLabel = (file: AuthFileItem): string =>
 const authFileQuotaProvider = (file: AuthFileItem): string =>
     String(file.type || inferProviderFromAuthFileName(file.name) || file.provider || '').trim()
 
-const authFileQuotaKey = (file: AuthFileItem): string => quotaCredentialKey(authFileQuotaProvider(file), file.name)
+const authFileQuotaKey = (file: AuthFileItem): string =>
+    quotaCredentialKey(authFileQuotaProvider(file), file.name, file.authIndex)
 
 const modelSearchTokens = (models?: GeminiKeyConfig['models']): string[] =>
     Array.isArray(models)
@@ -267,34 +261,6 @@ function formatCodexResetCreditCount(
     }
 }
 
-function codexResetCreditAvailabilityMessage(
-    availability: CodexResetCreditAvailability,
-    t: ReturnType<typeof useTranslation>['t'],
-): string {
-    switch (availability) {
-        case 'none':
-            return t('auth_files.quota_reset_codex_unavailable_zero', {
-                defaultValue: 'No manual reset is currently applicable to this account',
-            })
-        case 'invalid':
-            return t('auth_files.quota_reset_codex_unavailable_invalid', {
-                defaultValue: 'The applicable manual reset count is invalid',
-            })
-        case 'conflict':
-            return t('auth_files.quota_reset_codex_unavailable_conflict', {
-                defaultValue: 'The applicable manual reset count conflicts between provider responses',
-            })
-        case 'missing':
-            return t('auth_files.quota_reset_codex_unavailable_missing', {
-                defaultValue: 'The provider did not return an applicable manual reset count',
-            })
-        default:
-            return t('auth_files.quota_reset_codex_hint', {
-                defaultValue: 'Consume one Codex manual reset credit',
-            })
-    }
-}
-
 function formatCodexResetCreditExpiry(
     credit: CodexRateLimitResetCredit,
     language: string,
@@ -397,14 +363,16 @@ export function VendorSection({
               closePrefixProxyEditor,
               handlePrefixProxyChange,
               handlePrefixProxyBooleanChange,
+              handlePrefixProxyOverridesChange,
               handlePrefixProxySave,
           } = useAuthFilesPrefixProxyEditor({
                                                 disableControls,
-                                                completeMutation: (name, fields) => onAuthFileMutation({
-                                                                                                           kind: 'fields',
-                                                                                                           name,
-                                                                                                           fields,
-                                                                                                       }),
+                                                completeMutation: (name, fields, authIndex) => onAuthFileMutation({
+                                                                                                                      kind: 'fields',
+                                                                                                                      name,
+                                                                                                                      authIndex,
+                                                                                                                      fields,
+                                                                                                                  }),
                                             })
 
     const VendorIcon     = vendor.icon
@@ -819,6 +787,7 @@ export function VendorSection({
             item.configIndex,
             item.entryIndex ?? 'root',
         ].join('-')
+        const controlLabel = `${vendor.label} ${authIndex || cardIdentity}`
         const editButtonId = providerEditTriggerId(vendor.id, cardIdentity)
         const onEdit       = vendor.editRoute
                              ? () => openProviderEditor(`${vendor.editRoute}/${item.configIndex}`, editButtonId)
@@ -847,6 +816,7 @@ export function VendorSection({
                     key={`api-${vendor.id}-${item.configIndex}-${item.entryIndex ?? 'root'}-${authIndex ?? ''}`}
                     category='api-key'
                     title={title}
+                    controlLabel={controlLabel}
                     highlightTitle={highlightMatch(title)}
                     alias={aliases[item.apiKey]}
                     onAliasChange={onAliasChange && item.apiKey
@@ -909,6 +879,7 @@ export function VendorSection({
                 key={`api-${vendor.id}-${item.configIndex}-${authIndex ?? ''}`}
                 category='api-key'
                 title={title}
+                controlLabel={controlLabel}
                 highlightTitle={highlightMatch(title)}
                 alias={aliases[item.apiKey]}
                 onAliasChange={onAliasChange && item.apiKey
@@ -1045,6 +1016,7 @@ export function VendorSection({
             {activeFlow?.type === 'oauth' && (
                 <div className={styles.flowArea}>
                     <OAuthLoginAction
+                        key={activeFlow.provider}
                         provider={activeFlow.provider}
                         disableControls={disableControls}
                         onSuccess={handleOAuthSuccess}
@@ -1107,6 +1079,7 @@ export function VendorSection({
                 onClose={closePrefixProxyEditor}
                 onChange={handlePrefixProxyChange}
                 onBooleanChange={handlePrefixProxyBooleanChange}
+                onOverridesChange={handlePrefixProxyOverridesChange}
                 onSave={handlePrefixProxySave}
             />
 
@@ -1173,10 +1146,11 @@ export function VendorSection({
                                 </div>
                             </div>
                             <div className={styles.grid}>
-                                {paginatedAuthFiles.map((file) => (
-                                    <div key={`af-${file.name}`}>
+                                {paginatedAuthFiles.map((file, index) => (
+                                    <div key={`af-${file.name}-${String(file.authIndex ?? index)}`}>
                                         <AuthFileCardWithQuota
                                             file={file}
+                                            position={(safeAuthFilePage - 1) * authFilePageSize + index + 1}
                                             scheduler={scheduler}
                                             disableControls={disableControls}
                                             onToggle={toggleAuthFile}
@@ -1215,9 +1189,10 @@ export function VendorSection({
 
 interface AuthFileCardWithQuotaProps {
     file: AuthFileItem
+    position: number
     scheduler: QuotaSchedulerLike
     disableControls: boolean
-    onToggle: (name: string, disabled: boolean) => Promise<void>
+    onToggle: (file: AuthFileItem, disabled: boolean) => Promise<void>
     onRefresh: () => Promise<void>
     onEdit: (file: AuthFileItem) => void | Promise<void>
     onDelete: (name: string) => void
@@ -1228,6 +1203,7 @@ interface AuthFileCardWithQuotaProps {
 
 function AuthFileCardWithQuota({
                                    file,
+                                   position,
                                    scheduler,
                                    disableControls,
                                    onToggle,
@@ -1238,11 +1214,11 @@ function AuthFileCardWithQuota({
                                    selected,
                                    onSelect,
                                }: AuthFileCardWithQuotaProps) {
-    const { t, i18n }               = useTranslation()
-    const showNotification          = useNotificationStore((s) => s.showNotification)
-    const showConfirmation          = useNotificationStore((s) => s.showConfirmation)
-    const [resetting, setResetting] = useState(false)
+    const { t, i18n }                         = useTranslation()
+    const showNotification                    = useNotificationStore((s) => s.showNotification)
+    const [tokenRefreshing, setTokenRefreshing] = useState(false)
     const quotaProvider             = authFileQuotaProvider(file)
+    const authIndex                 = String(file.authIndex ?? file['auth_index'] ?? '').trim()
     const {
               items: quotaItems,
               lastError: quotaError,
@@ -1258,7 +1234,7 @@ function AuthFileCardWithQuota({
               resetCreditExpiries: quotaResetCreditExpiries,
               resetCreditDetailsState: quotaResetCreditDetailsState,
               resetCreditExpiriesError: quotaResetCreditExpiriesError,
-          }                         = useCredentialQuota(quotaProvider, file.name)
+          }                         = useCredentialQuota(quotaProvider, file.name, authIndex)
     const recentStatusBar           = useMemo(
         () => calculateStatusBarDataFromRecentRequests(file.recentRequests ?? []),
         [file.recentRequests],
@@ -1273,14 +1249,12 @@ function AuthFileCardWithQuota({
     const nextRefreshTime                      = scheduler.getNextRefreshTime(quotaKey)
     const isRefreshing                         = scheduler.isRefreshing(quotaKey)
     const schedulerStatus                      = scheduler.getStatus(quotaKey)
-    const authIndex                            = String(file.authIndex ?? file['auth_index'] ?? '').trim()
     const providerLabel                        = authFileProviderLabel(file)
+    const controlLabel                         = `${providerLabel || t('credentials.auth_files')} ${
+        authIndex || `#${position}`
+    }`
     const isCodexProvider                      = quotaProvider.toLowerCase().includes('codex')
-    const readApplicableResetCreditCount       = useCallback(
-        () => useQuotaStore.getState().codexQuota[quotaKey]?.rateLimitResetCreditsApplicableAvailableCount,
-        [quotaKey],
-    )
-    const resetCreditAvailability              = codexResetCreditAvailability(quotaApplicableManualResetCount)
+    const isDevinProvider                      = ['devin', 'cognition'].includes(quotaProvider.toLowerCase())
     const providerError                        = parseProviderError(file.runtimeError ?? file.statusMessage)
     const runtimeObservedAt                    = providerError?.observedAt ?? dateLikeToISOString(file.updatedAt)
     const runtimeObservedAtMs                  = parseDateLike(runtimeObservedAt)?.getTime()
@@ -1329,100 +1303,59 @@ function AuthFileCardWithQuota({
         await onRefresh()
     }, [onRefresh, quotaKey, scheduler])
 
-    const handleResetQuota = useCallback(() => {
+    const handleManualTokenRefresh = useCallback(async () => {
         if (!authIndex) {
-            showNotification(t('auth_files.quota_reset_manual_missing_auth_index'), 'error')
+            showNotification(
+                t('credentials.manual_token_refresh_missing_identity', {
+                    defaultValue: 'Missing auth_index; token refresh is unavailable',
+                }),
+                'error',
+            )
             return
         }
-        if (isCodexProvider) {
-            const availability = codexResetCreditAvailability(readApplicableResetCreditCount())
-            if (availability !== 'available') {
-                showNotification(codexResetCreditAvailabilityMessage(availability, t), 'warning')
-                return
-            }
+        setTokenRefreshing(true)
+        try {
+            await authFilesApi.requestManualRefresh(file.name, authIndex)
+            await onRefresh()
+            showNotification(
+                t('credentials.manual_token_refresh_success', {
+                    name: formatAuthFileDisplayName(file.name),
+                    defaultValue: 'Token refreshed for "{{name}}"',
+                }),
+                'success',
+            )
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            showNotification(
+                t('credentials.manual_token_refresh_failed', {
+                    name: formatAuthFileDisplayName(file.name),
+                    message,
+                    defaultValue: 'Failed to refresh token for "{{name}}": {{message}}',
+                }),
+                'error',
+            )
+        } finally {
+            setTokenRefreshing(false)
         }
-
-        showConfirmation({
-                             title: t('auth_files.quota_reset_manual_title'),
-                             message: isCodexProvider ?
-                                      t(
-                                          'auth_files.quota_reset_codex_confirm',
-                                          { name: formatAuthFileDisplayName(file.name) },
-                                      ) :
-                                      t(
-                                          'auth_files.quota_reset_manual_confirm',
-                                          { name: formatAuthFileDisplayName(file.name) },
-                                      ),
-                             confirmText: t('auth_files.quota_reset_manual_confirm_button'),
-                             onConfirm: async () => {
-                                 const executeReset = async () => {
-                                     setResetting(true)
-                                     try {
-                                         await quotaApi.reset(authIndex)
-                                         await onRefresh()
-                                         showNotification(
-                                             t('auth_files.quota_reset_manual_success', {
-                                                 name: formatAuthFileDisplayName(file.name),
-                                             }),
-                                             'success',
-                                         )
-                                     } catch (error) {
-                                         const message = error instanceof Error ? error.message : String(error)
-                                         showNotification(
-                                             t('auth_files.quota_reset_manual_failed', {
-                                                 name: formatAuthFileDisplayName(file.name),
-                                                 message,
-                                             }),
-                                             'error',
-                                         )
-                                         throw error
-                                     } finally {
-                                         setResetting(false)
-                                     }
-                                 }
-
-                                 if (!isCodexProvider) {
-                                     await executeReset()
-                                     return
-                                 }
-                                 const availability = await runCodexResetCreditAction(
-                                     readApplicableResetCreditCount,
-                                     executeReset,
-                                 )
-                                 if (availability !== 'available') {
-                                     showNotification(
-                                         codexResetCreditAvailabilityMessage(availability, t),
-                                         'warning',
-                                     )
-                                 }
-                             },
-                         })
-    }, [
-                                             authIndex,
-                                             file.name,
-                                             isCodexProvider,
-                                             onRefresh,
-                                             readApplicableResetCreditCount,
-                                             showConfirmation,
-                                             showNotification,
-                                             t,
-                                         ])
+    }, [authIndex, file.name, onRefresh, showNotification, t])
 
     const refreshState = {
         lastRefreshTime,
         nextRefreshTime,
-        isRefreshing: isRefreshing || resetting,
+        isRefreshing,
         autoRefreshEnabled: scheduler.isAutoRefreshEnabled(),
-        status: resetting ? 'loading' : schedulerStatus,
+        status: schedulerStatus,
         onRefresh: () => void handleQuotaRefresh(),
-        onResetQuota: handleResetQuota,
-        resetQuotaDisabled:
-            !authIndex || resetting || (isCodexProvider && !canUseCodexResetCredit(quotaApplicableManualResetCount)),
-        resetQuotaTitle: !authIndex ?
-                         t('auth_files.quota_reset_manual_missing_auth_index') :
-                         isCodexProvider ?
-                         codexResetCreditAvailabilityMessage(resetCreditAvailability, t) :
-                         undefined,
+    }
+    const manualTokenRefreshState = {
+        isRefreshing: tokenRefreshing,
+        onRefresh: () => void handleManualTokenRefresh(),
+        disabled: !authIndex,
+        title: authIndex ?
+               t('credentials.manual_token_refresh', {defaultValue: 'Refresh token'}) :
+               t('credentials.manual_token_refresh_missing_identity', {
+                   defaultValue: 'Missing auth_index; token refresh is unavailable',
+               }),
     }
 
     const identity                      = deriveAuthFileIdentity(file)
@@ -1515,6 +1448,16 @@ function AuthFileCardWithQuota({
                         })
         }
     }
+    if (isDevinProvider) {
+        const planEndLabel = formatDateLike(quotaSubscriptionActiveUntil, i18n.language)
+        if (planEndLabel) {
+            fields.push({
+                            id: 'plan-end',
+                            label: t('credentials.subscription_active_until', { defaultValue: 'Plan until' }),
+                            value: planEndLabel,
+                        })
+        }
+    }
 
     const providerKey            = providerLabel.toLowerCase()
     const allowAuthFilePlan      = providerKey.includes('codex')
@@ -1540,6 +1483,7 @@ function AuthFileCardWithQuota({
         <CredentialCard
             category='auth-file'
             title={identity.primary || formatAuthFileDisplayName(file.name)}
+            controlLabel={controlLabel}
             badge={(() => {
                 const tierColors: Record<string, { color: string; bg: string }> = {
                     pro: { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' },
@@ -1608,8 +1552,10 @@ function AuthFileCardWithQuota({
             stats={stats}
             statusBar={statusBar}
             runtimeState={runtimeState}
+            cooldownSnapshot={file.cooldownSnapshot}
             refreshState={refreshState}
-            onToggle={(enabled) => void onToggle(file.name, !enabled)}
+            manualTokenRefreshState={manualTokenRefreshState}
+            onToggle={(enabled) => void onToggle(file, !enabled)}
             onEdit={() => void onEdit(file)}
             onDelete={() => void onDelete(file.name)}
             onDownload={() => void onDownload(file.name)}

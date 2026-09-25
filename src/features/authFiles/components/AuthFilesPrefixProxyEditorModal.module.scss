@@ -80,3 +80,25 @@
     font-size: $font-size-sm;
     line-height: 1.5;
 }
+
+.settingsLink {
+    color: var(--primary-color);
+    font-weight: $font-weight-semibold;
+    text-decoration: none;
+
+    &:hover {
+        text-decoration: underline;
+    }
+
+    &:focus-visible {
+        border-radius: 2px;
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+    }
+
+    &[aria-disabled='true'] {
+        color: var(--text-tertiary);
+        cursor: not-allowed;
+        text-decoration: none;
+    }
+}

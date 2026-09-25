@@ -1,4 +1,5 @@
 import type {AuthFileMutation} from '@/components/credentials/credentialsDataLifecycle'
+import type {AuthFileItem} from '@/types/authFile'
 import {downloadAuthFilesBatch} from '@/features/authFiles/batchDownload'
 import {
     isAuthFileUploadInFlight,
@@ -72,10 +73,15 @@ export function useVendorActions(
     )
 
     const toggleAuthFile = useCallback(
-        async (name: string, disabled: boolean) => {
+        async (file: AuthFileItem, disabled: boolean) => {
             try {
-                const result = await authFilesApi.setStatus(name, disabled)
-                await completeMutation({ kind: 'status', names: [name], disabled: result.disabled })
+                const result = await authFilesApi.setStatus(file.name, disabled, file.authIndex)
+                await completeMutation({
+                    kind: 'status',
+                    names: [file.name],
+                    authIndex: file.authIndex,
+                    disabled: result.disabled,
+                })
             } catch {
                 showNotification(t('common.error'), 'error')
             }

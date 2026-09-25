@@ -39,6 +39,8 @@ const makeEditor = (json: Record<string, unknown>, weight: string): PrefixProxyE
     headersError: null,
     disableCooling: false,
     disableCoolingTouched: false,
+    requestRetry: undefined,
+    requestRetryTouched: false,
     supportsUsingApi: false,
     usingApi: false,
     usingApiTouched: false,

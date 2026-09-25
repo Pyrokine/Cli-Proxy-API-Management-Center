@@ -44,6 +44,8 @@ const editor = (overrides: Partial<PrefixProxyEditorState> = {}): PrefixProxyEdi
     headersError: null,
     disableCooling: false,
     disableCoolingTouched: true,
+    requestRetry: undefined,
+    requestRetryTouched: false,
     supportsUsingApi: true,
     usingApi: false,
     usingApiTouched: true,

@@ -1,15 +1,19 @@
 import {Button} from '@/components/ui/Button'
 import {IconCheck, IconCopy, IconExternalLink, IconX} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
+import {apiClient} from '@/services/api/client'
 import {oauthApi, type OAuthProvider} from '@/services/api/oauth'
+import {useAuthStore} from '@/stores/useAuthStore'
 import {copyToClipboard} from '@/utils/clipboard'
 import {safeExternalUrl} from '@/utils/validation'
 import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {validateDevinCallback} from './devinOAuth'
+import {createOAuthAttempts, shouldFinalizeOAuthAttempt, type OAuthAttempt} from './oauthAttempts'
 import styles from './OAuthLoginAction.module.scss'
 
 const POLL_INTERVAL                       = 3000
-const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli', 'xai']
+const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli', 'xai', 'devin']
 const XAI_CALLBACK_URL                    = 'http://127.0.0.1:56121/callback'
 
 function generateNonce(): string {
@@ -116,83 +120,147 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
     const [callbackSubmitting, setCallbackSubmitting] = useState(false)
     const [callbackAccepted, setCallbackAccepted]     = useState(false)
     const [oauthState, setOauthState]                 = useState('')
-    const pollRef                                     = useRef<number | null>(null)
-    const terminalRef                                 = useRef(false)
+    const [cancelSubmitting, setCancelSubmitting]     = useState(false)
+    const nonceRef                                    = useRef('')
+    const attemptsRef                                 = useRef(createOAuthAttempts({
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (timer) => window.clearTimeout(timer),
+        getGeneration: () => apiClient.getAuthGeneration(),
+    }))
 
     const needsProjectId   = provider === 'gemini-cli'
     const supportsCallback = CALLBACK_SUPPORTED.includes(provider)
 
-    const stopPolling = useCallback(() => {
-        if (pollRef.current !== null) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
+    useEffect(() => {
+        const attempts     = attemptsRef.current
+        let authGeneration = apiClient.getAuthGeneration()
+        const unsubscribe  = useAuthStore.subscribe((current, previous) => {
+            const nextGeneration = apiClient.getAuthGeneration()
+            if (
+                nextGeneration === authGeneration &&
+                current.apiBase === previous.apiBase &&
+                current.managementKey === previous.managementKey &&
+                current.isAuthenticated === previous.isAuthenticated
+            ) {
+                return
+            }
+            authGeneration = nextGeneration
+            attempts.invalidateAll()
+            nonceRef.current = ''
+            setUrl('')
+            setStatus('idle')
+            setError('')
+            setProjectId('')
+            setCallbackUrl('')
+            setCallbackSubmitting(false)
+            setCallbackAccepted(false)
+            setOauthState('')
+            setCancelSubmitting(false)
+        })
+        return () => {
+            unsubscribe()
+            attempts.invalidateAll()
         }
     }, [])
 
-    useEffect(() => stopPolling, [stopPolling])
+    const startPolling = useCallback((stateValue: string, nonce: string, attempt: OAuthAttempt) => {
+        attempt.poll(
+            () => oauthApi.getAuthStatus(stateValue, nonce, attempt.signal),
+            (result) => {
+                if (result.status === 'ok') {
+                    attempt.invalidate()
+                    nonceRef.current = ''
+                    setOauthState('')
+                    setStatus('success')
+                    onSuccess()
+                    return false
+                }
+                if (result.status === 'error') {
+                    if (shouldFinalizeOAuthAttempt(result)) {
+                        attempt.invalidate()
+                        nonceRef.current = ''
+                        setOauthState('')
+                    }
+                    setStatus('error')
+                    setError(result.error || t('credentials.oauth_error'))
+                    return false
+                }
+                return true
+            },
+            (pollError) => {
+                setStatus('error')
+                setError(pollError instanceof Error ? pollError.message : t('credentials.oauth_error'))
+            },
+            POLL_INTERVAL,
+        )
+    }, [onSuccess, t])
 
     const startAuth = useCallback(async () => {
-        terminalRef.current = false
+        const attempt  = attemptsRef.current.begin(provider)
+        const nonce    = generateNonce()
+        nonceRef.current = nonce
         setCallbackAccepted(false)
+        setCancelSubmitting(false)
+        setOauthState('')
         setStatus('starting')
         setError('')
         try {
-            // Generate a per-flow nonce bound to the polling loop so a third party who only
-            // learns the state (e.g. via referrer leak) cannot read the result.
-            const nonce    = generateNonce()
-            const options  = {
+            const response = await oauthApi.startAuth(provider, {
                 ...(needsProjectId && projectId ? { projectId } : {}),
                 nonce,
+                signal: attempt.signal,
+            })
+            if (!attempt.isCurrent()) {
+                return
             }
-            const response = await oauthApi.startAuth(provider, options)
-            setUrl(response.url)
-            setStatus('waiting')
-
             const authUrl = safeExternalUrl(response.url)
             if (!authUrl) {
-                terminalRef.current = true
+                attempt.invalidate()
+                nonceRef.current = ''
                 setError('Invalid OAuth URL received from server')
                 setStatus('error')
                 return
             }
-            window.open(authUrl, '_blank', 'noopener,noreferrer')
-
-            if (response.state) {
-                const stateValue = response.state
-                setOauthState(stateValue)
-                pollRef.current = window.setInterval(async () => {
-                    try {
-                        const result = await oauthApi.getAuthStatus(stateValue, nonce)
-                        if (terminalRef.current) {
-                            return
-                        }
-                        if (result.status === 'ok') {
-                            terminalRef.current = true
-                            stopPolling()
-                            setStatus('success')
-                            onSuccess()
-                        } else if (result.status === 'error') {
-                            terminalRef.current = true
-                            stopPolling()
-                            setStatus('error')
-                            setError(result.error || t('credentials.oauth_error'))
-                        }
-                    } catch {
-                        // Continue polling on network errors
-                    }
-                }, POLL_INTERVAL)
+            if (!response.state?.trim()) {
+                attempt.invalidate()
+                nonceRef.current = ''
+                setError(t('auth_login.missing_state'))
+                setStatus('error')
+                return
             }
+
+            const stateValue = response.state.trim()
+            setUrl(response.url)
+            setOauthState(stateValue)
+            setStatus('waiting')
+            window.open(authUrl, '_blank', 'noopener,noreferrer')
+            startPolling(stateValue, nonce, attempt)
         } catch (err) {
-            terminalRef.current = true
+            if (!attempt.isCurrent()) {
+                return
+            }
+            attempt.invalidate()
+            nonceRef.current = ''
             setStatus('error')
             setError(err instanceof Error ? err.message : t('credentials.oauth_error'))
         }
-    }, [provider, projectId, needsProjectId, stopPolling, onSuccess, t])
+    }, [provider, projectId, needsProjectId, startPolling, t])
 
     const submitCallback = useCallback(async () => {
+        const attempt = attemptsRef.current.get(provider)
+        if (!attempt?.isCurrent()) {
+            return
+        }
         if (!callbackUrl.trim()) {
             setError(t(provider === 'xai' ? 'auth_login.xai_callback_required' : 'auth_login.oauth_callback_required'))
             return
+        }
+        if (provider === 'devin') {
+            const callbackError = validateDevinCallback(callbackUrl, oauthState)
+            if (callbackError) {
+                setError(t(`auth_login.devin_callback_${callbackError}`))
+                return
+            }
         }
         const redirectUrl = resolveCallbackUrl(provider, callbackUrl, oauthState)
         if (!redirectUrl) {
@@ -202,20 +270,81 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
         setCallbackSubmitting(true)
         setError('')
         try {
-            await oauthApi.submitCallback(provider, redirectUrl)
-            setCallbackAccepted(true)
+            await oauthApi.submitCallback(provider, redirectUrl, attempt.signal)
+            if (attempt.isCurrent()) {
+                setCallbackAccepted(true)
+            }
         } catch (err) {
-            setError(err instanceof Error ? err.message : t('credentials.oauth_error'))
+            if (attempt.isCurrent()) {
+                setError(err instanceof Error ? err.message : t('credentials.oauth_error'))
+            }
         } finally {
-            setCallbackSubmitting(false)
+            if (attempt.isCurrent()) {
+                setCallbackSubmitting(false)
+            }
         }
     }, [provider, callbackUrl, oauthState, t])
 
-    const handleCancel = useCallback(() => {
-        terminalRef.current = true
-        stopPolling()
-        onCancel()
-    }, [stopPolling, onCancel])
+    const resumePolling = useCallback(() => {
+        const currentAttempt = attemptsRef.current.get(provider)
+        if (!oauthState || !nonceRef.current || !currentAttempt?.isCurrent()) {
+            currentAttempt?.invalidate()
+            nonceRef.current = ''
+            setOauthState('')
+            setStatus('idle')
+            return
+        }
+        const attempt = attemptsRef.current.begin(provider)
+        setCallbackSubmitting(false)
+        setStatus('waiting')
+        setError('')
+        startPolling(oauthState, nonceRef.current, attempt)
+    }, [oauthState, provider, startPolling])
+
+    const handleCancel = useCallback(async () => {
+        const stateValue    = oauthState
+        const nonce         = nonceRef.current
+        const loginAttempt  = attemptsRef.current.get(provider)
+        const ownsLoginFlow = loginAttempt?.isCurrent() ?? false
+        loginAttempt?.invalidate()
+        setCallbackSubmitting(false)
+
+        if (provider !== 'devin' || !stateValue || !ownsLoginFlow) {
+            nonceRef.current = ''
+            setOauthState('')
+            onCancel()
+            return
+        }
+
+        const cancelAttempt = attemptsRef.current.begin(provider)
+        setCancelSubmitting(true)
+        setError('')
+        try {
+            const result = await oauthApi.cancelSession(stateValue, nonce, cancelAttempt.signal)
+            if (!cancelAttempt.isCurrent()) {
+                return
+            }
+            if (result.cancelled) {
+                setCancelSubmitting(false)
+                cancelAttempt.invalidate()
+                nonceRef.current = ''
+                setOauthState('')
+                onCancel()
+                return
+            }
+        } catch (err) {
+            if (!cancelAttempt.isCurrent()) {
+                return
+            }
+            setError(err instanceof Error ? err.message : t('auth_login.devin_oauth_cancel_error'))
+        }
+        if (!cancelAttempt.isCurrent()) {
+            return
+        }
+        setCancelSubmitting(false)
+        setStatus('waiting')
+        startPolling(stateValue, nonce, cancelAttempt)
+    }, [oauthState, onCancel, provider, startPolling, t])
 
     if (status === 'success') {
         return (
@@ -230,13 +359,14 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                             variant='secondary'
                             size='sm'
                             onClick={() => {
-                                terminalRef.current = false
-                                stopPolling()
+                                attemptsRef.current.invalidateAll()
+                                nonceRef.current = ''
                                 setStatus('idle')
                                 setUrl('')
                                 setError('')
                                 setCallbackUrl('')
                                 setCallbackAccepted(false)
+                                setCancelSubmitting(false)
                                 setOauthState('')
                             }}
                         >
@@ -258,10 +388,15 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                     <IconX size={16} />
                     <span>{error || t('credentials.oauth_error')}</span>
                     <div className={styles.flowButtons}>
-                        <Button variant='secondary' size='sm' onClick={() => setStatus('idle')}>
+                        <Button variant='secondary' size='sm' onClick={resumePolling}>
                             {t('common.refresh')}
                         </Button>
-                        <Button variant='secondary' size='sm' onClick={handleCancel}>
+                        <Button
+                            variant='secondary'
+                            size='sm'
+                            onClick={() => void handleCancel()}
+                            loading={cancelSubmitting}
+                        >
                             {t('common.cancel')}
                         </Button>
                     </div>
@@ -324,11 +459,13 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                                     placeholder={t(
                                         provider === 'xai'
                                         ? 'auth_login.xai_callback_placeholder'
-                                        : 'auth_login.oauth_callback_placeholder',
+                                        : provider === 'devin'
+                                          ? 'auth_login.devin_callback_placeholder'
+                                          : 'auth_login.oauth_callback_placeholder',
                                     )}
                                     value={callbackUrl}
                                     onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
-                                    disabled={callbackSubmitting}
+                                    disabled={callbackSubmitting || cancelSubmitting}
                                 />
                                 <Button
                                     variant='primary'
@@ -343,13 +480,20 @@ export function OAuthLoginAction({ provider, disableControls, onSuccess, onCance
                             <div className={styles.callbackHint}>
                                 {provider === 'xai'
                                  ? t('auth_login.xai_callback_hint')
-                                 : t('auth_login.oauth_callback_hint')}
+                                 : provider === 'devin'
+                                   ? t('auth_login.devin_callback_hint')
+                                   : t('auth_login.oauth_callback_hint')}
                             </div>
                             {error && <div className={styles.callbackError}>{error}</div>}
                         </div>
                     )}
 
-                    <Button variant='secondary' size='sm' onClick={handleCancel}>
+                    <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={() => void handleCancel()}
+                        loading={cancelSubmitting}
+                    >
                         {t('common.cancel')}
                     </Button>
                 </div>

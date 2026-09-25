@@ -13,6 +13,7 @@ import type {
     CodexRateLimitResetCredit,
     CodexResetCreditCountState,
     CodexResetCreditDetailsState,
+    DevinQuotaState,
     GeminiCliQuotaState,
     KimiQuotaState,
     QuotaFreshness,
@@ -56,6 +57,26 @@ function fromUsedQuotaWindows(
                     resetAtMs: window.resetAtMs,
                     periodHours: window.periodHours,
                 }))
+}
+
+export function buildDevinQuotaItems(state: DevinQuotaState): QuotaItem[] {
+    if (state.status !== 'success') {
+        return []
+    }
+    return state.windows.flatMap((window) => {
+        if (window.remainingPercent === null) {
+            return []
+        }
+        return [{
+            id: `devin-${window.id}`,
+            model: i18n.t(`devin_quota.${window.id}_limit`, {
+                defaultValue: window.id === 'daily' ? 'Daily limit' : 'Weekly limit',
+            }),
+            percent: Math.round(window.remainingPercent),
+            resetAtMs: window.resetAtMs,
+            periodHours: window.periodHours,
+        }]
+    })
 }
 
 function fromGeminiCli(state: GeminiCliQuotaState): QuotaItem[] {
@@ -237,18 +258,23 @@ interface CredentialQuotaResult {
  * Returns quota state for a given provider and auth file name by checking all quota stores.
  * Includes items on success, error message on failure, and loading flag.
  */
-export function useCredentialQuota(provider: string | undefined, fileName: string): CredentialQuotaResult {
-    const key         = quotaCredentialKey(provider, fileName)
+export function useCredentialQuota(
+    provider: string | undefined,
+    fileName: string,
+    authIndex?: string | number | null,
+): CredentialQuotaResult {
+    const key         = quotaCredentialKey(provider, fileName, authIndex)
     const metadata    = useQuotaStore((s) => s.quotaMetadata[key])
     const antigravity = useQuotaStore((s) => s.antigravityQuota[key])
     const claude      = useQuotaStore((s) => s.claudeQuota[key])
     const codex       = useQuotaStore((s) => s.codexQuota[key])
+    const devin       = useQuotaStore((s) => s.devinQuota[key])
     const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[key])
     const kimi        = useQuotaStore((s) => s.kimiQuota[key])
     const xai         = useQuotaStore((s) => s.xaiQuota[key])
 
     return useMemo(() => {
-        const states                        = [antigravity, claude, codex, geminiCli, kimi, xai]
+        const states                        = [antigravity, claude, codex, devin, geminiCli, kimi, xai]
         const active                        = states.find((state) => state != null)
         const result: CredentialQuotaResult = {
             lastError: metadata?.lastError,
@@ -285,6 +311,14 @@ export function useCredentialQuota(provider: string | undefined, fileName: strin
                 resetCreditExpiriesError: codex.rateLimitResetCreditsError,
             }
         }
+        if (devin?.status === 'success') {
+            return {
+                ...result,
+                items: buildDevinQuotaItems(devin),
+                planType: devin.planType,
+                subscriptionActiveUntil: devin.planEnd,
+            }
+        }
         if (geminiCli?.status === 'success') {
             return { ...result, items: fromGeminiCli(geminiCli), planType: geminiCli.tierLabel }
         }
@@ -296,5 +330,5 @@ export function useCredentialQuota(provider: string | undefined, fileName: strin
         }
 
         return metadata || active ? result : {}
-    }, [metadata, antigravity, claude, codex, geminiCli, kimi, xai])
+    }, [metadata, antigravity, claude, codex, devin, geminiCli, kimi, xai])
 }

@@ -464,6 +464,28 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         [fetchData, t],
     )
 
+    const handleRefreshAllTokens = useCallback(async () => {
+        await runAction('refresh-all-tokens', async () => {
+            const result    = await authFilesApi.requestManualRefreshAll()
+            const succeeded = result.results.filter((item) => item.success).length
+            const failed    = result.results.length - succeeded
+            await onCredentialsChanged?.()
+            showNotification(
+                failed > 0 ?
+                t('credentials.manual_token_refresh_all_partial', {
+                    success: succeeded,
+                    failed,
+                    defaultValue: 'Refreshed {{success}} token(s); {{failed}} failed',
+                }) :
+                t('credentials.manual_token_refresh_all_success', {
+                    count: succeeded,
+                    defaultValue: 'Refreshed {{count}} token(s)',
+                }),
+                failed > 0 ? 'warning' : 'success',
+            )
+        })
+    }, [onCredentialsChanged, runAction, showNotification, t])
+
     const saveInspectionSchedule = useCallback(
         async (enabled = status.schedule.enabled) => {
             if (!inspectionScheduleLoaded) {
@@ -546,7 +568,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                         loading={busyAction === `enable-${key}`}
                         onClick={() =>
                             void runAction(`enable-${key}`, async () => {
-                                await authFilesApi.setStatus(result.file_name, false)
+                                await authFilesApi.setStatus(result.file_name, false, result.auth_index)
                                 await onCredentialsChanged?.()
                                 showNotification(t('common.success'), 'success')
                             })
@@ -563,7 +585,17 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                         size='xs'
                         loading={busyAction === `refresh-${key}`}
                         onClick={() =>
-                            void runAction(`refresh-${key}`, () => accountInspectionApi.refreshToken(targetFor(result)))
+                            void runAction(`refresh-${key}`, async () => {
+                                await authFilesApi.requestManualRefresh(result.file_name, result.auth_index)
+                                await onCredentialsChanged?.()
+                                showNotification(
+                                    t('credentials.manual_token_refresh_success', {
+                                        name: result.account || result.file_name,
+                                        defaultValue: 'Token refreshed for "{{name}}"',
+                                    }),
+                                    'success',
+                                )
+                            })
                         }
                     >
                         {t('credentials.inspection_refresh_token', { defaultValue: '刷新 token' })}
@@ -921,6 +953,15 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             onClick={() => void runAction('stop', accountInspectionApi.stop)}
                         >
                             {t('credentials.inspection_stop', { defaultValue: '停止' })}
+                        </Button>
+                        <Button
+                            variant='secondary'
+                            size='sm'
+                            loading={busyAction === 'refresh-all-tokens'}
+                            disabled={Boolean(busyAction) && busyAction !== 'refresh-all-tokens'}
+                            onClick={() => void handleRefreshAllTokens()}
+                        >
+                            {t('credentials.manual_token_refresh_all', {defaultValue: 'Refresh all tokens'})}
                         </Button>
                         <Button variant='ghost' size='sm' onClick={() => void fetchData()} loading={loading}>
                             {t('common.refresh')}

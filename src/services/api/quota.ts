@@ -121,12 +121,6 @@ export interface QuotaRefreshTask {
     persistence_error?: string
 }
 
-export interface ResetQuotaResponse {
-    status: string
-    auth_index: string
-    models: string[]
-}
-
 type QuotaRequestOptions = {
     signal?: AbortSignal
 }
@@ -161,9 +155,6 @@ export const quotaApi = {
         apiClient.post<QuotaRefreshTask>(`${quotaRefreshTaskPath(taskId)}/cancel`, undefined, {
             signal: options?.signal,
         }),
-
-    reset: (authIndex: string) =>
-        apiClient.post<ResetQuotaResponse>('/reset-quota', { auth_index: authIndex }),
 
     getConfig: () => apiClient.get<QuotaConfig>('/quota/config'),
 }

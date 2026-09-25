@@ -1,7 +1,8 @@
 import iconClaude from '@/assets/icons/claude.svg'
 import iconCodexDark from '@/assets/icons/codex_dark.svg'
 import iconCodexLight from '@/assets/icons/codex_light.svg'
-
+import iconDevinDark from '@/assets/icons/devin-dark.svg'
+import iconDevin from '@/assets/icons/devin.svg'
 import iconGemini from '@/assets/icons/gemini.svg'
 import iconGrokDark from '@/assets/icons/grok-dark.svg'
 import iconGrok from '@/assets/icons/grok.svg'
@@ -20,7 +21,10 @@ import {
     useCredentialsData,
     VendorSection,
 } from '@/components/credentials'
-import {createLatestCredentialsRequestTracker} from '@/components/credentials/credentialsDataLifecycle'
+import {
+    authFileRefreshIdentifiers,
+    createLatestCredentialsRequestTracker,
+} from '@/components/credentials/credentialsDataLifecycle'
 import {useBackendQuotaRegistration} from '@/components/credentials/hooks/useBackendQuotaRegistration'
 import {Button} from '@/components/ui/Button'
 import {IconSearch} from '@/components/ui/icons'
@@ -173,6 +177,7 @@ export default function CredentialsPage() {
                                      Qwen: makeIconComponent(iconQwen, 'Qwen'),
                                      IFlow: makeIconComponent(iconIflow, 'iFlow'),
                                      Grok: makeThemedIconComponent(iconGrok, iconGrokDark, 'Grok'),
+                                     Devin: makeThemedIconComponent(iconDevin, iconDevinDark, 'Devin'),
                                  })
                 .map((vendor) => ({
                     ...vendor,
@@ -217,10 +222,6 @@ export default function CredentialsPage() {
     const credentialInsightsTrackerRef                            = useRef(createLatestCredentialsRequestTracker())
     const quotaScheduler                                          = useBackendQuotaRegistration(authFiles)
     const quotaStatusMap                                          = quotaScheduler.statusMap
-    const authFileByName                                          = useMemo(
-        () => new Map(authFiles.map((file) => [file.name, file])),
-        [authFiles],
-    )
 
     const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v.id, label: v.label })), [vendors])
 
@@ -494,8 +495,10 @@ export default function CredentialsPage() {
         if (selectedVisibleItems.length === 0) {
             return
         }
-        const refreshableItems = selectedVisibleItems.filter((name) => authFileByName.get(name)?.disabled !== true)
-        const skippedDisabled  = selectedVisibleItems.length - refreshableItems.length
+        const {identifiers: refreshableItems, skippedDisabled} = authFileRefreshIdentifiers(
+            authFiles,
+            selectedVisibleItems,
+        )
         if (refreshableItems.length === 0) {
             showNotification(
                 t('credentials.batch_refresh_disabled_only', {
@@ -526,7 +529,7 @@ export default function CredentialsPage() {
         } finally {
             setBatchBusy(false)
         }
-    }, [selectedVisibleItems, authFileByName, quotaScheduler, refresh, markRefreshed, showNotification, t])
+    }, [selectedVisibleItems, authFiles, quotaScheduler, refresh, markRefreshed, showNotification, t])
 
     const handleBatchSetDisabled = useCallback(
         async (disabled: boolean) => {

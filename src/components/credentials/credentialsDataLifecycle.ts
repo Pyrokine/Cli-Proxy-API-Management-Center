@@ -2,12 +2,13 @@ import {inferProviderFromAuthFileName} from '@/features/authFiles/constants'
 import type {AuthFileFieldsPatch} from '@/services/api/authFiles'
 import type {AuthFileItem} from '@/types/authFile'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 
 export type AuthFileMutation =
     | { kind: 'upload'; names: string[] }
     | { kind: 'delete'; names: string[] }
-    | { kind: 'status'; names: string[]; disabled: boolean }
-    | { kind: 'fields'; name: string; fields: AuthFileFieldsPatch }
+    | { kind: 'status'; names: string[]; disabled: boolean; authIndex?: string | number | null }
+    | { kind: 'fields'; name: string; fields: AuthFileFieldsPatch; authIndex?: string | number | null }
     | { kind: 'reload'; names?: string[] }
 
 interface CredentialsRequestToken {
@@ -35,6 +36,21 @@ export const createLatestCredentialsRequestTracker = (): LatestCredentialsReques
 
 const normalizedNames = (names: string[]): string[] =>
     Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)))
+
+const normalizeAuthIndex = (value: string | number | null | undefined): string =>
+    String(value ?? '').trim()
+
+const matchesAuthFileIdentity = (
+    file: AuthFileItem,
+    name: string,
+    authIndex?: string | number | null,
+): boolean => {
+    if (file.name !== name) {
+        return false
+    }
+    const identity = normalizeAuthIndex(authIndex)
+    return !identity || normalizeAuthIndex(file.authIndex) === identity
+}
 
 const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): AuthFileItem => {
     const next: AuthFileItem = { ...file }
@@ -74,9 +90,26 @@ const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): Auth
         }
     }
     if (fields.disable_cooling !== undefined) {
-        next.disableCooling  = fields.disable_cooling
-        next.disable_cooling = fields.disable_cooling
+        delete next.disableCooling
+        delete next.disable_cooling
         delete next['disable-cooling']
+        if (fields.disable_cooling !== null) {
+            next.disableCooling  = fields.disable_cooling
+            next.disable_cooling = fields.disable_cooling
+        }
+    }
+    if (fields.request_retry !== undefined) {
+        const errorKey = getCredentialRetryValidationKey(fields.request_retry ?? undefined)
+        if (errorKey) {
+            throw new Error(errorKey)
+        }
+        delete next.requestRetry
+        delete next.request_retry
+        delete next['request-retry']
+        if (fields.request_retry !== null && fields.request_retry >= 0) {
+            next.requestRetry  = fields.request_retry
+            next.request_retry = fields.request_retry
+        }
     }
     if (fields.using_api !== undefined) {
         next.usingApi  = fields.using_api
@@ -109,13 +142,19 @@ export function applyAuthFileMutation(
         return deleted.size > 0 ? files.filter((file) => !deleted.has(file.name)) : files
     }
     if (mutation.kind === 'status') {
-        const updated = new Set(normalizedNames(mutation.names))
+        const updated   = new Set(normalizedNames(mutation.names))
+        const authIndex = normalizeAuthIndex(mutation.authIndex)
         return files.map((file) =>
-                             updated.has(file.name) ? { ...file, disabled: mutation.disabled } : file,
+                             updated.has(file.name) &&
+                             (!authIndex || normalizeAuthIndex(file.authIndex) === authIndex)
+                             ? { ...file, disabled: mutation.disabled }
+                             : file,
         )
     }
     return files.map((file) =>
-                         file.name === mutation.name ? applyFieldsPatch(file, mutation.fields) : file,
+                         matchesAuthFileIdentity(file, mutation.name, mutation.authIndex)
+                         ? applyFieldsPatch(file, mutation.fields)
+                         : file,
     )
 }
 
@@ -128,6 +167,27 @@ export const authFileMutationNames = (mutation: AuthFileMutation): string[] | un
 
 const quotaProviderForAuthFile = (file: AuthFileItem): string =>
     String(file.provider || file.type || inferProviderFromAuthFileName(file.name) || '').trim()
+
+export function authFileRefreshIdentifiers(
+    files: AuthFileItem[],
+    names: string[],
+): { identifiers: string[]; skippedDisabled: number } {
+    const selected = new Set(normalizedNames(names))
+    const identifiers = new Set<string>()
+    let skippedDisabled = 0
+    for (const file of files) {
+        if (!selected.has(file.name)) {
+            continue
+        }
+        if (file.disabled) {
+            skippedDisabled += 1
+            continue
+        }
+        const provider = quotaProviderForAuthFile(file)
+        identifiers.add(provider ? quotaCredentialKey(provider, file.name, file.authIndex) : file.name)
+    }
+    return {identifiers: Array.from(identifiers), skippedDisabled}
+}
 
 export const authFileMutationQuotaKeys = (
     files: AuthFileItem[],
@@ -147,7 +207,7 @@ export const authFileMutationQuotaKeys = (
             for (const file of matched) {
                 const provider = quotaProviderForAuthFile(file)
                 if (provider) {
-                    keys.add(quotaCredentialKey(provider, name))
+                    keys.add(quotaCredentialKey(provider, name, file.authIndex))
                 }
             }
             continue

@@ -43,6 +43,7 @@ const registryIcons = {
     Qwen: icon,
     IFlow: icon,
     Grok: icon,
+    Devin: icon,
 }
 
 const vertexEditSource             = readFileSync(
@@ -71,6 +72,7 @@ const accountInspectionPanelSource = readFileSync(
     'utf8',
 )
 const quotaApiSource               = readFileSync(new URL('../src/services/api/quota.ts', import.meta.url), 'utf8')
+const authFilesApiSource           = readFileSync(new URL('../src/services/api/authFiles.ts', import.meta.url), 'utf8')
 const accountInspectionApiSource   = readFileSync(
     new URL('../src/services/api/accountInspection.ts', import.meta.url),
     'utf8',
@@ -216,12 +218,13 @@ describe('provider identity and status UX', () => {
         const submitEnd   = oauthLoginActionSource.indexOf('const handleCancel', submitStart)
         const submitBody  = oauthLoginActionSource.slice(submitStart, submitEnd)
 
-        expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl)')
+        expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal)')
+        expect(submitBody).toContain('if (attempt.isCurrent())')
         expect(submitBody).toContain('setCallbackAccepted(true)')
         expect(submitBody).not.toContain('setStatus(\'success\')')
         expect(submitBody).not.toContain('onSuccess()')
         expect(oauthLoginActionSource).toContain('if (result.status === \'ok\')')
-        expect(oauthLoginActionSource).toContain('terminalRef.current = true')
+        expect(oauthLoginActionSource).toContain('attempt.invalidate()')
         expect(oauthLoginActionSource).toContain('\'credentials.oauth_callback_processing\'')
     })
 
@@ -327,23 +330,33 @@ describe('provider identity and status UX', () => {
         ).toHaveLength(2)
     })
 
-    test('refreshes auth-file runtime state without using manual quota reset', () => {
+    test('keeps quota refresh and token refresh separate without reset or consume paths', () => {
         expect(vendorSectionSource).toContain(
             'await scheduler.refreshNow(quotaKey)\n        await onRefresh()',
         )
         expect(vendorSectionSource).toContain(
-            'providerError?.nextRetryAfter ?? dateLikeToISOString(file.nextRetryAfter)',
+            'await authFilesApi.requestManualRefresh(file.name, authIndex)',
         )
-        expect(vendorSectionSource).toContain('runtimeState={runtimeState}')
-        expect(credentialCardSource).toContain(
-            'runtimeState.reason || runtimeState.checkedAt || runtimeState.nextRetryAfter',
-        )
-        expect(credentialCardSource).toContain("field.wrap ? styles.fieldValueWrap : ''")
-        expect(credentialCardSource).toContain('title={field.value}')
-        expect(credentialCardSource).toContain('t(\'credentials.provider_health_next_retry\'')
+        expect(vendorSectionSource).toContain('manualTokenRefreshState={manualTokenRefreshState}')
+        expect(credentialCardSource).toContain('manualTokenRefreshState?: ManualTokenRefreshState')
+        expect(credentialCardSource).toContain("t('auth_files.quota_refresh_hint'")
+        expect(credentialCardSource).toContain("t('credentials.manual_token_refresh'")
+        expect(credentialCardSource).toContain('refreshState?.isRefreshing')
+        expect(authFilesApiSource).toContain('{all: true}')
+        expect(authFilesApiSource).toContain('{timeout: AUTH_FILE_REFRESH_TIMEOUT_MS}')
+        expect(accountInspectionPanelSource).toContain('authFilesApi.requestManualRefreshAll()')
+        expect(accountInspectionPanelSource).toContain("busyAction === 'refresh-all-tokens'")
         expect(quotaApiSource).toContain('apiClient.post<QuotaRefreshTask>(')
         expect(quotaApiSource).toContain('const quotaRefreshTaskPath')
         expect(quotaApiSource).toContain('quotaRefreshTaskPath(taskId)')
+        for (const source of [authFilesApiSource, quotaApiSource, vendorSectionSource, accountInspectionPanelSource]) {
+            expect(source).not.toContain('/reset-quota')
+            expect(source).not.toContain('rate-limit-reset-credits/consume')
+            expect(source).not.toContain('banked reset')
+        }
+        expect(vendorSectionSource).not.toContain('quotaApi.reset')
+        expect(vendorSectionSource).not.toContain('runCodexResetCreditAction')
+        expect(vendorSectionSource).not.toContain('handleResetQuota')
         expect(backendQuotaHookSource).toContain('waitForQuotaRefreshTask(initialTask')
         expect(backendQuotaHookSource).toContain('applyQuotaRefreshTaskToMeta')
         expectSourceToContain(backendQuotaHookSource, 'const { i18n: translation } = useTranslation()')
@@ -357,26 +370,6 @@ describe('provider identity and status UX', () => {
         expect(accountInspectionPanelSource).toContain('quotaApi.resumeTask(latestQuotaTask.id)')
         expect(accountInspectionPanelSource).toContain('quotaApi.cancelTask(latestQuotaTask.id)')
         expect(accountInspectionPanelSource).toContain('latestQuotaTask?.targets ?? []')
-        expect(quotaApiSource).toContain('apiClient.post<ResetQuotaResponse>(\'/reset-quota\'')
-        const quotaRefreshHandler = vendorSectionSource.slice(
-            vendorSectionSource.indexOf('const handleQuotaRefresh'),
-            vendorSectionSource.indexOf('const handleResetQuota'),
-        )
-        expect(quotaRefreshHandler).not.toContain('quotaApi.reset')
-        const quotaResetHandler = vendorSectionSource.slice(
-            vendorSectionSource.indexOf('const handleResetQuota'),
-            vendorSectionSource.indexOf('const refreshState'),
-        )
-        const openGuard         = quotaResetHandler.indexOf(
-            'codexResetCreditAvailability(readApplicableResetCreditCount())',
-        )
-        const confirmation      = quotaResetHandler.indexOf('showConfirmation({')
-        const confirmGuard      = quotaResetHandler.indexOf('runCodexResetCreditAction(')
-        const resetRequest      = quotaResetHandler.indexOf('quotaApi.reset(authIndex)')
-        expect(openGuard).toBeGreaterThanOrEqual(0)
-        expect(confirmation).toBeGreaterThan(openGuard)
-        expect(confirmGuard).toBeGreaterThan(confirmation)
-        expect(resetRequest).toBeGreaterThan(confirmation)
     })
 
     test('shows provider-safe probe outcomes with immutable credential binding', () => {
@@ -456,7 +449,8 @@ describe('provider identity and status UX', () => {
         expect(xaiEditSource).toContain('<ProviderConnectionFields')
         expect(providerFormFieldsSource).toContain('<PriorityField form={form}')
         expect(providerFormFieldsSource).toContain('<WeightField form={form}')
-        expect(xaiEditSource).toContain('t(\'ai_providers.xai_disable_cooling_label\')')
+        expect(providerFormFieldsSource).toContain('<CredentialOverrideFields')
+        expect(xaiEditSource).not.toContain('Boolean(form.disableCooling)')
         expect(credentialsPageSource).toContain('t(\'credentials.routing_order_hint\')')
     })
 

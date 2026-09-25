@@ -1,15 +1,17 @@
 import {Button} from '@/components/ui/Button'
-import {IconDownload, IconPencil, IconRefreshCw, IconTimer, IconTrash2} from '@/components/ui/icons'
+import {IconDownload, IconKey, IconPencil, IconRefreshCw, IconTrash2} from '@/components/ui/icons'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import type {QuotaFreshness} from '@/types'
+import type {AuthFileCooldownSnapshot} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import type {ParsedProviderError} from '@/utils/providerError'
 import {getNextAntigravityCountdownUpdateDelay, resolveAntigravityNowMs} from '@/utils/quota/antigravityCountdown'
 import {projectQuotaProgress} from '@/utils/quota/projection'
 import {buildResetDisplay} from '@/utils/quota/relativeTime'
 import {pickUrgentRecoveryRowId} from '@/utils/quota/resetSchedule'
-import {MINUTE_CLOCK} from '@/utils/time/sharedClock'
+import {getCooldownRemainingSeconds} from '@/utils/time/durations'
+import {MINUTE_CLOCK, SECOND_CLOCK} from '@/utils/time/sharedClock'
 import type {StatusBarData, StatusBlockDetail} from '@/utils/usage'
 import {rateToColor} from '@/utils/usage'
 import type React from 'react'
@@ -61,9 +63,13 @@ interface RefreshState {
     /** Backend scheduler status: idle/loading/success/error/banned/quota_exceeded */
     status?: string
     onRefresh: () => void
-    onResetQuota?: () => void
-    resetQuotaDisabled?: boolean
-    resetQuotaTitle?: string
+}
+
+interface ManualTokenRefreshState {
+    isRefreshing: boolean
+    onRefresh: () => void
+    disabled?: boolean
+    title?: string
 }
 
 export interface CredentialField {
@@ -78,6 +84,8 @@ interface CredentialCardProps {
     category: 'api-key' | 'auth-file'
     /** Primary display text (masked key or file name) */
     title: string
+    /** Non-secret identity used to name this card's controls */
+    controlLabel: string
     /** Optional highlighted title (JSX with <mark> tags for search matching) */
     highlightTitle?: React.ReactNode
     /** Current alias for this credential (displayed as subtitle) */
@@ -111,6 +119,8 @@ interface CredentialCardProps {
     onDownload?: () => void
     /** Last known runtime health from account inspection */
     runtimeState?: CredentialRuntimeState
+    /** Backend cooldown snapshot for this credential; undefined means unsupported or omitted. */
+    cooldownSnapshot?: AuthFileCooldownSnapshot
     /** Quota capability for credentials without a queryable quota endpoint */
     quotaCapability?: 'unsupported'
     /** Quota usage data */
@@ -131,8 +141,10 @@ interface CredentialCardProps {
     statsError?: string
     /** Time-bucketed request status blocks */
     statusBar?: StatusBarData
-    /** Refresh scheduling state */
+    /** Quota refresh scheduling state */
     refreshState?: RefreshState
+    /** Explicit credential token refresh, separate from quota refresh. */
+    manualTokenRefreshState?: ManualTokenRefreshState
 }
 
 /** Classify quota bar color by remaining percentage. */
@@ -253,9 +265,116 @@ function quotaFreshnessLabel(
     }
 }
 
+const cooldownReasonKeys: Record<string, string> = {
+    quota: 'credentials.cooldown_reason_quota_exceeded',
+    credential_quota: 'credentials.cooldown_reason_quota_exceeded',
+    quota_exceeded: 'credentials.cooldown_reason_quota_exceeded',
+    rate_limit: 'credentials.cooldown_reason_rate_limit',
+    transient_error: 'credentials.cooldown_reason_temporary_failure',
+    temporary_failure: 'credentials.cooldown_reason_temporary_failure',
+    cloudflare_challenge: 'credentials.cooldown_reason_provider_error',
+    invalid_grant: 'credentials.cooldown_reason_provider_error',
+    unauthorized: 'credentials.cooldown_reason_provider_error',
+    payment_required: 'credentials.cooldown_reason_provider_error',
+    not_found: 'credentials.cooldown_reason_provider_error',
+    model_not_supported: 'credentials.cooldown_reason_provider_error',
+    provider_error: 'credentials.cooldown_reason_provider_error',
+}
+
+function cooldownReasonLabel(reason: string, t: ReturnType<typeof useTranslation>['t']): string {
+    const normalized = reason.trim().toLowerCase()
+    const key = Object.prototype.hasOwnProperty.call(cooldownReasonKeys, normalized) ?
+                cooldownReasonKeys[normalized] :
+                undefined
+    return key ? t(key) : t('credentials.cooldown_reason_unknown', { defaultValue: 'Cooldown reason unavailable' })
+}
+
+interface CredentialCooldownsProps {
+    snapshot: AuthFileCooldownSnapshot
+}
+
+function CredentialCooldowns({snapshot}: CredentialCooldownsProps) {
+    const {t} = useTranslation()
+
+    if (snapshot.records === null) {
+        return (
+            <details className={styles.cooldowns} open>
+                <summary>{t('credentials.cooldowns_title', {defaultValue: 'Cooldowns'})}</summary>
+                <div className={styles.cooldownUnknown} role='status'>
+                    {t('credentials.cooldowns_unknown', {defaultValue: 'Cooldown status is unavailable'})}
+                </div>
+            </details>
+        )
+    }
+
+    if (snapshot.records.length === 0) {
+        return (
+            <details className={styles.cooldowns} open>
+                <summary>{t('credentials.cooldowns_title', {defaultValue: 'Cooldowns'})}</summary>
+                <div className={styles.cooldownEmpty} role='status'>
+                    {t('credentials.cooldowns_empty', {defaultValue: 'No active cooldown timers'})}
+                </div>
+            </details>
+        )
+    }
+
+    return <ActiveCredentialCooldowns snapshot={snapshot}/>
+}
+
+function ActiveCredentialCooldowns({snapshot}: CredentialCooldownsProps) {
+    const {t}   = useTranslation()
+    const nowMs = useSyncExternalStore(SECOND_CLOCK.subscribe, SECOND_CLOCK.getSnapshot, SECOND_CLOCK.getSnapshot)
+    const activeCooldowns = snapshot.records?.flatMap((cooldown, index) => {
+        const remainingSeconds = getCooldownRemainingSeconds(
+            cooldown.remainingSeconds,
+            snapshot.receivedAtMs,
+            nowMs,
+        )
+        return remainingSeconds > 0 ? [{cooldown, index, remainingSeconds}] : []
+    }) ?? []
+
+    if (activeCooldowns.length === 0) {
+        return null
+    }
+
+    return (
+        <details className={styles.cooldowns} open>
+            <summary>{t('credentials.cooldowns_title', {defaultValue: 'Cooldowns'})}</summary>
+            <div className={styles.cooldownList}>
+                {activeCooldowns.map(({cooldown, index, remainingSeconds}) => {
+                    const scopeLabel = cooldown.scope === 'model' ?
+                                       t('credentials.cooldown_scope_model', {
+                                           model: cooldown.modelKey,
+                                           defaultValue: 'Model {{model}}',
+                                       }) :
+                                       t('credentials.cooldown_scope_credential', {defaultValue: 'Credential'})
+                    return (
+                        <div
+                            key={`${cooldown.scope}-${cooldown.modelKey ?? ''}-${cooldown.retryAt}-${index}`}
+                            className={styles.cooldownRow}
+                        >
+                            <span className={styles.cooldownScope}>{scopeLabel}</span>
+                            <span className={styles.cooldownRemaining}>
+                                {t('credentials.cooldown_remaining', {
+                                    seconds: remainingSeconds,
+                                    defaultValue: '{{seconds}}s remaining',
+                                })}
+                            </span>
+                            <span className={styles.cooldownReason}>
+                                {cooldownReasonLabel(cooldown.reason, t)}
+                            </span>
+                        </div>
+                    )
+                })}
+            </div>
+        </details>
+    )
+}
+
 export function CredentialCard({
                                    category,
                                    title,
+                                   controlLabel,
                                    highlightTitle,
                                    alias,
                                    onAliasChange,
@@ -273,6 +392,7 @@ export function CredentialCard({
                                    onToggle,
                                    onDownload,
                                    runtimeState,
+                                   cooldownSnapshot,
                                    quotaCapability,
                                    quotaItems,
                                    quotaError,
@@ -284,6 +404,7 @@ export function CredentialCard({
                                    statsError,
                                    statusBar,
                                    refreshState,
+                                   manualTokenRefreshState,
                                }: CredentialCardProps) {
     const { t, i18n }                     = useTranslation()
     const [editingAlias, setEditingAlias] = useState(false)
@@ -411,7 +532,14 @@ export function CredentialCard({
             {disabled && <div className={styles.disabledBanner}>{t('credentials.filter_disabled')}</div>}
             {/* Header: checkbox + badge + title */}
             <div className={styles.header}>
-                {onSelect && <SelectionCheckbox checked={selected ?? false} onChange={onSelect} />}
+                {onSelect && (
+                    <SelectionCheckbox
+                        checked={selected ?? false}
+                        onChange={onSelect}
+                        ariaLabel={t('credentials.card_select', { name: controlLabel })}
+                        title={t('credentials.card_select', { name: controlLabel })}
+                    />
+                )}
                 {badge && (
                     <span
                         className={`${styles.badge} ${badge.premium ? styles.badgePremium : ''}`}
@@ -631,6 +759,10 @@ export function CredentialCard({
                         </div>
                     )}
                 </div>
+            )}
+
+            {cooldownSnapshot !== undefined && (
+                <CredentialCooldowns snapshot={cooldownSnapshot}/>
             )}
 
             {/* Request statistics: badges + status blocks */}
@@ -949,7 +1081,7 @@ export function CredentialCard({
                         checked={!disabled}
                         disabled={disableControls}
                         onChange={onToggle}
-                        ariaLabel={t('auth_files.status_toggle_label')}
+                        ariaLabel={t('credentials.card_toggle', { name: controlLabel })}
                     />
                 )}
                 <div className={styles.buttons}>
@@ -970,11 +1102,13 @@ export function CredentialCard({
                             variant='secondary'
                             size='sm'
                             onClick={refreshState.onRefresh}
-                            disabled={disableControls || refreshState.isRefreshing}
+                            disabled={disableControls || refreshState.isRefreshing || manualTokenRefreshState?.isRefreshing}
                             title={
                                 refreshState.isRefreshing
                                 ? t('credentials.refreshing', { defaultValue: 'Refreshing...' })
-                                : t('common.refresh')
+                                : t('auth_files.quota_refresh_hint', {
+                                    defaultValue: 'Refresh quota for this credential only',
+                                })
                             }
                             className={refreshState.isRefreshing ? styles.spinning : ''}
                         >
@@ -986,17 +1120,22 @@ export function CredentialCard({
                             )}
                         </Button>
                     )}
-                    {refreshState?.onResetQuota && (
+                    {manualTokenRefreshState && (
                         <Button
                             variant='secondary'
                             size='sm'
-                            onClick={refreshState.onResetQuota}
-                            disabled={disableControls || refreshState.isRefreshing || refreshState.resetQuotaDisabled}
-                            title={refreshState.resetQuotaTitle ?? t('auth_files.quota_reset_manual_hint', {
-                                defaultValue: 'Clear backend quota and cooldown state for this credential',
+                            onClick={manualTokenRefreshState.onRefresh}
+                            disabled={
+                                disableControls ||
+                                manualTokenRefreshState.isRefreshing ||
+                                manualTokenRefreshState.disabled ||
+                                refreshState?.isRefreshing
+                            }
+                            title={manualTokenRefreshState.title ?? t('credentials.manual_token_refresh', {
+                                defaultValue: 'Refresh token',
                             })}
                         >
-                            <IconTimer size={14} />
+                            <IconKey size={14} />
                         </Button>
                     )}
                     {onDownload && (

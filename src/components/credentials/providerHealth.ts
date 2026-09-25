@@ -65,6 +65,9 @@ const normalizeProvider = (value: unknown): string => {
     const provider = String(value ?? '')
         .trim()
         .toLowerCase()
+    if (provider === 'cognition') {
+        return 'devin'
+    }
     return provider || 'unknown'
 }
 

@@ -152,7 +152,4 @@ export const accountInspectionApi = {
         apiClient.post<AccountInspectionRun>('/account-inspection/inspect-one', target),
 
     stop: () => apiClient.post<{ status: AccountInspectionStatus }>('/account-inspection/stop'),
-
-    refreshToken: (target: { id?: string; file_name?: string; auth_index?: string }) =>
-        apiClient.post<{ status: string }>('/account-inspection/refresh-token', target),
 }

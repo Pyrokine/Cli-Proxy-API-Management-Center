@@ -4,7 +4,7 @@ import {formatDateTime} from '@/utils/format'
 
 const AUTH_FILE_PREFIX_REGEX = new RegExp(
     '^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|' +
-    'gemini|aistudio|kimi|qwen|x-ai|xai|grok|vertex|iflow)' +
+    'gemini|aistudio|kimi|qwen|x-ai|xai|grok|devin|cognition|vertex|iflow)' +
     '-(?<rest>.+)$',
     'i',
 )
@@ -82,7 +82,10 @@ const appendRemainderCandidates = (items: string[], value: string) => {
 
 export const normalizeAuthFileProvider = (provider: unknown): string => {
     const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
-    return normalized === 'x-ai' || normalized === 'grok' ? 'xai' : normalized
+    if (normalized === 'x-ai' || normalized === 'grok') {
+        return 'xai'
+    }
+    return normalized === 'cognition' ? 'devin' : normalized
 }
 
 export const supportsAuthFileUsingApi = (provider: unknown): boolean =>
@@ -96,8 +99,18 @@ export const applyAuthFileUsingApi = (
     usingApi: boolean,
 ): Record<string, unknown> => ({ ...file, using_api: usingApi })
 
-export const readAuthFileDisableCooling = (file: AuthFileItem): boolean =>
-    normalizeBooleanValue(file.disableCooling ?? file.disable_cooling ?? file['disable-cooling']) ?? false
+const readOverrideValue = (file: Record<string, unknown>, keys: string[]): unknown => {
+    const key = keys.find((name) => Object.prototype.hasOwnProperty.call(file, name))
+    return key === undefined ? undefined : file[key]
+}
+
+export const readAuthFileDisableCooling = (file: Record<string, unknown>): boolean | undefined =>
+    normalizeBooleanValue(readOverrideValue(file, ['disable_cooling', 'disable-cooling', 'disableCooling']))
+
+export const readAuthFileRequestRetry = (file: Record<string, unknown>): number | undefined => {
+    const value = parsePriorityValue(readOverrideValue(file, ['request_retry', 'request-retry', 'requestRetry']))
+    return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
 
 export const parsePriorityValue = (value: unknown): number | undefined => {
     if (typeof value === 'number') {

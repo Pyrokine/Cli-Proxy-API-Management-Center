@@ -6,6 +6,7 @@ import type {
     AntigravityQuotaState,
     ClaudeQuotaState,
     CodexQuotaState,
+    DevinQuotaState,
     GeminiCliQuotaState,
     KimiQuotaState,
     QuotaCacheMetadata,
@@ -49,6 +50,7 @@ export type QuotaCachePayload =
     | { provider: 'antigravity'; value: AntigravityQuotaState }
     | { provider: 'claude'; value: ClaudeQuotaState }
     | { provider: 'codex'; value: CodexQuotaState }
+    | { provider: 'devin'; value: DevinQuotaState }
     | { provider: 'gemini-cli'; value: GeminiCliQuotaState }
     | { provider: 'kimi'; value: KimiQuotaState }
     | { provider: 'xai'; value: XaiQuotaState }
@@ -68,6 +70,7 @@ interface QuotaStoreState {
     antigravityQuota: Record<string, AntigravityQuotaState>
     claudeQuota: Record<string, ClaudeQuotaState>
     codexQuota: Record<string, CodexQuotaState>
+    devinQuota: Record<string, DevinQuotaState>
     geminiCliQuota: Record<string, GeminiCliQuotaState>
     kimiQuota: Record<string, KimiQuotaState>
     xaiQuota: Record<string, XaiQuotaState>
@@ -101,6 +104,7 @@ const quotaDataKeys = (state: QuotaStoreState): Set<string> => new Set([
                                                                            ...Object.keys(state.antigravityQuota),
                                                                            ...Object.keys(state.claudeQuota),
                                                                            ...Object.keys(state.codexQuota),
+                                                                           ...Object.keys(state.devinQuota),
                                                                            ...Object.keys(state.geminiCliQuota),
                                                                            ...Object.keys(state.kimiQuota),
                                                                            ...Object.keys(state.xaiQuota),
@@ -125,6 +129,7 @@ const invalidateQuotaSubjects = (state: QuotaStoreState, keys: Set<string>): Par
         antigravityQuota: withoutKeys(state.antigravityQuota, keys),
         claudeQuota: withoutKeys(state.claudeQuota, keys),
         codexQuota: withoutKeys(state.codexQuota, keys),
+        devinQuota: withoutKeys(state.devinQuota, keys),
         geminiCliQuota: withoutKeys(state.geminiCliQuota, keys),
         kimiQuota: withoutKeys(state.kimiQuota, keys),
         xaiQuota: withoutKeys(state.xaiQuota, keys),
@@ -138,6 +143,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     antigravityQuota: {},
     claudeQuota: {},
     codexQuota: {},
+    devinQuota: {},
     geminiCliQuota: {},
     kimiQuota: {},
     xaiQuota: {},
@@ -156,6 +162,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
             antigravityQuota: {},
             claudeQuota: {},
             codexQuota: {},
+            devinQuota: {},
             geminiCliQuota: {},
             kimiQuota: {},
             xaiQuota: {},
@@ -205,6 +212,7 @@ const hasQuotaData = (state: QuotaStoreState, key: string): boolean =>
     key in state.antigravityQuota ||
     key in state.claudeQuota ||
     key in state.codexQuota ||
+    key in state.devinQuota ||
     key in state.geminiCliQuota ||
     key in state.kimiQuota ||
     key in state.xaiQuota
@@ -269,6 +277,7 @@ export const commitQuotaSnapshot = (
         let antigravityQuota = replaceData ? withoutKeys(state.antigravityQuota, keys) : state.antigravityQuota
         let claudeQuota      = replaceData ? withoutKeys(state.claudeQuota, keys) : state.claudeQuota
         let codexQuota       = replaceData ? withoutKeys(state.codexQuota, keys) : state.codexQuota
+        let devinQuota       = replaceData ? withoutKeys(state.devinQuota, keys) : state.devinQuota
         let geminiCliQuota   = replaceData ? withoutKeys(state.geminiCliQuota, keys) : state.geminiCliQuota
         let kimiQuota        = replaceData ? withoutKeys(state.kimiQuota, keys) : state.kimiQuota
         let xaiQuota         = replaceData ? withoutKeys(state.xaiQuota, keys) : state.xaiQuota
@@ -281,6 +290,9 @@ export const commitQuotaSnapshot = (
                 break
             case 'codex':
                 codexQuota = { ...codexQuota, [snapshot.key]: snapshot.payload.value }
+                break
+            case 'devin':
+                devinQuota = { ...devinQuota, [snapshot.key]: snapshot.payload.value }
                 break
             case 'gemini-cli':
                 geminiCliQuota = { ...geminiCliQuota, [snapshot.key]: snapshot.payload.value }
@@ -309,6 +321,7 @@ export const commitQuotaSnapshot = (
             antigravityQuota,
             claudeQuota,
             codexQuota,
+            devinQuota,
             geminiCliQuota,
             kimiQuota,
             xaiQuota,
@@ -334,15 +347,16 @@ export const markQuotaSnapshotRejected = (
         if (current.localGeneration !== expectedLocalGeneration || current.tombstone) {
             return state
         }
-        const previous = state.quotaMetadata[snapshot.key]
-        changed        = true
+        const previous      = state.quotaMetadata[snapshot.key]
+        const lastKnownGood = hasQuotaData(state, snapshot.key) || (previous?.successfulEmpty ?? false)
+        changed             = true
         return {
             quotaMetadata: {
                 ...state.quotaMetadata,
                 [snapshot.key]: {
                     ...(previous ?? snapshot.metadata),
                     status: 'error',
-                    freshness: 'outdated',
+                    freshness: lastKnownGood ? 'stale' : 'outdated',
                     lastError: error,
                     lastErrorAt: failedAt,
                 },
@@ -403,10 +417,11 @@ export const reconcileQuotaSubjects = (
             if (seenKeys.has(key) || current.localGeneration !== localGeneration || current.tombstone || !metadata) {
                 continue
             }
-            quotaMetadata[key] = {
+            const lastKnownGood = hasQuotaData(state, key) || metadata.successfulEmpty
+            quotaMetadata[key]  = {
                 ...metadata,
                 status: 'error',
-                freshness: 'outdated',
+                freshness: lastKnownGood ? 'stale' : 'outdated',
                 lastError: 'Quota status response omitted this credential',
                 lastErrorAt: omittedAt,
             }

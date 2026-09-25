@@ -172,7 +172,7 @@ describe('quota cache session isolation', () => {
                                                                                       })
     })
 
-    test('keeps an omitted subject outdated and accepts its next state revision', () => {
+    test('keeps an omitted subject stale and accepts its next state revision', () => {
         const initial = captureQuotaRequestClaim(3)
         expect(commitQuotaSnapshot(initial, 3, {
             key: 'codex::a.json',
@@ -195,7 +195,7 @@ describe('quota cache session isolation', () => {
         let state = useQuotaStore.getState()
         expect(state.codexQuota['codex::a.json']?.windows[0]?.id).toBe('a')
         expect(state.quotaMetadata['codex::a.json']).toMatchObject({
-                                                                       freshness: 'outdated',
+                                                                       freshness: 'stale',
                                                                        lastError: 'Quota status response omitted this credential',
                                                                        lastErrorAt: '2026-09-09T01:30:00Z',
                                                                    })
@@ -243,7 +243,7 @@ describe('quota cache session isolation', () => {
             .not.toBe(quotaRequestClaimSignature(afterSubjectInvalidation))
     })
 
-    test('marks invalid and older backend snapshots outdated without replacing accepted data', () => {
+    test('marks invalid and older backend snapshots stale without replacing accepted data', () => {
         const initial = captureQuotaRequestClaim(3)
         expect(commitQuotaSnapshot(initial, 3, {
             key: 'codex::a.json',
@@ -284,7 +284,7 @@ describe('quota cache session isolation', () => {
         const state = useQuotaStore.getState()
         expect(state.codexQuota['codex::a.json']?.windows[0]?.id).toBe('current')
         expect(state.quotaMetadata['codex::a.json']).toMatchObject({
-                                                                       freshness: 'outdated',
+                                                                       freshness: 'stale',
                                                                        lastError: 'older backend version',
                                                                        lastErrorAt: '2026-09-09T01:45:00Z',
                                                                        backendGeneration: 5,

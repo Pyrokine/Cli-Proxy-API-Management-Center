@@ -13,6 +13,7 @@ export type AuthFileType =
     | 'codex'
     | 'antigravity'
     | 'xai'
+    | 'devin'
     | 'iflow'
     | 'vertex'
     | 'empty'
@@ -38,6 +39,25 @@ export interface AuthFileRuntimeError {
     observedAt?: string | number
 }
 
+export interface AuthFileCooldown {
+    scope: 'credential' | 'model'
+    modelKey?: string
+    retryAt: string
+    remainingSeconds: number
+    reason: string
+    backoffLevel?: number
+    httpStatus?: number
+}
+
+export interface AuthFileCooldownSnapshot {
+    /** Server observation time for this read-only projection. */
+    observedAt?: string
+    /** Local receipt time anchors countdown projection without assuming synchronized clocks. */
+    receivedAtMs: number
+    /** null = unknown; [] = known empty; non-empty = active credential/model cooldowns. */
+    records: AuthFileCooldown[] | null
+}
+
 export interface AuthFileItem {
     name: string
     type?: AuthFileType | string
@@ -61,15 +81,19 @@ export interface AuthFileItem {
     note?: string
     usingApi?: boolean
     using_api?: boolean
-    disableCooling?: boolean
-    disable_cooling?: boolean
-    'disable-cooling'?: boolean
+    disableCooling?: boolean | null
+    disable_cooling?: boolean | null
+    'disable-cooling'?: boolean | null
+    requestRetry?: number | null
+    request_retry?: number | null
+    'request-retry'?: number | null
     excludedModels?: string[]
     excluded_models?: string[]
     'excluded-models'?: string[]
     success?: number
     failed?: number
     recentRequests?: RecentRequestBucket[]
+    cooldownSnapshot?: AuthFileCooldownSnapshot
 
     [key: string]: unknown
 }
@@ -84,4 +108,6 @@ export interface AuthFileModelItem {
 export interface AuthFilesResponse {
     files: AuthFileItem[]
     total?: number
+    observedAt?: string
+    receivedAtMs?: number
 }

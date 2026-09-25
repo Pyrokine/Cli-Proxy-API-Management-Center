@@ -1,4 +1,5 @@
 import type {AuthFileItem} from '@/types/authFile'
+import {readAuthFileDisableCooling, readAuthFileRequestRetry} from '@/features/authFiles/constants'
 
 type AuthFileIdentityKind = 'email' | 'projectId' | 'fileName'
 
@@ -72,13 +73,17 @@ const SAFE_DISPLAY_FIELDS: Array<keyof AuthFileItem> = [
     'note',
     'usingApi',
     'disableCooling',
+    'requestRetry',
     'excludedModels',
 ]
 
 export const buildSafeAuthFileDisplayInfo = (file: AuthFileItem): Record<string, unknown> =>
     Object.fromEntries(
         SAFE_DISPLAY_FIELDS.flatMap((key) => {
-            const value = key === 'name' ? sanitizeAuthFileName(file.name) : file[key]
+            const value = key === 'name' ? sanitizeAuthFileName(file.name)
+                : key === 'disableCooling' ? readAuthFileDisableCooling(file)
+                : key === 'requestRetry' ? readAuthFileRequestRetry(file)
+                : file[key]
             return value === undefined ? [] : [[key, Array.isArray(value) ? [...value] : value]]
         }),
     )

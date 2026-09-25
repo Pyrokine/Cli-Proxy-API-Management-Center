@@ -49,6 +49,7 @@ export function createVendorRegistry(icons: {
     Qwen: ComponentType<{ size?: number }>
     IFlow: ComponentType<{ size?: number }>
     Grok: ComponentType<{ size?: number }>
+    Devin: ComponentType<{ size?: number }>
 }): VendorDefinition[] {
     return [
         {
@@ -108,6 +109,18 @@ export function createVendorRegistry(icons: {
             supportsJsonImport: false,
             supportsCookieAuth: false,
             quotaConfig: { provider: 'codex', label: 'Codex' },
+        },
+        {
+            id: 'devin',
+            label: 'Devin',
+            labelKey: 'credentials.vendor_devin',
+            icon: icons.Devin,
+            authFileTypes: ['devin', 'cognition'],
+            oauthProviders: ['devin'],
+            supportsFileUpload: true,
+            supportsJsonImport: false,
+            supportsCookieAuth: false,
+            quotaConfig: { provider: 'devin', label: 'Devin' },
         },
         {
             id: 'vertex',

@@ -3,13 +3,15 @@ import {
     normalizeAuthFileProvider,
     parsePriorityValue,
     readAuthFileDisableCooling,
+    readAuthFileRequestRetry,
     readAuthFileUsingApi,
     supportsAuthFileUsingApi,
 } from '@/features/authFiles/constants'
 import {buildSafeAuthFileDisplayInfo} from '@/features/authFiles/identity'
 import {type AuthFileFieldsPatch, authFilesApi} from '@/services/api/authFiles'
 import {useNotificationStore} from '@/stores'
-import type {AuthFileItem} from '@/types'
+import type {AuthFileItem, CredentialOverrides} from '@/types'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {
     type CredentialWeightError,
     parseCredentialWeightText,
@@ -27,7 +29,7 @@ type AuthFileHeadersErrorKey =
     | 'auth_files.headers_invalid_value'
     | 'auth_files.headers_sensitive_name'
 type AuthFileWeightErrorKey = 'auth_files.weight_integer_error' | 'auth_files.weight_max_error'
-type AuthFileEditorErrorKey = AuthFileHeadersErrorKey | AuthFileWeightErrorKey
+type AuthFileEditorErrorKey = AuthFileHeadersErrorKey | AuthFileWeightErrorKey | 'auth_files.request_retry_invalid'
 type AuthFileContentErrorKey = 'auth_files.prefix_proxy_invalid_json' | 'auth_files.prefix_proxy_html_challenge'
 
 const credentialWeightErrorKey = (error: CredentialWeightError): AuthFileWeightErrorKey =>
@@ -45,6 +47,7 @@ export type PrefixProxyEditorFieldValue = string
 
 export type PrefixProxyEditorState = {
     fileName: string
+    authIndex?: string | number | null
     fileInfoText: string
     loading: boolean
     saving: boolean
@@ -61,8 +64,10 @@ export type PrefixProxyEditorState = {
     headersText: string
     headersTouched: boolean
     headersError: string | null
-    disableCooling: boolean
+    disableCooling: boolean | undefined
     disableCoolingTouched: boolean
+    requestRetry: number | undefined
+    requestRetryTouched: boolean
     supportsUsingApi: boolean
     usingApi: boolean
     usingApiTouched: boolean
@@ -72,7 +77,11 @@ export type PrefixProxyEditorState = {
 
 type UseAuthFilesPrefixProxyEditorOptions = {
     disableControls: boolean
-    completeMutation: (name: string, fields: AuthFileFieldsPatch) => Promise<void>
+    completeMutation: (
+        name: string,
+        fields: AuthFileFieldsPatch,
+        authIndex?: string | number | null,
+    ) => Promise<void>
 }
 
 const isRecordObject = (value: unknown): value is Record<string, unknown> =>
@@ -116,6 +125,16 @@ const parseHeadersText = (text: string): {
 }
 
 const normalizeTextField = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+const normalizeAuthIndex = (value: string | number | null | undefined): string =>
+    String(value ?? '').trim()
+
+const isEditorIdentity = (
+    editor: PrefixProxyEditorState | null,
+    fileName: string,
+    authIndex?: string | number | null,
+): editor is PrefixProxyEditorState =>
+    editor?.fileName === fileName && normalizeAuthIndex(editor.authIndex) === normalizeAuthIndex(authIndex)
 
 const getAuthFileContentErrorKey = (text: string): AuthFileContentErrorKey => {
     const head               = text.trimStart().slice(0, 4096).toLowerCase()
@@ -266,7 +285,20 @@ export const buildAuthFileFieldsPatch = (
     if (editor.disableCoolingTouched) {
         const originalDisableCooling = readAuthFileDisableCooling(original as AuthFileItem)
         if (editor.disableCooling !== originalDisableCooling) {
-            patch.disable_cooling = editor.disableCooling
+            patch.disable_cooling = editor.disableCooling ?? null
+        }
+    }
+
+    if (editor.requestRetryTouched) {
+        const errorKey = getCredentialRetryValidationKey(editor.requestRetry)
+        if (errorKey) {
+            throw new Error(resolveHeadersError(errorKey))
+        }
+        const originalRequestRetry = readAuthFileRequestRetry(original)
+        const nextRequestRetry = editor.requestRetry !== undefined && editor.requestRetry >= 0
+            ? editor.requestRetry : undefined
+        if (nextRequestRetry !== originalRequestRetry) {
+            patch.request_retry = nextRequestRetry ?? null
         }
     }
 
@@ -297,24 +329,28 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
     const [prefixProxyEditor, setPrefixProxyEditor] = useState<PrefixProxyEditorState | null>(null)
 
     const hasBlockingValidationError = Boolean(
-        prefixProxyEditor?.weightError || (prefixProxyEditor?.headersTouched && prefixProxyEditor.headersError),
+        prefixProxyEditor?.weightError || (prefixProxyEditor?.headersTouched && prefixProxyEditor.headersError) ||
+        (prefixProxyEditor?.requestRetryTouched && getCredentialRetryValidationKey(prefixProxyEditor.requestRetry)),
     )
     const prefixProxyPatch           =
               prefixProxyEditor?.json && !hasBlockingValidationError
               ? buildAuthFileFieldsPatch(prefixProxyEditor, (key) => t(key))
               : null
-    const prefixProxyDirty           = hasKeys(prefixProxyPatch)
+    const prefixProxyDirty           = Boolean(
+        prefixProxyEditor && !prefixProxyEditor.readOnly && (hasBlockingValidationError || hasKeys(prefixProxyPatch)),
+    )
 
     const closePrefixProxyEditor = () => {
         setPrefixProxyEditor(null)
     }
 
     const openPrefixProxyEditor = async (file: AuthFileItem) => {
-        const name = file.name
+        const name      = file.name
+        const authIndex = file.authIndex
         if (disableControls) {
             return
         }
-        if (prefixProxyEditor?.fileName === name) {
+        if (isEditorIdentity(prefixProxyEditor, name, authIndex)) {
             setPrefixProxyEditor(null)
             return
         }
@@ -329,12 +365,14 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                 weight: file.weight,
                 note: file.note,
                 headers,
-                disable_cooling: file.disableCooling,
+                disable_cooling: readAuthFileDisableCooling(file),
+                request_retry: readAuthFileRequestRetry(file),
                 using_api: file.usingApi,
                 excluded_models: file.excludedModels,
             }
             setPrefixProxyEditor({
                                      fileName: name,
+                                     authIndex,
                                      fileInfoText: JSON.stringify(buildSafeAuthFileDisplayInfo(file), null, 2),
                                      loading: false,
                                      saving: false,
@@ -354,6 +392,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                      headersError: null,
                                      disableCooling: readAuthFileDisableCooling(file),
                                      disableCoolingTouched: false,
+                                     requestRetry: readAuthFileRequestRetry(file),
+                                     requestRetryTouched: false,
                                      supportsUsingApi: supportsAuthFileUsingApi(provider),
                                      usingApi: readAuthFileUsingApi(file),
                                      usingApiTouched: false,
@@ -365,6 +405,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
 
         setPrefixProxyEditor({
                                  fileName: name,
+                                 authIndex,
                                  fileInfoText: JSON.stringify(buildSafeAuthFileDisplayInfo(file), null, 2),
                                  loading: true,
                                  saving: false,
@@ -383,6 +424,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                  headersError: null,
                                  disableCooling: readAuthFileDisableCooling(file),
                                  disableCoolingTouched: false,
+                                 requestRetry: readAuthFileRequestRetry(file),
+                                 requestRetryTouched: false,
                                  supportsUsingApi: supportsAuthFileUsingApi(provider),
                                  usingApi: readAuthFileUsingApi(file),
                                  usingApiTouched: false,
@@ -398,7 +441,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                 parsed = JSON.parse(trimmed) as unknown
             } catch {
                 setPrefixProxyEditor((prev) =>
-                                         prev && prev.fileName === name
+                                         isEditorIdentity(prev, name, authIndex)
                                          ? {
                                                  ...prev,
                                                  loading: false,
@@ -411,7 +454,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
 
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
                 setPrefixProxyEditor((prev) =>
-                                         prev && prev.fileName === name
+                                         isEditorIdentity(prev, name, authIndex)
                                          ? {
                                                  ...prev,
                                                  loading: false,
@@ -430,7 +473,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                 weight: downloaded.weight,
                 note: downloaded.note,
                 headers: normalizeEditableHeaders(downloaded.headers),
-                disable_cooling: downloaded.disable_cooling ?? downloaded['disable-cooling'],
+                disable_cooling: readAuthFileDisableCooling(downloaded),
+                request_retry: readAuthFileRequestRetry(downloaded),
                 using_api: downloaded.using_api,
                 excluded_models: downloaded.excluded_models ?? downloaded['excluded-models'],
             }
@@ -446,7 +490,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             }
 
             setPrefixProxyEditor((prev) =>
-                                     prev && prev.fileName === name
+                                     isEditorIdentity(prev, name, authIndex)
                                      ? {
                                              ...prev,
                                              loading: false,
@@ -463,6 +507,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                                              headersError,
                                              disableCooling: readAuthFileDisableCooling(json as AuthFileItem),
                                              disableCoolingTouched: false,
+                                             requestRetry: readAuthFileRequestRetry(json),
+                                             requestRetryTouched: false,
                                              supportsUsingApi: supportsAuthFileUsingApi(
                                                  normalizeAuthFileProvider(
                                                      file.provider ||
@@ -485,7 +531,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : t('notification.download_failed')
             setPrefixProxyEditor((prev) =>
-                                     prev && prev.fileName === name
+                                     isEditorIdentity(prev, name, authIndex)
                                      ? { ...prev, loading: false, error: errorMessage }
                                      : prev,
             )
@@ -531,25 +577,36 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         })
     }
 
-    const handlePrefixProxyBooleanChange = (
-        field: 'disableCooling' | 'usingApi',
-        value: boolean,
-    ) => {
+    const handlePrefixProxyBooleanChange = (value: boolean) => {
         setPrefixProxyEditor((prev) => {
             if (!prev || prev.readOnly) {
                 return prev
             }
-            return field === 'disableCooling'
-                   ? { ...prev, disableCooling: value, disableCoolingTouched: true }
-                   : { ...prev, usingApi: value, usingApiTouched: true }
+            return { ...prev, usingApi: value, usingApiTouched: true }
+        })
+    }
+
+    const handlePrefixProxyOverridesChange = (overrides: CredentialOverrides) => {
+        setPrefixProxyEditor((prev) => {
+            if (!prev || prev.readOnly || prev.loading || prev.saving) {
+                return prev
+            }
+            return {
+                ...prev,
+                ...(Object.prototype.hasOwnProperty.call(overrides, 'disableCooling')
+                    ? { disableCooling: overrides.disableCooling, disableCoolingTouched: true } : {}),
+                ...(Object.prototype.hasOwnProperty.call(overrides, 'requestRetry')
+                    ? { requestRetry: overrides.requestRetry, requestRetryTouched: true } : {}),
+            }
         })
     }
 
     const handlePrefixProxySave = async () => {
-        if (!prefixProxyEditor?.json || prefixProxyEditor.readOnly || !prefixProxyDirty) {
+        if (!prefixProxyEditor?.json || prefixProxyEditor.readOnly || hasBlockingValidationError || !prefixProxyDirty) {
             return
         }
-        const name = prefixProxyEditor.fileName
+        const name      = prefixProxyEditor.fileName
+        const authIndex = prefixProxyEditor.authIndex
         let payload: AuthFileFieldsPatch
         try {
             payload = buildAuthFileFieldsPatch(prefixProxyEditor, (key) => t(key))
@@ -562,16 +619,16 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             return
         }
 
-        setPrefixProxyEditor((prev) => (prev && prev.fileName === name ? { ...prev, saving: true } : prev))
+        setPrefixProxyEditor((prev) => (isEditorIdentity(prev, name, authIndex) ? { ...prev, saving: true } : prev))
         try {
-            await authFilesApi.patchFields(name, payload)
-            await completeMutation(name, payload)
+            await authFilesApi.patchFields(name, payload, authIndex)
+            await completeMutation(name, payload, authIndex)
             showNotification(t('auth_files.prefix_proxy_saved_success', { name }), 'success')
-            setPrefixProxyEditor(null)
+            setPrefixProxyEditor((prev) => (isEditorIdentity(prev, name, authIndex) ? null : prev))
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.update_failed')}: ${errorMessage}`, 'error')
-            setPrefixProxyEditor((prev) => (prev && prev.fileName === name ? { ...prev, saving: false } : prev))
+            setPrefixProxyEditor((prev) => (isEditorIdentity(prev, name, authIndex) ? { ...prev, saving: false } : prev))
         }
     }
 
@@ -582,6 +639,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
         closePrefixProxyEditor,
         handlePrefixProxyChange,
         handlePrefixProxyBooleanChange,
+        handlePrefixProxyOverridesChange,
         handlePrefixProxySave,
     }
 }

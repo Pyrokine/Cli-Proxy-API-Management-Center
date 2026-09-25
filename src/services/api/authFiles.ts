@@ -3,18 +3,36 @@
  */
 
 import type {OAuthModelAliasEntry} from '@/types'
+import {readAuthFileDisableCooling, readAuthFileRequestRetry} from '@/features/authFiles/constants'
 import type {
     AuthFileItem,
     AuthFileModelItem,
     AuthFileRuntimeError,
+    AuthFileCooldown,
+    AuthFileCooldownSnapshot,
     AuthFilesResponse,
     RecentRequestBucket,
 } from '@/types/authFile'
 import {normalizeBooleanValue} from '@/utils/boolean'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {normalizeExcludedModelsValue} from '@/utils/excludedModels'
 import {apiClient} from './client'
 
 type AuthFileStatusResponse = { status: string; disabled: boolean }
+export type AuthFileRefreshResult = {
+    filename: string
+    provider: string
+    auth_index: string
+    status: string
+    refreshed_at: string
+}
+export type AuthFileRefreshBatchItem = AuthFileRefreshResult & {
+    success: boolean
+    error?: string
+}
+export type AuthFileRefreshBatchResult = {
+    results: AuthFileRefreshBatchItem[]
+}
 export type AuthFileFieldsPatch = {
     prefix?: string
     proxy_url?: string
@@ -22,7 +40,8 @@ export type AuthFileFieldsPatch = {
     priority?: number
     weight?: number | null
     note?: string
-    disable_cooling?: boolean
+    disable_cooling?: boolean | null
+    request_retry?: number | null
     using_api?: boolean
     excluded_models?: string[]
 }
@@ -104,13 +123,89 @@ const normalizeRuntimeError = (value: unknown): AuthFileRuntimeError | undefined
     }
 }
 
-const normalizeAuthFileItem = (value: unknown): AuthFileItem | null => {
+const normalizeTimestamp = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') {
+        return undefined
+    }
+    const trimmed = value.trim()
+    const timestamp = Date.parse(trimmed)
+    return trimmed && Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined
+}
+
+const normalizeOptionalNonNegativeInteger = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+
+const normalizeCooldown = (value: unknown): AuthFileCooldown | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null
+    }
+
+    const entry            = value as Record<string, unknown>
+    const scope            = normalizeString(entry.scope)?.toLowerCase()
+    const modelKey         = normalizeString(entry.model_key ?? entry.modelKey)
+    const retryAt          = normalizeTimestamp(entry.retry_at ?? entry.retryAt)
+    const remainingSeconds = entry.remaining_seconds ?? entry.remainingSeconds
+    const reason           = normalizeString(entry.reason) ?? 'unknown'
+    const backoffValue     = entry.backoff_level === undefined ? entry.backoffLevel : entry.backoff_level
+    const backoffLevel     = normalizeOptionalNonNegativeInteger(backoffValue)
+    const httpStatusValue  = entry.http_status === undefined ? entry.httpStatus : entry.http_status
+    const httpStatus       = typeof httpStatusValue === 'number' && Number.isSafeInteger(httpStatusValue) &&
+                             httpStatusValue >= 400 && httpStatusValue <= 599 ? httpStatusValue : undefined
+
+    if (
+        (scope !== 'credential' && scope !== 'model') ||
+        (scope === 'model' && !modelKey) ||
+        retryAt === undefined ||
+        typeof remainingSeconds !== 'number' ||
+        !Number.isSafeInteger(remainingSeconds) ||
+        remainingSeconds <= 0
+    ) {
+        return null
+    }
+
+    return {
+        scope,
+        ...(modelKey ? {modelKey} : {}),
+        retryAt,
+        remainingSeconds,
+        reason,
+        ...(backoffLevel === undefined ? {} : {backoffLevel}),
+        ...(httpStatus === undefined ? {} : {httpStatus}),
+    }
+}
+
+const normalizeCooldownSnapshot = (
+    entry: Record<string, unknown>,
+    observedAt: string | undefined,
+    receivedAtMs: number,
+): AuthFileCooldownSnapshot | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(entry, 'cooldowns')) {
+        return undefined
+    }
+    const snapshot = {observedAt, receivedAtMs}
+    if (!Array.isArray(entry.cooldowns)) {
+        return {...snapshot, records: null}
+    }
+
+    const records = entry.cooldowns.map(normalizeCooldown)
+    return {
+        ...snapshot,
+        records: records.every((cooldown): cooldown is AuthFileCooldown => cooldown !== null) ? records : null,
+    }
+}
+
+const normalizeAuthFileItem = (
+    value: unknown,
+    observedAt: string | undefined,
+    receivedAtMs: number,
+): AuthFileItem | null => {
     if (!value || typeof value !== 'object') {
         return null
     }
 
-    const entry = value as Record<string, unknown>
-    const name  = String(entry.name ?? '').trim()
+    const entry            = value as Record<string, unknown>
+    const cooldownSnapshot = normalizeCooldownSnapshot(entry, observedAt, receivedAtMs)
+    const name             = String(entry.name ?? '').trim()
     if (!name) {
         return null
     }
@@ -163,15 +258,15 @@ const normalizeAuthFileItem = (value: unknown): AuthFileItem | null => {
         email: normalizeString(entry.email),
         projectId: normalizeString(entry.project_id ?? entry.projectId),
         usingApi: normalizeBooleanValue(entry.using_api ?? entry.usingApi),
-        disableCooling: normalizeBooleanValue(
-            entry.disable_cooling ?? entry['disable-cooling'] ?? entry.disableCooling,
-        ),
+        disableCooling: readAuthFileDisableCooling(entry),
+        requestRetry: readAuthFileRequestRetry(entry),
         excludedModels: normalizeExcludedModelsValue(
             entry.excluded_models ?? entry['excluded-models'] ?? entry.excludedModels,
         ),
         success: normalizeNumber(entry.success),
         failed: normalizeNumber(entry.failed),
         recentRequests: normalizeRecentRequestBuckets(entry.recent_requests ?? entry.recentRequests),
+        cooldownSnapshot,
     }
 }
 const hasMeaningfulValue    = (value: unknown): boolean => {
@@ -213,7 +308,15 @@ const mergeAuthFileItems = (left: AuthFileItem, right: AuthFileItem): AuthFileIt
     const primary              = rightScore > leftScore ? right : left
     const secondary            = primary === left ? right : left
     const merged: AuthFileItem = { ...primary }
+    if (merged.cooldownSnapshot === undefined && secondary.cooldownSnapshot !== undefined) {
+        merged.cooldownSnapshot = secondary.cooldownSnapshot
+    }
     Object.entries(secondary).forEach(([key, value]) => {
+        if (['disable_cooling', 'disable-cooling', 'disableCooling',
+             'request_retry', 'request-retry', 'requestRetry',
+             'cooldowns', 'cooldownSnapshot'].includes(key)) {
+            return
+        }
         if (!hasMeaningfulValue(merged[key]) && hasMeaningfulValue(value)) {
             merged[key] = value
         }
@@ -221,22 +324,60 @@ const mergeAuthFileItems = (left: AuthFileItem, right: AuthFileItem): AuthFileIt
     return merged
 }
 
-export const normalizeAuthFilesResponse = (value: unknown): AuthFilesResponse => {
-    const record   = value && typeof value === 'object' ? (value as Record<string, unknown>) : null
-    const filesRaw = Array.isArray(record?.files) ? record.files : []
-    const byName   = new Map<string, AuthFileItem>()
+const mergeAuthFileRows = (rows: AuthFileItem[]): AuthFileItem | null =>
+    rows.reduce<AuthFileItem | null>(
+        (current, row) => current ? mergeAuthFileItems(current, row) : row,
+        null,
+    )
+
+const mergeAuthFileNameGroup = (rows: AuthFileItem[]): AuthFileItem[] => {
+    const byAuthIndex = new Map<string, AuthFileItem[]>()
+    const sharedRows: AuthFileItem[] = []
+    for (const row of rows) {
+        const authIndex = String(row.authIndex ?? '').trim()
+        if (!authIndex) {
+            sharedRows.push(row)
+            continue
+        }
+        byAuthIndex.set(authIndex, [...(byAuthIndex.get(authIndex) ?? []), row])
+    }
+
+    if (byAuthIndex.size <= 1) {
+        const merged = mergeAuthFileRows(rows)
+        return merged ? [merged] : []
+    }
+
+    const shared = mergeAuthFileRows(sharedRows)
+    return Array.from(byAuthIndex.values()).flatMap((identityRows) => {
+        const identity = mergeAuthFileRows(identityRows)
+        if (!identity) {
+            return []
+        }
+        return [shared ? mergeAuthFileItems(shared, identity) : identity]
+    })
+}
+
+export const normalizeAuthFilesResponse = (
+    value: unknown,
+    receivedAtMs = Date.now(),
+): AuthFilesResponse => {
+    const record     = value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+    const filesRaw   = Array.isArray(record?.files) ? record.files : []
+    const observedAt = normalizeTimestamp(record?.observed_at ?? record?.observedAt)
+    const byName     = new Map<string, AuthFileItem[]>()
     filesRaw.forEach((item) => {
-        const normalized = normalizeAuthFileItem(item)
+        const normalized = normalizeAuthFileItem(item, observedAt, receivedAtMs)
         if (!normalized) {
             return
         }
-        const current = byName.get(normalized.name)
-        byName.set(normalized.name, current ? mergeAuthFileItems(current, normalized) : normalized)
+        byName.set(normalized.name, [...(byName.get(normalized.name) ?? []), normalized])
     })
-    const files = [...byName.values()]
+    const files = Array.from(byName.values()).flatMap(mergeAuthFileNameGroup)
     return {
         files,
         total: files.length,
+        ...(observedAt === undefined ? {} : {observedAt}),
+        receivedAtMs,
     }
 }
 
@@ -470,17 +611,113 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
     return result
 }
 
-const OAUTH_MODEL_ALIAS_ENDPOINT = '/oauth-model-alias'
+const normalizeAuthFileRefreshResult = (value: unknown): AuthFileRefreshResult => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('auth_files.refresh_invalid_response')
+    }
+    const entry       = value as Record<string, unknown>
+    const filename    = normalizeString(entry.filename)
+    const provider    = normalizeString(entry.provider)
+    const authIndex   = normalizeString(entry.auth_index)
+    const status      = normalizeString(entry.status)
+    const refreshedAt = normalizeTimestamp(entry.refreshed_at)
+    if (!filename || !provider || !authIndex || !status || !refreshedAt) {
+        throw new Error('auth_files.refresh_invalid_response')
+    }
+    return {
+        filename,
+        provider,
+        auth_index: authIndex,
+        status,
+        refreshed_at: refreshedAt,
+    }
+}
+
+const normalizeAuthFileRefreshBatchResult = (value: unknown): AuthFileRefreshBatchResult => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('auth_files.refresh_invalid_response')
+    }
+    const results = (value as Record<string, unknown>).results
+    if (!Array.isArray(results)) {
+        throw new Error('auth_files.refresh_invalid_response')
+    }
+    return {
+        results: results.map((item) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                throw new Error('auth_files.refresh_invalid_response')
+            }
+            const entry   = item as Record<string, unknown>
+            const result  = normalizeAuthFileRefreshResult(entry)
+            const success = entry.success
+            if (typeof success !== 'boolean') {
+                throw new Error('auth_files.refresh_invalid_response')
+            }
+            const error = normalizeString(entry.error)
+            return {...result, success, ...(error ? {error} : {})}
+        }),
+    }
+}
+
+const OAUTH_MODEL_ALIAS_ENDPOINT       = '/oauth-model-alias'
+const AUTH_FILE_REFRESH_TIMEOUT_MS      = 35_000
 
 export const authFilesApi = {
     list: async (): Promise<AuthFilesResponse> =>
         normalizeAuthFilesResponse(await apiClient.get<unknown>('/auth-files')),
 
-    setStatus: (name: string, disabled: boolean) =>
-        apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),
+    setStatus: (name: string, disabled: boolean, authIndex?: string | number | null) => {
+        const identity = String(authIndex ?? '').trim()
+        return apiClient.patch<AuthFileStatusResponse>('/auth-files/status', {
+            name,
+            disabled,
+            ...(identity ? { auth_index: identity } : {}),
+        })
+    },
 
-    patchFields: (name: string, fields: AuthFileFieldsPatch) =>
-        apiClient.patch('/auth-files/fields', { name, ...fields }),
+    requestManualRefresh: (
+        name: string,
+        authIndex?: string | number | null,
+    ): Promise<AuthFileRefreshResult> => {
+        const normalizedName = String(name ?? '').trim()
+        const identity       = String(authIndex ?? '').trim()
+        if (!normalizedName || !identity) {
+            throw new Error('auth_files.refresh_identity_required')
+        }
+        return apiClient.post<unknown>('/auth-files/refresh', {
+            name: normalizedName,
+            auth_index: identity,
+        }, {timeout: AUTH_FILE_REFRESH_TIMEOUT_MS}).then(normalizeAuthFileRefreshResult)
+    },
+
+    requestManualRefreshAll: async (): Promise<AuthFileRefreshBatchResult> =>
+        normalizeAuthFileRefreshBatchResult(
+            await apiClient.post<unknown>(
+                '/auth-files/refresh',
+                {all: true},
+                {timeout: AUTH_FILE_REFRESH_TIMEOUT_MS},
+            ),
+        ),
+
+    patchFields: (
+        name: string,
+        fields: AuthFileFieldsPatch,
+        authIndex?: string | number | null,
+    ) => {
+        const errorKey = getCredentialRetryValidationKey(fields.request_retry ?? undefined)
+        if (errorKey) {
+            throw new Error(errorKey)
+        }
+        const identity = String(authIndex ?? '').trim()
+        const payload = {
+            name,
+            ...(identity ? { 'auth-index': identity } : {}),
+            ...fields,
+        }
+        if (typeof payload.request_retry === 'number' && payload.request_retry < 0) {
+            payload.request_retry = null
+        }
+        return apiClient.patch('/auth-files/fields', payload)
+    },
 
     /**
      * Bulk enable a list of auth files. Sibling to setStatus but flips many files

@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test'
 import {
     applyAuthFileMutation,
     authFileMutationQuotaKeys,
+    authFileRefreshIdentifiers,
     createLatestCredentialsRequestTracker,
 } from '@/components/credentials/credentialsDataLifecycle'
 
@@ -40,6 +41,48 @@ describe('credentials data lifecycle', () => {
                                  excludedModels: [],
                                  weight: 0,
                              })
+    })
+
+    test('targets same-file runtime identities without mutating their siblings', () => {
+        const files = [
+            {name: 'devin-shared.json', provider: 'devin', authIndex: 'devin-a', disabled: false, priority: 1},
+            {name: 'devin-shared.json', provider: 'devin', authIndex: 'devin-b', disabled: false, priority: 2},
+        ]
+
+        const disabled = applyAuthFileMutation(files, {
+            kind: 'status',
+            names: ['devin-shared.json'],
+            authIndex: 'devin-a',
+            disabled: true,
+        })
+        expect(disabled).toEqual([
+            {...files[0], disabled: true},
+            files[1],
+        ])
+
+        const edited = applyAuthFileMutation(disabled, {
+            kind: 'fields',
+            name: 'devin-shared.json',
+            authIndex: 'devin-b',
+            fields: {priority: 7},
+        })
+        expect(edited).toEqual([
+            disabled[0],
+            {...files[1], priority: 7},
+        ])
+    })
+
+    test('refreshes only enabled same-file identities by exact quota key', () => {
+        const files = [
+            {name: 'devin-shared.json', provider: 'devin', authIndex: 'devin-a', disabled: true},
+            {name: 'devin-shared.json', provider: 'devin', authIndex: 'devin-b', disabled: false},
+            {name: 'codex.json', provider: 'codex', authIndex: 'legacy-index', disabled: false},
+        ]
+
+        expect(authFileRefreshIdentifiers(files, ['devin-shared.json', 'codex.json'])).toEqual({
+            identifiers: ['devin::devin-shared.json::devin-b', 'codex::codex.json'],
+            skippedDisabled: 1,
+        })
     })
 
     test('derives provider-specific quota subjects without invalidating status or field updates', () => {

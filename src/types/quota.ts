@@ -156,6 +156,23 @@ export interface CodexQuotaState {
     errorStatus?: number
 }
 
+export interface DevinQuotaWindow {
+    id: 'daily' | 'weekly'
+    remainingPercent: number | null
+    resetAtMs: number | null
+    periodHours: number
+}
+
+export interface DevinQuotaState {
+    status: 'idle' | 'loading' | 'success' | 'error'
+    windows: DevinQuotaWindow[]
+    planType?: string | null
+    planStart?: string | null
+    planEnd?: string | null
+    error?: string
+    errorStatus?: number
+}
+
 export interface KimiQuotaRow {
     id: string
     label?: string
