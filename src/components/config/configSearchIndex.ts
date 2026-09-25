@@ -407,6 +407,22 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['plugins', 'configs'],
     },
     {
+        fieldId: 'antigravitySensitiveWords',
+        sectionId: 'advanced',
+        labelKey: L('sections.system.antigravity_sensitive_words'),
+        hintKey: L('sections.system.antigravity_sensitive_words_desc'),
+        yamlKeys: ['antigravity', 'sensitive-words'],
+        keywords: ['antigravity', 'obfuscate', 'zero-width'],
+    },
+    {
+        fieldId: 'devinSensitiveWords',
+        sectionId: 'advanced',
+        labelKey: L('sections.system.devin_sensitive_words'),
+        hintKey: L('sections.system.devin_sensitive_words_desc'),
+        yamlKeys: ['devin', 'sensitive-words'],
+        keywords: ['devin', 'system prompt', 'remove line', 'obfuscate', 'zero-width'],
+    },
+    {
         fieldId: 'providerConfig',
         sectionId: 'advanced',
         labelKey: L('sections.network.provider_keys'),
@@ -484,6 +500,13 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
 ]
 
 const MAX_RESULTS = 8
+
+export function findConfigFieldById(fieldId: string | null | undefined): ConfigFieldSearchEntry | undefined {
+    if (!fieldId) {
+        return undefined
+    }
+    return CONFIG_FIELD_SEARCH_INDEX.find((entry) => entry.fieldId === fieldId)
+}
 
 const buildYamlSearchText = (yamlKeys: string[] = []) => {
     const normalized = yamlKeys.map((key) => key.toLowerCase())

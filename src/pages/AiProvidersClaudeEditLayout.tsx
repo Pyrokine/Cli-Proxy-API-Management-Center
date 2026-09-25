@@ -4,9 +4,11 @@ import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUt
 import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
 import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
 import {findProviderConfigIndexByAuthIndex, providersApi} from '@/services/api'
+import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {useClaudeEditDraftStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {ProviderKeyConfig} from '@/types'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, getChangedHeaderNames, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
@@ -74,6 +76,8 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                                  Math.trunc(form.priority) :
                                  null,
                        weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
+                       disableCooling: form.disableCooling ?? null,
+                       requestRetry: form.requestRetry?.toString() ?? null,
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        proxyUrl: String(form.proxyUrl ?? '').trim(),
@@ -81,10 +85,12 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                        models: normalizeModelEntriesForSignature(form.modelEntries, { aliasFallbackToName: true }),
                        excludedModels: parseTextList(form.excludedText ?? ''),
                        cloak: normalizeCloakConfig(form.cloak),
+                       fingerprintProfile: normalizeClaudeFingerprintProfile(form.fingerprintProfile),
                    })
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
+    fingerprintProfile: '',
     priority: undefined,
     weight: undefined,
     prefix: '',
@@ -125,6 +131,7 @@ export function AiProvidersClaudeEditLayout() {
     const seedDraftInit = useCallback((data: ProviderKeyConfig) => {
         const seededForm: ProviderFormState = {
             ...data,
+            fingerprintProfile: normalizeClaudeFingerprintProfile(data.fingerprintProfile),
             headers: headersToEntries(data.headers),
             modelEntries: modelsToEntries(data.models),
             excludedText: excludedModelsToText(data.excludedModels),
@@ -162,12 +169,26 @@ export function AiProvidersClaudeEditLayout() {
                 return
             }
 
+            const retryError = getCredentialRetryValidationKey(form.requestRetry)
+            if (retryError) {
+                showNotification(t(retryError), 'error')
+                return
+            }
+
+            const fingerprintProfile = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
+            if (fingerprintProfile !== '' && fingerprintProfile !== 'claude-code-cli') {
+                showNotification(t('ai_providers.claude_fingerprint_profile_unknown', { value: fingerprintProfile }), 'error')
+                return
+            }
+
             setSaving(true)
             try {
                 const payload: ProviderKeyConfig = {
                     apiKey: form.apiKey.trim(),
                     priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
                     weight: form.weight,
+                    disableCooling: form.disableCooling,
+                    requestRetry: form.requestRetry,
                     prefix: form.prefix?.trim() || undefined,
                     baseUrl: (form.baseUrl ?? '').trim() || undefined,
                     proxyUrl: form.proxyUrl?.trim() || undefined,
@@ -178,6 +199,7 @@ export function AiProvidersClaudeEditLayout() {
                     })),
                     excludedModels: parseTextList(form.excludedText),
                     cloak: form.cloak,
+                    fingerprintProfile,
                 }
 
                 let localList: ProviderKeyConfig[]
@@ -193,6 +215,7 @@ export function AiProvidersClaudeEditLayout() {
                     const existing = configs[stableIndex]
                     await providersApi.patchClaudeConfig(stableIndex, payload, existing)
                     localList = configs.map((item, index) => index === stableIndex ? {
+                        ...existing,
                         ...payload,
                         authIndex: existing.authIndex,
                     } : item)

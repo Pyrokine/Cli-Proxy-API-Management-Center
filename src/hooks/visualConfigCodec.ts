@@ -12,7 +12,7 @@ import type {
 } from '@/types/visualConfig'
 import {isApiKeyModelRuleEmpty} from '@/types/visualConfig'
 import {rewriteModelMetadataForYaml} from '@/utils/modelMetadata'
-import {isMap, parseDocument, stringify as stringifyYaml} from 'yaml'
+import {isAlias, isMap, isScalar, isSeq, parseDocument, stringify as stringifyYaml, type Node, type YAMLMap, type YAMLSeq} from 'yaml'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -123,13 +123,7 @@ function deleteIfMapEmpty(doc: YamlDocument, path: YamlPath): void {
 }
 
 function setBooleanInDoc(doc: YamlDocument, path: YamlPath, value: boolean): void {
-    if (value) {
-        doc.setIn(path, true)
-        return
-    }
-    if (docHas(doc, path)) {
-        doc.setIn(path, false)
-    }
+    doc.setIn(path, value)
 }
 
 function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
@@ -139,31 +133,27 @@ function setStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void
         doc.setIn(path, safe)
         return
     }
-    // Preserve existing empty-string keys to avoid dropping template blocks/comments.
-    // Only keep the key when it already exists in the YAML.
-    if (docHas(doc, path)) {
-        doc.setIn(path, '')
-    }
+    doc.deleteIn(path)
 }
 
-function setIntFromStringInDoc(doc: YamlDocument, path: YamlPath, value: unknown): void {
-    const safe    = typeof value === 'string' ? value : ''
-    const trimmed = safe.trim()
-    if (trimmed === '') {
-        if (docHas(doc, path)) {
-            doc.deleteIn(path)
-        }
-        return
+export function parseVisualConfigInteger(value: string, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): number | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return undefined
     }
-
-    const parsed = Number.parseInt(trimmed, 10)
-    if (Number.isFinite(parsed)) {
-        doc.setIn(path, parsed)
-        return
+    const number = Number(trimmed)
+    if (!/^-?\d+$/.test(trimmed) || !Number.isSafeInteger(number) || number < minimum || number > maximum) {
+        throw new Error('Invalid configuration integer: ' + value)
     }
+    return number
+}
 
-    if (docHas(doc, path)) {
+function setIntFromStringInDoc(doc: YamlDocument, path: YamlPath, value: string, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): void {
+    const parsed = parseVisualConfigInteger(value, minimum, maximum)
+    if (parsed === undefined) {
         doc.deleteIn(path)
+    } else {
+        doc.setIn(path, parsed)
     }
 }
 
@@ -187,7 +177,7 @@ function parseYamlBlockText(value: string): unknown {
 }
 
 function parseConfigDocument(value: string): YamlDocument {
-    const doc = parseDocument(value)
+    const doc = parseDocument(value, { intAsBigInt: true })
     if (doc.errors.length > 0) {
         throw new Error(doc.errors[0]?.message ?? 'Invalid YAML')
     }
@@ -217,6 +207,57 @@ function setStringListInDoc(doc: YamlDocument, path: YamlPath, value: string[]):
     }
     if (docHas(doc, path)) {
         doc.deleteIn(path)
+    }
+}
+
+function syncStringListInDoc(doc: YamlDocument, path: YamlPath, value: string[]): void {
+    const list = value.map((item) => item.trim()).filter(Boolean)
+    if (list.length === 0) {
+        if (docHas(doc, path)) {
+            doc.deleteIn(path)
+        }
+        return
+    }
+
+    const existing = doc.getIn(path, true)
+    if (!isSeq(existing)) {
+        doc.setIn(path, list)
+        return
+    }
+
+    const nodes = existing.items as Node[]
+    const available = nodes.map((node, index) => ({
+        index,
+        value: isScalar(node) ? String(node.value ?? '').trim() : '',
+    }))
+    const used = new Set<number>()
+    const comments = new Map<Node, string | null | undefined>()
+    nodes.forEach((node, index) => {
+        comments.set(node, index === 0 ? existing.commentBefore : node.commentBefore)
+    })
+
+    const items = list.map((item) => {
+        const match = available.find((candidate) =>
+            candidate.value === item && !used.has(candidate.index),
+        )
+        const node = match ? nodes[match.index] : undefined
+        if (match) {
+            used.add(match.index)
+        }
+        if (isScalar(node)) {
+            node.value = item
+            return node
+        }
+        return doc.createNode(item) as Node
+    })
+
+    items.forEach((node) => {
+        node.commentBefore = comments.get(node)
+    })
+    existing.items = items
+    existing.commentBefore = items[0]?.commentBefore
+    if (items[0]) {
+        items[0].commentBefore = undefined
     }
 }
 
@@ -592,6 +633,8 @@ export function areVisualConfigValuesEqual(left: VisualConfigValues, right: Visu
         left.routingSessionAffinity === right.routingSessionAffinity &&
         left.routingSessionAffinityTTL === right.routingSessionAffinityTTL &&
         left.wsAuth === right.wsAuth &&
+        areStringArraysEqual(left.antigravitySensitiveWords, right.antigravitySensitiveWords) &&
+        areStringArraysEqual(left.devinSensitiveWords, right.devinSensitiveWords) &&
         left.allowQueryAuth === right.allowQueryAuth &&
         left.corsAllowedOrigins === right.corsAllowedOrigins &&
         left.providerConfigText === right.providerConfigText &&
@@ -861,7 +904,7 @@ function serializePluginStoreAuthForYaml(rules: PluginStoreAuthRule[]): Array<Re
 }
 
 function parsePayloadParamValue(raw: unknown): { valueType: PayloadParamValueType; value: string } {
-    if (typeof raw === 'number') {
+    if (typeof raw === 'number' || typeof raw === 'bigint') {
         return { valueType: 'number', value: String(raw) }
     }
 
@@ -1125,7 +1168,10 @@ function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string
                 let value: unknown = param.value
                 if (param.valueType === 'number') {
                     const num = Number(param.value)
-                    value     = Number.isFinite(num) ? num : param.value
+                    if (!Number.isFinite(num) || (Number.isInteger(num) && !Number.isSafeInteger(num))) {
+                        throw new Error('Invalid payload number: ' + param.path)
+                    }
+                    value = num
                 } else if (param.valueType === 'boolean') {
                     value = param.value === 'true'
                 } else if (param.valueType === 'json') {
@@ -1140,7 +1186,6 @@ function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string
 
             return { models, params }
         })
-        .filter((rule) => rule.models.length > 0)
 }
 
 function serializePayloadFilterRulesForYaml(rules: PayloadFilterRule[]): Array<Record<string, unknown>> {
@@ -1156,7 +1201,6 @@ function serializePayloadFilterRulesForYaml(rules: PayloadFilterRule[]): Array<R
 
             return { models, params }
         })
-        .filter((rule) => rule.models.length > 0)
 }
 
 function serializeRawPayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string, unknown>> {
@@ -1176,7 +1220,6 @@ function serializeRawPayloadRulesForYaml(rules: PayloadRule[]): Array<Record<str
 
             return { models, params }
         })
-        .filter((rule) => rule.models.length > 0)
 }
 
 export type ApiKeysStorageMetadata = {
@@ -1286,6 +1329,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
     const quotaExceeded                                       = asRecord(parsed['quota-exceeded'])
     const quotaRefresh                                        = asRecord(parsed['quota-refresh'])
     const plugins                                             = asRecord(parsed.plugins)
+    const antigravity                                         = asRecord(parsed.antigravity)
+    const devin                                               = asRecord(parsed.devin)
     const routing                                             = asRecord(parsed.routing)
     const payload                                             = asRecord(parsed.payload)
     const streaming                                           = asRecord(parsed.streaming)
@@ -1374,6 +1419,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
         maxRetryInterval: String(parsed['max-retry-interval'] ?? ''),
         wsAuth: normalizeBoolean(parsed['ws-auth']) ?? true,
+        antigravitySensitiveWords: parseStringList(antigravity?.['sensitive-words']),
+        devinSensitiveWords: parseStringList(devin?.['sensitive-words']),
         allowQueryAuth: normalizeBoolean(parsed['allow-query-auth']) ?? false,
         corsAllowedOrigins: Array.isArray(parsed['cors-allowed-origins'])
                             ? (parsed['cors-allowed-origins'] as string[]).join(', ')
@@ -1385,8 +1432,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         codexHeaderDefaultsText: yamlBlockToText(parsed['codex-header-defaults'] ?? {}),
         claudeHeaderDefaultsText: yamlBlockToText(parsed['claude-header-defaults'] ?? {}),
 
-        quotaSwitchProject: normalizeBoolean(quotaExceeded?.['switch-project']) ?? true,
-        quotaSwitchPreviewModel: normalizeBoolean(quotaExceeded?.['switch-preview-model']) ?? true,
+        quotaSwitchProject: normalizeBoolean(quotaExceeded?.['switch-project']) ?? false,
+        quotaSwitchPreviewModel: normalizeBoolean(quotaExceeded?.['switch-preview-model']) ?? false,
         quotaAntigravityCredits: normalizeBoolean(quotaExceeded?.['antigravity-credits']) ?? false,
         disableCooling: normalizeBoolean(parsed['disable-cooling']) ?? false,
         quotaRefreshEnabled: normalizeBoolean(quotaRefresh?.enabled) ?? false,
@@ -1419,7 +1466,366 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
             ),
         },
     }
+    const exactDocument = parseConfigDocument(yamlContent)
+    for (const [field, section] of Object.entries(PAYLOAD_FIELDS)) {
+        const rules = newValues[field as keyof typeof PAYLOAD_FIELDS]
+        rules.forEach((rule, index) => {
+            const node = exactDocument.getIn(['payload', section, index], true)
+            rule.sourceYaml = stringifyYaml(node, {verifyAliasOrder: false})
+            rule.models.forEach((model, modelIndex) => {
+                model.sourceYaml = stringifyYaml(exactDocument.getIn(['payload', section, index, 'models', modelIndex], true), {verifyAliasOrder: false})
+            })
+        })
+    }
+    for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
+        const node = exactDocument.getIn(contract.path, true)
+        if (isScalar(node) && typeof node.value === 'bigint') {
+            if (field.startsWith('streaming.')) {
+                newValues.streaming[field.slice('streaming.'.length) as keyof VisualConfigValues['streaming']] = String(node.value)
+            } else {
+                Object.assign(newValues, { [field]: String(node.value) })
+            }
+        }
+    }
     return { values: newValues, apiKeysStorage: nextApiKeysStorage }
+}
+
+export const VISUAL_INTEGER_FIELDS: Record<string, { path: string[]; minimum: number; maximum: number }> = {
+    port: { path: ['port'], minimum: 1, maximum: 65535 },
+    tlsHttpRedirectPort: { path: ['tls', 'http-redirect-port'], minimum: 0, maximum: 65535 },
+    rmCheckInterval: { path: ['remote-management', 'check-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    logsMaxTotalSizeMb: { path: ['logs-max-total-size-mb'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    imageArtifactCacheRetentionDays: { path: ['image-artifact-cache', 'retention-days'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    imageArtifactCacheMaxTotalSizeMb: { path: ['image-artifact-cache', 'max-total-size-mb'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    errorLogsMaxFiles: { path: ['error-logs-max-files'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    redisUsageQueueRetentionSeconds: { path: ['redis-usage-queue-retention-seconds'], minimum: 1, maximum: 3600 },
+    usageRetentionDays: { path: ['usage-retention', 'days'], minimum: -1, maximum: Number.MAX_SAFE_INTEGER },
+    usageRetentionMaxDbSizeMb: { path: ['usage-retention', 'max-db-size-mb'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    usageRetentionWarningThresholdPct: { path: ['usage-retention', 'warning-threshold-pct'], minimum: 0, maximum: 100 },
+    autoRefreshInterval: { path: ['auto-refresh-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    modelRefreshInterval: { path: ['model-refresh-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    requestRetry: { path: ['request-retry'], minimum: 0, maximum: 2147483647 },
+    maxRetryCredentials: { path: ['max-retry-credentials'], minimum: Number.MIN_SAFE_INTEGER, maximum: 2147483647 },
+    maxRetryInterval: { path: ['max-retry-interval'], minimum: -9223372036, maximum: 9223372036 },
+    authAutoRefreshWorkers: { path: ['auth-auto-refresh-workers'], minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+    quotaRefreshInterval: { path: ['quota-refresh', 'interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    quotaRefreshMaxInterval: { path: ['quota-refresh', 'max-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    'streaming.keepaliveSeconds': { path: ['streaming', 'keepalive-seconds'], minimum: Number.MIN_SAFE_INTEGER, maximum: 9223372036 },
+    'streaming.bootstrapRetries': { path: ['streaming', 'bootstrap-retries'], minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+    'streaming.nonstreamKeepaliveInterval': { path: ['nonstream-keepalive-interval'], minimum: Number.MIN_SAFE_INTEGER, maximum: 9223372036 },
+}
+
+export function integerFieldValue(values: VisualConfigValues, field: string): string {
+    if (field.startsWith('streaming.')) {
+        return values.streaming[field.slice('streaming.'.length) as keyof VisualConfigValues['streaming']]
+    }
+    return values[field as keyof VisualConfigValues] as string
+}
+
+const PAYLOAD_FIELDS = {
+    payloadDefaultRules: 'default',
+    payloadDefaultRawRules: 'default-raw',
+    payloadOverrideRules: 'override',
+    payloadOverrideRawRules: 'override-raw',
+    payloadFilterRules: 'filter',
+} as const
+
+type EditablePayloadRule = PayloadRule | PayloadFilterRule
+
+function payloadModelIdentity(model: PayloadModelEntry): unknown {
+    return { name: model.name, protocol: model.protocol ?? '', extra: model.extra ?? {} }
+}
+
+function payloadRuleIdentity(rule: EditablePayloadRule): unknown {
+    return rule.models.map(payloadModelIdentity)
+}
+
+function payloadConflict(section: string): never {
+    throw new Error(`Payload conflict: ${section}; reload and reconcile the changed rules`)
+}
+
+function syncPayloadSequence<T extends { id: string; sourceYaml?: string }>(
+    sequence: YAMLSeq,
+    current: T[],
+    baseline: T[],
+    desired: T[],
+    identity: (entry: T) => unknown,
+    update: (node: Node | undefined, prior: T | undefined, entry: T) => Node,
+    section: string,
+    distinguish?: (entry: T, prior: T) => boolean,
+): void {
+    const nodes = sequence.items as Node[]
+    const priorById = new Map(baseline.map((entry) => [entry.id, entry]))
+    const desiredById = new Map(desired.map((entry) => [entry.id, entry]))
+    if (desiredById.size !== desired.length || nodes.length !== current.length) {
+        payloadConflict(section)
+    }
+    const sameSource = (entry: T, prior: T) => prior.sourceYaml !== undefined
+        ? entry.sourceYaml === prior.sourceYaml
+        : areMergeValuesEqual(identity(entry), identity(prior)) && (!distinguish || distinguish(entry, prior))
+    const originalEntries = current.flatMap((entry, index) =>
+        baseline.some((prior) => sameSource(entry, prior)) ? [{entry, index}] : [],
+    )
+    const unchanged = originalEntries.length === baseline.length && baseline.every((prior, index) =>
+        sameSource(originalEntries[index]!.entry, prior),
+    )
+    const matched = new Map<string, Node>()
+    const owner = new Map<Node, string>()
+    for (const [priorIndex, prior] of baseline.entries()) {
+        let candidates = current.flatMap((entry, index) =>
+            areMergeValuesEqual(identity(entry), identity(prior)) ? [index] : [],
+        )
+        if (candidates.length > 1 && unchanged) {
+            candidates = candidates.filter((index) => index === originalEntries[priorIndex]!.index)
+        }
+        if (candidates.length > 1 && prior.sourceYaml !== undefined) {
+            const exact = candidates.filter((index) => current[index]!.sourceYaml === prior.sourceYaml)
+            if (exact.length) {
+                candidates = exact
+            }
+        }
+        if (candidates.length > 1 && distinguish) {
+            candidates = candidates.filter((index) => distinguish(current[index]!, prior))
+        }
+        if (candidates.length === 0) {
+            const next = desiredById.get(prior.id)
+            if (!next || areMergeValuesEqual(next, prior)) {
+                continue
+            }
+        }
+        if (candidates.length !== 1) {
+            payloadConflict(section)
+        }
+        const node = nodes[candidates[0]!]!
+        if (!node || owner.has(node)) {
+            payloadConflict(section)
+        }
+        matched.set(prior.id, node)
+        owner.set(node, prior.id)
+    }
+    const updated = new Map<string, Node>()
+    for (const entry of desired) {
+        const prior = priorById.get(entry.id)
+        const node = matched.get(entry.id)
+        if (prior && !node) {
+            continue
+        }
+        updated.set(entry.id, node && areMergeValuesEqual(prior, entry) ? node : update(node, prior, entry))
+    }
+    const retained = baseline.filter((entry) => desiredById.has(entry.id) && matched.has(entry.id)).map((entry) => entry.id)
+    const desiredOrder = desired.filter((entry) => matched.has(entry.id)).map((entry) => entry.id)
+    const currentOrder = nodes.flatMap((node) => {
+        const id = owner.get(node)
+        return id !== undefined && desiredById.has(id) ? [id] : []
+    })
+    const reordered = !areStringArraysEqual(retained, desiredOrder)
+    if (reordered && !areStringArraysEqual(currentOrder, retained) && !areStringArraysEqual(currentOrder, desiredOrder)) {
+        payloadConflict(section)
+    }
+    let position = 0
+    const result = nodes.flatMap((node) => {
+        const id = owner.get(node)
+        if (id === undefined) {
+            return [node]
+        }
+        if (!updated.has(id)) {
+            return []
+        }
+        return [updated.get(reordered ? desiredOrder[position++]! : id)!]
+    })
+    for (let i = 0; i < desired.length; i++) {
+        const entry = desired[i]!
+        if (priorById.has(entry.id)) {
+            continue
+        }
+        const next = desired.slice(i + 1).find((candidate) => result.includes(updated.get(candidate.id)!))
+        const index = next ? result.indexOf(updated.get(next.id)!) : result.length
+        result.splice(index, 0, updated.get(entry.id)!)
+    }
+    if (nodes[0] && sequence.commentBefore) {
+        nodes[0].commentBefore = [sequence.commentBefore, nodes[0].commentBefore].filter(Boolean).join('\n')
+        sequence.commentBefore = undefined
+    }
+    sequence.items = result
+}
+
+function syncPayloadModels(doc: YamlDocument, node: Node, baseline: PayloadModelEntry[], desired: PayloadModelEntry[], section: string): void {
+    if (arePayloadModelEntriesEqual(baseline, desired)) {
+        return
+    }
+    if (!isMap(node)) {
+        payloadConflict(section)
+    }
+    let sequence: unknown = node.get('models', true)
+    if (!isSeq(sequence)) {
+        if (baseline.length) {
+            payloadConflict(section)
+        }
+        sequence = doc.createNode([])
+        node.set('models', sequence)
+    }
+    const seq = sequence as YAMLSeq
+    const current = seq.items.map((model, index) => ({
+        ...parsePayloadModel((model as Node)?.toJS(doc), `current-${index}`),
+        sourceYaml: stringifyYaml(model, {verifyAliasOrder: false}),
+    }))
+    syncPayloadSequence(seq, current, baseline, desired, payloadModelIdentity, (existing, prior, model) => {
+        if (isAlias(existing)) {
+            const resolved = existing.resolve(doc)
+            if (!resolved) {
+                payloadConflict(section)
+            }
+            const replacement = resolved.clone() as Node
+            if (isScalar(replacement) || isMap(replacement) || isSeq(replacement)) {
+                replacement.anchor = undefined
+            }
+            existing = replacement
+        }
+        if (!existing || !prior) {
+            return doc.createNode(serializePayloadModel(model))
+        }
+        if (model.name !== prior.name) {
+            if (isScalar(existing)) {
+                existing.value = model.name
+            } else if (isMap(existing)) {
+                existing.set(existing.has('name') ? 'name' : existing.has('id') ? 'id' : 'name', model.name)
+            }
+        }
+        if (model.protocol !== prior.protocol) {
+            if (!isMap(existing)) {
+                const replacement = doc.createNode(serializePayloadModel(model))
+                replacement.comment = existing.comment
+                replacement.commentBefore = existing.commentBefore
+                return replacement
+            }
+            if (model.protocol) {
+                existing.set('protocol', model.protocol)
+            } else {
+                existing.delete('protocol')
+            }
+        }
+        return existing
+    }, section)
+}
+
+function syncPayloadRules(doc: YamlDocument, section: string, current: EditablePayloadRule[], baseline: EditablePayloadRule[], desired: EditablePayloadRule[]): void {
+    ensureMapInDoc(doc, ['payload'])
+    let sequence = doc.getIn(['payload', section], true)
+    if (!isSeq(sequence)) {
+        if (sequence !== undefined) {
+            payloadConflict(section)
+        }
+        sequence = doc.createNode([])
+        doc.setIn(['payload', section], sequence)
+    }
+    const priorIds = new Set(baseline.map((rule) => rule.id))
+    const rules = desired.filter((rule) => priorIds.has(rule.id) || rule.models.some((model) => model.name.trim()))
+    const serialize = (rule: EditablePayloadRule) => section === 'filter'
+        ? serializePayloadFilterRulesForYaml([rule as PayloadFilterRule])[0]!
+        : section.endsWith('-raw')
+          ? serializeRawPayloadRulesForYaml([rule as PayloadRule])[0]!
+          : serializePayloadRulesForYaml([rule as PayloadRule])[0]!
+    syncPayloadSequence(sequence as YAMLSeq, current, baseline, rules, payloadRuleIdentity, (existing, prior, rule) => {
+        if (!existing || !prior) {
+            return doc.createNode(serialize(rule))
+        }
+        if (!isMap(existing)) {
+            payloadConflict(section)
+        }
+        syncPayloadModels(doc, existing, prior.models, rule.models, section)
+        if (areMergeValuesEqual(prior.params, rule.params)) {
+            return existing
+        }
+        if (section === 'filter') {
+            const previous = existing.get('params', true)
+            const params = isSeq(previous) ? previous : doc.createNode([])
+            const priorParams = (prior.params as string[]).map((value, index) => ({id: `prior-${index}`, value}))
+            for (const value of new Set(prior.params as string[])) {
+                const count = priorParams.filter((entry) => entry.value === value).length
+                const retained = (rule.params as string[]).filter((entry) => entry === value).length
+                if (count > 1 && retained > 0 && retained !== count) {
+                    payloadConflict(section)
+                }
+            }
+            const remaining = [...priorParams]
+            const next = (rule.params as string[]).map((value, index) => {
+                const match = remaining.findIndex((entry) => entry.value === value)
+                return match < 0 ? {id: `added-${index}`, value} : remaining.splice(match, 1)[0]!
+            })
+            const currentParams = params.items.map((item, index) => ({id: `current-${index}`, value: String((item as Node)?.toJSON())}))
+            syncPayloadSequence(params, currentParams, priorParams, next, (entry) => entry.value,
+                (node, _prior, entry) => node ?? doc.createNode(entry.value), section)
+            if (!isSeq(previous)) {
+                existing.set('params', params)
+            }
+            return existing
+        }
+        const previousParams = existing.get('params', true)
+        const params: YAMLMap = isMap(previousParams) ? previousParams : doc.createNode({})
+        if (!isMap(previousParams)) {
+            existing.set('params', params)
+        }
+        const priorParams = (prior as PayloadRule).params
+        const nextParams = (rule as PayloadRule).params.filter((entry) => entry.path.trim())
+        const nextIds = new Set(nextParams.map((entry) => entry.id))
+        const serialized = serialize(rule).params as Record<string, unknown>
+        const keys = nextParams.map((entry) => entry.path.trim())
+        if (new Set(keys).size !== keys.length) {
+            payloadConflict(section)
+        }
+        const pairs = new Map(priorParams.map((entry) => [entry.id, params.items.find((pair) => isScalar(pair.key) && String(pair.key.value) === entry.path.trim())]))
+        for (const entry of priorParams) {
+            if (!nextIds.has(entry.id)) {
+                params.delete(entry.path.trim())
+            }
+        }
+        for (const entry of nextParams) {
+            const previous = priorParams.find((candidate) => candidate.id === entry.id)
+            if (areMergeValuesEqual(previous, entry)) {
+                continue
+            }
+            const pair = pairs.get(entry.id)
+            const key = entry.path.trim()
+            if (pair) {
+                if (previous?.path.trim() !== key && params.has(key)) {
+                    payloadConflict(section)
+                }
+                if (isScalar(pair.key)) {
+                    pair.key.value = key
+                }
+                if (previous?.valueType === entry.valueType && previous.value === entry.value) {
+                    continue
+                }
+                const value = serialized[key]
+                if (isScalar(pair.value) && (value === null || typeof value !== 'object')) {
+                    pair.value.value = value
+                    pair.value.tag = undefined
+                    pair.value.format = undefined
+                } else {
+                    const replacement = doc.createNode(value)
+                    const previousNode = pair.value as Node | null
+                    replacement.comment = previousNode?.comment
+                    replacement.commentBefore = previousNode?.commentBefore
+                    pair.value = replacement
+                }
+            } else {
+                if (previous || params.has(key)) {
+                    payloadConflict(section)
+                }
+                params.set(key, doc.createNode(serialized[key]))
+            }
+        }
+        return existing
+    }, section, (entry, prior) => {
+        const params = (rule: EditablePayloadRule) => rule.params.map((param) =>
+            typeof param === 'string' ? param : { path: param.path, value: param.value, valueType: param.valueType },
+        )
+        return areMergeValuesEqual(params(entry), params(prior))
+    })
+    if ((sequence as YAMLSeq).items.length === 0) {
+        doc.deleteIn(['payload', section])
+        deleteIfMapEmpty(doc, ['payload'])
+    }
 }
 
 export function encodeVisualConfigYaml(
@@ -1428,99 +1834,144 @@ export function encodeVisualConfigYaml(
     originalBaselineValues: VisualConfigValues,
     apiKeysStorage: ApiKeysStorageMetadata,
 ): string {
-    try {
-        const doc = parseConfigDocument(currentYaml)
-        if (!isMap(doc.contents)) {
-            doc.contents = doc.createNode({}) as unknown as typeof doc.contents
+    if (areVisualConfigValuesEqual(nextValues, originalBaselineValues)) {
+        return currentYaml
+    }
+    const doc = parseConfigDocument(currentYaml)
+    if (!isMap(doc.contents)) {
+        if (doc.contents !== null) {
+            throw new Error('Configuration must be a YAML map')
         }
-        const currentValues  = decodeVisualConfigYaml(currentYaml).values
-        const merged         = mergeVisualChanges(currentValues, nextValues, originalBaselineValues)
-        const values         = merged.value as VisualConfigValues
-        const baselineValues = merged.baseline as VisualConfigValues
-
-        setStringInDoc(doc, ['host'], values.host)
-        setIntFromStringInDoc(doc, ['port'], values.port)
-
-        if (
-            docHas(doc, ['tls']) ||
-            values.tlsEnable ||
-            values.tlsCert.trim() ||
-            values.tlsKey.trim() ||
-            values.tlsHttpRedirectPort.trim() ||
-            values.tlsRequireForAuth ||
-            values.tlsTrustForwardedProto
-        ) {
-            ensureMapInDoc(doc, ['tls'])
-            setBooleanInDoc(doc, ['tls', 'enable'], values.tlsEnable)
-            setStringInDoc(doc, ['tls', 'cert'], values.tlsCert)
-            setStringInDoc(doc, ['tls', 'key'], values.tlsKey)
-            setIntFromStringInDoc(doc, ['tls', 'http-redirect-port'], values.tlsHttpRedirectPort)
-            setBooleanInDoc(doc, ['tls', 'require-for-auth'], values.tlsRequireForAuth)
-            setBooleanInDoc(doc, ['tls', 'trust-forwarded-proto'], values.tlsTrustForwardedProto)
-            deleteIfMapEmpty(doc, ['tls'])
+        doc.contents = doc.createNode({})
+    }
+    const currentValues = decodeVisualConfigYaml(currentYaml).values
+    const merged = mergeVisualChanges(currentValues, nextValues, originalBaselineValues)
+    const values = merged.value as VisualConfigValues
+    const baselineValues = merged.baseline as VisualConfigValues
+    const dirty = (field: keyof VisualConfigValues) =>
+        !areMergeValuesEqual(nextValues[field], originalBaselineValues[field])
+    const preparePath = (path: string[]) => {
+        for (let i = 1; i < path.length; i++) {
+            ensureMapInDoc(doc, path.slice(0, i))
         }
-
-        if (
-            docHas(doc, ['remote-management']) ||
-            values.rmAllowRemote ||
-            values.rmTrustedProxies.length > 0 ||
-            values.rmSecretKey.trim() ||
-            values.rmDisableControlPanel ||
-            values.rmAutoUpdatePanel ||
-            values.rmAutoUpdateCPA ||
-            values.rmAutoCheckUpdate ||
-            values.rmCheckInterval.trim() ||
-            values.rmPanelRepo.trim() ||
-            values.rmCpaRepo.trim()
-        ) {
-            ensureMapInDoc(doc, ['remote-management'])
-            setBooleanInDoc(doc, ['remote-management', 'allow-remote'], values.rmAllowRemote)
-            setStringListInDoc(doc, ['remote-management', 'trusted-proxies'], values.rmTrustedProxies)
-            setStringInDoc(doc, ['remote-management', 'secret-key'], values.rmSecretKey)
-            setBooleanInDoc(doc, ['remote-management', 'disable-control-panel'], values.rmDisableControlPanel)
-            doc.setIn(['remote-management', 'auto-update-panel'], values.rmAutoUpdatePanel)
-            if (docHas(doc, ['remote-management', 'disable-auto-update-panel'])) {
-                doc.deleteIn(['remote-management', 'disable-auto-update-panel'])
+    }
+    const setField = (field: keyof VisualConfigValues, path: string[], kind: 'string' | 'boolean' | 'list' | 'yaml') => {
+        if (!dirty(field)) {
+            return
+        }
+        preparePath(path)
+        const value = values[field]
+        if (kind === 'string') {
+            setStringInDoc(doc, path, value)
+        } else if (kind === 'boolean') {
+            setBooleanInDoc(doc, path, value as boolean)
+        } else if (kind === 'list') {
+            setStringListInDoc(doc, path, value as string[])
+        } else {
+            setYamlBlockTextInDoc(doc, path, value as string)
+        }
+        for (let i = path.length - 1; i > 0; i--) {
+            deleteIfMapEmpty(doc, path.slice(0, i))
+        }
+    }
+    setField('host', ['host'], 'string')
+    setField('tlsCert', ['tls', 'cert'], 'string')
+    setField('tlsKey', ['tls', 'key'], 'string')
+    setField('rmSecretKey', ['remote-management', 'secret-key'], 'string')
+    setField('rmPanelRepo', ['remote-management', 'panel-github-repository'], 'string')
+    setField('rmCpaRepo', ['remote-management', 'cpa-github-repository'], 'string')
+    setField('authDir', ['auth-dir'], 'string')
+    setField('usageDataDir', ['usage-data-dir'], 'string')
+    setField('usageStatisticsFile', ['usage-statistics-file'], 'string')
+    setField('pluginsDir', ['plugins', 'dir'], 'string')
+    setField('pprofAddr', ['pprof', 'addr'], 'string')
+    setField('proxyUrl', ['proxy-url'], 'string')
+    setField('disableImageGeneration', ['disable-image-generation'], 'string')
+    setField('gptImage2BaseModel', ['gpt-image-2-base-model'], 'string')
+    setField('routingStrategy', ['routing', 'strategy'], 'string')
+    setField('routingSessionAffinityTTL', ['routing', 'session-affinity-ttl'], 'string')
+    setField('tlsEnable', ['tls', 'enable'], 'boolean')
+    setField('tlsRequireForAuth', ['tls', 'require-for-auth'], 'boolean')
+    setField('tlsTrustForwardedProto', ['tls', 'trust-forwarded-proto'], 'boolean')
+    setField('rmAllowRemote', ['remote-management', 'allow-remote'], 'boolean')
+    setField('rmDisableControlPanel', ['remote-management', 'disable-control-panel'], 'boolean')
+    setField('rmAutoUpdatePanel', ['remote-management', 'auto-update-panel'], 'boolean')
+    setField('rmAutoUpdateCPA', ['remote-management', 'auto-update-cpa'], 'boolean')
+    setField('rmAutoCheckUpdate', ['remote-management', 'auto-check-update'], 'boolean')
+    setField('pluginsEnabled', ['plugins', 'enabled'], 'boolean')
+    setField('debug', ['debug'], 'boolean')
+    setField('commercialMode', ['commercial-mode'], 'boolean')
+    setField('loggingToFile', ['logging-to-file'], 'boolean')
+    setField('requestLog', ['request-log'], 'boolean')
+    setField('pprofEnable', ['pprof', 'enable'], 'boolean')
+    setField('usageStatisticsEnabled', ['usage-statistics-enabled'], 'boolean')
+    setField('forceModelPrefix', ['force-model-prefix'], 'boolean')
+    setField('enableGeminiCliEndpoint', ['enable-gemini-cli-endpoint'], 'boolean')
+    setField('passthroughHeaders', ['passthrough-headers'], 'boolean')
+    setField('wsAuth', ['ws-auth'], 'boolean')
+    if (dirty('antigravitySensitiveWords')) {
+        preparePath(['antigravity', 'sensitive-words'])
+        syncStringListInDoc(
+            doc,
+            ['antigravity', 'sensitive-words'],
+            values.antigravitySensitiveWords,
+        )
+        deleteIfMapEmpty(doc, ['antigravity'])
+    }
+    if (dirty('devinSensitiveWords')) {
+        preparePath(['devin', 'sensitive-words'])
+        syncStringListInDoc(
+            doc,
+            ['devin', 'sensitive-words'],
+            values.devinSensitiveWords,
+        )
+        deleteIfMapEmpty(doc, ['devin'])
+    }
+    setField('allowQueryAuth', ['allow-query-auth'], 'boolean')
+    setField('codexIdentityConfuse', ['codex', 'identity-confuse'], 'boolean')
+    setField('quotaSwitchProject', ['quota-exceeded', 'switch-project'], 'boolean')
+    setField('quotaSwitchPreviewModel', ['quota-exceeded', 'switch-preview-model'], 'boolean')
+    setField('quotaAntigravityCredits', ['quota-exceeded', 'antigravity-credits'], 'boolean')
+    setField('disableCooling', ['disable-cooling'], 'boolean')
+    setField('quotaRefreshEnabled', ['quota-refresh', 'enabled'], 'boolean')
+    setField('routingSessionAffinity', ['routing', 'session-affinity'], 'boolean')
+    setField('pluginConfigsText', ['plugins', 'configs'], 'yaml')
+    setField('apiKeyAliasesText', ['api-key-aliases'], 'yaml')
+    setField('oauthExcludedModelsText', ['oauth-excluded-models'], 'yaml')
+    setField('oauthModelAliasText', ['oauth-model-alias'], 'yaml')
+    setField('codexHeaderDefaultsText', ['codex-header-defaults'], 'yaml')
+    setField('claudeHeaderDefaultsText', ['claude-header-defaults'], 'yaml')
+    setField('rmTrustedProxies', ['remote-management', 'trusted-proxies'], 'list')
+    setField('pluginStoreSources', ['plugins', 'store-sources'], 'list')
+    for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
+        const next = integerFieldValue(nextValues, field)
+        if (next === integerFieldValue(originalBaselineValues, field)) {
+            continue
+        }
+        preparePath(contract.path)
+        setIntFromStringInDoc(doc, contract.path, next, contract.minimum, contract.maximum)
+        for (let i = contract.path.length - 1; i > 0; i--) {
+            deleteIfMapEmpty(doc, contract.path.slice(0, i))
+        }
+        if (field === 'streaming.nonstreamKeepaliveInterval') {
+            if (doc.hasIn(['streaming', 'nonstream-keepalive-interval'])) {
+                doc.deleteIn(['streaming', 'nonstream-keepalive-interval'])
+                deleteIfMapEmpty(doc, ['streaming'])
             }
-            setBooleanInDoc(doc, ['remote-management', 'auto-update-cpa'], values.rmAutoUpdateCPA)
-            setBooleanInDoc(doc, ['remote-management', 'auto-check-update'], values.rmAutoCheckUpdate)
-            setIntFromStringInDoc(doc, ['remote-management', 'check-interval'], values.rmCheckInterval)
-            setStringInDoc(doc, ['remote-management', 'panel-github-repository'], values.rmPanelRepo)
-            setStringInDoc(doc, ['remote-management', 'cpa-github-repository'], values.rmCpaRepo)
-            if (docHas(doc, ['remote-management', 'panel-repo'])) {
-                doc.deleteIn(['remote-management', 'panel-repo'])
-            }
-            deleteIfMapEmpty(doc, ['remote-management'])
         }
-
-        setStringInDoc(doc, ['auth-dir'], values.authDir)
-        setStringInDoc(doc, ['usage-data-dir'], values.usageDataDir)
-        setStringInDoc(doc, ['usage-statistics-file'], values.usageStatisticsFile)
-        if (
-            docHas(doc, ['plugins']) ||
-            values.pluginsEnabled ||
-            values.pluginsEnabled !== baselineValues.pluginsEnabled ||
-            values.pluginsDir !== baselineValues.pluginsDir ||
-            (values.pluginsDir.trim() !== '' && values.pluginsDir.trim() !== 'plugins') ||
-            values.pluginStoreSources.length > 0 ||
-            !areStringArraysEqual(values.pluginStoreSources, baselineValues.pluginStoreSources) ||
-            values.pluginStoreAuth.length > 0 ||
-            !arePluginStoreAuthRulesEqual(values.pluginStoreAuth, baselineValues.pluginStoreAuth) ||
-            values.pluginConfigsText !== baselineValues.pluginConfigsText
-        ) {
-            ensureMapInDoc(doc, ['plugins'])
-            doc.setIn(['plugins', 'enabled'], values.pluginsEnabled)
-            setStringInDoc(doc, ['plugins', 'dir'], values.pluginsDir)
-            setStringListInDoc(doc, ['plugins', 'store-sources'], values.pluginStoreSources)
-            const storeAuth = serializePluginStoreAuthForYaml(values.pluginStoreAuth)
-            if (storeAuth.length > 0) {
-                doc.setIn(['plugins', 'store-auth'], storeAuth)
-            } else if (docHas(doc, ['plugins', 'store-auth'])) {
-                doc.deleteIn(['plugins', 'store-auth'])
-            }
-            setYamlBlockTextInDoc(doc, ['plugins', 'configs'], values.pluginConfigsText)
-            deleteIfMapEmpty(doc, ['plugins'])
-        }
+    }
+    if (dirty('rmAutoUpdatePanel')) {
+        doc.deleteIn(['remote-management', 'disable-auto-update-panel'])
+    }
+    if (dirty('rmPanelRepo')) {
+        doc.deleteIn(['remote-management', 'panel-repo'])
+    }
+    if (dirty('routingSessionAffinity')) {
+        doc.deleteIn(['routing', 'sessionAffinity'])
+    }
+    if (dirty('routingSessionAffinityTTL')) {
+        doc.deleteIn(['routing', 'sessionAffinityTTL'])
+    }
         if (values.apiKeysText !== baselineValues.apiKeysText) {
             const apiKeys = parseApiKeysInputText(values.apiKeysText)
             const entries = buildApiKeyEntries(apiKeys, apiKeysStorage)
@@ -1568,221 +2019,35 @@ export function encodeVisualConfigYaml(
             }
         }
 
-        setYamlBlockTextInDoc(doc, ['api-key-aliases'], values.apiKeyAliasesText)
-
-        const apiKeyRules = serializeApiKeyRulesForYaml(values.apiKeyRules)
-        if (Object.keys(apiKeyRules).length > 0) {
-            doc.setIn(['api-key-rules'], apiKeyRules)
-        } else if (docHas(doc, ['api-key-rules'])) {
+    if (dirty('apiKeyRules')) {
+        const rules = serializeApiKeyRulesForYaml(values.apiKeyRules)
+        if (Object.keys(rules).length) {
+            doc.setIn(['api-key-rules'], rules)
+        } else {
             doc.deleteIn(['api-key-rules'])
         }
-
-        setBooleanInDoc(doc, ['debug'], values.debug)
-
-        setBooleanInDoc(doc, ['commercial-mode'], values.commercialMode)
-        setBooleanInDoc(doc, ['logging-to-file'], values.loggingToFile)
-        setBooleanInDoc(doc, ['request-log'], values.requestLog)
-        if (docHas(doc, ['pprof']) || values.pprofEnable || values.pprofAddr.trim()) {
-            ensureMapInDoc(doc, ['pprof'])
-            setBooleanInDoc(doc, ['pprof', 'enable'], values.pprofEnable)
-            setStringInDoc(doc, ['pprof', 'addr'], values.pprofAddr)
-            deleteIfMapEmpty(doc, ['pprof'])
-        }
-        setIntFromStringInDoc(doc, ['logs-max-total-size-mb'], values.logsMaxTotalSizeMb)
-        if (
-            hasImageArtifactCacheChanges(values, baselineValues) &&
-            (
-                docHas(doc, ['image-artifact-cache']) ||
-                values.imageArtifactCacheRetentionDays.trim() ||
-                values.imageArtifactCacheMaxTotalSizeMb.trim()
-            )
-        ) {
-            ensureMapInDoc(doc, ['image-artifact-cache'])
-            setIntFromStringInDoc(
-                doc,
-                ['image-artifact-cache', 'retention-days'],
-                values.imageArtifactCacheRetentionDays,
-            )
-            setIntFromStringInDoc(
-                doc,
-                ['image-artifact-cache', 'max-total-size-mb'],
-                values.imageArtifactCacheMaxTotalSizeMb,
-            )
-            deleteIfMapEmpty(doc, ['image-artifact-cache'])
-        }
-        setIntFromStringInDoc(doc, ['error-logs-max-files'], values.errorLogsMaxFiles)
-        setIntFromStringInDoc(
-            doc,
-            ['redis-usage-queue-retention-seconds'],
-            values.redisUsageQueueRetentionSeconds,
-        )
-        setBooleanInDoc(doc, ['usage-statistics-enabled'], values.usageStatisticsEnabled)
-        if (
-            docHas(doc, ['usage-retention']) ||
-            values.usageRetentionDays.trim() ||
-            values.usageRetentionMaxDbSizeMb.trim() ||
-            values.usageRetentionWarningThresholdPct.trim()
-        ) {
-            ensureMapInDoc(doc, ['usage-retention'])
-            setIntFromStringInDoc(doc, ['usage-retention', 'days'], values.usageRetentionDays)
-            setIntFromStringInDoc(doc, ['usage-retention', 'max-db-size-mb'], values.usageRetentionMaxDbSizeMb)
-            setIntFromStringInDoc(
-                doc,
-                ['usage-retention', 'warning-threshold-pct'],
-                values.usageRetentionWarningThresholdPct,
-            )
-            deleteIfMapEmpty(doc, ['usage-retention'])
-        }
-        setIntFromStringInDoc(doc, ['auto-refresh-interval'], values.autoRefreshInterval)
-        setIntFromStringInDoc(doc, ['model-refresh-interval'], values.modelRefreshInterval)
-
-        setStringInDoc(doc, ['proxy-url'], values.proxyUrl)
-        setBooleanInDoc(doc, ['force-model-prefix'], values.forceModelPrefix)
-        setBooleanInDoc(doc, ['enable-gemini-cli-endpoint'], values.enableGeminiCliEndpoint)
-        setBooleanInDoc(doc, ['passthrough-headers'], values.passthroughHeaders)
-        doc.setIn(['disable-image-generation'], values.disableImageGeneration)
-        setStringInDoc(doc, ['gpt-image-2-base-model'], values.gptImage2BaseModel)
-        setIntFromStringInDoc(doc, ['auth-auto-refresh-workers'], values.authAutoRefreshWorkers)
-        setIntFromStringInDoc(doc, ['request-retry'], values.requestRetry)
-        setIntFromStringInDoc(doc, ['max-retry-credentials'], values.maxRetryCredentials)
-        setIntFromStringInDoc(doc, ['max-retry-interval'], values.maxRetryInterval)
-        doc.setIn(['ws-auth'], values.wsAuth)
-        setBooleanInDoc(doc, ['allow-query-auth'], values.allowQueryAuth)
-
-        const corsOrigins = values.corsAllowedOrigins
-                                  .split(',')
-                                  .map((s) => s.trim())
-                                  .filter(Boolean)
-        if (corsOrigins.length > 0) {
-            doc.setIn(['cors-allowed-origins'], corsOrigins)
-        } else if (docHas(doc, ['cors-allowed-origins'])) {
-            doc.deleteIn(['cors-allowed-origins'])
-        }
-        setProviderConfigTextInDoc(doc, values.providerConfigText)
-        setYamlBlockTextInDoc(doc, ['oauth-excluded-models'], values.oauthExcludedModelsText)
-        setYamlBlockTextInDoc(doc, ['oauth-model-alias'], values.oauthModelAliasText)
-        ensureMapInDoc(doc, ['codex'])
-        doc.setIn(['codex', 'identity-confuse'], values.codexIdentityConfuse)
-        setYamlBlockTextInDoc(doc, ['codex-header-defaults'], values.codexHeaderDefaultsText)
-        setYamlBlockTextInDoc(doc, ['claude-header-defaults'], values.claudeHeaderDefaultsText)
-
-        if (
-            docHas(doc, ['quota-exceeded']) ||
-            !values.quotaSwitchProject ||
-            !values.quotaSwitchPreviewModel ||
-            values.quotaAntigravityCredits
-        ) {
-            ensureMapInDoc(doc, ['quota-exceeded'])
-            doc.setIn(['quota-exceeded', 'switch-project'], values.quotaSwitchProject)
-            doc.setIn(['quota-exceeded', 'switch-preview-model'], values.quotaSwitchPreviewModel)
-            if (docHas(doc, ['quota-exceeded', 'antigravity-credits']) || values.quotaAntigravityCredits) {
-                doc.setIn(['quota-exceeded', 'antigravity-credits'], values.quotaAntigravityCredits)
-            }
-            deleteIfMapEmpty(doc, ['quota-exceeded'])
-        }
-
-        setBooleanInDoc(doc, ['disable-cooling'], values.disableCooling)
-
-        if (
-            docHas(doc, ['quota-refresh']) ||
-            values.quotaRefreshEnabled ||
-            values.quotaRefreshInterval.trim() ||
-            values.quotaRefreshMaxInterval.trim()
-        ) {
-            ensureMapInDoc(doc, ['quota-refresh'])
-            doc.setIn(['quota-refresh', 'enabled'], values.quotaRefreshEnabled)
-            setIntFromStringInDoc(doc, ['quota-refresh', 'interval'], values.quotaRefreshInterval)
-            setIntFromStringInDoc(doc, ['quota-refresh', 'max-interval'], values.quotaRefreshMaxInterval)
-            deleteIfMapEmpty(doc, ['quota-refresh'])
-        }
-
-        if (
-            docHas(doc, ['routing']) ||
-            values.routingStrategy !== 'round-robin' ||
-            values.routingSessionAffinity ||
-            values.routingSessionAffinityTTL.trim()
-        ) {
-            ensureMapInDoc(doc, ['routing'])
-            doc.setIn(['routing', 'strategy'], values.routingStrategy)
-            setBooleanInDoc(doc, ['routing', 'session-affinity'], values.routingSessionAffinity)
-            setStringInDoc(doc, ['routing', 'session-affinity-ttl'], values.routingSessionAffinityTTL)
-            deleteIfMapEmpty(doc, ['routing'])
-        }
-
-        const keepaliveSeconds           =
-                  typeof values.streaming?.keepaliveSeconds === 'string' ?
-                  values.streaming.keepaliveSeconds :
-                  ''
-        const bootstrapRetries           =
-                  typeof values.streaming?.bootstrapRetries === 'string' ?
-                  values.streaming.bootstrapRetries :
-                  ''
-        const nonstreamKeepaliveInterval =
-                  typeof values.streaming?.nonstreamKeepaliveInterval === 'string'
-                  ? values.streaming.nonstreamKeepaliveInterval
-                  : ''
-
-        const streamingDefined =
-                  docHas(doc, ['streaming']) || keepaliveSeconds.trim() || bootstrapRetries.trim()
-        if (streamingDefined) {
-            ensureMapInDoc(doc, ['streaming'])
-            setIntFromStringInDoc(doc, ['streaming', 'keepalive-seconds'], keepaliveSeconds)
-            setIntFromStringInDoc(doc, ['streaming', 'bootstrap-retries'], bootstrapRetries)
-            deleteIfMapEmpty(doc, ['streaming'])
-        }
-
-        setIntFromStringInDoc(doc, ['nonstream-keepalive-interval'], nonstreamKeepaliveInterval)
-
-        if (
-            docHas(doc, ['payload']) ||
-            values.payloadDefaultRules.length > 0 ||
-            values.payloadDefaultRawRules.length > 0 ||
-            values.payloadOverrideRules.length > 0 ||
-            values.payloadOverrideRawRules.length > 0 ||
-            values.payloadFilterRules.length > 0
-        ) {
-            ensureMapInDoc(doc, ['payload'])
-            if (values.payloadDefaultRules.length > 0) {
-                doc.setIn(['payload', 'default'], serializePayloadRulesForYaml(values.payloadDefaultRules))
-            } else if (docHas(doc, ['payload', 'default'])) {
-                doc.deleteIn(['payload', 'default'])
-            }
-            if (values.payloadDefaultRawRules.length > 0) {
-                doc.setIn(
-                    ['payload', 'default-raw'],
-                    serializeRawPayloadRulesForYaml(values.payloadDefaultRawRules),
-                )
-            } else if (docHas(doc, ['payload', 'default-raw'])) {
-                doc.deleteIn(['payload', 'default-raw'])
-            }
-            if (values.payloadOverrideRules.length > 0) {
-                doc.setIn(['payload', 'override'], serializePayloadRulesForYaml(values.payloadOverrideRules))
-            } else if (docHas(doc, ['payload', 'override'])) {
-                doc.deleteIn(['payload', 'override'])
-            }
-            if (values.payloadOverrideRawRules.length > 0) {
-                doc.setIn(
-                    ['payload', 'override-raw'],
-                    serializeRawPayloadRulesForYaml(values.payloadOverrideRawRules),
-                )
-            } else if (docHas(doc, ['payload', 'override-raw'])) {
-                doc.deleteIn(['payload', 'override-raw'])
-            }
-            if (values.payloadFilterRules.length > 0) {
-                doc.setIn(['payload', 'filter'], serializePayloadFilterRulesForYaml(values.payloadFilterRules))
-            } else if (docHas(doc, ['payload', 'filter'])) {
-                doc.deleteIn(['payload', 'filter'])
-            }
-            deleteIfMapEmpty(doc, ['payload'])
-        }
-
-        return doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 })
-    } catch (error: unknown) {
-        if (error instanceof Error) {
-            throw error
-        }
-        const wrapped = new Error('Invalid YAML') as Error & { cause?: unknown }
-        wrapped.cause = error
-        throw wrapped
     }
+    if (dirty('pluginStoreAuth')) {
+        preparePath(['plugins', 'store-auth'])
+        const rules = serializePluginStoreAuthForYaml(values.pluginStoreAuth)
+        if (rules.length) {
+            doc.setIn(['plugins', 'store-auth'], rules)
+        } else {
+            doc.deleteIn(['plugins', 'store-auth'])
+            deleteIfMapEmpty(doc, ['plugins'])
+        }
+    }
+    if (dirty('corsAllowedOrigins')) {
+        setStringListInDoc(doc, ['cors-allowed-origins'], values.corsAllowedOrigins.split(','))
+    }
+    if (dirty('providerConfigText')) {
+        setProviderConfigTextInDoc(doc, values.providerConfigText)
+    }
+    for (const [field, section] of Object.entries(PAYLOAD_FIELDS)) {
+        const key = field as keyof typeof PAYLOAD_FIELDS
+        if (dirty(key)) {
+            syncPayloadRules(doc, section, currentValues[key], originalBaselineValues[key], nextValues[key])
+        }
+    }
+    return doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 })
 }

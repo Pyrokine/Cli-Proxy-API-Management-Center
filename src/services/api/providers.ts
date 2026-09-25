@@ -2,10 +2,15 @@
  * AI 提供商相关 API
  */
 
-import type {ApiKeyEntry, GeminiKeyConfig, ModelAlias, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ModelAlias, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import {serializeModelMetadataForManagement, serializeModelThinkingForManagement} from '@/utils/modelMetadata'
 import {apiClient} from './client'
-import {normalizeGeminiKeyConfig, normalizeOpenAIProvider, normalizeProviderKeyConfig} from './transformers'
+import {
+    normalizeClaudeFingerprintProfile,
+    normalizeGeminiKeyConfig,
+    normalizeOpenAIProvider,
+    normalizeProviderKeyConfig,
+} from './transformers'
 
 const serializeHeaders = (headers?: Record<string, string>) =>
     headers && Object.keys(headers).length ? headers : undefined
@@ -73,7 +78,30 @@ const serializeApiKeyEntry = (entry: ApiKeyEntry) => {
     return payload
 }
 
-const serializeBaseKeyPayload = (config: {
+const serializeCredentialOverrides = (config: CredentialOverrides): Record<string, unknown> => {
+    if (config.disableCooling !== undefined && typeof config.disableCooling !== 'boolean') {
+        throw new Error('disable-cooling must be a boolean')
+    }
+    if (config.requestRetry !== undefined && !Number.isSafeInteger(config.requestRetry)) {
+        throw new Error('request-retry must be a safe integer')
+    }
+    return {
+        ...(config.disableCooling !== undefined ? {'disable-cooling': config.disableCooling} : {}),
+        ...(config.requestRetry !== undefined ? {'request-retry': config.requestRetry} : {}),
+    }
+}
+
+const buildCredentialOverridePatch = (config: CredentialOverrides, original: CredentialOverrides) => {
+    const current = serializeCredentialOverrides(config)
+    const previous = serializeCredentialOverrides(original)
+    return Object.fromEntries(
+        ['disable-cooling', 'request-retry'].flatMap((key) =>
+            (current[key] ?? null) === (previous[key] ?? null) ? [] : [[key, current[key] ?? null]],
+        ),
+    )
+}
+
+const serializeBaseKeyPayload = (config: CredentialOverrides & {
     apiKey: string
     priority?: number
     weight?: number
@@ -82,7 +110,7 @@ const serializeBaseKeyPayload = (config: {
     proxyUrl?: string
     headers?: Record<string, string>
 }): Record<string, unknown> => {
-    const payload: Record<string, unknown> = { 'api-key': config.apiKey }
+    const payload: Record<string, unknown> = { 'api-key': config.apiKey, ...serializeCredentialOverrides(config) }
     if (config.priority !== undefined) {
         payload.priority = config.priority
     }
@@ -116,13 +144,10 @@ const serializeCloakConfig = (config: ProviderKeyConfig['cloak']): Record<string
     }
 }
 
-const serializeProviderKey = (config: ProviderKeyConfig) => {
+const serializeProviderKey = (config: ProviderKeyConfig, provider?: 'claude') => {
     const payload = serializeBaseKeyPayload(config)
     if (config.websockets !== undefined) {
         payload.websockets = config.websockets
-    }
-    if (config.disableCooling !== undefined) {
-        payload['disable-cooling'] = config.disableCooling
     }
     const models = serializeModelAliases(config.models)
     if (models && models.length) {
@@ -134,6 +159,9 @@ const serializeProviderKey = (config: ProviderKeyConfig) => {
     const cloak = serializeCloakConfig(config.cloak)
     if (cloak) {
         payload.cloak = cloak
+    }
+    if (provider === 'claude' && config.fingerprintProfile !== undefined) {
+        payload['fingerprint-profile'] = normalizeClaudeFingerprintProfile(config.fingerprintProfile)
     }
     return payload
 }
@@ -150,23 +178,31 @@ export const findProviderConfigIndexByAuthIndex = (
 }
 
 export const buildClaudeConfigPatchPayload = (config: ProviderKeyConfig, original: ProviderKeyConfig) => {
-    const payload: Record<string, unknown> = {
-        priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
-        weight: config.weight ?? null,
-        prefix: config.prefix?.trim() || '',
-        'base-url': config.baseUrl?.trim() || '',
-        'proxy-url': config.proxyUrl?.trim() || '',
-        headers: config.headers ?? {},
-        models: (serializeModelAliases(config.models) ?? []).map((model) => ({
+    const [current, previous] = [config, original].map((item): Record<string, unknown> => ({
+        priority: item.priority !== undefined ? Math.trunc(item.priority) : 0,
+        weight: item.weight ?? null,
+        prefix: item.prefix?.trim() || '',
+        'base-url': item.baseUrl?.trim() || '',
+        'proxy-url': item.proxyUrl?.trim() || '',
+        headers: Object.fromEntries(Object.entries(item.headers ?? {}).sort(([a], [b]) => a.localeCompare(b))),
+        models: (serializeModelAliases(item.models) ?? []).map((model) => ({
             ...model,
             alias: model.alias ?? model.name,
         })),
-        'excluded-models': config.excludedModels ?? [],
+        'excluded-models': item.excludedModels ?? [],
+        cloak: serializeCloakConfig(item.cloak),
+    }))
+    const payload: Record<string, unknown> = {
+        ...Object.fromEntries(
+            Object.entries(current).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(previous[key])),
+        ),
+        ...buildCredentialOverridePatch(config, original),
     }
-    const cloak                            = serializeCloakConfig(config.cloak)
-    const originalCloak                    = serializeCloakConfig(original.cloak)
-    if (JSON.stringify(cloak) !== JSON.stringify(originalCloak)) {
-        payload.cloak = cloak
+    if (config.fingerprintProfile !== undefined) {
+        const profile = normalizeClaudeFingerprintProfile(config.fingerprintProfile)
+        if (profile !== normalizeClaudeFingerprintProfile(original.fingerprintProfile)) {
+            payload['fingerprint-profile'] = profile
+        }
     }
     const apiKey = config.apiKey.trim()
     if (apiKey && apiKey !== original.apiKey.trim()) {
@@ -235,6 +271,7 @@ const serializeGeminiKey = (config: GeminiKeyConfig) => {
 
 const serializeOpenAIProvider = (provider: OpenAIProviderConfig) => {
     const payload: Record<string, unknown> = {
+        ...serializeCredentialOverrides(provider),
         name: provider.name,
         'base-url': provider.baseUrl,
         'api-key-entries': Array.isArray(provider.apiKeyEntries)
@@ -278,6 +315,7 @@ export const buildGeminiConfigPatchRequest = (
     ...(original.authIndex?.trim() ? { 'auth-index': original.authIndex.trim() } : {}),
     value: {
         ...changedApiKeyPayload(config.apiKey, original.apiKey),
+        ...buildCredentialOverridePatch(config, original),
         priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
         weight: config.weight ?? null,
         prefix: config.prefix?.trim() || '',
@@ -299,14 +337,12 @@ const buildProviderKeyPatchRequest = (
     ...(original.authIndex?.trim() ? { 'auth-index': original.authIndex.trim() } : {}),
     value: {
         ...changedApiKeyPayload(config.apiKey, original.apiKey),
+        ...buildCredentialOverridePatch(config, original),
         priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
         weight: config.weight ?? null,
         prefix: config.prefix?.trim() || '',
         'base-url': config.baseUrl?.trim() || '',
         ...(config.websockets !== undefined ? { websockets: Boolean(config.websockets) } : {}),
-        ...(config.disableCooling !== undefined
-            ? { 'disable-cooling': Boolean(config.disableCooling) }
-            : {}),
         'proxy-url': config.proxyUrl?.trim() || '',
         headers: config.headers ?? {},
         models,
@@ -340,6 +376,7 @@ export const buildOpenAIProviderPatchRequest = (
     index,
     name: original.name,
     value: {
+        ...buildCredentialOverridePatch(provider, original),
         name: provider.name.trim(),
         priority: provider.priority !== undefined ? Math.trunc(provider.priority) : 0,
         prefix: provider.prefix?.trim() || '',
@@ -415,7 +452,8 @@ export const providersApi = {
         return list.map((item) => normalizeProviderKeyConfig(item)).filter(Boolean) as ProviderKeyConfig[]
     },
 
-    createClaudeConfig: (config: ProviderKeyConfig) => apiClient.post('/claude-api-key', serializeProviderKey(config)),
+    createClaudeConfig: (config: ProviderKeyConfig) =>
+        apiClient.post('/claude-api-key', serializeProviderKey(config, 'claude')),
 
     patchClaudeConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
         apiClient.patch('/claude-api-key', buildClaudeConfigPatchRequest(index, config, original)),

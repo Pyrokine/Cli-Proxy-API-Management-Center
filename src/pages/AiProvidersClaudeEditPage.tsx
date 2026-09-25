@@ -9,7 +9,9 @@ import {useEscapeKey} from '@/hooks/useEscapeKey'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
 import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api'
+import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {useNotificationStore} from '@/stores'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -75,7 +77,16 @@ export function AiProvidersClaudeEditPage() {
         lastCloakConfigRef.current = form.cloak
     }, [form.cloak])
 
-    const canSave = !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTesting
+    const fingerprintProfile = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
+    const invalidFingerprintProfile = fingerprintProfile !== '' && fingerprintProfile !== 'claude-code-cli'
+    const fingerprintProfileOptions = [
+        { value: '', label: t('ai_providers.claude_fingerprint_profile_default') },
+        { value: 'claude-code-cli', label: t('ai_providers.claude_fingerprint_profile_cli') },
+        ...(invalidFingerprintProfile ? [{ value: fingerprintProfile, label: fingerprintProfile }] : []),
+    ]
+    const canSave = !disableControls && !loading && !saving && !invalidIndexParam &&
+                    !invalidIndex && !isTesting && !invalidFingerprintProfile &&
+                    !getCredentialRetryValidationKey(form.requestRetry)
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
     const controlsDisabled   = saving || disableControls || isTesting
@@ -331,6 +342,29 @@ export function AiProvidersClaudeEditPage() {
                         onTest={() => void runClaudeConnectivityTest()}
                     />
                 </ModelConfigSection>
+
+                <div className='form-group'>
+                    <label htmlFor='claude-fingerprint-profile'>{t('ai_providers.claude_fingerprint_profile_label')}</label>
+                    <Select
+                        id='claude-fingerprint-profile'
+                        value={fingerprintProfile}
+                        options={fingerprintProfileOptions}
+                        onChange={(value) => setForm((prev) => ({ ...prev, fingerprintProfile: value }))}
+                        ariaLabel={t('ai_providers.claude_fingerprint_profile_label')}
+                        ariaDescribedBy={invalidFingerprintProfile
+                                         ? 'claude-fingerprint-profile-hint claude-fingerprint-profile-error'
+                                         : 'claude-fingerprint-profile-hint'}
+                        disabled={controlsDisabled}
+                    />
+                    <div id='claude-fingerprint-profile-hint' className='hint'>
+                        {t('ai_providers.claude_fingerprint_profile_hint')}
+                    </div>
+                    {invalidFingerprintProfile && (
+                        <div id='claude-fingerprint-profile-error' role='alert'>
+                            {t('ai_providers.claude_fingerprint_profile_unknown', { value: fingerprintProfile })}
+                        </div>
+                    )}
+                </div>
 
                 <ClaudeCodeConfigPanel models={form.modelEntries} disabled={controlsDisabled} />
 

@@ -62,6 +62,8 @@ interface VisualConfigEditorProps {
     hasPayloadValidationErrors?: boolean
     disabled?: boolean
     runtimeInfo?: VisualConfigRuntimeInfo
+    requestedField?: ConfigFieldSearchEntry
+    requestedFieldRequestKey?: string
     onChange: (values: Partial<VisualConfigValues>) => void
 }
 
@@ -231,6 +233,8 @@ export function VisualConfigEditor({
                                        hasPayloadValidationErrors = false,
                                        disabled = false,
                                        runtimeInfo,
+                                       requestedField,
+                                       requestedFieldRequestKey,
                                        onChange,
                                    }: VisualConfigEditorProps) {
     const { t }                                     = useTranslation()
@@ -274,6 +278,7 @@ export function VisualConfigEditor({
                                                                } | null>(null)
     const handledJumpRef                            = useRef<{ fieldId: string; sectionId: VisualSectionId } | null>(
         null)
+    const handledRequestedFieldRef                  = useRef('')
     const highlightTimerRef                         = useRef<number | null>(null)
     const highlightedElRef                          = useRef<HTMLElement | null>(null)
 
@@ -298,12 +303,20 @@ export function VisualConfigEditor({
         [handleModeChange],
     )
 
-    const isKeepaliveDisabled          = values.streaming.keepaliveSeconds ===
-                                         '' ||
-                                         values.streaming.keepaliveSeconds ===
-                                         '0'
-    const isNonstreamKeepaliveDisabled =
-              values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0'
+    useEffect(() => {
+        if (!requestedField ||
+            !requestedFieldRequestKey ||
+            handledRequestedFieldRef.current === requestedFieldRequestKey) {
+            return
+        }
+        handledRequestedFieldRef.current = requestedFieldRequestKey
+        queueMicrotask(() => handleResultJump(requestedField))
+    }, [handleResultJump, requestedField, requestedFieldRequestKey])
+
+    const isKeepaliveDisabled = !validationErrors?.['streaming.keepaliveSeconds'] &&
+                                Number(values.streaming.keepaliveSeconds) <= 0
+    const isNonstreamKeepaliveDisabled = !validationErrors?.['streaming.nonstreamKeepaliveInterval'] &&
+                                         Number(values.streaming.nonstreamKeepaliveInterval) <= 0
 
     const portError                            = getValidationMessage(t, validationErrors?.port)
     const tlsHttpRedirectPortError             = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
@@ -435,6 +448,14 @@ export function VisualConfigEditor({
     )
     const handlePluginStoreSourcesChange      = useCallback(
         (pluginStoreSources: string[]) => onChange({ pluginStoreSources }),
+        [onChange],
+    )
+    const handleAntigravitySensitiveWordsChange = useCallback(
+        (antigravitySensitiveWords: string[]) => onChange({ antigravitySensitiveWords }),
+        [onChange],
+    )
+    const handleDevinSensitiveWordsChange     = useCallback(
+        (devinSensitiveWords: string[]) => onChange({ devinSensitiveWords }),
         [onChange],
     )
     const handlePluginStoreAuthChange         = useCallback(
@@ -675,6 +696,10 @@ export function VisualConfigEditor({
         window.requestAnimationFrame(() => {
             element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
             element.classList.add(styles.fieldHighlightActive)
+            element.querySelector<HTMLElement>(
+                'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), ' +
+                'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            )?.focus({ preventScroll: true })
         })
         highlightedElRef.current  = element
         highlightTimerRef.current = window.setTimeout(() => {
@@ -2280,6 +2305,76 @@ export function VisualConfigEditor({
                                          </SectionStack>
                                      </Collapsible>
                                  </FieldAnchor>
+
+                                 <Collapsible
+                                     label={sectionT('advanced.antigravity_title')}
+                                     defaultOpen={false}
+                                 >
+                                     <FieldAnchor fieldId='antigravitySensitiveWords'>
+                                         <SectionSubsection
+                                             title={sectionT('system.antigravity_sensitive_words')}
+                                             description={sectionT(
+                                                 'system.antigravity_sensitive_words_desc',
+                                             )}
+                                         >
+                                             <FieldShell
+                                                 label={sectionT(
+                                                     'system.antigravity_sensitive_words_label',
+                                                 )}
+                                                 hint={sectionT(
+                                                     'system.antigravity_sensitive_words_hint',
+                                                 )}
+                                             >
+                                                 <StringListEditor
+                                                     value={values.antigravitySensitiveWords}
+                                                     disabled={disabled}
+                                                     placeholder={sectionT(
+                                                         'system.antigravity_sensitive_words_placeholder',
+                                                     )}
+                                                     inputAriaLabel={sectionT(
+                                                         'system.antigravity_sensitive_words_label',
+                                                     )}
+                                                     onChange={handleAntigravitySensitiveWordsChange}
+                                                 />
+                                             </FieldShell>
+                                         </SectionSubsection>
+                                     </FieldAnchor>
+                                 </Collapsible>
+
+                                 <Collapsible
+                                     label={sectionT('advanced.devin_title')}
+                                     defaultOpen={false}
+                                 >
+                                     <FieldAnchor fieldId='devinSensitiveWords'>
+                                         <SectionSubsection
+                                             title={sectionT('system.devin_sensitive_words')}
+                                             description={sectionT(
+                                                 'system.devin_sensitive_words_desc',
+                                             )}
+                                         >
+                                             <FieldShell
+                                                 label={sectionT(
+                                                     'system.devin_sensitive_words_label',
+                                                 )}
+                                                 hint={sectionT(
+                                                     'system.devin_sensitive_words_hint',
+                                                 )}
+                                             >
+                                                 <StringListEditor
+                                                     value={values.devinSensitiveWords}
+                                                     disabled={disabled}
+                                                     placeholder={sectionT(
+                                                         'system.devin_sensitive_words_placeholder',
+                                                     )}
+                                                     inputAriaLabel={sectionT(
+                                                         'system.devin_sensitive_words_label',
+                                                     )}
+                                                     onChange={handleDevinSensitiveWordsChange}
+                                                 />
+                                             </FieldShell>
+                                         </SectionSubsection>
+                                     </FieldAnchor>
+                                 </Collapsible>
 
                                  <FieldAnchor fieldId='codexIdentityConfuse'>
                                      <Collapsible

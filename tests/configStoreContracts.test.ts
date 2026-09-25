@@ -109,8 +109,8 @@ describe('config section descriptors', () => {
     })
 
     test('keeps the raw server YAML as the API key storage source across tab changes', () => {
-        expect(configPageSource).toContain('const apiKeysSourceYaml = dirty ? content : serverYaml')
-        expect(configPageSource).toContain('loadVisualValuesFromYaml(content, apiKeysSourceYaml)')
+        expect(configPageSource).toContain('revisionStateRef.current.sourceNeedsReload || visualParseError')
+        expect(configPageSource).toContain('loadVisualValuesFromYaml(content, content)')
     })
 
     test('discards a dirty draft from the local server baseline without refetching', () => {
@@ -118,7 +118,7 @@ describe('config section descriptors', () => {
         const reloadEnd   = configPageSource.indexOf('const shouldShowFloatingActions', reloadStart)
         const reloadBody  = configPageSource.slice(reloadStart, reloadEnd)
 
-        expect(reloadBody).toContain('const baseline = mergeConfigWithDefaults(serverYaml)')
+        expect(reloadBody).toContain('const baseline = serverYaml')
         expect(reloadBody).toContain('revisionStateRef.current.resetDraftToServer()')
         expect(reloadBody).toContain('loadVisualValuesFromYaml(baseline, serverYaml)')
         expect(reloadBody.match(/loadConfig\(\)/g)).toHaveLength(1)
@@ -149,8 +149,8 @@ describe('config section descriptors', () => {
         const saveBody     = configPageSource.slice(saveStart, saveEnd)
 
         expect(confirmBody).toContain('let nextMergedYaml = prepared.content')
-        expect(confirmBody).toContain('if (prepared.mode !== \'source\')')
-        expectSourceToContain(saveBody, 'const sourceDraft = content')
+        expect(confirmBody).toContain('if (prepared.origin !== \'source\')')
+        expect(saveBody).toContain('revisionStateRef.current.buildSaveDraft(latestServerYaml, mode, applyVisualChangesToYaml)')
         expect(saveBody).toContain('serverYaml: latestServerYaml')
         expect(configPageSource).toContain('original={diffOriginalYaml}')
     })

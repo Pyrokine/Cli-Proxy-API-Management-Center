@@ -26,7 +26,6 @@ const buildEmptyForm = (): ProviderFormState => ({
     prefix: '',
     baseUrl: DEFAULT_XAI_BASE_URL,
     websockets: false,
-    disableCooling: false,
     proxyUrl: '',
     headers: [],
     models: [],
@@ -39,7 +38,6 @@ const buildSignature = (form: ProviderFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
                        websockets: Boolean(form.websockets),
-                       disableCooling: Boolean(form.disableCooling),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
                        excludedModels: parseTextList(form.excludedText),
                    })
@@ -54,7 +52,6 @@ export function AiProvidersXAIEditPage() {
         configToForm: (config) => ({
             ...config,
             websockets: Boolean(config.websockets),
-            disableCooling: Boolean(config.disableCooling),
             headers: headersToEntries(config.headers),
             modelEntries: modelsToEntries(config.models),
             excludedText: excludedModelsToText(config.excludedModels),
@@ -66,7 +63,8 @@ export function AiProvidersXAIEditPage() {
             prefix: form.prefix?.trim() || undefined,
             baseUrl: form.baseUrl?.trim() || undefined,
             websockets: Boolean(form.websockets),
-            disableCooling: Boolean(form.disableCooling),
+            disableCooling: form.disableCooling,
+            requestRetry: form.requestRetry,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
@@ -145,16 +143,6 @@ export function AiProvidersXAIEditPage() {
                                 ariaLabel={t('ai_providers.xai_websockets_label')}
                             />
                             <div className='hint'>{t('ai_providers.xai_websockets_hint')}</div>
-                        </div>
-                        <div className='form-group'>
-                            <label>{t('ai_providers.xai_disable_cooling_label')}</label>
-                            <ToggleSwitch
-                                checked={Boolean(form.disableCooling)}
-                                onChange={(value) => setForm((previous) => ({ ...previous, disableCooling: value }))}
-                                disabled={disabled}
-                                ariaLabel={t('ai_providers.xai_disable_cooling_label')}
-                            />
-                            <div className='hint'>{t('ai_providers.xai_disable_cooling_hint')}</div>
                         </div>
                     </>
                 }

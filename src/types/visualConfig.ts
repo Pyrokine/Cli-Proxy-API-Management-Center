@@ -11,6 +11,7 @@ export type PayloadParamValidationErrorCode =
 export type VisualConfigFieldPath =
     | 'port'
     | 'tlsHttpRedirectPort'
+    | 'rmCheckInterval'
     | 'logsMaxTotalSizeMb'
     | 'imageArtifactCacheRetentionDays'
     | 'imageArtifactCacheMaxTotalSizeMb'
@@ -34,6 +35,7 @@ export type VisualConfigFieldPath =
 export type VisualConfigValidationErrorCode =
     | 'port_range'
     | 'non_negative_integer'
+    | 'payload_invalid_number'
     | 'integer_range_1_3600'
     | 'quota_refresh_interval_range'
     | 'quota_refresh_max_interval_range'
@@ -77,6 +79,7 @@ export type PayloadParamEntry = {
 
 export type PayloadModelEntry = {
     id: string
+    sourceYaml?: string
     name: string
     protocol?: string
     extra?: Record<string, unknown>
@@ -84,12 +87,14 @@ export type PayloadModelEntry = {
 
 export type PayloadRule = {
     id: string
+    sourceYaml?: string
     models: PayloadModelEntry[]
     params: PayloadParamEntry[]
 }
 
 export type PayloadFilterRule = {
     id: string
+    sourceYaml?: string
     models: PayloadModelEntry[]
     params: string[]
 }
@@ -217,6 +222,8 @@ export type VisualConfigValues = {
     routingSessionAffinity: boolean
     routingSessionAffinityTTL: string
     wsAuth: boolean
+    antigravitySensitiveWords: string[]
+    devinSensitiveWords: string[]
     allowQueryAuth: boolean
     corsAllowedOrigins: string
     providerConfigText: string
@@ -297,8 +304,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     requestRetry: '',
     maxRetryCredentials: '',
     maxRetryInterval: '',
-    quotaSwitchProject: true,
-    quotaSwitchPreviewModel: true,
+    quotaSwitchProject: false,
+    quotaSwitchPreviewModel: false,
     quotaAntigravityCredits: false,
     disableCooling: false,
     quotaRefreshEnabled: false,
@@ -308,6 +315,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     routingSessionAffinity: false,
     routingSessionAffinityTTL: '',
     wsAuth: true,
+    antigravitySensitiveWords: [],
+    devinSensitiveWords: [],
     allowQueryAuth: false,
     corsAllowedOrigins: '',
     providerConfigText: '',

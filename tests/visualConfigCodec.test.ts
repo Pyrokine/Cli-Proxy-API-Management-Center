@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test'
-import {parse} from 'yaml'
+import {parse, parseDocument} from 'yaml'
+import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 
 import {
     decodeVisualConfigYaml,
@@ -84,8 +85,8 @@ describe('visual config YAML codec', () => {
         expect(parsed['unknown-section']).toEqual({ value: 'keep' })
         expect(parsed.debug).toBe(true)
         expect(parsed['ws-auth']).toBe(false)
-        expect(remoteManagement['disable-auto-update-panel']).toBeUndefined()
-        expect(remoteManagement['auto-update-panel']).toBe(false)
+        expect(remoteManagement['disable-auto-update-panel']).toBe(true)
+        expect(remoteManagement['auto-update-panel']).toBeUndefined()
         expect(remoteManagement['trusted-proxies']).toEqual(['127.0.0.1/32', '10.0.0.0/8'])
         expect(configApiKey['api-key-entries']).toEqual([
                                                             { 'api-key': 'new-key', label: 'primary' },
@@ -364,6 +365,121 @@ payload:
                                                                    })
         expect(output).toContain('tokens: 9007199254740993')
         expect(output).not.toContain('blocked-models')
+    })
+
+    test('writes only dirty leaves and preserves omitted defaults and legacy aliases', () => {
+        const source = '# untouched\ndebug: false\nws-auth: true\nremote-management:\n  disable-auto-update-panel: true\n  panel-repo: old/repo\nrouting:\n  strategy: wrr\nunknown: 9007199254740993\n'
+        const decoded = decodeVisualConfigYaml(source)
+        expect(encodeVisualConfigYaml(source, decoded.values, decoded.values, decoded.apiKeysStorage)).toBe(source)
+        const next = { ...decoded.values, debug: true }
+        const output = encodeVisualConfigYaml(source, next, decoded.values, decoded.apiKeysStorage)
+        expect(output).toBe(source.replace('debug: false', 'debug: true'))
+        expect(decodeVisualConfigYaml('').values.quotaSwitchProject).toBe(false)
+        expect(decodeVisualConfigYaml('').values.quotaSwitchPreviewModel).toBe(false)
+        expect(DEFAULT_VISUAL_VALUES.quotaSwitchProject).toBe(false)
+        expect(DEFAULT_VISUAL_VALUES.quotaSwitchPreviewModel).toBe(false)
+        expect(output).not.toContain('quota-exceeded')
+        expect(output).not.toContain('codex:')
+    })
+
+    const sections = {
+        payloadDefaultRules: 'default', payloadDefaultRawRules: 'default-raw',
+        payloadOverrideRules: 'override', payloadOverrideRawRules: 'override-raw', payloadFilterRules: 'filter',
+    } as const
+    for (const [field, section] of Object.entries(sections)) {
+        const key = field as keyof typeof sections
+        const params = section === 'filter' ? '        - "remove-a" # parameter-comment' :
+            section.endsWith('-raw') ? '        content: | # parameter-comment\n          {"enabled": true}' :
+                '        content: "text" # parameter-comment'
+        const source = `debug: false\npayload:\n  ${section}:\n    # rule-comment\n    - custom-rule: first\n      models:\n        # model-comment\n        - name: "first" # name-comment\n          headers: {x-client: cli-*}\n          match: [{user: test}]\n          not-match: [{stream: true}]\n          exist: [messages]\n          not-exist: [tools]\n          vendor-option: keep\n      params:\n${params}\n    - custom-rule: second\n      models: [{name: second}]\n      params: ${section === 'filter' ? '[other]' : '{other: "123"}'}\n`
+        test(`${section}: unrelated edits retain the original rule AST`, () => {
+            const decoded = decodeVisualConfigYaml(source)
+            const output = encodeVisualConfigYaml(source, { ...decoded.values, debug: true }, decoded.values, decoded.apiKeysStorage)
+            const originalPayload = parseDocument(source).get('payload', true)
+            expect(parseDocument(output).get('payload', true)?.toString()).toBe(originalPayload?.toString())
+            for (const comment of ['rule-comment', 'model-comment', 'name-comment', 'parameter-comment']) {
+                expect(output).toContain(comment)
+            }
+        })
+        test(`${section}: edits and local reorders retain rule/model unknowns and scalar styles`, () => {
+            const decoded = decodeVisualConfigYaml(source)
+            const next = structuredClone(decoded.values)
+            next[key][0]!.models[0]!.name = 'renamed'
+            next[key].reverse()
+            const output = encodeVisualConfigYaml(source, next, decoded.values, decoded.apiKeysStorage)
+            const parsed = parse(output).payload[section]
+            expect(parsed[0]['custom-rule']).toBe('second')
+            expect(parsed[1]['custom-rule']).toBe('first')
+            expect(parsed[1].models[0]).toMatchObject({ name: 'renamed', 'vendor-option': 'keep', headers: { 'x-client': 'cli-*' } })
+            expect(output).toContain('name: "renamed"')
+            for (const comment of ['rule-comment', 'model-comment', 'name-comment', 'parameter-comment']) {
+                expect(output).toContain(comment)
+            }
+            expect(output).toContain(section.endsWith('-raw') ? 'content: |' : section === 'filter' ? '"remove-a"' : 'content: "text"')
+        })
+        test(`${section}: concurrent reorder and insertion are matched to baseline identity`, () => {
+            const decoded = decodeVisualConfigYaml(source)
+            const next = structuredClone(decoded.values)
+            next[key][0]!.models[0]!.name = 'renamed'
+            const latest = parseDocument(source)
+            const seq = latest.getIn(['payload', section], true) as { items: unknown[] }
+            seq.items.reverse()
+            seq.items.unshift(latest.createNode({ models: [{ name: 'remote-new' }], params: section === 'filter' ? ['new'] : { new: true }, 'remote-only': true }))
+            const output = encodeVisualConfigYaml(latest.toString(), next, decoded.values, decoded.apiKeysStorage)
+            const rules = parse(output).payload[section]
+            expect(rules.map((rule: { models: { name: string }[] }) => rule.models[0]!.name)).toEqual(['remote-new', 'second', 'renamed'])
+            expect(rules[0]['remote-only']).toBe(true)
+            expect(rules[2]['custom-rule']).toBe('first')
+        })
+        test(`${section}: deletion does not move another rule's metadata`, () => {
+            const decoded = decodeVisualConfigYaml(source)
+            const next = structuredClone(decoded.values)
+            next[key].splice(0, 1)
+            const output = encodeVisualConfigYaml(source, next, decoded.values, decoded.apiKeysStorage)
+            const rules = parse(output).payload[section]
+            expect(rules).toHaveLength(1)
+            expect(rules[0]['custom-rule']).toBe('second')
+            expect(rules[0].models[0].name).toBe('second')
+        })
+    }
+
+    test('parameter rename and edits preserve comment and quoting while concurrent additions survive', () => {
+        const source = 'payload:\n  default:\n    - models: [model]\n      custom: keep\n      params:\n        old: "before" # keep-param\n        other: 1\n'
+        const decoded = decodeVisualConfigYaml(source)
+        const next = structuredClone(decoded.values)
+        const param = next.payloadDefaultRules[0]!.params[0]!
+        param.path = 'renamed'
+        param.value = 'after'
+        const latest = source.replace('other: 1', 'other: 2\n        remote: true')
+        const output = encodeVisualConfigYaml(latest, next, decoded.values, decoded.apiKeysStorage)
+        expect(output).toContain('renamed: "after" # keep-param')
+        expect(parse(output).payload.default[0].params).toEqual({ renamed: 'after', other: 2, remote: true })
+        expect(parse(output).payload.default[0].models).toEqual(['model'])
+    })
+
+    test('same model selectors with distinct params retain their own metadata after reorder', () => {
+        const source = 'payload:\n  default:\n    - custom: first\n      models: [{name: same}]\n      params: {n: 1}\n    - custom: second\n      models: [{name: same}]\n      params: {n: 2}\n'
+        const decoded = decodeVisualConfigYaml(source)
+        const next = structuredClone(decoded.values)
+        next.payloadDefaultRules.reverse()
+        next.payloadDefaultRules[1]!.params[0]!.value = '3'
+        const output = encodeVisualConfigYaml(source, next, decoded.values, decoded.apiKeysStorage)
+        expect(parse(output).payload.default.map((rule: {custom: string}) => rule.custom)).toEqual(['second', 'first'])
+        expect(parse(output).payload.default[1].params.n).toBe(3)
+    })
+
+    test('ambiguous concurrent identity and conflicting reorder fail without replacing the draft', () => {
+        const source = 'payload:\n  default:\n    - models: [{name: one}]\n      params: {n: 1}\n    - models: [{name: two}]\n      params: {n: 2}\n    - models: [{name: three}]\n      params: {n: 3}\n'
+        const decoded = decodeVisualConfigYaml(source)
+        const next = structuredClone(decoded.values)
+        next.payloadDefaultRules.reverse()
+        const server = parseDocument(source)
+        const seq = server.getIn(['payload', 'default'], true) as { items: unknown[] }
+        seq.items.push(seq.items.shift())
+        expect(() => encodeVisualConfigYaml(server.toString(), next, decoded.values, decoded.apiKeysStorage)).toThrow('Payload conflict')
+        const ambiguous = source.replace('name: two', 'name: one').replace('n: 2', 'n: 1')
+        expect(() => encodeVisualConfigYaml(ambiguous, next, decoded.values, decoded.apiKeysStorage)).toThrow('Payload conflict')
+        expect(next.payloadDefaultRules[0]!.models[0]!.name).toBe('three')
     })
 
     test('rejects invalid YAML before producing visual values', () => {

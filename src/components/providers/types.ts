@@ -1,10 +1,10 @@
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
-import type {ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
+import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
 import type {HeaderEntry} from '@/utils/headers'
 
 export type {ModelEntry} from '@/components/ui/modelInputListUtils'
 
-export interface OpenAIFormState {
+export interface OpenAIFormState extends CredentialOverrides {
     name: string
     priority?: number
     prefix: string

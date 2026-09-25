@@ -1,4 +1,6 @@
+import {CredentialOverrideFields} from '@/components/providers/CredentialOverrideFields'
 import {Button} from '@/components/ui/Button'
+import type {CredentialOverrides} from '@/types'
 import {HeaderInputList} from '@/components/ui/HeaderInputList'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
@@ -103,7 +105,7 @@ export function PrefixField<T extends { prefix?: string }>({ form, setForm, disa
     )
 }
 
-interface ProviderConnectionForm {
+interface ProviderConnectionForm extends CredentialOverrides {
     apiKey: string
     priority?: number
     weight?: number
@@ -160,6 +162,12 @@ export function ProviderConnectionFields<T extends ProviderConnectionForm>({
             />
             <PriorityField form={form} setForm={setForm} disabled={disabled} />
             <WeightField form={form} setForm={setForm} disabled={disabled} />
+            <CredentialOverrideFields
+                disableCooling={form.disableCooling}
+                requestRetry={form.requestRetry}
+                disabled={disabled}
+                onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
+            />
             <PrefixField form={form} setForm={setForm} disabled={disabled} />
             <Input
                 label={baseUrlLabel}

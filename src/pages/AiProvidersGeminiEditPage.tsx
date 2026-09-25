@@ -98,6 +98,8 @@ export function AiProvidersGeminiEditPage() {
                 apiKey: form.apiKey.trim(),
                 priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
                 weight: form.weight,
+                disableCooling: form.disableCooling,
+                requestRetry: form.requestRetry,
                 prefix: form.prefix?.trim() || undefined,
                 baseUrl: form.baseUrl?.trim() || undefined,
                 proxyUrl: form.proxyUrl?.trim() || undefined,

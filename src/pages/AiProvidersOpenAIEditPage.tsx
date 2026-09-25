@@ -2,6 +2,8 @@ import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
 import {buildApiKeyEntry} from '@/components/providers/utils'
+import {CredentialOverrideFields} from '@/components/providers/CredentialOverrideFields'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {Button} from '@/components/ui/Button'
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
@@ -128,7 +130,8 @@ export function AiProvidersOpenAIEditPage() {
                              !saving &&
                              !invalidIndexParam &&
                              !invalidIndex &&
-                             !isTesting
+                             !isTesting &&
+                             !getCredentialRetryValidationKey(form.requestRetry)
     const controlsDisabled = saving || disableControls || isTesting
 
     const openOpenaiModelDiscovery = () => {
@@ -504,6 +507,12 @@ export function AiProvidersOpenAIEditPage() {
                     disabled={controlsDisabled}
                 />
                 <PriorityField form={form} setForm={setForm} disabled={controlsDisabled} />
+                <CredentialOverrideFields
+                    disableCooling={form.disableCooling}
+                    requestRetry={form.requestRetry}
+                    disabled={controlsDisabled}
+                    onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
+                />
                 <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
                 <Input
                     label={t('ai_providers.openai_add_modal_url_label')}

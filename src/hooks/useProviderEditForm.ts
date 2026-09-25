@@ -2,7 +2,9 @@ import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import type {CredentialOverrides} from '@/types'
 import type {RawConfigSection} from '@/types/config'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {normalizeHeaderEntries} from '@/utils/headers'
 import {parseIndexParam} from '@/utils/helpers'
 import {type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState} from 'react'
@@ -13,7 +15,7 @@ export {normalizeModelEntriesForSignature} from '@/utils/modelMetadata'
 
 // ---- Generic form state constraint ----
 
-interface BaseFormState {
+interface BaseFormState extends CredentialOverrides {
     apiKey: string
     priority?: number
     weight?: number
@@ -218,7 +220,8 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
 
     // ---- Unsaved changes guard ----
 
-    const canSave  = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex
+    const canSave  = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex &&
+                     !getCredentialRetryValidationKey(form.requestRetry)
     const canGuard = isDirty && !loading && !saving && !invalidIndexParam && !invalidIndex
 
     const { allowNextNavigation } = useUnsavedChangesGuard({
@@ -346,6 +349,8 @@ export const buildBaseSignatureFields = (form: BaseFormState) => ({
     apiKey: String(form.apiKey ?? '').trim(),
     priority: form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
     weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
+    disableCooling: form.disableCooling ?? null,
+    requestRetry: form.requestRetry?.toString() ?? null,
     prefix: String(form.prefix ?? '').trim(),
     baseUrl: String(form.baseUrl ?? '').trim(),
     proxyUrl: String(form.proxyUrl ?? '').trim(),

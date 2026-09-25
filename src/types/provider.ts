@@ -34,7 +34,12 @@ export interface CloakConfig {
     sensitiveWords?: string[]
 }
 
-export interface GeminiKeyConfig {
+export interface CredentialOverrides {
+    disableCooling?: boolean
+    requestRetry?: number
+}
+
+export interface GeminiKeyConfig extends CredentialOverrides {
     apiKey: string
     authIndex?: string
     priority?: number
@@ -47,7 +52,7 @@ export interface GeminiKeyConfig {
     excludedModels?: string[]
 }
 
-export interface ProviderKeyConfig {
+export interface ProviderKeyConfig extends CredentialOverrides {
     apiKey: string
     authIndex?: string
     priority?: number
@@ -55,15 +60,15 @@ export interface ProviderKeyConfig {
     prefix?: string
     baseUrl?: string
     websockets?: boolean
-    disableCooling?: boolean
     proxyUrl?: string
     headers?: Record<string, string>
     models?: ModelAlias[]
     excludedModels?: string[]
     cloak?: CloakConfig
+    fingerprintProfile?: string
 }
 
-export interface OpenAIProviderConfig {
+export interface OpenAIProviderConfig extends CredentialOverrides {
     name: string
     prefix?: string
     baseUrl: string

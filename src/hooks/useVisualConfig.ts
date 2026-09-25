@@ -15,6 +15,9 @@ import {
     decodeVisualConfigYaml,
     DEFAULT_API_KEYS_STORAGE_METADATA,
     encodeVisualConfigYaml,
+    integerFieldValue,
+    parseVisualConfigInteger,
+    VISUAL_INTEGER_FIELDS,
     updateApiKeysStorageMetadata,
 } from './visualConfigCodec'
 
@@ -27,49 +30,21 @@ function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value)) as T
 }
 
-function getPortError(value: string): VisualConfigValidationErrorCode | undefined {
-    const trimmed = value.trim()
-    if (!trimmed) {
-        return undefined
-    }
-    const parsed = Number(trimmed)
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-        return 'port_range'
-    }
-    return undefined
-}
-
 function getNonNegativeIntegerError(value: string): VisualConfigValidationErrorCode | undefined {
-    const trimmed = value.trim()
-    if (!trimmed) {
+    try {
+        parseVisualConfigInteger(value)
         return undefined
-    }
-    const parsed = Number(trimmed)
-    if (!Number.isInteger(parsed) || parsed < 0) {
+    } catch {
         return 'non_negative_integer'
     }
-    return undefined
-}
-
-function getRedisRetentionError(value: string): VisualConfigValidationErrorCode | undefined {
-    const trimmed = value.trim()
-    if (!trimmed) {
-        return undefined
-    }
-    if (!/^\d+$/.test(trimmed)) {
-        return 'integer_range_1_3600'
-    }
-    const parsed = Number(trimmed)
-    return parsed >= 1 && parsed <= 3600 ? undefined : 'integer_range_1_3600'
 }
 
 function parseOptionalInteger(value: string): number | undefined {
-    const trimmed = value.trim()
-    if (!trimmed) {
+    try {
+        return parseVisualConfigInteger(value)
+    } catch {
         return undefined
     }
-    const parsed = Number(trimmed)
-    return Number.isInteger(parsed) ? parsed : undefined
 }
 
 function getQuotaRefreshIntervalError(values: VisualConfigValues): VisualConfigValidationErrorCode | undefined {
@@ -77,8 +52,8 @@ function getQuotaRefreshIntervalError(values: VisualConfigValues): VisualConfigV
     if (baseError || !values.quotaRefreshEnabled) {
         return baseError
     }
-    const interval = parseOptionalInteger(values.quotaRefreshInterval)
-    if (interval === undefined || interval < 60) {
+    const interval = parseOptionalInteger(values.quotaRefreshInterval) ?? 600
+    if (interval < 60) {
         return 'quota_refresh_interval_range'
     }
     return undefined
@@ -89,38 +64,32 @@ function getQuotaRefreshMaxIntervalError(values: VisualConfigValues): VisualConf
     if (baseError || !values.quotaRefreshEnabled) {
         return baseError
     }
-    const interval    = parseOptionalInteger(values.quotaRefreshInterval)
-    const maxInterval = parseOptionalInteger(values.quotaRefreshMaxInterval)
-    if (maxInterval === undefined || maxInterval < 300 || (interval !== undefined && maxInterval < interval)) {
+    const interval    = parseOptionalInteger(values.quotaRefreshInterval) ?? 600
+    const maxInterval = parseOptionalInteger(values.quotaRefreshMaxInterval) ?? 1800
+    if (maxInterval < 300 || maxInterval < interval) {
         return 'quota_refresh_max_interval_range'
     }
     return undefined
 }
 
-function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConfigValidationErrors {
-    return {
-        port: getPortError(values.port),
-        tlsHttpRedirectPort: getNonNegativeIntegerError(values.tlsHttpRedirectPort),
-        logsMaxTotalSizeMb: getNonNegativeIntegerError(values.logsMaxTotalSizeMb),
-        imageArtifactCacheRetentionDays: getNonNegativeIntegerError(values.imageArtifactCacheRetentionDays),
-        imageArtifactCacheMaxTotalSizeMb: getNonNegativeIntegerError(values.imageArtifactCacheMaxTotalSizeMb),
-        errorLogsMaxFiles: getNonNegativeIntegerError(values.errorLogsMaxFiles),
-        redisUsageQueueRetentionSeconds: getRedisRetentionError(values.redisUsageQueueRetentionSeconds),
-        authAutoRefreshWorkers: getNonNegativeIntegerError(values.authAutoRefreshWorkers),
-        usageRetentionDays: getNonNegativeIntegerError(values.usageRetentionDays),
-        usageRetentionMaxDbSizeMb: getNonNegativeIntegerError(values.usageRetentionMaxDbSizeMb),
-        usageRetentionWarningThresholdPct: getNonNegativeIntegerError(values.usageRetentionWarningThresholdPct),
-        autoRefreshInterval: getNonNegativeIntegerError(values.autoRefreshInterval),
-        modelRefreshInterval: getNonNegativeIntegerError(values.modelRefreshInterval),
-        requestRetry: getNonNegativeIntegerError(values.requestRetry),
-        maxRetryCredentials: getNonNegativeIntegerError(values.maxRetryCredentials),
-        maxRetryInterval: getNonNegativeIntegerError(values.maxRetryInterval),
-        quotaRefreshInterval: getQuotaRefreshIntervalError(values),
-        quotaRefreshMaxInterval: getQuotaRefreshMaxIntervalError(values),
-        'streaming.keepaliveSeconds': getNonNegativeIntegerError(values.streaming.keepaliveSeconds),
-        'streaming.bootstrapRetries': getNonNegativeIntegerError(values.streaming.bootstrapRetries),
-        'streaming.nonstreamKeepaliveInterval': getNonNegativeIntegerError(values.streaming.nonstreamKeepaliveInterval),
+export function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConfigValidationErrors {
+    const errors: VisualConfigValidationErrors = {}
+    for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
+        try {
+            parseVisualConfigInteger(integerFieldValue(values, field), contract.minimum, contract.maximum)
+        } catch {
+            errors[field as keyof VisualConfigValidationErrors] = field === 'port'
+                ? 'port_range'
+                : field === 'redisUsageQueueRetentionSeconds'
+                  ? 'integer_range_1_3600'
+                  : contract.minimum < 0 || contract.maximum < Number.MAX_SAFE_INTEGER
+                    ? 'payload_invalid_number'
+                    : 'non_negative_integer'
+        }
     }
+    errors.quotaRefreshInterval = getQuotaRefreshIntervalError(values)
+    errors.quotaRefreshMaxInterval = getQuotaRefreshMaxIntervalError(values)
+    return errors
 }
 
 export function getPayloadParamValidationError(param: PayloadParamEntry): PayloadParamValidationErrorCode | undefined {
@@ -131,7 +100,7 @@ export function getPayloadParamValidationError(param: PayloadParamEntry): Payloa
 
     if (param.valueType === 'number') {
         const parsed = Number(trimmedValue)
-        if (!Number.isFinite(parsed)) {
+        if (!Number.isFinite(parsed) || (Number.isInteger(parsed) && !Number.isSafeInteger(parsed))) {
             return 'payload_invalid_number'
         }
     }

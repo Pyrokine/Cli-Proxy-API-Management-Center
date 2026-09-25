@@ -56,6 +56,8 @@ export function AiProvidersVertexEditPage() {
             priority:
                 form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : undefined,
             weight: form.weight,
+            disableCooling: form.disableCooling,
+            requestRetry: form.requestRetry,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,

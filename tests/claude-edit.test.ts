@@ -58,7 +58,17 @@ describe('buildClaudeConfigPatchPayload', () => {
                 headers: {},
                 excludedModels: [],
             },
-            { apiKey: 'sk-m...tail' },
+            {
+                apiKey: 'sk-m...tail',
+                priority: 5,
+                weight: 2,
+                prefix: 'old',
+                baseUrl: 'https://gateway.example',
+                proxyUrl: 'http://proxy.example',
+                headers: { 'X-Test': 'old' },
+                models: [{ name: 'old' }],
+                excludedModels: ['old'],
+            },
         );
 
         expect(payload['api-key']).toBeUndefined();

@@ -8,6 +8,7 @@ import {useConfigStore, useNotificationStore, useOpenAIEditDraftStore} from '@/s
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry, OpenAIProviderConfig} from '@/types'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
@@ -93,6 +94,8 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        disabled: Boolean(form.disabled),
+                       disableCooling: form.disableCooling ?? null,
+                       requestRetry: form.requestRetry?.toString() ?? null,
                        authIndex: String(form.authIndex ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
                        apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
@@ -146,6 +149,8 @@ export function AiProvidersOpenAIEditLayout() {
         const seededForm: OpenAIFormState = {
             name: data.name,
             priority: data.priority,
+            disableCooling: data.disableCooling,
+            requestRetry: data.requestRetry,
             prefix: data.prefix ?? '',
             baseUrl: data.baseUrl,
             headers: headersToEntries(data.headers),
@@ -196,6 +201,11 @@ export function AiProvidersOpenAIEditLayout() {
                 showNotification(t('notification.openai_provider_required'), 'error')
                 return
             }
+            const retryError = getCredentialRetryValidationKey(form.requestRetry)
+            if (retryError) {
+                showNotification(t(retryError), 'error')
+                return
+            }
             const weightError = form.apiKeyEntries
                                     .map((entry) => getCredentialWeightValidationKey(entry.weight))
                                     .find(Boolean)
@@ -211,6 +221,8 @@ export function AiProvidersOpenAIEditLayout() {
                     prefix: form.prefix?.trim() || undefined,
                     baseUrl,
                     disabled: form.disabled,
+                    disableCooling: form.disableCooling,
+                    requestRetry: form.requestRetry,
                     headers: buildHeaderObject(form.headers),
                     apiKeyEntries: form.apiKeyEntries.map((entry: ApiKeyEntry) => ({
                         apiKey: entry.apiKey.trim(),
