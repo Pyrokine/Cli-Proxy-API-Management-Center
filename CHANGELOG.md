@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.23.1-aug.1 - 2026-09-25
+
+### Release Basis
+
+- Upstream semantic basis: v1.23.1 (`c12997e1a544374336ea385d5e9a9bbabe1e4767`)
+- Fork point with upstream v1.23.1: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.22.2-aug.1
+- Local release: v1.23.1-aug.1
+- Paired server release and minimum compatible server: CLIProxyAPI v7.3.2-aug.1
+
+### What's Changed
+
+- feat (config): Preserve visual YAML edits and unknown fields through merges and concurrent revisions; add typed Provider settings, credential overrides and configuration navigation
+- feat (credentials): Add Devin OAuth and quota views, manual credential refresh and account inspection; keep refresh separate from active quota reset
+- fix (oauth): Bind login attempts to their current owner and cancel stale polling after account, source or session changes
+- fix (ui): Keep log previews, downloads and notifications scoped to the active request; refine navigation, accessibility and shared messages across four locales
+- feat (models): Read Dashboard and System inventory from current runtime data, display model capabilities and prices, and recognize sync dirty builds in version history
+
+### Compatibility
+
+- This panel requires CLIProxyAPI v7.3.2-aug.1 or newer for the credential refresh endpoint; upgrade the server before installing this panel
+- The release asset remains the single-file `management.html`
+- Real paid Provider inference and active quota reset were not part of the local release checks
+
+---
+
+### 版本依据
+
+- 上游语义基线：v1.23.1（`c12997e1a544374336ea385d5e9a9bbabe1e4767`）
+- 与上游 v1.23.1 的分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.22.2-aug.1
+- 本地发布版本：v1.23.1-aug.1
+- 配套后端与最低兼容版本：CLIProxyAPI v7.3.2-aug.1
+
+### 更新内容
+
+- feat (config)：合并及并发修订期间保留可视化 YAML 编辑和未知字段，增加类型化 Provider 设置、凭证覆盖项与配置导航
+- feat (credentials)：增加 Devin OAuth 与 quota 展示、手动凭证刷新和账号巡检；凭证刷新与主动重置配额分开
+- fix (oauth)：登录尝试绑定当前归属，账号、来源或会话变化后取消过期轮询
+- fix (ui)：日志预览、下载和通知只更新当前请求，调整导航、无障碍交互与四语共用文案
+- feat (models)：Dashboard 与 System 读取当前运行时模型，展示模型能力和价格，并在版本历史中识别 sync dirty 构建
+
+### 兼容性
+
+- 面板依赖 CLIProxyAPI v7.3.2-aug.1 或更新版本的凭证刷新接口，安装面板前先升级后端
+- 发布资产仍是单文件 `management.html`
+- 本地发版检查没有发起真实付费 Provider 推理或主动重置配额
+
 ## v1.22.2-aug.1 - 2026-09-13
 
 ### Release Basis
