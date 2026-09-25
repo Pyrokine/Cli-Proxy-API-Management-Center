@@ -1,7 +1,10 @@
 import {IconX} from '@/components/ui/icons'
 import {useNotificationStore} from '@/stores'
 import type {Notification} from '@/types'
-import {useEffect, useRef, useState} from 'react'
+import {NOTIFICATION_DURATION_MS} from '@/utils/constants'
+import {useCallback, useEffect, useRef, useState, type RefObject} from 'react'
+import {useTranslation} from 'react-i18next'
+import {createNotificationTimer} from './notificationTimer'
 
 interface AnimatedNotification extends Notification {
     isExiting?: boolean
@@ -9,78 +12,133 @@ interface AnimatedNotification extends Notification {
 
 const ANIMATION_DURATION = 300 // ms
 
-export function NotificationContainer() {
-    const { notifications, removeNotification }             = useNotificationStore()
-    const [animatedNotifications, setAnimatedNotifications] = useState<AnimatedNotification[]>([])
-    const prevNotificationsRef                              = useRef<Notification[]>([])
+function NotificationCard({notification, onExited, returnFocusRef}: {
+    notification: AnimatedNotification
+    onExited: (id: string) => void
+    returnFocusRef: RefObject<HTMLElement | null>
+}) {
+    const {t} = useTranslation()
+    const removeNotification = useNotificationStore((state) => state.removeNotification)
+    const {id, type, message, duration = NOTIFICATION_DURATION_MS, isExiting} = notification
+    const cardRef = useRef<HTMLDivElement>(null)
+    const [readableTimer] = useState(() => createNotificationTimer(duration, () => removeNotification(id)))
 
-    // Track notifications and manage animation states
     useEffect(() => {
-        const prevNotifications = prevNotificationsRef.current
-        const prevIds           = new Set(prevNotifications.map((n) => n.id))
-        const currentIds        = new Set(notifications.map((n) => n.id))
-
-        // Find new notifications (for enter animation)
-        const newNotifications = notifications.filter((n) => !prevIds.has(n.id))
-
-        // Find removed notifications (for exit animation)
-        const removedIds = new Set(prevNotifications.filter((n) => !currentIds.has(n.id)).map((n) => n.id))
-
-        setAnimatedNotifications((prev) => {
-            // Mark removed notifications as exiting
-            let updated = prev.map((n) => (removedIds.has(n.id) ? { ...n, isExiting: true } : n))
-
-            // Add new notifications
-            newNotifications.forEach((n) => {
-                if (!updated.find((an) => an.id === n.id)) {
-                    updated.push({ ...n, isExiting: false })
-                }
-            })
-
-            // Remove notifications that are not in current and not exiting
-            // (they've already completed their exit animation)
-            updated = updated.filter((n) => currentIds.has(n.id) || n.isExiting)
-
-            return updated
-        })
-
-        // Clean up exited notifications after animation
-        if (removedIds.size > 0) {
-            setTimeout(() => {
-                setAnimatedNotifications((prev) => prev.filter((n) => !removedIds.has(n.id)))
-            }, ANIMATION_DURATION)
+        if (isExiting) {
+            readableTimer.dispose()
+            const exitTimer = setTimeout(() => onExited(id), ANIMATION_DURATION)
+            return () => clearTimeout(exitTimer)
         }
+        const syncVisibility = () => readableTimer.setPaused('hidden', document.hidden)
+        syncVisibility()
+        readableTimer.setPaused('hover', Boolean(cardRef.current?.matches(':hover')))
+        readableTimer.setPaused('focus', Boolean(cardRef.current?.contains(document.activeElement)))
+        readableTimer.start()
+        document.addEventListener('visibilitychange', syncVisibility)
+        return () => {
+            document.removeEventListener('visibilitychange', syncVisibility)
+            readableTimer.stop()
+        }
+    }, [id, isExiting, onExited, readableTimer])
 
-        prevNotificationsRef.current = notifications
-    }, [notifications])
-
-    const handleClose = (id: string) => {
-        // Start exit animation
-        setAnimatedNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isExiting: true } : n)))
-
-        // Actually remove after animation
-        setTimeout(() => {
-            removeNotification(id)
-        }, ANIMATION_DURATION)
-    }
-
-    if (!animatedNotifications.length) {
-        return null
+    const dismiss = (immediate: boolean) => {
+        const card = cardRef.current
+        if (card?.contains(document.activeElement)) {
+            const buttons = Array.from(card.parentElement?.querySelectorAll<HTMLButtonElement>(
+                '.notification:not(.exiting) .close-btn:not(:disabled)',
+            ) ?? [])
+            const index = buttons.indexOf(card.querySelector<HTMLButtonElement>('.close-btn')!)
+            const target = buttons[index + 1] ?? buttons[index - 1] ?? returnFocusRef.current
+            if (target?.isConnected && !target.closest('[inert]') && !target.matches(':disabled')) {
+                target.focus({preventScroll: true})
+            }
+        }
+        readableTimer.dispose()
+        removeNotification(id)
+        if (immediate) {
+            onExited(id)
+        }
     }
 
     return (
-        <div className='notification-container'>
-            {animatedNotifications.map((notification) => (
-                <div
-                    key={notification.id}
-                    className={`notification ${notification.type} ${notification.isExiting ? 'exiting' : 'entering'}`}
-                >
-                    <div className='message'>{notification.message}</div>
-                    <button className='close-btn' onClick={() => handleClose(notification.id)} aria-label='Close'>
-                        <IconX size={16} />
-                    </button>
-                </div>
-            ))}
+        <div
+            ref={cardRef}
+            className={`notification ${type} ${isExiting ? 'exiting' : 'entering'}`}
+            aria-hidden={isExiting || undefined}
+            inert={isExiting || undefined}
+            onPointerEnter={(event) => {
+                if (event.pointerType !== 'touch') {
+                    readableTimer.setPaused('hover', true)
+                }
+            }}
+            onPointerLeave={() => readableTimer.setPaused('hover', false)}
+            onFocusCapture={() => readableTimer.setPaused('focus', true)}
+            onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                    readableTimer.setPaused('focus', false)
+                }
+            }}
+            onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    dismiss(true)
+                }
+            }}
+        >
+            <div className='message' role={type === 'error' ? 'alert' : 'status'} aria-atomic='true'>{message}</div>
+            <button
+                type='button'
+                className='close-btn'
+                onClick={(event) => dismiss(event.detail === 0)}
+                disabled={isExiting}
+                aria-label={t('common.close')}
+            >
+                <IconX size={16} />
+            </button>
         </div>
+    )
+}
+
+export function NotificationContainer() {
+    const {t} = useTranslation()
+    const notifications = useNotificationStore((state) => state.notifications)
+    const [rendered, setRendered] = useState<{source: Notification[]; items: AnimatedNotification[]}>({
+        source: notifications, items: notifications,
+    })
+    const returnFocusRef = useRef<HTMLElement | null>(null)
+
+    if (rendered.source !== notifications) {
+        const current = new Map(notifications.map((notification) => [notification.id, notification]))
+        const previousIds = new Set(rendered.items.map((notification) => notification.id))
+        setRendered({
+            source: notifications,
+            items: [
+                ...rendered.items.map((notification) => current.get(notification.id) ?? {...notification, isExiting: true}),
+                ...notifications.filter((notification) => !previousIds.has(notification.id)),
+            ],
+        })
+    }
+
+    const handleExited = useCallback((id: string) => {
+        if (!useNotificationStore.getState().notifications.some((notification) => notification.id === id)) {
+            setRendered((previous) => ({...previous, items: previous.items.filter((notification) => notification.id !== id)}))
+        }
+    }, [])
+
+    return (
+        <section
+            className='notification-container'
+            aria-label={t('notifications.title')}
+            onFocusCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                    returnFocusRef.current = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+                }
+            }}
+        >
+            {rendered.items.map((notification) => (
+                <NotificationCard key={notification.id} notification={notification} onExited={handleExited} returnFocusRef={returnFocusRef} />
+            ))}
+        </section>
     )
 }

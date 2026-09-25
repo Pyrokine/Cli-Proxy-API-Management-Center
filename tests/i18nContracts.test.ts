@@ -202,7 +202,7 @@ const technicalOnlyPatterns = [
     /^low, medium, high$/,
     new RegExp(
         '^(?:Qwen|Gemini|GeminiCLI|Gemini CLI|Kimi|AIStudio|Claude|Anthropic|' +
-        'Codex|Antigravity|xAI|iFlow|Vertex|Interactions|OpenAI)(?: OAuth)?$',
+        'Codex|Antigravity|xAI|iFlow|Vertex|Interactions|OpenAI|Devin)(?: OAuth)?$',
     ),
     /^(?:Free|Plus|Team|Pro(?: (?:5x|20x))?|Ultra(?: Lite)?|Max(?: (?:5x|20x))?|SuperGrok(?: Heavy)?|Iguana Necktie)$/,
     new RegExp(
@@ -435,6 +435,26 @@ describe('global i18n contract', () => {
             const description = flatLocales[localeName]['model_management.image_call_desc']
             expect(description).toContain('GPT Image 2.5 Flare/Sunburst')
             expect(description).toContain('OpenAI')
+        })
+    })
+
+    test('describes the merged models.json and runtime-discovered catalog in every locale', () => {
+        const runtimeTerms = {
+            en: 'runtime',
+            ru: 'runtime',
+            'zh-CN': '运行时',
+            'zh-TW': '執行階段',
+        } as const
+
+        localeNames.forEach((localeName) => {
+            const descriptions = [
+                flatLocales[localeName]['model_management.total_models_hint'],
+                flatLocales[localeName]['model_management.source_help'],
+            ]
+            descriptions.forEach((description) => {
+                expect(description).toContain('models.json')
+                expect(description.toLocaleLowerCase()).toContain(runtimeTerms[localeName])
+            })
         })
     })
 })

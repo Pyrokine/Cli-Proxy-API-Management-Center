@@ -26,7 +26,8 @@ import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useLocalStorage} from '@/hooks/useLocalStorage'
 import {configApi} from '@/services/api/config'
-import {logsApi, type LogsQuery} from '@/services/api/logs'
+import {apiClient} from '@/services/api/client'
+import {logsApi, type ErrorLogFile, type LogsQuery} from '@/services/api/logs'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {copyToClipboard} from '@/utils/clipboard'
@@ -36,9 +37,11 @@ import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp} f
 import {redactSensitiveText} from '@/utils/redaction'
 import {formatDurationMs, formatThinkingLabel} from '@/utils/usage'
 import type {PointerEvent as ReactPointerEvent} from 'react'
-import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react'
+import {useDeferredValue, useEffect, useMemo, useReducer, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {errorLogViewerReducer} from './hooks/errorLogViewer'
 import {parseLogLine} from './hooks/logParsing'
+import {createLogRequestGuard, createLogRequestQueue} from './hooks/logRequests'
 import {
     HTTP_METHODS,
     type LogState,
@@ -51,12 +54,6 @@ import type {RouteDecisionCooldown, RouteDecisionQuotaStatus} from './hooks/rout
 import {useLogFilters} from './hooks/useLogFilters'
 import {isTraceableRequestPath, useTraceResolver} from './hooks/useTraceResolver'
 import styles from './LogsPage.module.scss'
-
-interface ErrorLogItem {
-    name: string
-    size?: number
-    modified?: number
-}
 
 // 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
 const MAX_BUFFER_LINES          = 10000
@@ -242,6 +239,7 @@ export function LogsPage() {
                                                                                              buffer: [],
                                                                                          })
     const [loading, setLoading]                                     = useState(true)
+    const [clearingLogs, setClearingLogs]                           = useState(false)
     const [error, setError]                                         = useState('')
     const configRefreshMs                                           = useMemo(
         () => resolveAutoRefreshMs(config?.autoRefreshInterval),
@@ -284,9 +282,15 @@ export function LogsPage() {
         'logsPage.structuredFilters',
         DEFAULT_PERSISTED_LOG_FILTERS,
     )
-    const [errorLogs, setErrorLogs]                                 = useState<ErrorLogItem[]>([])
+    const [errorLogs, setErrorLogs]                                 = useState<ErrorLogFile[]>([])
     const [loadingErrors, setLoadingErrors]                         = useState(false)
     const [errorLogsError, setErrorLogsError]                       = useState('')
+    const [errorLogViewer, dispatchErrorLogViewer]                  = useReducer(errorLogViewerReducer, {
+        status: 'closed',
+    })
+    const selectedErrorLog                                         = errorLogViewer.status === 'closed' ?
+                                                                     null : errorLogViewer.item
+    const [errorLogDownloading, setErrorLogDownloading]             = useState<string | null>(null)
     const [requestLogId, setRequestLogId]                           = useState<string | null>(null)
     const [requestLogUpdating, setRequestLogUpdating]               = useState(false)
     const [logDiskSize, setLogDiskSize]                             = useState<{
@@ -298,10 +302,6 @@ export function LogsPage() {
         defaultValue: 'Not recorded',
     })
 
-    // 错误日志预览
-    const [previewName, setPreviewName]                     = useState<string | null>(null)
-    const [previewContent, setPreviewContent]               = useState('')
-    const [previewLoading, setPreviewLoading]               = useState(false)
     const [requestLogDownloading, setRequestLogDownloading] = useState(false)
     const [logPanelFullscreen, setLogPanelFullscreen]       = useState(false)
 
@@ -436,42 +436,39 @@ export function LogsPage() {
                                                  startY: number
                                                  fired: boolean
                                              } | null>(null)
-    const logRequestControllerRef   = useRef<AbortController | null>(null)
-    const logRequestInFlightRef     = useRef(false)
-    const pendingFullReloadRef      = useRef(false)
-    const logPageActiveRef          = useRef(false)
+    const [requests] = useState(() => ({
+        session: createLogRequestGuard(),
+        logs: createLogRequestQueue(),
+        errors: createLogRequestGuard(),
+        preview: createLogRequestGuard(),
+        errorDownload: createLogRequestGuard(),
+        requestDownload: createLogRequestGuard(),
+    }))
 
     // 保存最新读取位置用于增量获取
     const logPositionRef          = useRef<LogPosition>({})
     const requestLogHomeIpByIdRef = useRef<Record<string, string>>({})
 
     const disableControls = connectionStatus !== 'connected'
+    const refreshDisabled = disableControls || loading || clearingLogs
+    const clearDisabled   = disableControls || clearingLogs
 
     // 分页状态
     const [logPage, setLogPage]         = useState(1)
     const [logPageSize, setLogPageSize] = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
 
     const loadLogs = async (incremental = false) => {
-        if (connectionStatus !== 'connected') {
+        if (useAuthStore.getState().connectionStatus !== 'connected') {
             setLoading(false)
             return
         }
 
-        if (logRequestInFlightRef.current) {
-            if (!incremental) {
-                pendingFullReloadRef.current = true
-                logRequestControllerRef.current?.abort()
-            }
+        const authGeneration = apiClient.getAuthGeneration()
+        const request        = requests.logs.startRead(incremental, authGeneration)
+        if (request === null) {
             return
         }
-
-        const controller                = new AbortController()
-        logRequestControllerRef.current = controller
-        logRequestInFlightRef.current   = true
-        const requestIsCurrent          = () =>
-            logPageActiveRef.current &&
-            logRequestControllerRef.current === controller &&
-            !controller.signal.aborted
+        const requestIsCurrent = () => requests.logs.isCurrent(request, apiClient.getAuthGeneration())
 
         if (!incremental) {
             setLoading(true)
@@ -490,11 +487,13 @@ export function LogsPage() {
                 }
                                       : { limit: MAX_BUFFER_LINES }
             const [data, logSize]   = await Promise.all([
-                                                            logsApi.fetchLogs(params, { signal: controller.signal }),
+                                                            logsApi.fetchLogs(params, {
+                                                                signal: request.controller.signal,
+                                                            }),
                                                             incremental
                                                             ? Promise.resolve(null)
                                                             : logsApi
-                                                                .fetchLogSize({ signal: controller.signal })
+                                                                .fetchLogSize({ signal: request.controller.signal })
                                                                 .catch(() => null),
                                                         ])
             if (!requestIsCurrent()) {
@@ -565,14 +564,12 @@ export function LogsPage() {
                 setError(getErrorMessage(err) || t('logs.load_error'))
             }
         } finally {
-            if (logRequestControllerRef.current === controller) {
-                logRequestControllerRef.current = null
-                logRequestInFlightRef.current   = false
-                if (!incremental && logPageActiveRef.current) {
+            const result = requests.logs.finish(request, apiClient.getAuthGeneration())
+            if (result.finished) {
+                if (!incremental && !result.reload) {
                     setLoading(false)
                 }
-                if (logPageActiveRef.current && pendingFullReloadRef.current) {
-                    pendingFullReloadRef.current = false
+                if (result.reload) {
                     void loadLogs(false)
                 }
             }
@@ -582,32 +579,72 @@ export function LogsPage() {
     useHeaderRefresh(() => loadLogs(false))
 
     const clearLogs = async () => {
+        const session = requests.session.capture(apiClient.getAuthGeneration())
         showConfirmation({
                              title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
                              message: t('logs.clear_confirm'),
                              variant: 'danger',
                              confirmText: t('common.confirm'),
                              onConfirm: async () => {
+                                 const currentAuthGeneration = apiClient.getAuthGeneration()
+                                 if (!requests.session.isCurrent(session, currentAuthGeneration) ||
+                                     useAuthStore.getState().connectionStatus !== 'connected') {
+                                     return
+                                 }
+                                 const request = requests.logs.startClear(currentAuthGeneration)
+                                 if (request === null) {
+                                     return
+                                 }
+                                 setClearingLogs(true)
+                                 setLoading(false)
+                                 setError('')
+                                 let clearFailed = false
                                  try {
-                                     await logsApi.clearLogs()
+                                     await logsApi.clearLogs({ signal: request.controller.signal })
+                                     if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
+                                         return
+                                     }
                                      setLogState({ buffer: [] })
                                      logPositionRef.current          = {}
                                      requestLogHomeIpByIdRef.current = {}
+                                     setTotalLogLines(0)
+                                     setLogDiskSize(null)
                                      setLogPage(1)
-                                     showNotification(t('logs.clear_success'), 'success')
-                                     logsApi
-                                         .fetchLogSize()
-                                         .then((res) => {
-                                             setLogDiskSize({ totalBytes: res.total_bytes, fileCount: res.file_count })
-                                         })
-                                         .catch((e) => {
-                                             console.warn('[LogsPage] fetchLogSize failed', e)
-                                         })
+
+                                     try {
+                                         const size = await logsApi.fetchLogSize({ signal: request.controller.signal })
+                                         if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
+                                             return
+                                         }
+                                         setLogDiskSize({
+                                                            totalBytes: size.total_bytes,
+                                                            fileCount: size.file_count,
+                                                        })
+                                     } catch (err: unknown) {
+                                         if (requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
+                                             console.warn('[LogsPage] fetchLogSize failed', err)
+                                         }
+                                     }
+                                     if (requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
+                                         showNotification(t('logs.clear_success'), 'success')
+                                     }
                                  } catch (err: unknown) {
+                                     if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
+                                         return
+                                     }
+                                     clearFailed = true
                                      const message = getErrorMessage(err)
                                      showNotification(`${t('notification.delete_failed')}${message ?
-                                                                                           `: ${message}` :
-                                                                                           ''}`, 'error')
+                                                                                                   `: ${message}` :
+                                                                                                   ''}`, 'error')
+                                 } finally {
+                                     const result = requests.logs.finish(request, apiClient.getAuthGeneration(), clearFailed)
+                                     if (result.finished) {
+                                         setClearingLogs(false)
+                                         if (result.reload) {
+                                             void loadLogs(false)
+                                         }
+                                     }
                                  }
                              },
                          })
@@ -620,18 +657,24 @@ export function LogsPage() {
     }
 
     const loadErrorLogs = async () => {
-        if (connectionStatus !== 'connected') {
+        if (useAuthStore.getState().connectionStatus !== 'connected') {
             setLoadingErrors(false)
             return
         }
 
+        const request = requests.errors.begin(apiClient.getAuthGeneration())
         setLoadingErrors(true)
         setErrorLogsError('')
         try {
-            const res = await logsApi.fetchErrorLogs()
-            // API 返回 { files: [...] }
+            const res = await logsApi.fetchErrorLogs({ signal: request.controller.signal })
+            if (!requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             setErrorLogs(Array.isArray(res.files) ? res.files : [])
         } catch (err: unknown) {
+            if (!requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             console.error('Failed to load error logs:', err)
             setErrorLogs([])
             const message = getErrorMessage(err)
@@ -639,70 +682,154 @@ export function LogsPage() {
                 message ? `${t('logs.error_logs_load_error')}: ${message}` : t('logs.error_logs_load_error'),
             )
         } finally {
-            setLoadingErrors(false)
+            if (requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
+                requests.errors.finish(request)
+                setLoadingErrors(false)
+            }
         }
     }
 
     const downloadErrorLog = async (name: string) => {
+        const request = requests.errorDownload.begin(apiClient.getAuthGeneration())
+        setErrorLogDownloading(name)
         try {
-            const response = await logsApi.downloadErrorLog(name)
-            const text     = redactSensitiveText(await responseDataToText(response.data))
+            const response = await logsApi.downloadErrorLog(name, { signal: request.controller.signal })
+            if (!requests.errorDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
+            const text = redactSensitiveText(await responseDataToText(response.data))
+            if (!requests.errorDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             downloadBlob({ filename: name, blob: new Blob([text], { type: 'text/plain' }) })
             showNotification(t('logs.error_log_download_success'), 'success')
         } catch (err: unknown) {
+            if (!requests.errorDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             const message = getErrorMessage(err)
             showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
-        }
-    }
-
-    const previewErrorLog = async (name: string) => {
-        setPreviewName(name)
-        setPreviewContent('')
-        setPreviewLoading(true)
-        try {
-            const result = await logsApi.previewErrorLog(name, 500)
-            setPreviewContent(redactSensitiveText(result.content))
-        } catch (err: unknown) {
-            setPreviewContent(getErrorMessage(err) || 'Failed to load preview')
         } finally {
-            setPreviewLoading(false)
+            if (requests.errorDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                requests.errorDownload.finish(request)
+                setErrorLogDownloading(null)
+            }
         }
     }
 
-    useEffect(() => {
-        logPageActiveRef.current = true
-        return () => {
-            logPageActiveRef.current      = false
-            pendingFullReloadRef.current  = false
-            logRequestInFlightRef.current = false
-            logRequestControllerRef.current?.abort()
-            logRequestControllerRef.current = null
+    const previewErrorLog = async (item: ErrorLogFile) => {
+        const request = requests.preview.begin(apiClient.getAuthGeneration())
+        dispatchErrorLogViewer({ type: 'open', item })
+        try {
+            const result = await logsApi.previewErrorLog(item.name, 500, {
+                signal: request.controller.signal,
+            })
+            if (!requests.preview.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
+            dispatchErrorLogViewer({ type: 'ready', text: redactSensitiveText(result.content) })
+        } catch (err: unknown) {
+            if (!requests.preview.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
+            const message = getErrorMessage(err)
+            dispatchErrorLogViewer({
+                                       type: 'error',
+                                       message: message ?
+                                                `${t('logs.error_log_open_failed')}: ${message}` :
+                                                t('logs.error_log_open_failed'),
+                                   })
+        } finally {
+            if (requests.preview.isCurrent(request, apiClient.getAuthGeneration())) {
+                requests.preview.finish(request)
+            }
         }
-    }, [])
+    }
+
+    const closeErrorLogViewer = () => {
+        requests.preview.invalidate()
+        dispatchErrorLogViewer({ type: 'close' })
+    }
 
     useEffect(() => {
-        pendingFullReloadRef.current = false
-        logRequestControllerRef.current?.abort()
-        if (connectionStatus === 'connected') {
+        const invalidateRequests = () => {
+            requests.session.invalidate()
+            requests.logs.invalidate()
+            requests.errors.invalidate()
+            requests.preview.invalidate()
+            requests.errorDownload.invalidate()
+            requests.requestDownload.invalidate()
+            if (longPressRef.current?.timer) {
+                window.clearTimeout(longPressRef.current.timer)
+            }
+            longPressRef.current = null
+        }
+        const resetLogs = () => {
             logPositionRef.current          = {}
             requestLogHomeIpByIdRef.current = {}
+            setLogState({ buffer: [] })
+            setLoading(false)
+            setClearingLogs(false)
+            setError('')
+            setLogDiskSize(null)
+            setTotalLogLines(0)
+            setLogPage(1)
+        }
+        const resetErrors = () => {
+            setErrorLogs([])
+            setLoadingErrors(false)
+            setErrorLogsError('')
+            dispatchErrorLogViewer({ type: 'close' })
+            setErrorLogDownloading(null)
+            setRequestLogId(null)
+            setRequestLogDownloading(false)
+        }
+
+        const unsubscribeAuth = useAuthStore.subscribe((next, previous) => {
+            if (next.apiBase === previous.apiBase &&
+                next.managementKey === previous.managementKey &&
+                next.connectionStatus === previous.connectionStatus &&
+                next.isAuthenticated === previous.isAuthenticated) {
+                return
+            }
+            invalidateRequests()
+            resetLogs()
+            resetErrors()
+        })
+        const unsubscribeConfig = useConfigStore.subscribe((next, previous) => {
+            if (next.config?.requestLog === previous.config?.requestLog) {
+                return
+            }
+            requests.errors.invalidate()
+            requests.preview.invalidate()
+            requests.errorDownload.invalidate()
+            requests.requestDownload.invalidate()
+            resetErrors()
+        })
+        return () => {
+            unsubscribeAuth()
+            unsubscribeConfig()
+            invalidateRequests()
+        }
+    }, [requests])
+
+    useEffect(() => {
+        if (connectionStatus === 'connected') {
             void loadLogs(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionStatus])
+    }, [connectionStatus, apiBase, managementKey])
 
     useEffect(() => {
-        if (activeTab !== 'errors') {
-            return
-        }
-        if (connectionStatus !== 'connected') {
+        if (activeTab !== 'errors' || connectionStatus !== 'connected') {
+            requests.errors.invalidate()
             return
         }
         queueMicrotask(() => {
             void loadErrorLogs()
         })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab, connectionStatus, requestLogEnabled])
+    }, [activeTab, connectionStatus, apiBase, managementKey, requestLogEnabled])
 
     useEffect(() => {
         if (!autoRefresh || refreshInterval <= 0 || connectionStatus !== 'connected') {
@@ -1072,13 +1199,22 @@ export function LogsPage() {
     }
 
     const downloadRequestLog = async (id: string, frozenHomeIp?: string | null) => {
+        const request = requests.requestDownload.begin(apiClient.getAuthGeneration())
         setRequestLogDownloading(true)
         try {
             const homeIp   = frozenHomeIp === undefined ?
                              requestLogHomeIpByIdRef.current[id] :
                              frozenHomeIp || undefined
-            const response = await logsApi.downloadRequestLogById(id, homeIp)
-            const text     = redactSensitiveText(await responseDataToText(response.data))
+            const response = await logsApi.downloadRequestLogById(id, homeIp, {
+                signal: request.controller.signal,
+            })
+            if (!requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
+            const text = redactSensitiveText(await responseDataToText(response.data))
+            if (!requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             downloadBlob({
                              filename: `request-${id}.log`,
                              blob: new Blob([text], { type: 'text/plain' }),
@@ -1086,10 +1222,16 @@ export function LogsPage() {
             showNotification(t('logs.request_log_download_success'), 'success')
             setRequestLogId(null)
         } catch (err: unknown) {
+            if (!requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                return
+            }
             const message = getErrorMessage(err)
             showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
-            setRequestLogDownloading(false)
+            if (requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
+                requests.requestDownload.finish(request)
+                setRequestLogDownloading(false)
+            }
         }
     }
 
@@ -1112,15 +1254,6 @@ export function LogsPage() {
             setRequestLogUpdating(false)
         }
     }
-
-    useEffect(() => {
-        return () => {
-            if (longPressRef.current?.timer) {
-                window.clearTimeout(longPressRef.current.timer)
-                longPressRef.current.timer = null
-            }
-        }
-    }, [])
 
     useEffect(() => {
         if (!logPanelFullscreen) {
@@ -1343,7 +1476,7 @@ export function LogsPage() {
                                         variant='secondary'
                                         size='sm'
                                         onClick={() => loadLogs(false)}
-                                        disabled={disableControls || loading}
+                                        disabled={refreshDisabled}
                                         loading={loading}
                                         className={styles.actionButton}
                                     >
@@ -1430,7 +1563,8 @@ export function LogsPage() {
                                         variant='danger'
                                         size='sm'
                                         onClick={clearLogs}
-                                        disabled={disableControls}
+                                        disabled={clearDisabled}
+                                        loading={clearingLogs}
                                         className={styles.actionButton}
                                     >
                                         <span className={styles.buttonContent}>
@@ -1590,7 +1724,7 @@ export function LogsPage() {
                                                         <Button
                                                             variant='ghost'
                                                             size='sm'
-                                                            onClick={() => previewErrorLog(item.name)}
+                                                            onClick={() => previewErrorLog(item)}
                                                             disabled={disableControls}
                                                         >
                                                             {t('logs.error_logs_preview')}
@@ -1599,7 +1733,8 @@ export function LogsPage() {
                                                             variant='secondary'
                                                             size='sm'
                                                             onClick={() => downloadErrorLog(item.name)}
-                                                            disabled={disableControls}
+                                                            disabled={disableControls || errorLogDownloading !== null}
+                                                            loading={errorLogDownloading === item.name}
                                                         >
                                                             {t('logs.error_logs_download')}
                                                         </Button>
@@ -2313,28 +2448,36 @@ export function LogsPage() {
             </Modal>
 
             <Modal
-                open={previewName !== null}
-                onClose={() => setPreviewName(null)}
-                title={previewName ?? ''}
+                open={errorLogViewer.status !== 'closed'}
+                onClose={closeErrorLogViewer}
+                title={selectedErrorLog?.name ?? ''}
                 width={720}
                 footer={
                     <Button
                         variant='secondary'
                         onClick={() => {
-                            if (previewName) {
-                                void downloadErrorLog(previewName)
+                            if (selectedErrorLog) {
+                                void downloadErrorLog(selectedErrorLog.name)
                             }
                         }}
+                        disabled={errorLogViewer.status === 'loading' || errorLogDownloading !== null}
+                        loading={selectedErrorLog !== null && errorLogDownloading === selectedErrorLog.name}
                     >
                         {t('logs.error_logs_download')}
                     </Button>
                 }
             >
-                {previewLoading ? (
+                {errorLogViewer.status === 'loading' && (
                     <div className='hint'>{t('common.loading')}</div>
-                ) : (
-                     <pre className={styles.previewContent}>{previewContent}</pre>
-                 )}
+                )}
+                {errorLogViewer.status === 'error' && (
+                    <div className='error-box'>{errorLogViewer.message}</div>
+                )}
+                {errorLogViewer.status === 'ready' && (
+                    errorLogViewer.text ?
+                    <pre className={styles.previewContent}>{errorLogViewer.text}</pre> :
+                    <div className='hint'>{t('logs.error_log_empty_content')}</div>
+                )}
             </Modal>
         </div>
     )

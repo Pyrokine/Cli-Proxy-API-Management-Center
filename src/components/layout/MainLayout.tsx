@@ -237,6 +237,35 @@ export function MainLayout() {
     const mobileSidebarToggleLabel = sidebarOpen
                                      ? t('sidebar.toggle_collapse', { defaultValue: 'Close navigation' })
                                      : t('sidebar.toggle_expand', { defaultValue: 'Open navigation' })
+    const sidebarToggleLabel = sidebarCollapsed
+        ? t('sidebar.expand', {defaultValue: '展开'})
+        : t('sidebar.collapse', {defaultValue: '收起'})
+    const sidebarShortcutLabel = useMemo(() =>
+        typeof navigator !== 'undefined' && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform || navigator.userAgent)
+            ? '⌘B' : 'Ctrl+B', [])
+
+    useEffect(() => {
+        const handleSidebarShortcut = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey || event.shiftKey ||
+                event.ctrlKey === event.metaKey || event.key.toLowerCase() !== 'b' || document.designMode === 'on') {
+                return
+            }
+            if (event.composedPath().some((target) => target instanceof HTMLElement && (
+                target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+                target.closest('[role="textbox"], [role="searchbox"], [role="combobox"]')
+            ))) {
+                return
+            }
+            const toggle = headerRef.current?.querySelector<HTMLButtonElement>('.sidebar-toggle-header')
+            if (!toggle?.getClientRects().length) {
+                return
+            }
+            event.preventDefault()
+            toggle.click()
+        }
+        window.addEventListener('keydown', handleSidebarShortcut)
+        return () => window.removeEventListener('keydown', handleSidebarShortcut)
+    }, [])
 
     // 将顶栏高度写入 CSS 变量，确保侧栏/内容区计算一致，防止滚动时抖动
     useLayoutEffect(() => {
@@ -611,11 +640,10 @@ export function MainLayout() {
                     <button
                         className='sidebar-toggle-header'
                         onClick={() => setSidebarCollapsed((prev) => !prev)}
-                        title={
-                            sidebarCollapsed
-                            ? t('sidebar.expand', { defaultValue: '展开' })
-                            : t('sidebar.collapse', { defaultValue: '收起' })
-                        }
+                        title={`${sidebarToggleLabel} (${sidebarShortcutLabel})`}
+                        aria-label={sidebarToggleLabel}
+                        aria-expanded={!sidebarCollapsed}
+                        aria-keyshortcuts='Control+B Meta+B'
                     >
                         {sidebarCollapsed ? headerIcons.chevronRight : headerIcons.chevronLeft}
                     </button>

@@ -31,7 +31,7 @@ interface LogsResponse {
     offset?: number
 }
 
-interface ErrorLogFile {
+export interface ErrorLogFile {
     name: string
     size?: number
     modified?: number
@@ -275,34 +275,50 @@ export const logsApi = {
         return normalizeLogsResponse(await fetchCompleteHomeLogs(raw, params, options?.signal))
     },
 
-    clearLogs: () => apiClient.delete('/logs'),
+    clearLogs: (options?: { signal?: AbortSignal }) => apiClient.delete('/logs', { signal: options?.signal }),
 
-    fetchErrorLogs: (): Promise<ErrorLogsResponse> =>
-        apiClient.get('/request-error-logs', { timeout: LOGS_TIMEOUT_MS }),
+    fetchErrorLogs: (options?: { signal?: AbortSignal }): Promise<ErrorLogsResponse> =>
+        apiClient.get('/request-error-logs', {
+            timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
+        }),
 
-    downloadErrorLog: (filename: string) =>
+    downloadErrorLog: (filename: string, options?: { signal?: AbortSignal }) =>
         apiClient.getRaw(`/request-error-logs/${encodeURIComponent(filename)}`, {
             responseType: 'blob',
             timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
         }),
 
-    previewErrorLog: (filename: string, lines = 200): Promise<ErrorLogPreview> =>
+    previewErrorLog: (
+        filename: string,
+        lines = 200,
+        options?: { signal?: AbortSignal },
+    ): Promise<ErrorLogPreview> =>
         apiClient.get(`/request-error-logs/${encodeURIComponent(filename)}`, {
             params: { lines },
             timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
         }),
 
-    downloadRequestLogById: (id: string, homeIp?: string) =>
+    downloadRequestLogById: (id: string, homeIp?: string, options?: { signal?: AbortSignal }) =>
         apiClient.getRaw(`/request-log-by-id/${encodeURIComponent(id)}`, {
             params: homeIp ? { home_ip: homeIp } : undefined,
             responseType: 'blob',
             timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
         }),
 
-    previewRequestLogById: async (id: string, lines = 200, homeIp?: string): Promise<RequestLogPreview> => {
+    previewRequestLogById: async (
+        id: string,
+        lines = 200,
+        homeIp?: string,
+        options?: { signal?: AbortSignal },
+    ): Promise<RequestLogPreview> => {
         const raw = await apiClient.get(`/request-log-by-id/${encodeURIComponent(id)}`, {
             params: homeIp ? { lines, home_ip: homeIp } : { lines },
             timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
         })
         return normalizeRequestLogPreview(raw)
     },
