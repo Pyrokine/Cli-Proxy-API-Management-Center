@@ -15,6 +15,7 @@ import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Select} from '@/components/ui/Select'
 import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
+import {apiClient} from '@/services/api/client'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -85,12 +86,18 @@ export function PluginStorePage() {
     const { t }                = useTranslation()
     const navigate             = useNavigate()
     const apiBase              = useAuthStore((state) => state.apiBase)
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
     const clearConfigCache     = useConfigStore((state) => state.clearCache)
     const { showNotification } = useNotificationStore()
     const mountedRef           = useRef(true)
     const loadAbortRef         = useRef<AbortController | null>(null)
     const installAbortRef      = useRef<AbortController | null>(null)
     const releaseAbortRef      = useRef<AbortController | null>(null)
+    const [pageGeneration, setPageGeneration] = useState(authGeneration)
+    const isCurrentConnection = useCallback(
+        () => mountedRef.current && authGeneration === apiClient.getAuthGeneration(),
+        [authGeneration],
+    )
 
     const [data, setData]                                     = useState<PluginStoreResponse | null>(null)
     const [loading, setLoading]                               = useState(true)
@@ -110,32 +117,56 @@ export function PluginStorePage() {
     const [gateTyped, setGateTyped]                           = useState('')
     const [restartRequiredKeys, setRestartRequiredKeys]       = useState<string[]>([])
 
+    if (pageGeneration !== authGeneration) {
+        setPageGeneration(authGeneration)
+        setData(null)
+        setLoading(true)
+        setError('')
+        setInstallingKey('')
+        setInstallEntry(null)
+        setInstallVersion('')
+        setReleaseVersions([])
+        setReleaseVersionsLoading(false)
+        setReleaseVersionsError('')
+        setGateEntry(null)
+        setGateIsUpdate(false)
+        setGateRequestedVersion('')
+        setGateStep(1)
+        setGateTyped('')
+        setRestartRequiredKeys([])
+    }
+
     const loadStore = useCallback(async (options?: { skipLeadingState?: boolean }) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         loadAbortRef.current?.abort()
         const controller     = new AbortController()
         loadAbortRef.current = controller
+        const isActive = () => isCurrentConnection() && !controller.signal.aborted &&
+            loadAbortRef.current === controller
         if (!options?.skipLeadingState) {
             setLoading(true)
             setError('')
         }
         try {
             const response = await pluginStoreApi.list({ signal: controller.signal })
-            if (!controller.signal.aborted && mountedRef.current) {
+            if (isActive()) {
                 setData(response)
             }
         } catch (err: unknown) {
-            if (!isAbortError(err) && mountedRef.current) {
+            if (!isAbortError(err) && isActive()) {
                 setError(getErrorMessage(err) || t('plugin_store.load_failed', { defaultValue: '加载插件商店失败' }))
             }
         } finally {
+            if (isActive()) {
+                setLoading(false)
+            }
             if (loadAbortRef.current === controller) {
                 loadAbortRef.current = null
             }
-            if (!controller.signal.aborted && mountedRef.current) {
-                setLoading(false)
-            }
         }
-    }, [t])
+    }, [isCurrentConnection, t])
 
     useEffect(() => {
         const id = window.setTimeout(() => {
@@ -152,7 +183,7 @@ export function PluginStorePage() {
             installAbortRef.current?.abort()
             releaseAbortRef.current?.abort()
         }
-    }, [])
+    }, [authGeneration])
 
     const stats = useMemo(() => {
         const plugins   = data?.plugins ?? []
@@ -208,6 +239,9 @@ export function PluginStorePage() {
     ]
 
     const loadReleaseVersions = useCallback(async (entry: PluginStoreEntry) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         releaseAbortRef.current?.abort()
         setReleaseVersions([])
         setReleaseVersionsError('')
@@ -218,28 +252,30 @@ export function PluginStorePage() {
 
         const controller        = new AbortController()
         releaseAbortRef.current = controller
+        const isActive = () => isCurrentConnection() && !controller.signal.aborted &&
+            releaseAbortRef.current === controller
         setReleaseVersionsLoading(true)
         try {
             const versions = await fetchPluginReleaseVersions(entry.id, entry.source_id, { signal: controller.signal })
-            if (!controller.signal.aborted && mountedRef.current) {
+            if (isActive()) {
                 setReleaseVersions(versions)
             }
         } catch (err: unknown) {
-            if (!isAbortError(err) && mountedRef.current) {
+            if (!isAbortError(err) && isActive()) {
                 setReleaseVersionsError(getErrorMessage(err) || t(
                     'plugin_store.release_versions_failed',
                     { defaultValue: '获取 GitHub Releases 失败' },
                 ))
             }
         } finally {
+            if (isActive()) {
+                setReleaseVersionsLoading(false)
+            }
             if (releaseAbortRef.current === controller) {
                 releaseAbortRef.current = null
             }
-            if (!controller.signal.aborted && mountedRef.current) {
-                setReleaseVersionsLoading(false)
-            }
         }
-    }, [t])
+    }, [isCurrentConnection, t])
 
     const releaseVersionOptions = useMemo(
         () => releaseVersions.map((release) => ({
@@ -253,10 +289,14 @@ export function PluginStorePage() {
     )
 
     const runInstall = useCallback(async (entry: PluginStoreEntry, isUpdate: boolean, requestedVersion = '') => {
+        if (!isCurrentConnection()) {
+            return
+        }
         installAbortRef.current?.abort()
         const controller        = new AbortController()
         installAbortRef.current = controller
-        const isActive          = () => mountedRef.current && !controller.signal.aborted
+        const isActive          = () => isCurrentConnection() && !controller.signal.aborted &&
+            installAbortRef.current === controller
         const entryKey          = storeEntryKey(entry)
         const version           = supportsPluginVersionSelection(entry.install_type) ? requestedVersion.trim() : ''
         setInstallingKey(entryKey)
@@ -278,6 +318,7 @@ export function PluginStorePage() {
                 undefined,
                 undefined,
                 controller.signal,
+                authGeneration,
             )
             if (!isActive()) {
                 return
@@ -321,6 +362,7 @@ export function PluginStorePage() {
                     undefined,
                     undefined,
                     controller.signal,
+                    authGeneration,
                 )
                 if (!isActive()) {
                     return
@@ -342,7 +384,7 @@ export function PluginStorePage() {
                 { defaultValue: isUpdate ? '插件已更新' : '插件已安装' },
             ), 'success')
         } catch (err: unknown) {
-            if (isAbortError(err) || !mountedRef.current) {
+            if (isAbortError(err) || !isActive()) {
                 return
             }
             if (pluginStoreErrorRestartRequired(err)) {
@@ -360,16 +402,19 @@ export function PluginStorePage() {
                              ), 'error')
             throw err
         } finally {
-            if (installAbortRef.current === controller) {
-                installAbortRef.current = null
-            }
             if (isActive()) {
                 setInstallingKey('')
             }
+            if (installAbortRef.current === controller) {
+                installAbortRef.current = null
+            }
         }
-    }, [clearConfigCache, showNotification, t])
+    }, [authGeneration, clearConfigCache, isCurrentConnection, showNotification, t])
 
     const openInstallOptions = (entry: PluginStoreEntry) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         setInstallEntry(entry)
         setInstallVersion('')
         if (supportsPluginVersionSelection(entry.install_type)) {
@@ -378,7 +423,7 @@ export function PluginStorePage() {
     }
 
     const closeInstallOptions = () => {
-        if (installingKey) {
+        if (installingKey || !isCurrentConnection()) {
             return
         }
         releaseAbortRef.current?.abort()
@@ -390,7 +435,7 @@ export function PluginStorePage() {
     }
 
     const confirmInstallOptions = async () => {
-        if (!installEntry) {
+        if (!installEntry || !isCurrentConnection()) {
             return
         }
         const isUpdate = installEntry.installed && installEntry.update_available
@@ -416,6 +461,9 @@ export function PluginStorePage() {
         }
         try {
             await runInstall(installEntry, isUpdate, version)
+            if (!isCurrentConnection()) {
+                return
+            }
             setInstallEntry(null)
             setInstallVersion('')
             setReleaseVersions([])
@@ -426,7 +474,7 @@ export function PluginStorePage() {
     }
 
     const closeGate = () => {
-        if (installingKey) {
+        if (installingKey || !isCurrentConnection()) {
             return
         }
         setGateEntry(null)
@@ -436,7 +484,7 @@ export function PluginStorePage() {
     }
 
     const confirmGate = async () => {
-        if (!gateEntry) {
+        if (!gateEntry || !isCurrentConnection()) {
             return
         }
         try {

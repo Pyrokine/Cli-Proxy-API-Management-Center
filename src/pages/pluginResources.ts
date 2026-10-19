@@ -52,6 +52,19 @@ export const buildRepositoryURL = (repository: string | undefined): string => {
     return `https://github.com/${trimmed.replace(/^\/+/, '')}`
 }
 
+export const getPluginLogo = (plugin: PluginEntry, entries: PluginStoreEntry[]): string => {
+    const ownLogo = plugin.logo?.trim() || plugin.metadata?.logo?.trim()
+    if (ownLogo) {
+        return ownLogo
+    }
+    const repository = plugin.metadata?.github_repository?.trim()
+    const normalizeRepository = (value: string) =>
+        buildRepositoryURL(value).replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase()
+    const matches = entries.filter((entry) =>
+        entry.id === plugin.id && (!repository || normalizeRepository(entry.repository) === normalizeRepository(repository)))
+    return matches.length === 1 ? matches[0].logo?.trim() ?? '' : ''
+}
+
 const OFFICIAL_PLUGIN_REPO_OWNER       = 'router-for-me'
 const DEFAULT_PLUGIN_STORE_SOURCE_ID   = 'official'
 const DEFAULT_PLUGIN_STORE_SOURCE_NAME = 'official'

@@ -3,9 +3,10 @@ import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
 import {hasImageArtifactCacheChanges} from '@/hooks/useVisualConfig'
 import {normalizePluginReleaseVersions} from '@/pages/pluginReleaseVersions'
+import {getPluginLogo} from '@/pages/pluginResources'
 import {applyProviderQuickFill} from '@/pages/providerQuickFill'
 import {modelsApi} from '@/services/api/models'
-import {buildPluginStoreReleasesPath} from '@/services/api/plugins'
+import {buildPluginStoreReleasesPath, type PluginEntry, type PluginStoreEntry} from '@/services/api/plugins'
 import {useModelsStore} from '@/stores/useModelsStore'
 import {summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
 
@@ -164,7 +165,9 @@ describe('management authentication lifecycle', () => {
         expect(mainLayoutSource).toContain('key: \'extensions\'')
         expect(mainLayoutSource).toContain('key: \'observability\'')
         expect(mainLayoutSource).toContain('useAuthFilesSummaryStore')
-        expect(mainLayoutSource).toContain('badge: authFilesCount')
+        expect(mainLayoutSource).toContain('badge: credentialsCount')
+        expect(mainLayoutSource).toContain('countCredentialCards(config, authFilesCount)')
+        expect(mainLayoutSource).toContain('[config, authFilesCount]')
         expect(mainLayoutSource).toContain('title={item.label}')
         expect(authStoreSource).toContain('useAuthFilesSummaryStore.getState().clear()')
         expect(authStoreSource).toContain('clearAuthFileModelsCache()')
@@ -278,5 +281,21 @@ describe('plugin release versions', () => {
                                                                   assetNames: ['sample_1.2.3_linux_amd64.zip'],
                                                               },
                                                           ])
+    })
+
+    test('fills installed plugin logos only from an unambiguous matching store entry', () => {
+        const plugin = {
+            id: 'sample', logo: '', metadata: {logo: '', github_repository: 'Example/Sample.git'},
+        } as PluginEntry
+        const first = {id: 'sample', repository: 'https://github.com/example/sample', logo: '/sample.svg'} as PluginStoreEntry
+        const other = {id: 'sample', repository: 'https://github.com/other/sample', logo: '/other.svg'} as PluginStoreEntry
+        expect(getPluginLogo(plugin, [first, other])).toBe('/sample.svg')
+        expect(getPluginLogo({...plugin, metadata: {...plugin.metadata!, github_repository: ''}}, [first, other])).toBe('')
+        expect(getPluginLogo({...plugin, logo: '/installed.svg'}, [first])).toBe('/installed.svg')
+        expect(getPluginLogo({...plugin, metadata: null}, [first])).toBe('/sample.svg')
+        const page = readFileSync(new URL('../src/pages/PluginManagementPage.tsx', import.meta.url), 'utf8')
+        expect(page).toContain('pluginStoreApi.list({signal: controller.signal, timeout: 15_000})')
+        expect(page).toContain('resolvePluginAssetURL(getPluginLogo(plugin, logoEntries), apiBase)')
+        expect(page).toContain('currentStoreLogos?.error')
     })
 })

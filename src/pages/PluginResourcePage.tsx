@@ -1,4 +1,5 @@
 import {EmptyState} from '@/components/ui/EmptyState'
+import {apiClient} from '@/services/api/client'
 import {pluginsApi} from '@/services/api/plugins'
 import {useAuthStore} from '@/stores'
 import {normalizeApiBase} from '@/utils/connection'
@@ -34,6 +35,7 @@ export function PluginResourcePage() {
     const params                    = useParams<{ pluginId: string; resourceKey: string }>()
     const apiBase                   = useAuthStore((state) => state.apiBase)
     const managementKey             = useAuthStore((state) => state.managementKey)
+    const authGeneration            = apiClient.getAuthGeneration()
     const pluginID                  = useMemo(() => params.pluginId ?? '', [params.pluginId])
     const resourceKey               = useMemo(() => pluginResourceKey(params.resourceKey ?? ''), [params.resourceKey])
     const [loading, setLoading]     = useState(true)
@@ -43,12 +45,16 @@ export function PluginResourcePage() {
     const loadAbortRef              = useRef<AbortController | null>(null)
 
     const loadResource = useCallback(async (options?: { skipLeadingState?: boolean }) => {
+        if (authGeneration !== apiClient.getAuthGeneration()) {
+            return
+        }
         const sequence     = loadSeqRef.current + 1
         loadSeqRef.current = sequence
         loadAbortRef.current?.abort()
         const controller       = new AbortController()
         loadAbortRef.current   = controller
-        const isCurrentRequest = () => loadSeqRef.current === sequence && !controller.signal.aborted
+        const isCurrentRequest = () => loadSeqRef.current === sequence && !controller.signal.aborted &&
+            authGeneration === apiClient.getAuthGeneration()
 
         if (!options?.skipLeadingState) {
             setLoading(true)
@@ -81,11 +87,11 @@ export function PluginResourcePage() {
                 resourceURL.toString(),
                 { credentials: 'include', headers, signal: controller.signal },
             )
-            if (!response.ok) {
-                setError(`${response.status} ${response.statusText}`.trim())
+            if (!isCurrentRequest()) {
                 return
             }
-            if (!isCurrentRequest()) {
+            if (!response.ok) {
+                setError(`${response.status} ${response.statusText}`.trim())
                 return
             }
             setIframeSrc(resourceURL.toString())
@@ -102,22 +108,18 @@ export function PluginResourcePage() {
                 }
             }
         }
-    }, [apiBase, managementKey, pluginID, resourceKey, t])
+    }, [apiBase, authGeneration, managementKey, pluginID, resourceKey, t])
 
     useEffect(() => {
         const id = window.setTimeout(() => {
             void loadResource()
         }, 0)
-        return () => window.clearTimeout(id)
-    }, [loadResource])
-
-    useEffect(
-        () => () => {
+        return () => {
+            window.clearTimeout(id)
             loadSeqRef.current += 1
             loadAbortRef.current?.abort()
-        },
-        [],
-    )
+        }
+    }, [loadResource])
 
     useEffect(() => {
         const handleRefresh = () => {

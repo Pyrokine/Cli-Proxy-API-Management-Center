@@ -1,28 +1,36 @@
 import {Sheet, type SheetColumn} from '@/components/common/Sheet'
+import {OAuthLoginAction} from '@/components/credentials/OAuthLoginAction'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {IconSlidersHorizontal} from '@/components/ui/icons'
 import {
     type PluginConfigField,
     type PluginConfigObject,
     type PluginConfigValue,
     type PluginEntry,
+    type PluginStoreEntry,
     pluginsApi,
+    pluginStoreApi,
 } from '@/services/api/plugins'
-import {useNotificationStore} from '@/stores'
+import {apiClient} from '@/services/api/client'
+import {useAuthStore, useNotificationStore} from '@/stores'
+import {getErrorMessage} from '@/utils/helpers'
 import {safeExternalUrl} from '@/utils/validation'
-import {useCallback, useEffect, useMemo, useState} from 'react'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link, useNavigate} from 'react-router-dom'
 import styles from './PluginManagementPage.module.scss'
-import {buildPluginResourceRoute} from './pluginResources'
+import {buildPluginResourceRoute, getPluginLogo, resolvePluginAssetURL} from './pluginResources'
 
 type PluginPageStatus = 'loading' | 'ready' | 'empty' | 'error'
 
 type PluginBadgeTone = 'success' | 'warning' | 'muted' | 'error'
+
+const EMPTY_PLUGIN_STORE_ENTRIES: PluginStoreEntry[] = []
 
 function isJsonConfigValue(value: PluginConfigValue): value is PluginConfigValue[] | {
     [key: string]: PluginConfigValue
@@ -85,13 +93,31 @@ function Badge({ tone, children }: { tone: PluginBadgeTone; children: string }) 
     return <span className={`${styles.badge} ${styles[`badge_${tone}`]}`}>{children}</span>
 }
 
+function PluginLogo({src}: {src: string}) {
+    const [failed, setFailed] = useState(false)
+    return src && !failed ?
+           <img src={src} alt='' onError={() => setFailed(true)} /> :
+           <IconSlidersHorizontal size={18} />
+}
+
 export function PluginManagementPage() {
     const { t }                = useTranslation()
     const navigate             = useNavigate()
+    const apiBase              = useAuthStore((state) => state.apiBase)
+    const managementKey        = useAuthStore((state) => state.managementKey)
+    const connectionStatus     = useAuthStore((state) => state.connectionStatus)
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
     const { showNotification } = useNotificationStore()
+    const mountedRef           = useRef(true)
+    const [pageGeneration, setPageGeneration] = useState(authGeneration)
+    const isCurrentConnection = useCallback(
+        () => mountedRef.current && authGeneration === apiClient.getAuthGeneration(),
+        [authGeneration],
+    )
 
-    const [data, setData]                             = useState<Awaited<ReturnType<typeof pluginsApi.list>> | null>(
-        null)
+    const [data, setData]                             = useState<(Awaited<ReturnType<typeof pluginsApi.list>> & {authGeneration: number}) | null>(null)
+    const requestSequence                            = useRef(0)
+    const [oauthSelection, setOAuthSelection]         = useState<{id: string; authGeneration: number} | null>(null)
     const [status, setStatus]                         = useState<PluginPageStatus>('loading')
     const [error, setError]                           = useState<string | null>(null)
     const [refreshing, setRefreshing]                 = useState(false)
@@ -104,12 +130,57 @@ export function PluginManagementPage() {
     const [jsonDraft, setJsonDraft]                   = useState<Record<string, string>>({})
     const [configError, setConfigError]               = useState<string | null>(null)
     const [savingConfig, setSavingConfig]             = useState(false)
+    const [storeLogos, setStoreLogos]                 = useState<{
+        apiBase: string
+        managementKey: string
+        entries: PluginStoreEntry[]
+        error: string
+    } | null>(null)
 
-    const plugins        = data?.plugins ?? []
-    const pluginsEnabled = data?.plugins_enabled ?? false
-    const pluginsDir     = data?.plugins_dir || 'plugins'
+    if (pageGeneration !== authGeneration) {
+        setPageGeneration(authGeneration)
+        setData(null)
+        setStatus('loading')
+        setError(null)
+        setRefreshing(false)
+        setSavingPluginID(null)
+        setDeletingPluginID(null)
+        setDeletePluginTarget(null)
+        setExpandedPluginID(null)
+        setEditingPlugin(null)
+        setConfigDraft({})
+        setJsonDraft({})
+        setConfigError(null)
+        setSavingConfig(false)
+        setOAuthSelection(null)
+        setStoreLogos(null)
+    }
+
+    const currentData      = data?.authGeneration === apiClient.getAuthGeneration() ? data : null
+    const plugins          = currentData?.plugins ?? []
+    const pluginsEnabled   = currentData?.plugins_enabled ?? false
+    const pluginsDir       = currentData?.plugins_dir || 'plugins'
+    const oauthPlugin      = pluginsEnabled && oauthSelection?.authGeneration === currentData?.authGeneration
+        ? plugins.find((plugin) => plugin.id === oauthSelection?.id && plugin.effective_enabled && plugin.supports_oauth && plugin.oauth_provider)
+        : undefined
+    const needsStoreLogos  = plugins.some((plugin) => !plugin.logo?.trim() && !plugin.metadata?.logo?.trim())
+    const currentStoreLogos = storeLogos?.apiBase === apiBase && storeLogos.managementKey === managementKey
+                              ? storeLogos : null
+    const logoEntries      = currentStoreLogos?.entries ?? EMPTY_PLUGIN_STORE_ENTRIES
+
+    useEffect(() => {
+        mountedRef.current = true
+        return () => {
+            mountedRef.current = false
+        }
+    }, [authGeneration])
 
     const fetchPlugins = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+        if (!isCurrentConnection()) {
+            return
+        }
+        const sequence = ++requestSequence.current
+        const isCurrent = () => sequence === requestSequence.current && isCurrentConnection()
         if (!silent) {
             setStatus('loading')
         } else {
@@ -118,25 +189,64 @@ export function PluginManagementPage() {
         setError(null)
         try {
             const next = await pluginsApi.list()
-            setData(next)
+            if (!isCurrent()) {
+                return
+            }
+            setData({...next, authGeneration})
             setStatus(next.plugins.length > 0 ? 'ready' : 'empty')
         } catch (err: unknown) {
+            if (!isCurrent()) {
+                return
+            }
             const message = err instanceof Error ? err.message : String(err ?? '')
             setError(message || t('common.unknown_error'))
             setStatus('error')
         } finally {
-            setRefreshing(false)
+            if (isCurrent()) {
+                setRefreshing(false)
+            }
         }
-    }, [t])
+    }, [authGeneration, isCurrentConnection, t])
 
     useEffect(() => {
+        const requests = requestSequence
         const timer = window.setTimeout(() => {
             void fetchPlugins()
         }, 0)
-        return () => window.clearTimeout(timer)
-    }, [fetchPlugins])
+        return () => {
+            window.clearTimeout(timer)
+            ++requests.current
+        }
+    }, [fetchPlugins, apiBase, managementKey])
+
+    useEffect(() => {
+        if (connectionStatus !== 'connected' || !currentData?.plugins.some(
+            (plugin) => !plugin.logo?.trim() && !plugin.metadata?.logo?.trim(),
+        )) {
+            return
+        }
+        const controller = new AbortController()
+        void pluginStoreApi.list({signal: controller.signal, timeout: 15_000})
+            .then((response) => {
+                if (!Array.isArray(response.plugins)) {
+                    throw new Error('Invalid plugin store response')
+                }
+                if (!controller.signal.aborted && isCurrentConnection()) {
+                    setStoreLogos({apiBase, managementKey, entries: response.plugins, error: ''})
+                }
+            })
+            .catch((err: unknown) => {
+                if (!controller.signal.aborted && isCurrentConnection()) {
+                    setStoreLogos({apiBase, managementKey, entries: [], error: getErrorMessage(err)})
+                }
+            })
+        return () => controller.abort()
+    }, [apiBase, connectionStatus, currentData, isCurrentConnection, managementKey])
 
     const openConfig = useCallback((plugin: PluginEntry) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         const nextConfig                       = { ...(plugin.config ?? {}) }
         const nextJson: Record<string, string> = {}
         for (const field of plugin.config_fields) {
@@ -148,49 +258,63 @@ export function PluginManagementPage() {
         setConfigDraft(nextConfig)
         setJsonDraft(nextJson)
         setConfigError(null)
-    }, [])
+    }, [isCurrentConnection])
 
     const closeConfig = useCallback(() => {
-        if (savingConfig) {
+        if (savingConfig || !isCurrentConnection()) {
             return
         }
         setEditingPlugin(null)
         setConfigDraft({})
         setJsonDraft({})
         setConfigError(null)
-    }, [savingConfig])
+    }, [isCurrentConnection, savingConfig])
 
     const handleTogglePlugin = useCallback(
         async (plugin: PluginEntry, enabled: boolean) => {
+            if (!isCurrentConnection()) {
+                return
+            }
             setSavingPluginID(plugin.id)
             try {
                 await pluginsApi.setEnabled(plugin.id, enabled)
+                if (!isCurrentConnection()) {
+                    return
+                }
                 showNotification(t('plugin_management.save_success'), 'success')
                 await fetchPlugins({ silent: true })
             } catch (err: unknown) {
+                if (!isCurrentConnection()) {
+                    return
+                }
                 const message = err instanceof Error ? err.message : String(err ?? '')
                 showNotification(`${t('plugin_management.save_failed')}${message ? `: ${message}` : ''}`, 'error')
             } finally {
-                setSavingPluginID(null)
+                if (isCurrentConnection()) {
+                    setSavingPluginID((current) => current === plugin.id ? null : current)
+                }
             }
         },
-        [fetchPlugins, showNotification, t],
+        [fetchPlugins, isCurrentConnection, showNotification, t],
     )
 
     const closeDelete = useCallback(() => {
-        if (deletingPluginID) {
+        if (deletingPluginID || !isCurrentConnection()) {
             return
         }
         setDeletePluginTarget(null)
-    }, [deletingPluginID])
+    }, [deletingPluginID, isCurrentConnection])
 
     const handleDeletePlugin = useCallback(async () => {
-        if (!deletePluginTarget) {
+        if (!deletePluginTarget || !isCurrentConnection()) {
             return
         }
         setDeletingPluginID(deletePluginTarget.id)
         try {
             const result = await pluginsApi.deletePlugin(deletePluginTarget.id)
+            if (!isCurrentConnection()) {
+                return
+            }
             showNotification(t('plugin_management.delete_success'), 'success')
             if (result.restart_required) {
                 showNotification(t('plugin_management.delete_restart_required'), 'warning')
@@ -198,19 +322,26 @@ export function PluginManagementPage() {
             setDeletePluginTarget(null)
             await fetchPlugins({ silent: true })
         } catch (err: unknown) {
+            if (!isCurrentConnection()) {
+                return
+            }
             const message = err instanceof Error ? err.message : String(err ?? '')
             showNotification(`${t('plugin_management.delete_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
-            setDeletingPluginID(null)
+            if (isCurrentConnection()) {
+                setDeletingPluginID((current) => current === deletePluginTarget.id ? null : current)
+            }
         }
-    }, [deletePluginTarget, fetchPlugins, showNotification, t])
+    }, [deletePluginTarget, fetchPlugins, isCurrentConnection, showNotification, t])
 
     const handleConfigValueChange = useCallback((field: string, value: PluginConfigValue) => {
-        setConfigDraft((prev) => ({ ...prev, [field]: value }))
-    }, [])
+        if (isCurrentConnection()) {
+            setConfigDraft((prev) => ({ ...prev, [field]: value }))
+        }
+    }, [isCurrentConnection])
 
     const handleSaveConfig = useCallback(async () => {
-        if (!editingPlugin) {
+        if (!editingPlugin || !isCurrentConnection()) {
             return
         }
         setConfigError(null)
@@ -235,18 +366,26 @@ export function PluginManagementPage() {
         setSavingConfig(true)
         try {
             await pluginsApi.patchConfig(editingPlugin.id, payload)
+            if (!isCurrentConnection()) {
+                return
+            }
             showNotification(t('plugin_management.save_success'), 'success')
             setEditingPlugin(null)
             setConfigDraft({})
             setJsonDraft({})
             await fetchPlugins({ silent: true })
         } catch (err: unknown) {
+            if (!isCurrentConnection()) {
+                return
+            }
             const message = err instanceof Error ? err.message : String(err ?? '')
             setConfigError(message || t('plugin_management.save_failed'))
         } finally {
-            setSavingConfig(false)
+            if (isCurrentConnection()) {
+                setSavingConfig(false)
+            }
         }
-    }, [configDraft, editingPlugin, fetchPlugins, jsonDraft, showNotification, t])
+    }, [configDraft, editingPlugin, fetchPlugins, isCurrentConnection, jsonDraft, showNotification, t])
 
     const renderConfigInput = (field: PluginConfigField) => {
         const value = configDraft[field.name]
@@ -274,7 +413,11 @@ export function PluginManagementPage() {
                 <textarea
                     className={styles.textarea}
                     value={jsonDraft[field.name] ?? stringifyConfigValue(value, field.type)}
-                    onChange={(event) => setJsonDraft((prev) => ({ ...prev, [field.name]: event.target.value }))}
+                    onChange={(event) => {
+                        if (isCurrentConnection()) {
+                            setJsonDraft((prev) => ({ ...prev, [field.name]: event.target.value }))
+                        }
+                    }}
                     spellCheck={false}
                 />
             )
@@ -308,13 +451,21 @@ export function PluginManagementPage() {
                 header: t('plugin_management.plugin'),
                 sortable: true,
                 sortValue: (plugin) => pluginTitle(plugin),
-                cell: (plugin) => (
-                    <div className={styles.pluginCell}>
-                        <div className={styles.pluginName}>{pluginTitle(plugin)}</div>
-                        <div className={styles.pluginID}>{plugin.id}</div>
-                        {plugin.path && <div className={styles.pluginPath}>{plugin.path}</div>}
-                    </div>
-                ),
+                cell: (plugin) => {
+                    const logo = resolvePluginAssetURL(getPluginLogo(plugin, logoEntries), apiBase)
+                    return (
+                        <div className={styles.pluginCell}>
+                            <span className={styles.pluginLogo} aria-hidden='true'>
+                                <PluginLogo key={logo} src={logo} />
+                            </span>
+                            <div className={styles.pluginIdentity}>
+                                <div className={styles.pluginName}>{pluginTitle(plugin)}</div>
+                                <div className={styles.pluginID}>{plugin.id}</div>
+                                {plugin.path && <div className={styles.pluginPath}>{plugin.path}</div>}
+                            </div>
+                        </div>
+                    )
+                },
             },
             {
                 key: 'status',
@@ -384,6 +535,21 @@ export function PluginManagementPage() {
                         <Button type='button' variant='secondary' size='sm' onClick={() => openConfig(plugin)}>
                             {t('common.edit')}
                         </Button>
+                        {plugin.supports_oauth && plugin.oauth_provider && (
+                            <Button
+                                type='button'
+                                variant='secondary'
+                                size='sm'
+                                disabled={!pluginsEnabled || !plugin.effective_enabled || connectionStatus !== 'connected' || savingPluginID === plugin.id || deletingPluginID === plugin.id}
+                                onClick={() => {
+                                    if (currentData?.authGeneration === apiClient.getAuthGeneration()) {
+                                        setOAuthSelection({id: plugin.id, authGeneration: currentData.authGeneration})
+                                    }
+                                }}
+                            >
+                                {t('auth_login.login_button')}
+                            </Button>
+                        )}
                         <Button
                             type='button'
                             variant='ghost'
@@ -396,7 +562,11 @@ export function PluginManagementPage() {
                             type='button'
                             variant='danger'
                             size='sm'
-                            onClick={() => setDeletePluginTarget(plugin)}
+                            onClick={() => {
+                                if (isCurrentConnection()) {
+                                    setDeletePluginTarget(plugin)
+                                }
+                            }}
                             loading={deletingPluginID === plugin.id}
                             disabled={Boolean(deletingPluginID && deletingPluginID !== plugin.id)}
                         >
@@ -407,9 +577,14 @@ export function PluginManagementPage() {
             },
         ],
         [
+            apiBase,
+            connectionStatus,
+            currentData,
             deletingPluginID,
             expandedPluginID,
             handleTogglePlugin,
+            isCurrentConnection,
+            logoEntries,
             navigate,
             openConfig,
             pluginsEnabled,
@@ -508,6 +683,11 @@ export function PluginManagementPage() {
             )}
 
             <Card title={t('plugin_management.list_title')}>
+                {needsStoreLogos && currentStoreLogos?.error && (
+                    <p role='alert' className={styles.storeLogoError}>
+                        {t('plugin_store.load_failed')}: {currentStoreLogos.error}
+                    </p>
+                )}
                 <Sheet
                     rows={plugins}
                     columns={columns}
@@ -533,6 +713,28 @@ export function PluginManagementPage() {
                     tableClassName={styles.pluginTable}
                 />
             </Card>
+
+            <Modal
+                open={Boolean(oauthPlugin)}
+                onClose={() => setOAuthSelection(null)}
+                closeDisabled
+                title={oauthPlugin ? `${pluginTitle(oauthPlugin)} OAuth` : undefined}
+            >
+                {oauthPlugin?.oauth_provider && (
+                    <OAuthLoginAction
+                        key={`${oauthPlugin.id}:${oauthPlugin.oauth_provider}:${oauthSelection?.authGeneration}`}
+                        provider={oauthPlugin.oauth_provider}
+                        plugin
+                        disableControls={connectionStatus !== 'connected' || savingPluginID === oauthPlugin.id || deletingPluginID === oauthPlugin.id}
+                        onSuccess={() => {
+                            setOAuthSelection(null)
+                            showNotification(t('credentials.oauth_success'), 'success')
+                            navigate('/credentials')
+                        }}
+                        onCancel={() => setOAuthSelection(null)}
+                    />
+                )}
+            </Modal>
 
             <Modal
                 open={editingPlugin !== null}

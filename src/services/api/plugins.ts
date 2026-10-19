@@ -165,17 +165,19 @@ const OAUTH_PROVIDER_ALIASES: Record<string, OAuthProvider> = {
 }
 
 const normalizePluginOAuthProvider = (value: unknown): OAuthProvider | undefined => {
-    const key = String(value ?? '').trim().toLowerCase()
-    return OAUTH_PROVIDER_ALIASES[key]
+    if (typeof value !== 'string') {
+        return undefined
+    }
+    const provider = value.trim().toLowerCase()
+    return /^[a-z0-9-]+$/.test(provider) ? provider : undefined
 }
 
 const normalizePluginEntry = (plugin: PluginEntry): PluginEntry => {
-    const oauthProvider =
-              normalizePluginOAuthProvider(plugin.oauth_provider) ??
-              (plugin.supports_oauth ? normalizePluginOAuthProvider(plugin.id) : undefined)
-    if (!oauthProvider || oauthProvider === plugin.oauth_provider) {
-        return plugin
-    }
+    const oauthProvider = plugin.supports_oauth
+        ? plugin.oauth_provider !== undefined
+            ? normalizePluginOAuthProvider(plugin.oauth_provider)
+            : OAUTH_PROVIDER_ALIASES[String(plugin.id).trim().toLowerCase()]
+        : undefined
     return { ...plugin, oauth_provider: oauthProvider }
 }
 

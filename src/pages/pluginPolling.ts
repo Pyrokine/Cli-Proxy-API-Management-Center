@@ -1,4 +1,5 @@
 import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
+import {apiClient} from '@/services/api/client'
 
 const PLUGIN_STATE_TIMEOUT_MS  = 15000
 const PLUGIN_STATE_INTERVAL_MS = 500
@@ -37,12 +38,20 @@ export async function waitForPluginStoreState(
     timeoutMs  = PLUGIN_STATE_TIMEOUT_MS,
     intervalMs = PLUGIN_STATE_INTERVAL_MS,
     signal?: AbortSignal,
+    authGeneration = apiClient.getAuthGeneration(),
 ): Promise<PluginStoreStateWaitResult> {
     const deadline = Date.now() + timeoutMs
-    throwIfAborted(signal)
+    const throwIfInactive = () => {
+        throwIfAborted(signal)
+        if (authGeneration !== apiClient.getAuthGeneration()) {
+            throw abortError()
+        }
+    }
+    throwIfInactive()
     let latest = await pluginStoreApi.list({ signal })
 
     for (; ;) {
+        throwIfInactive()
         const plugin = latest.plugins.find((item) => item.id === id && (!sourceId || item.source_id === sourceId)) ??
                        null
         if (plugin && predicate(plugin, latest)) {
@@ -52,7 +61,7 @@ export async function waitForPluginStoreState(
             return { response: latest, plugin, timedOut: true }
         }
         await wait(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal)
-        throwIfAborted(signal)
+        throwIfInactive()
         latest = await pluginStoreApi.list({ signal })
     }
 }
