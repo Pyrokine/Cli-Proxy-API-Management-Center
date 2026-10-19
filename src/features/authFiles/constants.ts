@@ -4,7 +4,7 @@ import {formatDateTime} from '@/utils/format'
 
 const AUTH_FILE_PREFIX_REGEX = new RegExp(
     '^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|' +
-    'gemini|aistudio|kimi|qwen|x-ai|xai|grok|devin|cognition|vertex|iflow)' +
+    'gemini|aistudio|kimi-ai|kimi|meta|muse|qwen|x-ai|xai|grok|devin|cognition|vertex|iflow)' +
     '-(?<rest>.+)$',
     'i',
 )
@@ -85,11 +85,20 @@ export const normalizeAuthFileProvider = (provider: unknown): string => {
     if (normalized === 'x-ai' || normalized === 'grok') {
         return 'xai'
     }
-    return normalized === 'cognition' ? 'devin' : normalized
+    if (normalized === 'cognition') {
+        return 'devin'
+    }
+    return normalized === 'muse' ? 'meta' : normalized
 }
 
 export const supportsAuthFileUsingApi = (provider: unknown): boolean =>
     normalizeAuthFileProvider(provider) === 'xai'
+
+export const supportsAuthFileWebsockets = (provider: unknown): boolean =>
+    ['codex', 'xai'].includes(normalizeAuthFileProvider(provider))
+
+export const readAuthFileWebsockets = (file: Record<string, unknown>): boolean | undefined =>
+    normalizeBooleanValue(file.websockets)
 
 export const readAuthFileUsingApi = (file: Record<string, unknown>): boolean =>
     normalizeBooleanValue(file.usingApi ?? file.using_api) ?? false

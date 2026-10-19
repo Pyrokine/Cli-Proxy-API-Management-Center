@@ -4,12 +4,14 @@
 
 import {apiClient} from './client'
 
-export type OAuthProvider =
-    'codex' | 'anthropic' | 'antigravity' | 'gemini-cli' | 'kimi' | 'qwen' | 'xai' | 'devin'
+export type OAuthProvider = string
 
 interface OAuthStartResponse {
     url: string
     state?: string
+    user_code?: string
+    flow?: string
+    expires_in?: number
 }
 
 interface OAuthCallbackResponse {
@@ -29,6 +31,7 @@ export interface OAuthStatusResponse {
 
 interface OAuthRequestOptions {
     projectId?: string
+    plugin?: boolean
     nonce?: string
     signal?: AbortSignal
 }
@@ -57,16 +60,16 @@ const CALLBACK_PROVIDER_MAP: Partial<Record<OAuthProvider, string>> = {
 export const oauthApi = {
     startAuth: (provider: OAuthProvider, options?: OAuthRequestOptions) => {
         const params: Record<string, string | boolean> = {}
-        if (WEBUI_SUPPORTED.includes(provider)) {
+        if (options?.plugin || WEBUI_SUPPORTED.includes(provider)) {
             params.is_webui = true
         }
-        if (provider === 'gemini-cli' && options?.projectId) {
+        if (!options?.plugin && provider === 'gemini-cli' && options?.projectId) {
             params.project_id = options.projectId
         }
         if (options?.nonce) {
             params.nonce = options.nonce
         }
-        return apiClient.get<OAuthStartResponse>(`/${provider}-auth-url`, {
+        return apiClient.get<OAuthStartResponse>(`/${encodeURIComponent(provider)}-auth-url`, {
             params: Object.keys(params).length ? params : undefined,
             signal: options?.signal,
         })
@@ -84,8 +87,8 @@ export const oauthApi = {
             signal,
         }),
 
-    submitCallback: (provider: OAuthProvider, redirectUrl: string, signal?: AbortSignal) => {
-        const callbackProvider = CALLBACK_PROVIDER_MAP[provider] ?? provider
+    submitCallback: (provider: OAuthProvider, redirectUrl: string, signal?: AbortSignal, plugin = false) => {
+        const callbackProvider = plugin ? provider : CALLBACK_PROVIDER_MAP[provider] ?? provider
         return apiClient.post<OAuthCallbackResponse>('/oauth-callback', {
             provider: callbackProvider,
             redirect_url: redirectUrl,

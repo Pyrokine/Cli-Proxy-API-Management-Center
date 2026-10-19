@@ -1,8 +1,30 @@
 import type {OAuthProvider} from '@/services/api/oauth'
 import type {Config, GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {ComponentType} from 'react'
+import {buildManualKeyCardItems} from '../apiKeyStatus'
 
 export type AnyKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig
+
+const manualKeyExtractors: Record<string, (config: Config) => AnyKeyConfig[]> = {
+    gemini: (config) => config.geminiApiKeys ?? [],
+    interactions: (config) => config.interactionsApiKeys ?? [],
+    claude: (config) => config.claudeApiKeys ?? [],
+    codex: (config) => config.codexApiKeys ?? [],
+    meta: (config) => config.metaApiKeys ?? [],
+    vertex: (config) => config.vertexApiKeys ?? [],
+    openai: (config) => config.openaiCompatibility ?? [],
+    xai: (config) => config.xaiApiKeys ?? [],
+}
+
+export function countCredentialCards(config: Config | null, authFilesCount: number | null): number | null {
+    if (config === null || authFilesCount === null) {
+        return null
+    }
+    return authFilesCount + Object.entries(manualKeyExtractors).reduce(
+        (count, [vendorId, extract]) => count + buildManualKeyCardItems(vendorId, extract(config)).length,
+        0,
+    )
+}
 
 export interface QuotaConfig {
     provider: string
@@ -43,6 +65,7 @@ export function createVendorRegistry(icons: {
     Gemini: ComponentType<{ size?: number }>
     Claude: ComponentType<{ size?: number }>
     Codex: ComponentType<{ size?: number }>
+    Meta: ComponentType<{ size?: number }>
     Vertex: ComponentType<{ size?: number }>
     OpenAI: ComponentType<{ size?: number }>
     Kimi: ComponentType<{ size?: number }>
@@ -50,6 +73,7 @@ export function createVendorRegistry(icons: {
     IFlow: ComponentType<{ size?: number }>
     Grok: ComponentType<{ size?: number }>
     Devin: ComponentType<{ size?: number }>
+    Generic: ComponentType<{ size?: number }>
 }): VendorDefinition[] {
     return [
         {
@@ -57,7 +81,7 @@ export function createVendorRegistry(icons: {
             label: 'Gemini',
             labelKey: 'credentials.vendor_gemini',
             icon: icons.Gemini,
-            configExtractor: (c) => c.geminiApiKeys || [],
+            configExtractor: manualKeyExtractors.gemini,
             authFileTypes: ['gemini', 'gemini-cli', 'aistudio'],
             oauthProviders: ['gemini-cli'],
             editRoute: '/credentials/gemini',
@@ -71,7 +95,7 @@ export function createVendorRegistry(icons: {
             label: 'Interactions',
             labelKey: 'credentials.vendor_interactions',
             icon: icons.Gemini,
-            configExtractor: (c) => c.interactionsApiKeys || [],
+            configExtractor: manualKeyExtractors.interactions,
             authFileTypes: [],
             oauthProviders: [],
             editRoute: '/credentials/interactions',
@@ -85,7 +109,7 @@ export function createVendorRegistry(icons: {
             label: 'Claude Compatible',
             labelKey: 'credentials.vendor_claude_compatible',
             icon: icons.Claude,
-            configExtractor: (c) => c.claudeApiKeys || [],
+            configExtractor: manualKeyExtractors.claude,
             authFileTypes: ['claude', 'antigravity'],
             oauthProviders: ['anthropic', 'antigravity'],
             editRoute: '/credentials/claude',
@@ -100,7 +124,7 @@ export function createVendorRegistry(icons: {
             label: 'Codex',
             labelKey: 'credentials.vendor_codex',
             icon: icons.Codex,
-            configExtractor: (c) => c.codexApiKeys || [],
+            configExtractor: manualKeyExtractors.codex,
             authFileTypes: ['codex'],
             oauthProviders: ['codex'],
             editRoute: '/credentials/codex',
@@ -109,6 +133,20 @@ export function createVendorRegistry(icons: {
             supportsJsonImport: false,
             supportsCookieAuth: false,
             quotaConfig: { provider: 'codex', label: 'Codex' },
+        },
+        {
+            id: 'meta',
+            label: 'Muse (Meta)',
+            labelKey: 'credentials.vendor_meta',
+            icon: icons.Meta,
+            configExtractor: manualKeyExtractors.meta,
+            authFileTypes: ['meta', 'muse'],
+            oauthProviders: ['meta'],
+            editRoute: '/credentials/meta',
+            createRoute: '/credentials/meta/new',
+            supportsFileUpload: true,
+            supportsJsonImport: false,
+            supportsCookieAuth: false,
         },
         {
             id: 'devin',
@@ -127,7 +165,7 @@ export function createVendorRegistry(icons: {
             label: 'Vertex',
             labelKey: 'credentials.vendor_vertex',
             icon: icons.Vertex,
-            configExtractor: (c) => c.vertexApiKeys || [],
+            configExtractor: manualKeyExtractors.vertex,
             authFileTypes: ['vertex'],
             oauthProviders: [],
             editRoute: '/credentials/vertex',
@@ -141,7 +179,7 @@ export function createVendorRegistry(icons: {
             label: 'OpenAI Compatible',
             labelKey: 'credentials.vendor_openai_compatible',
             icon: icons.OpenAI,
-            configExtractor: (c) => c.openaiCompatibility || [],
+            configExtractor: manualKeyExtractors.openai,
             authFileTypes: [],
             oauthProviders: [],
             editRoute: '/credentials/openai',
@@ -155,8 +193,8 @@ export function createVendorRegistry(icons: {
             label: 'Kimi',
             labelKey: 'credentials.vendor_kimi',
             icon: icons.Kimi,
-            authFileTypes: ['kimi'],
-            oauthProviders: ['kimi'],
+            authFileTypes: ['kimi', 'kimi-ai'],
+            oauthProviders: ['kimi', 'kimi-ai'],
             supportsFileUpload: true,
             supportsJsonImport: false,
             supportsCookieAuth: false,
@@ -189,12 +227,23 @@ export function createVendorRegistry(icons: {
             label: 'xAI',
             labelKey: 'credentials.vendor_xai',
             icon: icons.Grok,
-            configExtractor: (c) => c.xaiApiKeys || [],
+            configExtractor: manualKeyExtractors.xai,
             authFileTypes: ['xai', 'x-ai', 'grok'],
             oauthProviders: ['xai'],
             editRoute: '/credentials/xai',
             createRoute: '/credentials/xai/new',
             supportsFileUpload: true,
+            supportsJsonImport: false,
+            supportsCookieAuth: false,
+        },
+        {
+            id: 'other',
+            label: 'Other credentials',
+            labelKey: 'credentials.vendor_other',
+            icon: icons.Generic,
+            authFileTypes: [],
+            oauthProviders: [],
+            supportsFileUpload: false,
             supportsJsonImport: false,
             supportsCookieAuth: false,
         },

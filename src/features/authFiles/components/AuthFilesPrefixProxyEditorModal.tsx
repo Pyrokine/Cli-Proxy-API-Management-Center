@@ -13,7 +13,7 @@ import type {
 } from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 import {useNotificationStore} from '@/stores'
 import {MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
-import {type MouseEvent, useCallback, useState} from 'react'
+import {type MouseEvent, useCallback, useId, useState} from 'react'
 import {Trans, useTranslation} from 'react-i18next'
 import {Link, useNavigate} from 'react-router-dom'
 import styles from './AuthFilesPrefixProxyEditorModal.module.scss'
@@ -21,9 +21,10 @@ import styles from './AuthFilesPrefixProxyEditorModal.module.scss'
 type AuthFilesPrefixProxyEditorModalProps = {
     editor: PrefixProxyEditorState | null
     dirty: boolean
+    disableControls: boolean
     onClose: () => void
     onChange: (field: PrefixProxyEditorField, value: PrefixProxyEditorFieldValue) => void
-    onBooleanChange: (value: boolean) => void
+    onBooleanChange: (field: 'usingApi' | 'websockets', value: boolean) => void
     onOverridesChange: (overrides: CredentialOverrides) => void
     onSave: () => void | Promise<void>
 }
@@ -57,6 +58,7 @@ function ReadonlyJsonBlock({ label, value }: { label: string; value: string }) {
 export function AuthFilesPrefixProxyEditorModal({
                                                     editor,
                                                     dirty,
+                                                    disableControls,
                                                     onClose,
                                                     onChange,
                                                     onBooleanChange,
@@ -67,12 +69,17 @@ export function AuthFilesPrefixProxyEditorModal({
     const navigate           = useNavigate()
     const showConfirmation   = useNotificationStore((state) => state.showConfirmation)
     const readOnly           = editor?.readOnly ?? false
+    const fieldsDisabled     = disableControls || readOnly || Boolean(editor?.loading || editor?.saving)
+    const aliasesId          = useId()
+    const rulesId            = useId()
     const hasValidationError = Boolean(
         editor?.weightError || (editor?.headersTouched && editor.headersError) ||
+        (editor?.modelAliasesTouched && editor.modelAliasesError) ||
+        (editor?.requestRulesTouched && editor.requestRulesError) ||
         (editor?.requestRetryTouched && getCredentialRetryValidationKey(editor.requestRetry)),
     )
     const canSave            = Boolean(
-        editor?.json && dirty && !readOnly && !editor.saving && !editor.loading && !hasValidationError,
+        editor?.json && dirty && !fieldsDisabled && !hasValidationError,
     )
     const requestClose = useCallback((afterClose?: () => void) => {
         if (editor?.saving) {
@@ -154,6 +161,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.prefix}
                                                        onChange={(event) => onChange('prefix', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                    />
                                                    <Input
                                                        label={t('auth_files.proxy_url_label')}
@@ -161,6 +169,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.proxyUrl}
                                                        onChange={(event) => onChange('proxyUrl', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                    />
                                                    <Input
                                                        label={t('auth_files.priority_label')}
@@ -169,6 +178,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.priority}
                                                        onChange={(event) => onChange('priority', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                    />
                                                    <Input
                                                        label={t('auth_files.weight_label')}
@@ -196,6 +206,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.weight}
                                                        onChange={(event) => onChange('weight', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                    />
                                                    <Input
                                                        label={t('auth_files.note_label')}
@@ -204,32 +215,81 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.note}
                                                        onChange={(event) => onChange('note', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                    />
                                                    <CredentialOverrideFields
                                                        disableCooling={editor.disableCooling}
                                                        requestRetry={editor.requestRetry}
-                                                       disabled={editor.saving || readOnly}
+                                                       disabled={fieldsDisabled}
                                                        onChange={onOverridesChange}
                                                    />
                                                </div>
-                                               {editor.supportsUsingApi && (
+                                               {(editor.supportsWebsockets || editor.supportsUsingApi) && (
                                                    <div className={styles.switches}>
-                                                       <ToggleSwitch
-                                                           checked={editor.usingApi}
-                                                           disabled={editor.saving || readOnly}
-                                                           onChange={onBooleanChange}
-                                                           label={t('auth_files.using_api_label', {
-                                                               defaultValue: 'Use official xAI API (using_api)',
-                                                           })}
-                                                       />
+                                                       {editor.supportsWebsockets && (
+                                                           <ToggleSwitch
+                                                               checked={editor.websockets}
+                                                               disabled={fieldsDisabled}
+                                                               onChange={(value) => onBooleanChange('websockets', value)}
+                                                               label={t('credentials.websockets')}
+                                                           />
+                                                       )}
+                                                       {editor.supportsUsingApi && (
+                                                           <ToggleSwitch
+                                                               checked={editor.usingApi}
+                                                               disabled={fieldsDisabled}
+                                                               onChange={(value) => onBooleanChange('usingApi', value)}
+                                                               label={t('auth_files.using_api_label', {
+                                                                   defaultValue: 'Use official xAI API (using_api)',
+                                                               })}
+                                                           />
+                                                       )}
                                                    </div>
                                                )}
                                                <AuthFileExcludedModelsField
                                                    fileName={editor.fileName}
                                                    value={editor.excludedModelsText}
-                                                   disabled={editor.saving || readOnly}
+                                                   disabled={fieldsDisabled}
                                                    onChange={(value) => onChange('excludedModelsText', value)}
                                                />
+                                               {!readOnly && editor.supportsModelAliases && (
+                                                   <div className='form-group'>
+                                                       <label htmlFor={aliasesId}>{t('auth_files.model_aliases_label')}</label>
+                                                       <textarea
+                                                           id={aliasesId}
+                                                           className={`input ${styles.headersTextarea}`}
+                                                           placeholder='[{"name":"gpt-5","alias":"local-gpt","fork":true}]'
+                                                           value={editor.modelAliasesText}
+                                                           onChange={(event) => onChange('modelAliasesText', event.target.value)}
+                                                           disabled={fieldsDisabled}
+                                                           aria-invalid={Boolean(editor.modelAliasesError)}
+                                                           spellCheck={false}
+                                                       />
+                                                       <div className='hint'>{t('auth_files.policy_array_hint')}</div>
+                                                       {editor.modelAliasesTouched && editor.modelAliasesError && (
+                                                           <div className='error-box' role='alert'>{editor.modelAliasesError}</div>
+                                                       )}
+                                                   </div>
+                                               )}
+                                               {!readOnly && (
+                                                   <div className='form-group'>
+                                                       <label htmlFor={rulesId}>{t('auth_files.request_rules_label')}</label>
+                                                       <textarea
+                                                           id={rulesId}
+                                                           className={`input ${styles.headersTextarea}`}
+                                                           placeholder='[{"status":429,"match":["quota"],"action":"stop"}]'
+                                                           value={editor.requestRulesText}
+                                                           onChange={(event) => onChange('requestRulesText', event.target.value)}
+                                                           disabled={fieldsDisabled}
+                                                           aria-invalid={Boolean(editor.requestRulesError)}
+                                                           spellCheck={false}
+                                                       />
+                                                       <div className='hint'>{t('auth_files.policy_array_hint')}</div>
+                                                       {editor.requestRulesTouched && editor.requestRulesError && (
+                                                           <div className='error-box' role='alert'>{editor.requestRulesError}</div>
+                                                       )}
+                                                   </div>
+                                               )}
                                                <div className='form-group'>
                                                    <label>{t('auth_files.headers_label')}</label>
                                                    <textarea
@@ -238,6 +298,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                                        value={editor.headersText}
                                                        onChange={(event) => onChange('headersText', event.target.value)}
                                                        readOnly={readOnly}
+                                                       disabled={fieldsDisabled}
                                                        spellCheck={false}
                                                    />
                                                    <div className='hint'>{t('auth_files.headers_hint')}</div>

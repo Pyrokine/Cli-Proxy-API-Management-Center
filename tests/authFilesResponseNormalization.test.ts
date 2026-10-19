@@ -33,6 +33,23 @@ describe('auth-files response normalization', () => {
                                               })
     })
 
+    test('only accepts an explicit boolean Meta manual-refresh capability', () => {
+        const {files} = normalizeAuthFilesResponse({
+            files: [
+                {name: 'meta-dca.json', type: 'meta', manual_refresh_available: true},
+                {name: 'meta-api-key.json', type: 'meta', manual_refresh_available: false},
+                {name: 'meta-legacy.json', type: 'meta'},
+                {name: 'meta-invalid.json', type: 'meta', manual_refresh_available: 'true'},
+            ],
+        })
+        expect(Object.fromEntries(files.map((file) => [file.name, file.manualTokenRefreshAvailable]))).toEqual({
+            'meta-dca.json': true,
+            'meta-api-key.json': false,
+            'meta-legacy.json': undefined,
+            'meta-invalid.json': undefined,
+        })
+    })
+
     test('preserves credential runtime cooldown fields', () => {
         const result = normalizeAuthFilesResponse({
                                                       files: [

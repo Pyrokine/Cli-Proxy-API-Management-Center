@@ -1,6 +1,7 @@
 export interface OAuthAttempt {
     readonly signal: AbortSignal
     isCurrent: () => boolean
+    isPolling: () => boolean
     invalidate: () => void
     schedule: (callback: () => void, delay: number) => void
     poll: <T>(
@@ -33,17 +34,20 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
     const begin = (owner: string): OAuthAttempt => {
         attempts.get(owner)?.invalidate()
         let timer: number | undefined
+        let polling = false
         const generation = scheduler.getGeneration()
         const controller = new AbortController()
         const ownsAttempt = () => attempts.get(owner) === attempt
         const attempt: OAuthAttempt = {
             signal: controller.signal,
             isCurrent: () => ownsAttempt() && generation === scheduler.getGeneration(),
+            isPolling: () => polling && attempt.isCurrent(),
             invalidate: () => {
                 if (timer !== undefined) {
                     scheduler.clearTimeout(timer)
                 }
                 timer = undefined
+                polling = false
                 if (ownsAttempt()) {
                     attempts.delete(owner)
                 }
@@ -64,6 +68,10 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
                 }, delay)
             },
             poll: (request, onResult, onError, delay) => {
+                if (!attempt.isCurrent() || polling) {
+                    return
+                }
+                polling = true
                 const tick = async () => {
                     try {
                         const result = await request()
@@ -72,9 +80,12 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
                         }
                         if (onResult(result)) {
                             attempt.schedule(() => void tick(), delay)
+                        } else {
+                            polling = false
                         }
                     } catch (error) {
                         if (attempt.isCurrent()) {
+                            polling = false
                             onError(error)
                         }
                     }

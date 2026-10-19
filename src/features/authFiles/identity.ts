@@ -50,7 +50,7 @@ export const deriveAuthFileIdentity = (file: AuthFileItem): AuthFileIdentity => 
 }
 
 export const authFileIdentitySearchTokens = (file: AuthFileItem): string[] =>
-    [sanitizeAuthFileName(file.name), file.type, file.provider, file.email, file.projectId, file.note]
+    [sanitizeAuthFileName(file.name), file.type, file.provider, file.email, file.projectId, file.note, file.statusMessage]
         .filter((value): value is string => typeof value === 'string')
         .map((value) => value.trim())
         .filter(Boolean)
@@ -72,6 +72,7 @@ const SAFE_DISPLAY_FIELDS: Array<keyof AuthFileItem> = [
     'weight',
     'note',
     'usingApi',
+    'websockets',
     'disableCooling',
     'requestRetry',
     'excludedModels',

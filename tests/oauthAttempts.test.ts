@@ -73,6 +73,64 @@ describe('OAuth attempt lifecycle', () => {
         expect(requests).toBe(2)
     })
 
+    test('a failed status request can resume the same attempt after an accepted callback', async () => {
+        const {attempts, tasks, tick} = setup()
+        const results: string[] = []
+        const attempt = attempts.begin('codex')
+        let requests = 0
+        let errors   = 0
+        const poll = () => attempt.poll(
+            async () => {
+                requests++
+                if (requests === 1) {
+                    throw new Error('Request failed with status code 502')
+                }
+                return requests === 2 ? 'wait' : 'ok'
+            },
+            (result) => {
+                results.push(result)
+                return result === 'wait'
+            },
+            () => errors++,
+            3000,
+        )
+
+        expect(attempt.isPolling()).toBe(false)
+        poll()
+        expect(attempt.isPolling()).toBe(true)
+        tick()
+        await flush()
+        expect(errors).toBe(1)
+        expect(attempt.isPolling()).toBe(false)
+        expect(tasks.size).toBe(0)
+
+        poll()
+        poll()
+        expect(attempt.isPolling()).toBe(true)
+        expect(tasks.size).toBe(1)
+        tick()
+        await flush()
+        expect(results).toEqual(['wait'])
+        expect(attempt.isPolling()).toBe(true)
+        tick()
+        await flush()
+        expect(results).toEqual(['wait', 'ok'])
+        expect(attempt.isPolling()).toBe(false)
+        expect(tasks.size).toBe(0)
+    })
+
+    test('an invalidated OAuth attempt never restarts polling', () => {
+        const {attempts, tasks} = setup()
+        const old = attempts.begin('codex')
+        old.poll(async () => 'wait', () => true, () => {}, 3000)
+        expect(old.isPolling()).toBe(true)
+        const next = attempts.begin('codex')
+        expect(old.isPolling()).toBe(false)
+        old.poll(async () => 'wait', () => true, () => {}, 3000)
+        expect(tasks.size).toBe(0)
+        expect(next.isPolling()).toBe(false)
+    })
+
     test('a new attempt makes late poll and callback results inert', async () => {
         const {attempts, tasks, tick} = setup()
         const poll = deferred<string>()

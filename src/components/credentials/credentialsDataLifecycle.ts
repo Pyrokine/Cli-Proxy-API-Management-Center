@@ -40,6 +40,20 @@ const normalizedNames = (names: string[]): string[] =>
 const normalizeAuthIndex = (value: string | number | null | undefined): string =>
     String(value ?? '').trim()
 
+export const authFileSelectionKey = (file: Pick<AuthFileItem, 'name' | 'authIndex'>): string =>
+    JSON.stringify([file.name, normalizeAuthIndex(file.authIndex)])
+
+export const selectedPhysicalFileNames = (
+    files: AuthFileItem[],
+    selectedKeys: ReadonlySet<string>,
+): string[] | null => {
+    const names = new Set(files.filter((file) => selectedKeys.has(authFileSelectionKey(file)))
+        .map((file) => file.name))
+    return files.some((file) => names.has(file.name) && !selectedKeys.has(authFileSelectionKey(file)))
+           ? null
+           : Array.from(names)
+}
+
 const matchesAuthFileIdentity = (
     file: AuthFileItem,
     name: string,
@@ -111,6 +125,9 @@ const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): Auth
             next.request_retry = fields.request_retry
         }
     }
+    if (fields.websockets !== undefined) {
+        next.websockets = fields.websockets
+    }
     if (fields.using_api !== undefined) {
         next.usingApi  = fields.using_api
         next.using_api = fields.using_api
@@ -119,6 +136,22 @@ const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): Auth
         next.excludedModels  = [...fields.excluded_models]
         next.excluded_models = [...fields.excluded_models]
         delete next['excluded-models']
+    }
+    if (fields.model_aliases !== undefined) {
+        delete next['model-aliases']
+        if (fields.model_aliases.length === 0) {
+            delete next.model_aliases
+        } else {
+            next.model_aliases = fields.model_aliases.map((row) => ({...row}))
+        }
+    }
+    if (fields.request_scoped_errors !== undefined) {
+        delete next['request-scoped-errors']
+        if (fields.request_scoped_errors.length === 0) {
+            delete next.request_scoped_errors
+        } else {
+            next.request_scoped_errors = fields.request_scoped_errors.map((row) => ({...row}))
+        }
     }
     return next
 }
@@ -146,7 +179,7 @@ export function applyAuthFileMutation(
         const authIndex = normalizeAuthIndex(mutation.authIndex)
         return files.map((file) =>
                              updated.has(file.name) &&
-                             (!authIndex || normalizeAuthIndex(file.authIndex) === authIndex)
+                             normalizeAuthIndex(file.authIndex) === authIndex
                              ? { ...file, disabled: mutation.disabled }
                              : file,
         )
@@ -166,17 +199,22 @@ export const authFileMutationNames = (mutation: AuthFileMutation): string[] | un
       : mutation.names
 
 const quotaProviderForAuthFile = (file: AuthFileItem): string =>
-    String(file.provider || file.type || inferProviderFromAuthFileName(file.name) || '').trim()
+    String(file.type || file.provider || inferProviderFromAuthFileName(file.name) || '').trim()
 
 export function authFileRefreshIdentifiers(
     files: AuthFileItem[],
-    names: string[],
-): { identifiers: string[]; skippedDisabled: number } {
-    const selected = new Set(normalizedNames(names))
+    selectedKeys: ReadonlySet<string>,
+): { identifiers: string[]; skippedDisabled: number; skippedUnsupported: number; skippedAmbiguous: number } {
     const identifiers = new Set<string>()
+    const unselectedQuotaKeys = new Set(files.filter((file) => !selectedKeys.has(authFileSelectionKey(file)))
+        .map((file) => quotaCredentialKey(quotaProviderForAuthFile(file), file.name, file.authIndex)))
+    const unselectedFileNames = new Set(files.filter((file) => !selectedKeys.has(authFileSelectionKey(file)))
+        .map((file) => file.name))
     let skippedDisabled = 0
+    let skippedUnsupported = 0
+    let skippedAmbiguous = 0
     for (const file of files) {
-        if (!selected.has(file.name)) {
+        if (!selectedKeys.has(authFileSelectionKey(file))) {
             continue
         }
         if (file.disabled) {
@@ -184,9 +222,29 @@ export function authFileRefreshIdentifiers(
             continue
         }
         const provider = quotaProviderForAuthFile(file)
-        identifiers.add(provider ? quotaCredentialKey(provider, file.name, file.authIndex) : file.name)
+        if (['meta', 'muse', 'kimi-ai'].includes(provider.toLowerCase())) {
+            skippedUnsupported += 1
+            continue
+        }
+        const key = quotaCredentialKey(provider, file.name, file.authIndex)
+        if (provider ? unselectedQuotaKeys.has(key) : unselectedFileNames.has(file.name)) {
+            skippedAmbiguous += 1
+            continue
+        }
+        identifiers.add(provider ? key : file.name)
     }
-    return {identifiers: Array.from(identifiers), skippedDisabled}
+    return {identifiers: Array.from(identifiers), skippedDisabled, skippedUnsupported, skippedAmbiguous}
+}
+
+export const authFileStatusQuotaKeys = (
+    files: AuthFileItem[],
+    mutation: Extract<AuthFileMutation, {kind: 'status'}>,
+): string[] => {
+    const names = new Set(normalizedNames(mutation.names))
+    const authIndex = normalizeAuthIndex(mutation.authIndex)
+    return Array.from(new Set(files.filter((file) =>
+        names.has(file.name) && normalizeAuthIndex(file.authIndex) === authIndex,
+    ).map((file) => quotaCredentialKey(quotaProviderForAuthFile(file), file.name, file.authIndex))))
 }
 
 export const authFileMutationQuotaKeys = (

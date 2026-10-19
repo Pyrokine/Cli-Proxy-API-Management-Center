@@ -66,6 +66,8 @@ export interface AuthFileItem {
     projectId?: string
     size?: number
     authIndex?: string | number | null
+    supportsQuota?: boolean
+    quotaProvider?: string
     runtimeOnly?: boolean | string
     disabled?: boolean
     unavailable?: boolean
@@ -74,6 +76,7 @@ export interface AuthFileItem {
     runtimeError?: AuthFileRuntimeError
     updatedAt?: string | number
     lastRefresh?: string | number
+    manualTokenRefreshAvailable?: boolean
     nextRetryAfter?: string | number
     modified?: number
     priority?: number
@@ -81,6 +84,7 @@ export interface AuthFileItem {
     note?: string
     usingApi?: boolean
     using_api?: boolean
+    websockets?: boolean
     disableCooling?: boolean | null
     disable_cooling?: boolean | null
     'disable-cooling'?: boolean | null

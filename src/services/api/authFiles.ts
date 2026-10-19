@@ -2,8 +2,11 @@
  * 认证文件与 OAuth 排除模型相关 API
  */
 
+import i18n from '@/i18n'
+import {useAuthFileRefreshStore, type AuthFileRefreshRequest} from '@/stores/useAuthFileRefreshStore'
+import {authFileStatusRequestKey, useAuthFileStatusStore} from '@/stores/useAuthFileStatusStore'
 import type {OAuthModelAliasEntry} from '@/types'
-import {readAuthFileDisableCooling, readAuthFileRequestRetry} from '@/features/authFiles/constants'
+import {readAuthFileDisableCooling, readAuthFileRequestRetry, readAuthFileWebsockets} from '@/features/authFiles/constants'
 import type {
     AuthFileItem,
     AuthFileModelItem,
@@ -42,8 +45,11 @@ export type AuthFileFieldsPatch = {
     note?: string
     disable_cooling?: boolean | null
     request_retry?: number | null
+    websockets?: boolean
     using_api?: boolean
     excluded_models?: string[]
+    model_aliases?: Array<Record<string, unknown>>
+    request_scoped_errors?: Array<Record<string, unknown>>
 }
 type AuthFileBatchFailure = { name: string; error: string }
 
@@ -215,6 +221,8 @@ const normalizeAuthFileItem = (
         name,
         type: typeof entry.type === 'string' ? entry.type : undefined,
         provider: typeof entry.provider === 'string' ? entry.provider : undefined,
+        supportsQuota: entry.supports_quota === true || entry.supportsQuota === true,
+        quotaProvider: normalizeString(entry.quota_provider ?? entry.quotaProvider),
         size: normalizeNumber(entry.size),
         authIndex:
             typeof entry.auth_index === 'string' || typeof entry.auth_index === 'number'
@@ -245,6 +253,8 @@ const normalizeAuthFileItem = (
             : typeof entry.lastRefresh === 'string' || typeof entry.lastRefresh === 'number'
               ? (entry.lastRefresh as string | number)
               : undefined,
+        manualTokenRefreshAvailable:
+            typeof entry.manual_refresh_available === 'boolean' ? entry.manual_refresh_available : undefined,
         nextRetryAfter:
             typeof entry.next_retry_after === 'string' || typeof entry.next_retry_after === 'number'
             ? (entry.next_retry_after as string | number)
@@ -258,6 +268,7 @@ const normalizeAuthFileItem = (
         email: normalizeString(entry.email),
         projectId: normalizeString(entry.project_id ?? entry.projectId),
         usingApi: normalizeBooleanValue(entry.using_api ?? entry.usingApi),
+        websockets: readAuthFileWebsockets(entry),
         disableCooling: readAuthFileDisableCooling(entry),
         requestRetry: readAuthFileRequestRetry(entry),
         excludedModels: normalizeExcludedModelsValue(
@@ -313,7 +324,8 @@ const mergeAuthFileItems = (left: AuthFileItem, right: AuthFileItem): AuthFileIt
     }
     Object.entries(secondary).forEach(([key, value]) => {
         if (['disable_cooling', 'disable-cooling', 'disableCooling',
-             'request_retry', 'request-retry', 'requestRetry',
+             'request_retry', 'request-retry', 'requestRetry', 'websockets',
+             'model_aliases', 'model-aliases', 'request_scoped_errors', 'request-scoped-errors',
              'cooldowns', 'cooldownSnapshot'].includes(key)) {
             return
         }
@@ -658,20 +670,63 @@ const normalizeAuthFileRefreshBatchResult = (value: unknown): AuthFileRefreshBat
     }
 }
 
-const OAUTH_MODEL_ALIAS_ENDPOINT       = '/oauth-model-alias'
-const AUTH_FILE_REFRESH_TIMEOUT_MS      = 35_000
+const OAUTH_MODEL_ALIAS_ENDPOINT  = '/oauth-model-alias'
+const AUTH_FILE_REFRESH_TIMEOUT_MS = 35_000
+const AUTH_FILE_REFRESH_ALL_TIMEOUT_MS = 300_000
+
+const refreshAuthFileTokens = async (
+    target: AuthFileRefreshRequest['target'],
+    timeout: number,
+): Promise<unknown> => {
+    const generation = apiClient.getAuthGeneration()
+    if (useAuthFileRefreshStore.getState().request?.generation === generation) {
+        throw new Error(i18n.t('credentials.manual_token_refresh_in_progress'))
+    }
+    const request = {generation, target}
+    useAuthFileRefreshStore.setState({request})
+    try {
+        return await apiClient.post<unknown>('/auth-files/refresh', target, {timeout})
+    } finally {
+        if (useAuthFileRefreshStore.getState().request === request) {
+            useAuthFileRefreshStore.setState({request: null})
+        }
+    }
+}
 
 export const authFilesApi = {
     list: async (): Promise<AuthFilesResponse> =>
         normalizeAuthFilesResponse(await apiClient.get<unknown>('/auth-files')),
 
-    setStatus: (name: string, disabled: boolean, authIndex?: string | number | null) => {
+    setStatus: async (name: string, disabled: boolean, authIndex?: string | number | null) => {
+        name = name.trim()
         const identity = String(authIndex ?? '').trim()
-        return apiClient.patch<AuthFileStatusResponse>('/auth-files/status', {
-            name,
-            disabled,
-            ...(identity ? { auth_index: identity } : {}),
-        })
+        const generation = apiClient.getAuthGeneration()
+        const key = authFileStatusRequestKey(generation, name, identity)
+        if (useAuthFileStatusStore.getState().requests.has(key)) {
+            throw new Error(i18n.t('credentials.status_update_in_progress'))
+        }
+        const request = {generation, name, authIndex: identity}
+        useAuthFileStatusStore.setState((state) => ({requests: new Map(state.requests).set(key, request)}))
+        try {
+            const result = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', {
+                name,
+                disabled,
+                ...(identity ? {auth_index: identity} : {}),
+            })
+            if (result?.status !== 'ok' || result.disabled !== disabled) {
+                throw new Error(i18n.t('credentials.batch_status_invalid_response'))
+            }
+            return result
+        } finally {
+            useAuthFileStatusStore.setState((state) => {
+                if (state.requests.get(key) !== request) {
+                    return state
+                }
+                const requests = new Map(state.requests)
+                requests.delete(key)
+                return {requests}
+            })
+        }
     },
 
     requestManualRefresh: (
@@ -683,20 +738,29 @@ export const authFilesApi = {
         if (!normalizedName || !identity) {
             throw new Error('auth_files.refresh_identity_required')
         }
-        return apiClient.post<unknown>('/auth-files/refresh', {
+        return refreshAuthFileTokens({
             name: normalizedName,
             auth_index: identity,
-        }, {timeout: AUTH_FILE_REFRESH_TIMEOUT_MS}).then(normalizeAuthFileRefreshResult)
+        }, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)
     },
 
     requestManualRefreshAll: async (): Promise<AuthFileRefreshBatchResult> =>
         normalizeAuthFileRefreshBatchResult(
-            await apiClient.post<unknown>(
-                '/auth-files/refresh',
-                {all: true},
-                {timeout: AUTH_FILE_REFRESH_TIMEOUT_MS},
-            ),
+            await refreshAuthFileTokens({all: true}, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS),
         ),
+
+    clearLocalCooldown: async (authIndex: string): Promise<void> => {
+        const identity = String(authIndex ?? '').trim()
+        if (!identity) {
+            throw new Error('auth_files.cooldown_identity_required')
+        }
+        const result = await apiClient.post<{status: string; auth_index: string}>(
+            '/routing/cooldown/reset', {auth_index: identity},
+        )
+        if (result?.status !== 'ok' || result.auth_index !== identity) {
+            throw new Error('auth_files.cooldown_reset_invalid_response')
+        }
+    },
 
     patchFields: (
         name: string,

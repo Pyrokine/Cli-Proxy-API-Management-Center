@@ -3,6 +3,7 @@ import {
     type AuthFileMutation,
     authFileMutationNames,
     authFileMutationQuotaKeys,
+    authFileStatusQuotaKeys,
     createLatestCredentialsRequestTracker,
 } from '@/components/credentials/credentialsDataLifecycle'
 import {invalidateAuthFileDerivedCaches} from '@/features/authFiles/cacheInvalidation'
@@ -11,6 +12,7 @@ import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {useConfigStore} from '@/stores'
 import {useAuthFilesSummaryStore} from '@/stores/useAuthFilesSummaryStore'
+import {useQuotaStore} from '@/stores/useQuotaStore'
 import type {Config} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -31,7 +33,7 @@ interface UseCredentialsDataReturn {
     refreshing: boolean
     error: string | null
     refresh: () => Promise<void>
-    completeMutation: (mutation: AuthFileMutation) => Promise<void>
+    completeMutation: (mutation: AuthFileMutation | AuthFileMutation[]) => Promise<void>
 }
 
 type LoadCredentialsOptions = {
@@ -51,6 +53,20 @@ const authFileSupplierTokens = (file: AuthFileItem): string[] =>
 const authFileBelongsToVendor = (file: AuthFileItem, vendor: VendorDefinition): boolean => {
     const vendorTypes = new Set([...vendor.authFileTypes, ...vendor.oauthProviders].map((item) => item.toLowerCase()))
     return authFileSupplierTokens(file).some((token) => vendorTypes.has(token))
+}
+
+export function groupVendorAuthFiles(vendors: VendorDefinition[], authFiles: AuthFileItem[]): Map<string, AuthFileItem[]> {
+    const groups = new Map<string, AuthFileItem[]>()
+    for (const vendor of vendors) {
+        if (vendor.id !== 'other') {
+            groups.set(vendor.id, authFiles.filter((file) => authFileBelongsToVendor(file, vendor)))
+        }
+    }
+    if (vendors.some((vendor) => vendor.id === 'other')) {
+        groups.set('other', authFiles.filter((file) =>
+            !vendors.some((vendor) => vendor.id !== 'other' && authFileBelongsToVendor(file, vendor))))
+    }
+    return groups
 }
 
 /**
@@ -115,38 +131,57 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
 
     const refresh = useCallback(() => loadAll({ background: authFilesRef.current.length > 0 }), [loadAll])
 
-    const completeMutation = useCallback(async (mutation: AuthFileMutation) => {
+    const completeMutation = useCallback(async (mutation: AuthFileMutation | AuthFileMutation[]) => {
+        const mutations = Array.isArray(mutation) ? mutation : [mutation]
+        if (mutations.length === 0) {
+            // 状态写入后仍可返回错误，空成功列表也需读取服务端状态
+            await loadAll({ background: true })
+            return
+        }
         requestTrackerRef.current.invalidate()
-        const quotaKeys      = authFileMutationQuotaKeys(authFilesRef.current, mutation)
-        const nextFiles      = applyAuthFileMutation(authFilesRef.current, mutation)
+        let nextFiles = authFilesRef.current
+        const statusQuotaKeys = new Set<string>()
+        for (const item of mutations) {
+            if (item.kind === 'status') {
+                authFileStatusQuotaKeys(nextFiles, item).forEach((key) => statusQuotaKeys.add(key))
+            }
+            const quotaKeys = authFileMutationQuotaKeys(nextFiles, item)
+            nextFiles = applyAuthFileMutation(nextFiles, item)
+            invalidateAuthFileDerivedCaches(authFileMutationNames(item), quotaKeys)
+        }
+        useQuotaStore.getState().advanceQuotaSubjects(Array.from(statusQuotaKeys))
         authFilesRef.current = nextFiles
         setAuthFiles(nextFiles)
         setSummaryCount(nextFiles.length)
-        invalidateAuthFileDerivedCaches(authFileMutationNames(mutation), quotaKeys)
         setLoading(false)
         setRefreshing(false)
         await loadAll({ background: true })
     }, [loadAll, setSummaryCount])
 
     useEffect(() => {
+        let cancelled = false
         const requestTracker = requestTrackerRef.current
         queueMicrotask(() => {
-            void loadAll()
+            if (!cancelled) {
+                void loadAll()
+            }
         })
-        return () => requestTracker.invalidate()
+        return () => {
+            cancelled = true
+            requestTracker.invalidate()
+        }
     }, [loadAll])
 
     const vendorData = useMemo(() => {
         const map = new Map<string, VendorData>()
+        const groupedFiles = groupVendorAuthFiles(vendors, authFiles)
 
         for (const vendor of vendors) {
             const data = createEmptyVendorData()
             if (vendor.configExtractor && config) {
                 data.apiKeys = vendor.configExtractor(config)
             }
-            if (vendor.authFileTypes.length > 0 || vendor.oauthProviders.length > 0) {
-                data.authFiles = authFiles.filter((file) => authFileBelongsToVendor(file, vendor))
-            }
+            data.authFiles = groupedFiles.get(vendor.id) ?? []
             map.set(vendor.id, data)
         }
 
