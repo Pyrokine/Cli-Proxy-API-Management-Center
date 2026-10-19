@@ -1,6 +1,6 @@
 import type {OpenAIFormState} from '@/components/providers/types'
 import {buildApiKeyEntry} from '@/components/providers/utils'
-import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {entriesToModels, getModelEntriesValidationKey, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
 import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
 import {providersApi} from '@/services/api'
@@ -8,7 +8,7 @@ import {useConfigStore, useNotificationStore, useOpenAIEditDraftStore} from '@/s
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry, OpenAIProviderConfig} from '@/types'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
-import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
+import {getCredentialRetryValidationKey, getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
@@ -85,7 +85,7 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
         return acc
     }, [])
 
-const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
+const buildOpenAISignature = (form: OpenAIFormState, _testModel: string) =>
     JSON.stringify({
                        name: String(form.name ?? '').trim(),
                        priority: form.priority !== undefined && Number.isFinite(form.priority) ?
@@ -94,13 +94,14 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        disabled: Boolean(form.disabled),
+                       supportPromptCacheKey: Boolean(form.supportPromptCacheKey),
                        disableCooling: form.disableCooling ?? null,
                        requestRetry: form.requestRetry?.toString() ?? null,
+                       requestScopedErrors: form.requestScopedErrors ?? null,
                        authIndex: String(form.authIndex ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
                        apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
-                       testModel: String(testModel ?? '').trim(),
                    })
 
 const buildEmptyForm = (): OpenAIFormState => ({
@@ -112,8 +113,8 @@ const buildEmptyForm = (): OpenAIFormState => ({
     authIndex: undefined,
     apiKeyEntries: [buildApiKeyEntry()],
     modelEntries: [{ name: '', alias: '' }],
-    testModel: undefined,
     disabled: false,
+    supportPromptCacheKey: false,
 })
 
 /* ------------------------------------------------------------------ */
@@ -151,11 +152,11 @@ export function AiProvidersOpenAIEditLayout() {
             priority: data.priority,
             disableCooling: data.disableCooling,
             requestRetry: data.requestRetry,
+            requestScopedErrors: data.requestScopedErrors,
             prefix: data.prefix ?? '',
             baseUrl: data.baseUrl,
             headers: headersToEntries(data.headers),
             authIndex: data.authIndex,
-            testModel: data.testModel,
             modelEntries,
             apiKeyEntries: data.apiKeyEntries?.length
                            ?
@@ -166,11 +167,11 @@ export function AiProvidersOpenAIEditLayout() {
                            :
                 [buildApiKeyEntry({ authIndex: data.authIndex })],
             disabled: data.disabled ?? false,
+            supportPromptCacheKey: Boolean(data.supportPromptCacheKey),
         }
 
         const available        = modelEntries.map((entry) => entry.name.trim()).filter(Boolean)
-        const initialTestModel =
-                  data.testModel && available.includes(data.testModel) ? data.testModel : available[0] || ''
+        const initialTestModel = available[0] || ''
 
         return {
             form: seededForm,
@@ -183,6 +184,7 @@ export function AiProvidersOpenAIEditLayout() {
 
     const onSave = useCallback(
         async (ctx: {
+            isCurrent: () => boolean
             form: OpenAIFormState
             testModel: string
             editIndex: number | null
@@ -193,6 +195,9 @@ export function AiProvidersOpenAIEditLayout() {
             updateBaselineSignature: (signature: string) => void
             handleBack: () => void
         }) => {
+            if (!ctx.isCurrent()) {
+                return
+            }
             const { form, testModel, editIndex, configs, setConfigs, setSaving, handleBack } = ctx
             const name                                                                       = form.name.trim()
             const baseUrl                                                                    = form.baseUrl.trim()
@@ -204,6 +209,17 @@ export function AiProvidersOpenAIEditLayout() {
             const retryError = getCredentialRetryValidationKey(form.requestRetry)
             if (retryError) {
                 showNotification(t(retryError), 'error')
+                return
+            }
+            const modelError = getModelEntriesValidationKey(form.modelEntries)
+            if (modelError) {
+                showNotification(t(modelError), 'error')
+                return
+            }
+            const rulesError = getRequestScopedErrorsValidationKey(
+                form.requestScopedErrors, editIndex !== null ? configs[editIndex]?.requestScopedErrors : undefined)
+            if (rulesError) {
+                showNotification(t(rulesError), 'error')
                 return
             }
             const weightError = form.apiKeyEntries
@@ -221,8 +237,10 @@ export function AiProvidersOpenAIEditLayout() {
                     prefix: form.prefix?.trim() || undefined,
                     baseUrl,
                     disabled: form.disabled,
+                    supportPromptCacheKey: Boolean(form.supportPromptCacheKey),
                     disableCooling: form.disableCooling,
                     requestRetry: form.requestRetry,
+                    requestScopedErrors: form.requestScopedErrors,
                     headers: buildHeaderObject(form.headers),
                     apiKeyEntries: form.apiKeyEntries.map((entry: ApiKeyEntry) => ({
                         apiKey: entry.apiKey.trim(),
@@ -234,10 +252,6 @@ export function AiProvidersOpenAIEditLayout() {
                 }
                 if (form.priority !== undefined && Number.isFinite(form.priority)) {
                     payload.priority = Math.trunc(form.priority)
-                }
-                const resolvedTestModel = testModel.trim()
-                if (resolvedTestModel) {
-                    payload.testModel = resolvedTestModel
                 }
                 const models = entriesToModels(form.modelEntries)
                 if (models.length) {
@@ -260,6 +274,9 @@ export function AiProvidersOpenAIEditLayout() {
                     await providersApi.createOpenAIProvider(payload)
                     localProviders = [...configs, payload]
                 }
+                if (!ctx.isCurrent()) {
+                    return
+                }
 
                 showNotification(
                     editIndex !== null
@@ -272,8 +289,14 @@ export function AiProvidersOpenAIEditLayout() {
                 try {
                     syncedProviders = await providersApi.getOpenAIProviders()
                 } catch (refreshError: unknown) {
+                    if (!ctx.isCurrent()) {
+                        return
+                    }
                     const message = refreshError instanceof Error ? refreshError.message : ''
                     showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+                }
+                if (!ctx.isCurrent()) {
+                    return
                 }
 
                 setConfigs(syncedProviders)
@@ -282,9 +305,14 @@ export function AiProvidersOpenAIEditLayout() {
                 ctx.updateBaselineSignature(buildOpenAISignature(form, testModel))
                 handleBack()
             } catch (err: unknown) {
+                if (!ctx.isCurrent()) {
+                    return
+                }
                 showNotification(`${t('notification.update_failed')}: ${getErrorMessage(err)}`, 'error')
             } finally {
-                setSaving(false)
+                if (ctx.isCurrent()) {
+                    setSaving(false)
+                }
             }
         },
         [showNotification, t, updateConfigValue],
@@ -303,28 +331,34 @@ export function AiProvidersOpenAIEditLayout() {
                                          })
 
     /* ---- OpenAI-specific: keyTestStatuses bound to current draftKey ---- */
-    const { draftKey }    = layout
+    const { draftKey, isCurrent } = layout
     const keyTestStatuses = rawDrafts[draftKey]?.keyTestStatuses ?? []
 
     const handleSetDraftKeyTestStatus = useCallback(
         (keyIndex: number, status: KeyTestStatus) => {
-            rawSetDraftKeyTestStatus(draftKey, keyIndex, status)
+            if (isCurrent()) {
+                rawSetDraftKeyTestStatus(draftKey, keyIndex, status)
+            }
         },
-        [draftKey, rawSetDraftKeyTestStatus],
+        [draftKey, isCurrent, rawSetDraftKeyTestStatus],
     )
 
     const handleSetDraftKeyTestStatuses = useCallback(
         (statuses: KeyTestStatus[]) => {
-            rawSetDraftKeyTestStatuses(draftKey, statuses)
+            if (isCurrent()) {
+                rawSetDraftKeyTestStatuses(draftKey, statuses)
+            }
         },
-        [draftKey, rawSetDraftKeyTestStatuses],
+        [draftKey, isCurrent, rawSetDraftKeyTestStatuses],
     )
 
     const handleResetDraftKeyTestStatuses = useCallback(
         (count: number) => {
-            rawResetDraftKeyTestStatuses(draftKey, count)
+            if (isCurrent()) {
+                rawResetDraftKeyTestStatuses(draftKey, count)
+            }
         },
-        [draftKey, rawResetDraftKeyTestStatuses],
+        [draftKey, isCurrent, rawResetDraftKeyTestStatuses],
     )
 
     return (

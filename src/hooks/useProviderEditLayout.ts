@@ -12,6 +12,7 @@
 import type {ModelEntry} from '@/components/providers/types'
 import {resolveProviderDraftInitAction} from '@/hooks/providerEditLayoutState'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
+import {apiClient} from '@/services/api/client'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import type {BaseDraft, DraftSliceState} from '@/stores/createDraftSlice'
 import {getErrorMessage, parseIndexParam} from '@/utils/helpers'
@@ -41,6 +42,7 @@ type DraftInitPayload<D extends BaseDraft> = Omit<D, 'initialized' | 'baselineSi
 
 /** Save context passed to the provider-specific `onSave` callback. */
 interface SaveContext<F, C> {
+    isCurrent: () => boolean
     form: F
     testModel: string
     editIndex: number | null
@@ -89,6 +91,7 @@ interface ProviderEditLayoutResult<F, C> {
     invalidIndexParam: boolean
     invalidIndex: boolean
     disableControls: boolean
+    isCurrent: () => boolean
     loading: boolean
     saving: boolean
     setSaving: Dispatch<SetStateAction<boolean>>
@@ -144,22 +147,42 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
     /* ---- Connection status ---- */
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const authGeneration = useAuthStore(() => apiClient.getAuthGeneration())
+    const isCurrent = useCallback(() => apiClient.getAuthGeneration() === authGeneration, [authGeneration])
     const disableControls  = connectionStatus !== 'connected'
 
-    const [configs, setConfigs] = useState<C[]>([])
+    const [storedConfigs, setStoredConfigs] = useState<C[]>([])
+    const [configGeneration, setConfigGeneration] = useState<number | null>(null)
     const [loading, setLoading] = useState(true)
-    const [saving, setSaving]   = useState(false)
+    const [savingGeneration, setSavingGeneration] = useState<number | null>(null)
+    const saving = savingGeneration === authGeneration
+    const sourceLoaded = configGeneration === authGeneration
+    const configs = useMemo(() => sourceLoaded ? storedConfigs : [], [sourceLoaded, storedConfigs])
+    const setConfigs: Dispatch<SetStateAction<C[]>> = useCallback((action) => {
+        if (isCurrent()) {
+            setStoredConfigs(action)
+        }
+    }, [isCurrent])
+    const setSaving: Dispatch<SetStateAction<boolean>> = useCallback((action) => {
+        if (isCurrent()) {
+            setSavingGeneration((previous) => {
+                const value = typeof action === 'function' ? action(previous === authGeneration) : action
+                return value ? authGeneration : null
+            })
+        }
+    }, [authGeneration, isCurrent])
 
     /* ---- Draft store binding ---- */
     const draftKey = useMemo(() => {
+        const sourceKey = `${draftKeyPrefix}:${authGeneration}`
         if (invalidIndexParam) {
-            return `${draftKeyPrefix}:invalid:${params.index ?? 'unknown'}`
+            return `${sourceKey}:invalid:${params.index ?? 'unknown'}`
         }
         if (editIndex === null) {
-            return `${draftKeyPrefix}:new`
+            return `${sourceKey}:new`
         }
-        return `${draftKeyPrefix}:${editIndex}`
-    }, [draftKeyPrefix, editIndex, invalidIndexParam, params.index])
+        return `${sourceKey}:${editIndex}`
+    }, [authGeneration, draftKeyPrefix, editIndex, invalidIndexParam, params.index])
 
     const draft                     = useDraftStore((state) => state.drafts[draftKey])
     const acquireDraft              = useDraftStore((state) => state.acquireDraft)
@@ -179,37 +202,47 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
     const setForm: Dispatch<SetStateAction<F>> = useCallback(
         (action) => {
-            setDraftForm(draftKey, action as SetStateAction<D['form']>)
+            if (isCurrent()) {
+                setDraftForm(draftKey, action as SetStateAction<D['form']>)
+            }
         },
-        [draftKey, setDraftForm],
+        [draftKey, isCurrent, setDraftForm],
     )
 
     const setTestModel: Dispatch<SetStateAction<string>> = useCallback(
         (action) => {
-            setDraftTestModel(draftKey, action)
+            if (isCurrent()) {
+                setDraftTestModel(draftKey, action)
+            }
         },
-        [draftKey, setDraftTestModel],
+        [draftKey, isCurrent, setDraftTestModel],
     )
 
     const setTestStatus: Dispatch<SetStateAction<TestStatus>> = useCallback(
         (action) => {
-            setDraftTestStatus(draftKey, action as SetStateAction<D['testStatus']>)
+            if (isCurrent()) {
+                setDraftTestStatus(draftKey, action as SetStateAction<D['testStatus']>)
+            }
         },
-        [draftKey, setDraftTestStatus],
+        [draftKey, isCurrent, setDraftTestStatus],
     )
 
     const setTestMessage: Dispatch<SetStateAction<string>> = useCallback(
         (action) => {
-            setDraftTestMessage(draftKey, action)
+            if (isCurrent()) {
+                setDraftTestMessage(draftKey, action)
+            }
         },
-        [draftKey, setDraftTestMessage],
+        [draftKey, isCurrent, setDraftTestMessage],
     )
 
     const updateBaselineSignature = useCallback(
         (signature: string) => {
-            setDraftBaselineSignature(draftKey, signature)
+            if (isCurrent()) {
+                setDraftBaselineSignature(draftKey, signature)
+            }
         },
-        [draftKey, setDraftBaselineSignature],
+        [draftKey, isCurrent, setDraftBaselineSignature],
     )
 
     /* ---- Derived state ---- */
@@ -258,29 +291,31 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         let cancelled = false
 
         queueMicrotask(() => {
-            if (cancelled) {
+            if (cancelled || !isCurrent()) {
                 return
             }
             setLoading(true)
+            setConfigs([])
 
             loadConfigs()
                 .then((value) => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
                     setConfigs(value)
                 })
                 .catch((err: unknown) => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
                     const message = getErrorMessage(err) || t('notification.refresh_failed')
                     showNotification(`${t('notification.load_failed')}: ${message}`, 'error')
                 })
                 .finally(() => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
+                    setConfigGeneration(authGeneration)
                     setLoading(false)
                 })
         })
@@ -288,12 +323,16 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         return () => {
             cancelled = true
         }
-    }, [loadConfigs, showNotification, t])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authGeneration, isCurrent, loadConfigs, setConfigs, showNotification])
 
     /* ---- Draft initialization ---- */
     useEffect(() => {
+        if (!isCurrent()) {
+            return
+        }
         const action = resolveProviderDraftInitAction({
-                                                          loading,
+                                                          loading: loading || !sourceLoaded,
                                                           initialized: Boolean(draft?.initialized),
                                                           hasIndexParam,
                                                           invalidIndexParam,
@@ -316,13 +355,15 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
                   initDraft,
                   initialData,
                   invalidIndexParam,
+                  isCurrent,
                   loading,
                   seedDraftInit,
+                  sourceLoaded,
               ])
 
     /* ---- Resolved loading (config or draft not yet initialized) ---- */
     const draftRequired   = !invalidIndexParam && !invalidIndex
-    const resolvedLoading = loading || (draftRequired && !draft?.initialized)
+    const resolvedLoading = loading || !sourceLoaded || (draftRequired && !draft?.initialized)
 
     /* ---- Dirty detection ---- */
     const currentSignature  = useMemo(() => buildSignature(form, testModel), [buildSignature, form, testModel])
@@ -406,11 +447,12 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
     /* ---- Save (delegated to provider-specific callback) ---- */
     const handleSave = useCallback(async () => {
         const canSave = !disableControls && !saving && !resolvedLoading && !invalidIndexParam && !invalidIndex
-        if (!canSave) {
+        if (!canSave || !isCurrent()) {
             return
         }
 
         await onSave({
+                         isCurrent,
                          form,
                          testModel,
                          editIndex,
@@ -430,9 +472,12 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
                                        handleBack,
                                        invalidIndex,
                                        invalidIndexParam,
+                                       isCurrent,
                                        onSave,
                                        resolvedLoading,
                                        saving,
+                                       setConfigs,
+                                       setSaving,
                                        testModel,
                                        updateBaselineSignature,
                                    ])
@@ -443,6 +488,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         invalidIndexParam,
         invalidIndex,
         disableControls,
+        isCurrent,
         loading: resolvedLoading,
         saving,
         setSaving,

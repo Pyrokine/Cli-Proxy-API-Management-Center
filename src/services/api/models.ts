@@ -2,6 +2,7 @@
  * 可用模型获取
  */
 
+import i18n from '@/i18n'
 import {normalizeApiBase} from '@/utils/connection'
 import {REQUEST_TIMEOUT_MS} from '@/utils/constants'
 import {normalizeModelList} from '@/utils/models'
@@ -203,7 +204,7 @@ const buildRequestSignature = (
     const headerSignature = Object.entries(headers)
                                   .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
                                   .map(([key, value]) => [key, value])
-    return JSON.stringify({ url, authIndex: authIndex ?? '', headers: headerSignature })
+    return JSON.stringify({ authGeneration: apiClient.getAuthGeneration(), url, authIndex: authIndex ?? '', headers: headerSignature })
 }
 
 const buildModelsEndpoint = (baseUrl: string): string => {
@@ -559,6 +560,7 @@ export const modelsApi = {
         authIndex?: string,
         signal?: AbortSignal,
     ) {
+        const authGeneration = apiClient.getAuthGeneration()
         const endpoint = buildGeminiModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
@@ -578,6 +580,9 @@ export const modelsApi = {
             let pageToken                                          = ''
 
             for (let page = 0; page < 20; page += 1) {
+                if (authGeneration !== apiClient.getAuthGeneration()) {
+                    throw new axios.Cancel(i18n.t('common.connection_changed'))
+                }
                 const url = new URL(endpoint)
                 if (pageToken) {
                     url.searchParams.set('pageToken', pageToken)

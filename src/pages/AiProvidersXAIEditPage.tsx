@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useProviderEditForm'
 import {providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
+import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries} from '@/utils/headers'
 import {useTranslation} from 'react-i18next'
@@ -65,6 +66,7 @@ export function AiProvidersXAIEditPage() {
             websockets: Boolean(form.websockets),
             disableCooling: form.disableCooling,
             requestRetry: form.requestRetry,
+            requestScopedErrors: form.requestScopedErrors,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
@@ -72,10 +74,11 @@ export function AiProvidersXAIEditPage() {
         }),
         createConfig: (config) => providersApi.createXAIConfig(config),
         updateConfig: (index, config, original) => providersApi.patchXAIConfig(index, config, original),
-        validateBeforeSave: (form) => {
-            const weightError = getCredentialWeightValidationKey(form.weight)
-            if (weightError) {
-                return weightError
+        validateBeforeSave: (form, original) => {
+            const validationError = getCredentialWeightValidationKey(form.weight) ??
+                getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors)
+            if (validationError) {
+                return validationError
             }
             if (!form.apiKey.trim()) {
                 return 'notification.xai_key_required'
@@ -159,6 +162,7 @@ export function AiProvidersXAIEditPage() {
                     removeButtonAriaLabel={t('common.delete')}
                     disabled={disabled}
                     metadataEditing
+                    provider='xai'
                 />
                 <div className='hint'>{t('ai_providers.xai_models_hint')}</div>
             </div>

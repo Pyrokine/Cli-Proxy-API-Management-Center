@@ -2,18 +2,20 @@ import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
 import {buildApiKeyEntry} from '@/components/providers/utils'
-import {CredentialOverrideFields} from '@/components/providers/CredentialOverrideFields'
+import {CredentialOverrideFields, RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {Button} from '@/components/ui/Button'
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
+import {getModelEntriesValidationKey} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {useEscapeKey} from '@/hooks/useEscapeKey'
 import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
 import {modelsApi} from '@/services/api'
 import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api/apiCall'
-import {useNotificationStore} from '@/stores'
+import {apiClient} from '@/services/api/client'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry} from '@/types'
 import {MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
@@ -42,6 +44,7 @@ export function AiProvidersOpenAIEditPage() {
     const location             = useLocation()
     const modalPresentation    = resolveProviderEditModalState(location.state, location.pathname)
     const { showNotification } = useNotificationStore()
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
     const {
               hasIndexParam,
               invalidIndexParam,
@@ -84,6 +87,7 @@ export function AiProvidersOpenAIEditPage() {
 
     const connectivityConfigSignature   = useMemo(
         () => JSON.stringify({
+                                 authGeneration,
                                  baseUrl: form.baseUrl.trim(),
                                  headers: form.headers.map((entry) => [entry.key.trim(), entry.value.trim()]),
                                  authIndex: form.authIndex?.trim() ?? '',
@@ -94,7 +98,7 @@ export function AiProvidersOpenAIEditPage() {
                                      proxyUrl: entry.proxyUrl?.trim() ?? '',
                                  })),
                              }),
-        [form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers, resolvedTestModel],
+        [authGeneration, form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers, resolvedTestModel],
     )
     const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
 
@@ -131,7 +135,8 @@ export function AiProvidersOpenAIEditPage() {
                              !invalidIndexParam &&
                              !invalidIndex &&
                              !isTesting &&
-                             !getCredentialRetryValidationKey(form.requestRetry)
+                             !getCredentialRetryValidationKey(form.requestRetry) &&
+                             !getModelEntriesValidationKey(form.modelEntries)
     const controlsDisabled = saving || disableControls || isTesting
 
     const openOpenaiModelDiscovery = () => {
@@ -146,7 +151,7 @@ export function AiProvidersOpenAIEditPage() {
     }
 
     const runOpenAIConnectivityTest = async (keyIndex?: number) => {
-        if (isTesting) {
+        if (authGeneration !== apiClient.getAuthGeneration() || isTesting || activeTestAbortRef.current) {
             return
         }
 
@@ -249,7 +254,8 @@ export function AiProvidersOpenAIEditPage() {
                 { timeout: OPENAI_TEST_TIMEOUT_MS, signal: controller.signal },
             )
 
-            if (requestId !== activeTestRequestIdRef.current || controller.signal.aborted) {
+            if (authGeneration !== apiClient.getAuthGeneration() || requestId !== activeTestRequestIdRef.current ||
+                controller.signal.aborted) {
                 return
             }
             if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -276,6 +282,7 @@ export function AiProvidersOpenAIEditPage() {
                               ? String((err as { code?: string }).code)
                               : ''
             if (
+                authGeneration !== apiClient.getAuthGeneration() ||
                 requestId !== activeTestRequestIdRef.current ||
                 controller.signal.aborted ||
                 errorCode === 'ERR_CANCELED'
@@ -295,7 +302,9 @@ export function AiProvidersOpenAIEditPage() {
         } finally {
             if (requestId === activeTestRequestIdRef.current) {
                 activeTestAbortRef.current = null
-                setIsTesting(false)
+                if (authGeneration === apiClient.getAuthGeneration() && !controller.signal.aborted) {
+                    setIsTesting(false)
+                }
             }
         }
     }
@@ -513,6 +522,11 @@ export function AiProvidersOpenAIEditPage() {
                     disabled={controlsDisabled}
                     onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
                 />
+                <RequestScopedErrorsField
+                    rules={form.requestScopedErrors}
+                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    disabled={controlsDisabled}
+                />
                 <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
                 <Input
                     label={t('ai_providers.openai_add_modal_url_label')}
@@ -530,6 +544,15 @@ export function AiProvidersOpenAIEditPage() {
                     />
                     <div className='hint'>{t('ai_providers.openai_disabled_hint')}</div>
                 </div>
+                <div className='form-group'>
+                    <ToggleSwitch
+                        label={t('ai_providers.openai_prompt_cache_key_label')}
+                        checked={Boolean(form.supportPromptCacheKey)}
+                        onChange={(value) => setForm((prev) => ({...prev, supportPromptCacheKey: value}))}
+                        disabled={controlsDisabled}
+                    />
+                    <div className='hint'>{t('ai_providers.openai_prompt_cache_key_hint')}</div>
+                </div>
 
                 <HeadersField
                     entries={form.headers}
@@ -538,6 +561,7 @@ export function AiProvidersOpenAIEditPage() {
                 />
 
                 <ModelConfigSection
+                    provider='openai'
                     title={
                         hasIndexParam
                         ? t('ai_providers.openai_edit_modal_models_label')

@@ -3,6 +3,7 @@ import type {ProviderFormState} from '@/components/providers'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {Select} from '@/components/ui/Select'
 import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {useProviderConnectivityTestState} from '@/hooks/useProviderConnectivityTestState'
@@ -14,6 +15,7 @@ import {
 } from '@/hooks/useProviderEditForm'
 import {apiCallApi, modelsApi, prepareApiCallAuth, providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
+import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
@@ -42,6 +44,7 @@ const buildEmptyForm = (): ProviderFormState => ({
     prefix: '',
     baseUrl: '',
     websockets: false,
+    alphaSearch: false,
     proxyUrl: '',
     headers: [],
     models: [],
@@ -54,6 +57,8 @@ const buildSignature = (form: ProviderFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
                        websockets: Boolean(form.websockets),
+                       alphaSearch: Boolean(form.alphaSearch),
+                       disableCodexCloaking: form.disableCodexCloaking ?? null,
                        models: normalizeModelEntriesForSignature(form.modelEntries),
                        excludedModels: parseTextList(form.excludedText ?? ''),
                    })
@@ -71,6 +76,7 @@ export function AiProvidersCodexEditPage() {
         configToForm: (config) => ({
             ...config,
             websockets: Boolean(config.websockets),
+            alphaSearch: Boolean(config.alphaSearch),
             headers: headersToEntries(config.headers),
             modelEntries: modelsToEntries(config.models),
             excludedText: excludedModelsToText(config.excludedModels),
@@ -81,9 +87,12 @@ export function AiProvidersCodexEditPage() {
             weight: form.weight,
             disableCooling: form.disableCooling,
             requestRetry: form.requestRetry,
+            requestScopedErrors: form.requestScopedErrors,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             websockets: Boolean(form.websockets),
+            alphaSearch: Boolean(form.alphaSearch),
+            disableCodexCloaking: form.disableCodexCloaking,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
@@ -91,10 +100,11 @@ export function AiProvidersCodexEditPage() {
         }),
         createConfig: (config) => providersApi.createCodexConfig(config),
         updateConfig: (index, config, original) => providersApi.patchCodexConfig(index, config, original),
-        validateBeforeSave: (form) => {
-            const weightError = getCredentialWeightValidationKey(form.weight)
-            if (weightError) {
-                return weightError
+        validateBeforeSave: (form, original) => {
+            const validationError = getCredentialWeightValidationKey(form.weight) ??
+                getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors)
+            if (validationError) {
+                return validationError
             }
             if (!(form.baseUrl ?? '').trim()) {
                 return 'notification.codex_base_url_required'
@@ -169,6 +179,7 @@ export function AiProvidersCodexEditPage() {
               runConnectivityTest,
               showTestError,
           }                = useProviderConnectivityTestState({
+                                                                  authIndex: form.authIndex,
                                                                   apiKey: form.apiKey,
                                                                   baseUrl: form.baseUrl,
                                                                   proxyUrl: form.proxyUrl,
@@ -281,6 +292,38 @@ export function AiProvidersCodexEditPage() {
                     </div>
                 }
             />
+            <div className='form-group'>
+                <ToggleSwitch
+                    label={t('ai_providers.codex_alpha_search_label')}
+                    checked={Boolean(form.alphaSearch)}
+                    onChange={(value) => setForm((prev) => ({...prev, alphaSearch: value}))}
+                    disabled={controlsDisabled}
+                />
+                <div className='hint'>{t('ai_providers.codex_alpha_search_hint')}</div>
+            </div>
+            <div className='form-group'>
+                <label htmlFor='codex-credential-cloaking'>{t('ai_providers.codex_cloaking_label')}</label>
+                <Select
+                    id='codex-credential-cloaking'
+                    ariaLabel={t('ai_providers.codex_cloaking_label')}
+                    ariaDescribedBy='codex-credential-cloaking-hint'
+                    value={form.disableCodexCloaking === undefined ? 'inherit' :
+                        form.disableCodexCloaking ? 'disabled' : 'enabled'}
+                    options={[
+                        {value: 'inherit', label: t('ai_providers.codex_cloaking_inherit')},
+                        {value: 'enabled', label: t('ai_providers.codex_cloaking_enabled')},
+                        {value: 'disabled', label: t('ai_providers.codex_cloaking_disabled')},
+                    ]}
+                    onChange={(value) => setForm((prev) => ({
+                        ...prev,
+                        disableCodexCloaking: value === 'inherit' ? undefined : value === 'disabled',
+                    }))}
+                    disabled={controlsDisabled}
+                />
+                <div className='hint' id='codex-credential-cloaking-hint'>
+                    {t('ai_providers.codex_cloaking_hint')}
+                </div>
+            </div>
             <ProviderModelSection
                 form={form}
                 setForm={setForm}

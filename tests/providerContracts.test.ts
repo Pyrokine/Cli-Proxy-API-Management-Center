@@ -109,10 +109,9 @@ describe('provider mutation contract', () => {
         expect(request.index).toBe(3)
         expect(request['auth-index']).toBe('gemini-auth')
         expect(request.value).not.toHaveProperty('api-key')
-        expect(request.value.priority).toBe(9)
-        expect(request.value.weight).toBe(0)
-        expect(request.value.prefix).toBe('')
-        expect(request.value.models).toEqual([])
+        expect(request.value).toMatchObject({priority: 9, weight: 0, prefix: ''})
+        expect(request.value).not.toHaveProperty('models')
+        expect(request.value).not.toHaveProperty('excluded-models')
     })
 
     test('Claude PATCH requires stable credential identity', () => {
@@ -134,7 +133,7 @@ describe('provider mutation contract', () => {
         expect(request.value.weight).toBeNull()
     })
 
-    test('Codex PATCH carries all editable fields and a changed secret', () => {
+    test('Codex PATCH carries changed editable fields and a changed secret', () => {
         const original = {
             apiKey: 'cod...tail',
             authIndex: 'codex-auth',
@@ -156,10 +155,10 @@ describe('provider mutation contract', () => {
 
         expect(request['auth-index']).toBe('codex-auth')
         expect(request.value['api-key']).toBe('new-secret')
-        expect(request.value.weight).toBe(3)
-        expect(request.value.websockets).toBe(true)
-        expect(request.value.models).toEqual([{ name: 'gpt-upstream', alias: 'gpt-alias' }])
-        expect(request.value['excluded-models']).toEqual(['gpt-old'])
+        expect(request.value).toHaveProperty('weight', 3)
+        expect(request.value).toHaveProperty('websockets', true)
+        expect(request.value).toHaveProperty('models', [{ name: 'gpt-upstream', alias: 'gpt-alias' }])
+        expect(request.value).toHaveProperty('excluded-models', ['gpt-old'])
     })
 
     test('OpenAI PATCH identifies the original provider name', () => {
@@ -267,19 +266,21 @@ describe('provider mutation contract', () => {
                                                                 })
         const patch = spyOn(apiClient, 'patch').mockResolvedValue({ status: 'ok' })
 
-        const keys = await providersApi.getInteractionsKeys()
-        expect(get).toHaveBeenCalledWith('/interactions-api-key')
-        expect(keys[0]).toMatchObject({ apiKey: 'masked-key', authIndex: 'interactions-auth', weight: 0 })
+        try {
+            const keys = await providersApi.getInteractionsKeys()
+            expect(get).toHaveBeenCalledWith('/interactions-api-key')
+            expect(keys[0]).toMatchObject({ apiKey: 'masked-key', authIndex: 'interactions-auth', weight: 0 })
 
-        await providersApi.patchInteractionsKey(0, { ...keys[0]!, weight: 3 }, keys[0]!)
-        expect(patch).toHaveBeenCalledWith('/interactions-api-key', {
-            index: 0,
-            'auth-index': 'interactions-auth',
-            value: expect.objectContaining({ weight: 3 }),
-        })
-
-        get.mockRestore()
-        patch.mockRestore()
+            await providersApi.patchInteractionsKey(0, { ...keys[0]!, weight: 3 }, keys[0]!)
+            expect(patch).toHaveBeenCalledWith('/interactions-api-key', {
+                index: 0,
+                'auth-index': 'interactions-auth',
+                value: expect.objectContaining({ weight: 3 }),
+            }, {__authGeneration: apiClient.getAuthGeneration()})
+        } finally {
+            get.mockRestore()
+            patch.mockRestore()
+        }
     })
 
     test('normalizes provider and API-key entry weights without losing explicit zero', () => {

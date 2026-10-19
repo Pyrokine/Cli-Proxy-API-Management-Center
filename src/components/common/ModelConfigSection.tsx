@@ -26,6 +26,8 @@ interface ModelConfigSectionProps<F extends { modelEntries: ModelEntry[] }> {
     fetchDisabled?: boolean
     /** Stable focus target used when returning from route-backed discovery */
     fetchButtonId?: string
+    /** Backend model contract used to show supported fields */
+    provider: 'claude' | 'openai'
     /** Content rendered after the ModelInputList (e.g. ModelTestPanel) */
     children?: ReactNode
 }
@@ -45,6 +47,7 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                                                                                  disabled,
                                                                                  fetchDisabled,
                                                                                  fetchButtonId,
+                                                                                 provider,
                                                                                  children,
                                                                              }: ModelConfigSectionProps<F>) {
     const { t } = useTranslation()
@@ -89,6 +92,7 @@ export function ModelConfigSection<F extends { modelEntries: ModelEntry[] }>({
                 disabled={disabled}
                 hideAddButton
                 metadataEditing
+                provider={provider}
                 className={styles.modelInputList}
                 rowClassName={styles.modelInputRow}
                 inputClassName={styles.modelInputField}

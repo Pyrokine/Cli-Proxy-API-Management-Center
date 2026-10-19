@@ -1,6 +1,6 @@
-import {CredentialOverrideFields} from '@/components/providers/CredentialOverrideFields'
+import {CredentialOverrideFields, RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {Button} from '@/components/ui/Button'
-import type {CredentialOverrides} from '@/types'
+import type {CredentialOverrides, RequestScopedErrorRule} from '@/types'
 import {HeaderInputList} from '@/components/ui/HeaderInputList'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
@@ -106,6 +106,7 @@ export function PrefixField<T extends { prefix?: string }>({ form, setForm, disa
 }
 
 interface ProviderConnectionForm extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
     priority?: number
     weight?: number
@@ -128,6 +129,7 @@ interface ProviderConnectionFieldsProps<T extends ProviderConnectionForm> {
     onApiKeyChange?: (value: string) => void
     onHeadersChange?: (headers: HeaderEntry[]) => void
     afterBaseUrl?: ReactNode
+    supportsErrorRules?: boolean
 }
 
 export function ProviderConnectionFields<T extends ProviderConnectionForm>({
@@ -143,6 +145,7 @@ export function ProviderConnectionFields<T extends ProviderConnectionForm>({
                                                                                onApiKeyChange,
                                                                                onHeadersChange,
                                                                                afterBaseUrl,
+                                                                               supportsErrorRules = true,
                                                                            }: ProviderConnectionFieldsProps<T>) {
     return (
         <>
@@ -168,6 +171,13 @@ export function ProviderConnectionFields<T extends ProviderConnectionForm>({
                 disabled={disabled}
                 onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
             />
+            {supportsErrorRules && (
+                <RequestScopedErrorsField
+                    rules={form.requestScopedErrors}
+                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    disabled={disabled}
+                />
+            )}
             <PrefixField form={form} setForm={setForm} disabled={disabled} />
             <Input
                 label={baseUrlLabel}
@@ -281,8 +291,8 @@ interface ModelConfigSectionProps {
     onChange: (entries: ModelEntry[]) => void
     onAddRow: () => void
     disabled: boolean
-    /** Translation key prefix for labels (e.g. 'codex', 'gemini') */
-    i18nPrefix: string
+    /** Translation key prefix for labels and provider model capabilities */
+    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta'
     /** If provided, shows a "Discover Models" button */
     onDiscovery?: () => void
     discoveryDisabled?: boolean
@@ -324,6 +334,7 @@ function ModelConfigSection({
                 disabled={disabled}
                 hideAddButton
                 metadataEditing
+                provider={i18nPrefix}
                 className={styles.modelInputList}
                 rowClassName={styles.modelInputRow}
                 inputClassName={styles.modelInputField}
@@ -373,7 +384,7 @@ interface ProviderModelSectionProps<
     disabled: boolean
     discovery: ModelDiscoveryReturn
     discoveryDisabled?: boolean
-    i18nPrefix: string
+    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta'
     children?: ReactNode
 }
 

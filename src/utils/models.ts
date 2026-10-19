@@ -15,6 +15,7 @@ const MODEL_CATEGORIES = [
     { id: 'gpt', label: 'GPT' },
     { id: 'claude', label: 'Claude' },
     { id: 'gemini', label: 'Gemini' },
+    { id: 'meta', label: 'Muse' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'qwen', label: 'Qwen' },
     { id: 'glm', label: 'GLM' },

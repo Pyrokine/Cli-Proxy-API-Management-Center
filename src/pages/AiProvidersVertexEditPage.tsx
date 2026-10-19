@@ -69,11 +69,13 @@ export function AiProvidersVertexEditPage() {
                             if (!name || !alias) {
                                 return null
                             }
-                            const thinking = normalizeModelThinking(entry.thinking)
+                            const thinking    = normalizeModelThinking(entry.thinking)
+                            const displayName = entry.displayName?.trim()
                             return {
                                 name,
                                 alias,
-                                ...(thinking ? { thinking } : {}),
+                                ...(displayName ? {displayName} : {}),
+                                ...(thinking ? {thinking} : {}),
                             }
                         })
                         .filter(Boolean) as ProviderKeyConfig['models'],
@@ -122,6 +124,7 @@ export function AiProvidersVertexEditPage() {
                 form={form}
                 setForm={setForm}
                 disabled={disabled}
+                supportsErrorRules={false}
                 apiKeyLabel={t('ai_providers.vertex_add_modal_key_label')}
                 apiKeyPlaceholder={t('ai_providers.vertex_add_modal_key_placeholder')}
                 baseUrlLabel={t('ai_providers.vertex_add_modal_url_label')}
@@ -140,6 +143,8 @@ export function AiProvidersVertexEditPage() {
                     removeButtonTitle={t('common.delete')}
                     removeButtonAriaLabel={t('common.delete')}
                     disabled={disabled}
+                    metadataEditing
+                    provider='vertex'
                 />
                 <div className='hint'>{t('ai_providers.vertex_models_hint')}</div>
             </div>

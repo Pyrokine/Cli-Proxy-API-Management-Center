@@ -9,6 +9,7 @@ import iconGrok from '@/assets/icons/grok.svg'
 import iconIflow from '@/assets/icons/iflow.svg'
 import iconKimiDark from '@/assets/icons/kimi-dark.svg'
 import iconKimiLight from '@/assets/icons/kimi-light.svg'
+import iconMeta from '@/assets/icons/meta.svg'
 import iconOpenaiDark from '@/assets/icons/openai-dark.svg'
 import iconOpenaiLight from '@/assets/icons/openai-light.svg'
 import iconQwen from '@/assets/icons/qwen.svg'
@@ -22,12 +23,15 @@ import {
     VendorSection,
 } from '@/components/credentials'
 import {
+    type AuthFileMutation,
     authFileRefreshIdentifiers,
+    authFileSelectionKey,
     createLatestCredentialsRequestTracker,
+    selectedPhysicalFileNames,
 } from '@/components/credentials/credentialsDataLifecycle'
 import {useBackendQuotaRegistration} from '@/components/credentials/hooks/useBackendQuotaRegistration'
 import {Button} from '@/components/ui/Button'
-import {IconSearch} from '@/components/ui/icons'
+import {IconKey, IconSearch} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {MultiSelect} from '@/components/ui/MultiSelect'
 import {Tabs} from '@/components/ui/Tabs'
@@ -39,7 +43,9 @@ import {apiKeyAliasApi} from '@/services/api/apiKeys'
 import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {type SummaryApiKeyStats, type SummaryTimePoint, usageApi} from '@/services/api/usage'
-import {useConfigStore, useThemeStore} from '@/stores'
+import {useAuthStore, useConfigStore, useThemeStore} from '@/stores'
+import {useAuthFileRefreshStore} from '@/stores/useAuthFileRefreshStore'
+import {useAuthFileStatusStore} from '@/stores/useAuthFileStatusStore'
 import {useNotificationStore} from '@/stores/useNotificationStore'
 import {resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {formatDateTime} from '@/utils/format'
@@ -141,6 +147,7 @@ function loadCredentialsUIState(): CredentialsUIState {
 export default function CredentialsPage() {
     const { t }                                 = useTranslation()
     const config                                = useConfigStore((s) => s.config)
+    const connectionStatus                      = useAuthStore((state) => state.connectionStatus)
     const showNotification                      = useNotificationStore((s) => s.showNotification)
     const showConfirmation                      = useNotificationStore((s) => s.showConfirmation)
     const [initialUIState]                      = useState(loadCredentialsUIState)
@@ -152,9 +159,14 @@ export default function CredentialsPage() {
     const [activeTab, setActiveTab]             = useState<CredentialsTab>('credentials')
 
     // Batch operations
-    const [selectedItems, setSelectedItems]                       = useState<Set<string>>(new Set())
-    const [batchBusy, setBatchBusy]                               = useState(false)
-    const [visibleAuthFilesByVendor, setVisibleAuthFilesByVendor] = useState<Record<string, string[]>>({})
+    const [selectedItems, setSelectedItems]                               = useState<Set<string>>(new Set())
+    const [batchGeneration, setBatchGeneration]                           = useState<number | null>(null)
+    const batchBusy                                                      = batchGeneration === apiClient.getAuthGeneration()
+    const tokenRefreshRequest                                            = useAuthFileRefreshStore((state) => state.request)
+    const tokenRefreshBusy                                               = tokenRefreshRequest?.generation === apiClient.getAuthGeneration()
+    const statusChangeBusy                                               = useAuthFileStatusStore((state) =>
+        Array.from(state.requests.values()).some((request) => request.generation === apiClient.getAuthGeneration()))
+    const [visibleAuthFileKeysByVendor, setVisibleAuthFileKeysByVendor]   = useState<Record<string, string[]>>({})
 
     // Vendor drag-to-reorder
     const dragVendorRef                 = useRef<string | null>(null)
@@ -171,6 +183,7 @@ export default function CredentialsPage() {
                                      Gemini: makeIconComponent(iconGemini, 'Gemini'),
                                      Claude: makeIconComponent(iconClaude, 'Claude'),
                                      Codex: makeThemedIconComponent(iconCodexLight, iconCodexDark, 'Codex'),
+                                     Meta: makeIconComponent(iconMeta, 'Muse (Meta)'),
                                      Vertex: makeIconComponent(iconVertex, 'Vertex'),
                                      OpenAI: makeThemedIconComponent(iconOpenaiLight, iconOpenaiDark, 'OpenAI'),
                                      Kimi: makeThemedIconComponent(iconKimiLight, iconKimiDark, 'Kimi'),
@@ -178,6 +191,7 @@ export default function CredentialsPage() {
                                      IFlow: makeIconComponent(iconIflow, 'iFlow'),
                                      Grok: makeThemedIconComponent(iconGrok, iconGrokDark, 'Grok'),
                                      Devin: makeThemedIconComponent(iconDevin, iconDevinDark, 'Devin'),
+                                     Generic: IconKey,
                                  })
                 .map((vendor) => ({
                     ...vendor,
@@ -336,6 +350,14 @@ export default function CredentialsPage() {
     }, [markRefreshed, refreshAllCredentials])
     useHeaderRefresh(handleRefresh)
 
+    const handleCredentialsChanged = useCallback(async (names?: string[]) => {
+        const generation = apiClient.getAuthGeneration()
+        await Promise.all([completeMutation({kind: 'reload', names}), refreshCredentialInsights()])
+        if (generation === apiClient.getAuthGeneration()) {
+            markRefreshed()
+        }
+    }, [completeMutation, markRefreshed, refreshCredentialInsights])
+
     const handleAliasChange = useCallback(
         async (apiKey: string, alias: string) => {
             try {
@@ -355,27 +377,29 @@ export default function CredentialsPage() {
     )
 
     // Batch operations
-    const visibleAuthFileNames = useMemo(() => {
+    const visibleAuthFileKeys = useMemo(() => {
         if (typeFilter === 'api-key') {
             return []
         }
-        const vendorSet       = selectedVendors.length > 0 ? new Set(selectedVendors) : null
-        const names: string[] = []
-        for (const [vendorId, fileNames] of Object.entries(visibleAuthFilesByVendor)) {
+        const vendorSet = selectedVendors.length > 0 ? new Set(selectedVendors) : null
+        const keys = new Set<string>()
+        for (const [vendorId, fileKeys] of Object.entries(visibleAuthFileKeysByVendor)) {
             if (vendorSet && !vendorSet.has(vendorId)) {
                 continue
             }
-            names.push(...fileNames)
+            fileKeys.forEach((key) => keys.add(key))
         }
-        return names
-    }, [visibleAuthFilesByVendor, typeFilter, selectedVendors])
+        return Array.from(keys)
+    }, [visibleAuthFileKeysByVendor, typeFilter, selectedVendors])
 
-    const selectedVisibleItems = useMemo(() => {
-        const visible = new Set(visibleAuthFileNames)
-        return Array.from(selectedItems).filter((name) => visible.has(name))
-    }, [selectedItems, visibleAuthFileNames])
-
-    const selectedVisibleCount = selectedVisibleItems.length
+    const selectedVisibleKeys = useMemo(() => {
+        const visible = new Set(visibleAuthFileKeys)
+        return new Set(Array.from(selectedItems).filter((key) => visible.has(key)))
+    }, [selectedItems, visibleAuthFileKeys])
+    const selectedVisibleAuthFiles = useMemo(() => authFiles.filter(
+        (file) => selectedVisibleKeys.has(authFileSelectionKey(file)),
+    ), [authFiles, selectedVisibleKeys])
+    const selectedVisibleCount = selectedVisibleAuthFiles.length
 
     const handleToggleSelect = useCallback((id: string) => {
         setSelectedItems((prev) => {
@@ -390,53 +414,67 @@ export default function CredentialsPage() {
     }, [])
 
     const handleSelectAll = useCallback(() => {
-        setSelectedItems(new Set(visibleAuthFileNames))
-    }, [visibleAuthFileNames])
+        setSelectedItems(new Set(visibleAuthFileKeys))
+    }, [visibleAuthFileKeys])
 
     const handleDeselectAll = useCallback(() => {
         setSelectedItems(new Set())
     }, [])
 
-    const handleSelectVendorFiles = useCallback((fileNames: string[], selected: boolean) => {
+    const handleSelectVendorFiles = useCallback((fileKeys: string[], selected: boolean) => {
         setSelectedItems((prev) => {
             const next = new Set(prev)
-            for (const name of fileNames) {
+            for (const key of fileKeys) {
                 if (selected) {
-                    next.add(name)
+                    next.add(key)
                 } else {
-                    next.delete(name)
+                    next.delete(key)
                 }
             }
             return next
         })
     }, [])
 
-    const handleVisibleAuthFilesChange = useCallback((vendorId: string, fileNames: string[]) => {
-        setVisibleAuthFilesByVendor((prev) => {
+    const handleVisibleAuthFilesChange = useCallback((vendorId: string, fileKeys: string[]) => {
+        setVisibleAuthFileKeysByVendor((prev) => {
             const previous = prev[vendorId] ?? []
-            if (previous.length === fileNames.length && previous.every((name, index) => name === fileNames[index])) {
+            if (previous.length === fileKeys.length && previous.every((key, index) => key === fileKeys[index])) {
                 return prev
             }
-            return { ...prev, [vendorId]: fileNames }
+            return { ...prev, [vendorId]: fileKeys }
         })
     }, [])
 
     const handleBatchDelete = useCallback(() => {
-        if (selectedVisibleItems.length === 0) {
+        if (selectedVisibleCount === 0) {
             return
         }
-        const names = selectedVisibleItems
+        const names = selectedPhysicalFileNames(authFiles, selectedVisibleKeys)
+        if (!names) {
+            showNotification(t('credentials.batch_file_action_requires_all_identities'), 'warning')
+            return
+        }
+        const generation = apiClient.getAuthGeneration()
         showConfirmation({
                              title: t('credentials.batch_delete_title'),
                              message: t('credentials.batch_delete_confirm', { count: names.length }),
                              confirmText: t('common.delete'),
                              onConfirm: async () => {
-                                 setBatchBusy(true)
+                                 if (generation !== apiClient.getAuthGeneration()) {
+                                     throw new Error(t('common.connection_changed'))
+                                 }
+                                 setBatchGeneration(generation)
                                  try {
                                      const result = await authFilesApi.deleteFiles(names)
+                                     if (generation !== apiClient.getAuthGeneration()) {
+                                         return
+                                     }
                                      if (result.files.length > 0) {
                                          setSelectedItems(new Set())
                                          await completeMutation({ kind: 'delete', names: result.files })
+                                         if (generation !== apiClient.getAuthGeneration()) {
+                                             return
+                                         }
                                          markRefreshed()
                                      }
                                      if (result.failed.length === 0) {
@@ -454,19 +492,28 @@ export default function CredentialsPage() {
                                          )
                                      }
                                  } finally {
-                                     setBatchBusy(false)
+                                     setBatchGeneration((previous) => previous === generation ? null : previous)
                                  }
                              },
                          })
-    }, [selectedVisibleItems, showConfirmation, showNotification, t, completeMutation, markRefreshed])
+    }, [authFiles, selectedVisibleKeys, selectedVisibleCount, showConfirmation, showNotification, t, completeMutation, markRefreshed])
 
     const handleBatchDownload = useCallback(async () => {
-        if (selectedVisibleItems.length === 0) {
+        if (selectedVisibleCount === 0) {
             return
         }
-        setBatchBusy(true)
+        const names = selectedPhysicalFileNames(authFiles, selectedVisibleKeys)
+        if (!names) {
+            showNotification(t('credentials.batch_file_action_requires_all_identities'), 'warning')
+            return
+        }
+        const generation = apiClient.getAuthGeneration()
+        setBatchGeneration(generation)
         try {
-            const result = await downloadAuthFilesBatch(selectedVisibleItems, authFilesApi.download)
+            const result = await downloadAuthFilesBatch(names, authFilesApi.download)
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
             if (result.failed.length === 0) {
                 showNotification(
                     t('auth_files.batch_download_success', {
@@ -487,33 +534,38 @@ export default function CredentialsPage() {
                 )
             }
         } finally {
-            setBatchBusy(false)
+            setBatchGeneration((previous) => previous === generation ? null : previous)
         }
-    }, [selectedVisibleItems, showNotification, t])
+    }, [authFiles, selectedVisibleKeys, selectedVisibleCount, showNotification, t])
 
     const handleBatchRefresh = useCallback(async () => {
-        if (selectedVisibleItems.length === 0) {
+        if (selectedVisibleCount === 0) {
             return
         }
-        const {identifiers: refreshableItems, skippedDisabled} = authFileRefreshIdentifiers(
-            authFiles,
-            selectedVisibleItems,
-        )
+        const {identifiers: refreshableItems, skippedDisabled, skippedUnsupported, skippedAmbiguous} =
+            authFileRefreshIdentifiers(authFiles, selectedVisibleKeys)
         if (refreshableItems.length === 0) {
             showNotification(
-                t('credentials.batch_refresh_disabled_only', {
-                    defaultValue:
-                        'Selected credentials are disabled. Enable them or use ' +
-                        'the card refresh button to verify one account manually.',
-                }),
+                skippedAmbiguous > 0 ?
+                t('credentials.batch_refresh_requires_all_identities') :
+                skippedUnsupported > 0 ?
+                t('credentials.batch_refresh_none_supported') :
+                t('credentials.batch_refresh_disabled_only'),
                 'warning',
             )
             return
         }
-        setBatchBusy(true)
+        const generation = apiClient.getAuthGeneration()
+        setBatchGeneration(generation)
         try {
             await quotaScheduler.refreshMany(refreshableItems)
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
             await refresh()
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
             markRefreshed()
             if (skippedDisabled > 0) {
                 showNotification(
@@ -526,37 +578,70 @@ export default function CredentialsPage() {
                     'warning',
                 )
             }
+            if (skippedUnsupported > 0) {
+                showNotification(
+                    t('credentials.batch_refresh_skipped_unsupported', {count: skippedUnsupported}),
+                    'warning',
+                )
+            }
+            if (skippedAmbiguous > 0) {
+                showNotification(t('credentials.batch_refresh_requires_all_identities'), 'warning')
+            }
         } finally {
-            setBatchBusy(false)
+            setBatchGeneration((previous) => previous === generation ? null : previous)
         }
-    }, [selectedVisibleItems, authFiles, quotaScheduler, refresh, markRefreshed, showNotification, t])
+    }, [authFiles, selectedVisibleKeys, selectedVisibleCount, quotaScheduler, refresh, markRefreshed, showNotification, t])
 
     const handleBatchSetDisabled = useCallback(
         async (disabled: boolean) => {
-            if (selectedVisibleItems.length === 0) {
+            if (selectedVisibleCount === 0 || batchBusy) {
                 return
             }
-            const names = selectedVisibleItems
-            setBatchBusy(true)
-            try {
-                const result = disabled ? await authFilesApi.bulkDisable(names) : await authFilesApi.bulkEnable(names)
-                await completeMutation({ kind: 'status', names: result.updated, disabled })
-                markRefreshed()
-                const failed = result.failed ? Object.entries(result.failed) : []
-                if (failed.length === 0) {
-                    showNotification(t('common.success'), 'success')
-                } else {
-                    const details = failed.map(([name, message]) => `${name}: ${message}`).join('; ')
-                    showNotification(
-                        `${t('common.success')} (${result.updated.length}/${names.length}): ${details}`,
-                        'warning',
-                    )
+            const generation = apiClient.getAuthGeneration()
+            if (Array.from(useAuthFileStatusStore.getState().requests.values()).some(
+                (request) => request.generation === generation,
+            )) {
+                showNotification(t('credentials.status_update_in_progress'), 'warning')
+                return
+            }
+            const results = await Promise.allSettled(selectedVisibleAuthFiles.map(
+                (file) => authFilesApi.setStatus(file.name, disabled, file.authIndex),
+            ))
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
+            const failed = results.flatMap((result, index) => {
+                if (result.status === 'fulfilled') {
+                    return []
                 }
-            } finally {
-                setBatchBusy(false)
+                const file = selectedVisibleAuthFiles[index]
+                const label = `${file.name}${file.authIndex == null ? '' : ` (${file.authIndex})`}`
+                const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+                return [`${label}: ${reason}`]
+            })
+            const mutations = results.flatMap<AuthFileMutation>((result, index) => {
+                if (result.status !== 'fulfilled') {
+                    return []
+                }
+                const file = selectedVisibleAuthFiles[index]
+                return [{kind: 'status', names: [file.name], authIndex: file.authIndex, disabled: result.value.disabled}]
+            })
+            await completeMutation(mutations)
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
+            markRefreshed()
+            if (failed.length === 0) {
+                showNotification(t('common.success'), 'success')
+            } else {
+                showNotification(t('credentials.batch_status_partial', {
+                    success: results.length - failed.length,
+                    total: results.length,
+                    details: failed.join('; '),
+                }), failed.length === results.length ? 'error' : 'warning')
             }
         },
-        [selectedVisibleItems, completeMutation, markRefreshed, showNotification, t],
+        [selectedVisibleAuthFiles, selectedVisibleCount, batchBusy, completeMutation, markRefreshed, showNotification, t],
     )
 
     return (
@@ -641,7 +726,7 @@ export default function CredentialsPage() {
                     <span className={styles.batchCount}>
                         {t('credentials.batch_selected', {
                             selected: selectedVisibleCount,
-                            total: visibleAuthFileNames.length,
+                            total: visibleAuthFileKeys.length,
                         })}
                     </span>
                 </div>
@@ -681,7 +766,7 @@ export default function CredentialsPage() {
                                 variant='ghost'
                                 size='sm'
                                 onClick={() => void handleBatchRefresh()}
-                                disabled={selectedVisibleCount === 0 || batchBusy}
+                                disabled={selectedVisibleCount === 0 || batchBusy || tokenRefreshBusy || statusChangeBusy}
                             >
                                 {t('credentials.batch_refresh', { defaultValue: 'Refresh Selected' })}
                             </Button>
@@ -689,7 +774,7 @@ export default function CredentialsPage() {
                                 variant='ghost'
                                 size='sm'
                                 onClick={() => void handleBatchDownload()}
-                                disabled={selectedVisibleCount === 0 || batchBusy}
+                                disabled={selectedVisibleCount === 0 || batchBusy || tokenRefreshBusy || statusChangeBusy}
                             >
                                 {t('auth_files.batch_download', { defaultValue: 'Download Selected' })}
                             </Button>
@@ -697,7 +782,7 @@ export default function CredentialsPage() {
                                 variant='ghost'
                                 size='sm'
                                 onClick={() => void handleBatchSetDisabled(false)}
-                                disabled={selectedVisibleCount === 0 || batchBusy}
+                                disabled={selectedVisibleCount === 0 || batchBusy || tokenRefreshBusy || statusChangeBusy}
                             >
                                 {t('credentials.batch_enable_selected', { defaultValue: 'Enable Selected' })}
                             </Button>
@@ -705,7 +790,7 @@ export default function CredentialsPage() {
                                 variant='ghost'
                                 size='sm'
                                 onClick={() => void handleBatchSetDisabled(true)}
-                                disabled={selectedVisibleCount === 0 || batchBusy}
+                                disabled={selectedVisibleCount === 0 || batchBusy || tokenRefreshBusy || statusChangeBusy}
                             >
                                 {t('credentials.batch_disable_selected', { defaultValue: 'Disable Selected' })}
                             </Button>
@@ -725,7 +810,7 @@ export default function CredentialsPage() {
                         size='sm'
                         fullWidth
                         onClick={handleBatchDelete}
-                        disabled={selectedVisibleCount === 0 || batchBusy}
+                        disabled={selectedVisibleCount === 0 || batchBusy || tokenRefreshBusy || statusChangeBusy}
                         loading={batchBusy}
                     >
                         {t('credentials.batch_delete')}
@@ -735,7 +820,7 @@ export default function CredentialsPage() {
 
             {error && <div className={styles.error}>{error}</div>}
 
-            {activeTab === 'inspection' && <AccountInspectionPanel onCredentialsChanged={handleRefresh} />}
+            {activeTab === 'inspection' && <AccountInspectionPanel onCredentialsChanged={handleCredentialsChanged} />}
 
             {activeTab ===
              'credentials' &&
@@ -772,7 +857,7 @@ export default function CredentialsPage() {
                              data={vendorData.get(vendor.id) ?? { apiKeys: [], authFiles: [] }}
                              aliases={aliases}
                              onAliasChange={handleAliasChange}
-                             disableControls={loading || batchBusy}
+                             disableControls={connectionStatus !== 'connected' || loading || batchBusy || tokenRefreshBusy}
                              onRefresh={handleRefresh}
                              onAuthFileMutation={completeMutation}
                              searchQuery={searchQuery}

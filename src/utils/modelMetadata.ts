@@ -1,8 +1,18 @@
 import type {ModelAlias, ModelThinking} from '@/types'
 
-type ModelMetadata = Pick<ModelAlias, 'maxContextLength' | 'thinking'>
+type ModelMetadata = Pick<ModelAlias,
+    'maxContextLength' | 'thinking' | 'displayName' | 'forceMapping' | 'isCompat' |
+    'supportConfigurationUpdate' | 'useMaxCompletionTokens' | 'image' |
+    'inputModalities' | 'outputModalities'>
 
 const MAX_CONTEXT_LENGTH_KEYS = ['maxContextLength', 'max-context-length', 'max_context_length'] as const
+const BOOLEAN_MODEL_FIELDS = [
+    ['forceMapping', 'force-mapping'],
+    ['isCompat', 'is-compat'],
+    ['supportConfigurationUpdate', 'support-configuration-update'],
+    ['useMaxCompletionTokens', 'use-max-completion-tokens'],
+    ['image', 'image'],
+] as const
 const ZERO_ALLOWED_KEYS       = ['zeroAllowed', 'zero_allowed', 'zero-allowed'] as const
 const DYNAMIC_ALLOWED_KEYS    = ['dynamicAllowed', 'dynamic_allowed', 'dynamic-allowed'] as const
 
@@ -32,7 +42,7 @@ const normalizeInteger = (value: unknown): number | undefined => {
     return Number.isInteger(parsed) ? parsed : undefined
 }
 
-export const normalizeMaxContextLength = (value: unknown): number | undefined => {
+const normalizeMaxContextLength = (value: unknown): number | undefined => {
     const parsed = normalizeInteger(value)
     return parsed !== undefined && parsed > 0 ? parsed : undefined
 }
@@ -105,6 +115,26 @@ export const normalizeModelMetadata = (value: unknown): ModelMetadata => {
     if (thinking) {
         metadata.thinking = thinking
     }
+    const displayName = readOwnValue(value, ['displayName', 'display-name', 'display_name'])
+    if (typeof displayName.value === 'string' && displayName.value.trim()) {
+        metadata.displayName = displayName.value.trim()
+    }
+    for (const [field, wireName] of BOOLEAN_MODEL_FIELDS) {
+        const normalized = normalizeBoolean(readOwnValue(value, [field, wireName]).value)
+        if (normalized !== undefined) {
+            metadata[field] = normalized
+        }
+    }
+    const inputModalities = readOwnValue(value, ['inputModalities', 'input-modalities'])
+    const outputModalities = readOwnValue(value, ['outputModalities', 'output-modalities'])
+    if (inputModalities.found && Array.isArray(inputModalities.value) &&
+        inputModalities.value.every((item) => typeof item === 'string')) {
+        metadata.inputModalities = [...inputModalities.value]
+    }
+    if (outputModalities.found && Array.isArray(outputModalities.value) &&
+        outputModalities.value.every((item) => typeof item === 'string')) {
+        metadata.outputModalities = [...outputModalities.value]
+    }
     return metadata
 }
 
@@ -130,6 +160,9 @@ export const normalizeModelEntriesForSignature = (
         alias?: string
         maxContextLength?: number
         thinking?: ModelThinking
+        maxContextLengthDraft?: string
+        thinkingMinDraft?: string
+        thinkingMaxDraft?: string
     }>,
     options: {
         normalizeName?: (name: string) => string
@@ -148,7 +181,13 @@ export const normalizeModelEntriesForSignature = (
         if (!name) {
             return acc
         }
-        acc.push({ name, alias, ...normalizeModelMetadata(entry) })
+        const numericDrafts = [entry.maxContextLengthDraft, entry.thinkingMinDraft, entry.thinkingMaxDraft]
+        acc.push({
+            name,
+            alias,
+            ...normalizeModelMetadata(entry),
+            ...(numericDrafts.some((draft) => draft !== undefined) ? {numericDrafts} : {}),
+        })
         return acc
     }, [])
 }
@@ -187,6 +226,20 @@ export const serializeModelMetadataForManagement = (value: unknown): Record<stri
     const output: Record<string, unknown> = {}
     if (metadata.maxContextLength !== undefined) {
         output['max-context-length'] = metadata.maxContextLength
+    }
+    if (metadata.displayName !== undefined) {
+        output['display-name'] = metadata.displayName
+    }
+    for (const [field, wireName] of BOOLEAN_MODEL_FIELDS) {
+        if (metadata[field] !== undefined) {
+            output[wireName] = metadata[field]
+        }
+    }
+    if (metadata.inputModalities !== undefined) {
+        output['input-modalities'] = metadata.inputModalities
+    }
+    if (metadata.outputModalities !== undefined) {
+        output['output-modalities'] = metadata.outputModalities
     }
     const thinking = serializeThinking(metadata.thinking, 'zero_allowed', 'dynamic_allowed')
     if (thinking) {

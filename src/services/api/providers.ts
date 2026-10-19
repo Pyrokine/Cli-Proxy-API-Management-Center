@@ -2,7 +2,11 @@
  * AI 提供商相关 API
  */
 
-import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ModelAlias, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import i18n from '@/i18n'
+import type {
+    ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ModelAlias,
+    OpenAIProviderConfig, ProviderKeyConfig, RequestScopedErrorRule,
+} from '@/types'
 import {serializeModelMetadataForManagement, serializeModelThinkingForManagement} from '@/utils/modelMetadata'
 import {apiClient} from './client'
 import {
@@ -55,9 +59,6 @@ const serializeModelAliases = (models?: ModelAlias[]) =>
             if (model.priority !== undefined) {
                 payload.priority = model.priority
             }
-            if (model.testModel) {
-                payload['test-model'] = model.testModel
-            }
             return payload
         })
         .filter((model): model is Record<string, unknown> => Boolean(model))
@@ -77,6 +78,13 @@ const serializeApiKeyEntry = (entry: ApiKeyEntry) => {
     }
     return payload
 }
+
+const serializeRequestScopedErrors = (rules?: RequestScopedErrorRule[]) => rules?.map((rule) => ({
+    ...(rule.status !== undefined ? {status: rule.status} : {}),
+    ...(rule.match !== undefined ? {match: rule.match} : {}),
+    ...(rule.matchRegex !== undefined ? {'match-regexr': rule.matchRegex} : {}),
+    ...(rule.action !== undefined ? {action: rule.action} : {}),
+}))
 
 const serializeCredentialOverrides = (config: CredentialOverrides): Record<string, unknown> => {
     if (config.disableCooling !== undefined && typeof config.disableCooling !== 'boolean') {
@@ -99,6 +107,28 @@ const buildCredentialOverridePatch = (config: CredentialOverrides, original: Cre
             (current[key] ?? null) === (previous[key] ?? null) ? [] : [[key, current[key] ?? null]],
         ),
     )
+}
+
+const changedProviderFields = (current: Record<string, unknown>, original: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(current).filter(([key, value]) =>
+        JSON.stringify(value) !== JSON.stringify(original[key])))
+
+const unchangedProviderIndex = async <T extends {authIndex?: string}>(
+    fetch: () => Promise<T[]>, original: T,
+): Promise<{index: number; generation: number}> => {
+    const generation = apiClient.getAuthGeneration()
+    const latest = await fetch()
+    const authIndex = original.authIndex?.trim()
+    const snapshot = JSON.stringify(original)
+    const matches = latest.flatMap((entry, entryIndex) =>
+        (authIndex ? entry.authIndex?.trim() === authIndex : JSON.stringify(entry) === snapshot) ? [entryIndex] : [])
+    if (generation !== apiClient.getAuthGeneration()) {
+        throw new Error(i18n.t('common.connection_changed'))
+    }
+    if (matches.length !== 1 || JSON.stringify(latest[matches[0]]) !== snapshot) {
+        throw new Error(i18n.t('ai_providers.provider_changed'))
+    }
+    return {index: matches[0]!, generation}
 }
 
 const serializeBaseKeyPayload = (config: CredentialOverrides & {
@@ -144,8 +174,11 @@ const serializeCloakConfig = (config: ProviderKeyConfig['cloak']): Record<string
     }
 }
 
-const serializeProviderKey = (config: ProviderKeyConfig, provider?: 'claude') => {
+const serializeProviderKey = (config: ProviderKeyConfig, provider?: 'claude' | 'codex') => {
     const payload = serializeBaseKeyPayload(config)
+    if (config.requestScopedErrors !== undefined) {
+        payload['request-scoped-errors'] = serializeRequestScopedErrors(config.requestScopedErrors)
+    }
     if (config.websockets !== undefined) {
         payload.websockets = config.websockets
     }
@@ -160,8 +193,21 @@ const serializeProviderKey = (config: ProviderKeyConfig, provider?: 'claude') =>
     if (cloak) {
         payload.cloak = cloak
     }
-    if (provider === 'claude' && config.fingerprintProfile !== undefined) {
-        payload['fingerprint-profile'] = normalizeClaudeFingerprintProfile(config.fingerprintProfile)
+    if (provider === 'claude') {
+        if (config.fingerprintProfile !== undefined) {
+            payload['fingerprint-profile'] = normalizeClaudeFingerprintProfile(config.fingerprintProfile)
+        }
+        if (config.rebuildMidSystemMessage !== undefined) {
+            payload['rebuild-mid-system-message'] = config.rebuildMidSystemMessage
+        }
+    }
+    if (provider === 'codex') {
+        if (config.alphaSearch !== undefined) {
+            payload['alpha-search'] = config.alphaSearch
+        }
+        if (config.disableCodexCloaking !== undefined) {
+            payload['disable-codex-cloaking'] = config.disableCodexCloaking
+        }
     }
     return payload
 }
@@ -191,6 +237,8 @@ export const buildClaudeConfigPatchPayload = (config: ProviderKeyConfig, origina
         })),
         'excluded-models': item.excludedModels ?? [],
         cloak: serializeCloakConfig(item.cloak),
+        'rebuild-mid-system-message': Boolean(item.rebuildMidSystemMessage),
+        'request-scoped-errors': serializeRequestScopedErrors(item.requestScopedErrors),
     }))
     const payload: Record<string, unknown> = {
         ...Object.fromEntries(
@@ -239,6 +287,7 @@ const serializeVertexModelAliases = (models?: ModelAlias[]) =>
             return {
                 name,
                 alias,
+                ...(model.displayName ? {'display-name': model.displayName} : {}),
                 ...serializeModelThinkingForManagement(model.thinking),
             }
         })
@@ -259,6 +308,9 @@ const serializeVertexKey = (config: ProviderKeyConfig) => {
 
 const serializeGeminiKey = (config: GeminiKeyConfig) => {
     const payload = serializeBaseKeyPayload(config)
+    if (config.requestScopedErrors !== undefined) {
+        payload['request-scoped-errors'] = serializeRequestScopedErrors(config.requestScopedErrors)
+    }
     const models  = serializeModelAliases(config.models)
     if (models && models.length) {
         payload.models = models
@@ -277,6 +329,8 @@ const serializeOpenAIProvider = (provider: OpenAIProviderConfig) => {
         'api-key-entries': Array.isArray(provider.apiKeyEntries)
                            ? provider.apiKeyEntries.map((entry) => serializeApiKeyEntry(entry))
                            : [],
+        ...(provider.requestScopedErrors !== undefined ?
+            {'request-scoped-errors': serializeRequestScopedErrors(provider.requestScopedErrors)} : {}),
     }
     if (provider.prefix?.trim()) {
         payload.prefix = provider.prefix.trim()
@@ -292,11 +346,11 @@ const serializeOpenAIProvider = (provider: OpenAIProviderConfig) => {
     if (provider.priority !== undefined) {
         payload.priority = provider.priority
     }
-    if (provider.testModel) {
-        payload['test-model'] = provider.testModel
-    }
     if (provider.disabled !== undefined) {
         payload.disabled = provider.disabled
+    }
+    if (provider.supportPromptCacheKey !== undefined) {
+        payload['support-prompt-cache-key'] = provider.supportPromptCacheKey
     }
     return payload
 }
@@ -305,6 +359,19 @@ const changedApiKeyPayload = (current: string, original: string) => {
     const apiKey = current.trim()
     return apiKey === original.trim() ? {} : { 'api-key': apiKey }
 }
+
+const geminiPatchFields = (config: GeminiKeyConfig): Record<string, unknown> => ({
+    ...(config.requestScopedErrors !== undefined ?
+        {'request-scoped-errors': serializeRequestScopedErrors(config.requestScopedErrors)} : {}),
+    priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
+    weight: config.weight ?? null,
+    prefix: config.prefix?.trim() || '',
+    'base-url': config.baseUrl?.trim() || '',
+    'proxy-url': config.proxyUrl?.trim() || '',
+    headers: config.headers ?? {},
+    models: serializeModelAliases(config.models) ?? [],
+    'excluded-models': config.excludedModels ?? [],
+})
 
 export const buildGeminiConfigPatchRequest = (
     index: number,
@@ -316,15 +383,22 @@ export const buildGeminiConfigPatchRequest = (
     value: {
         ...changedApiKeyPayload(config.apiKey, original.apiKey),
         ...buildCredentialOverridePatch(config, original),
-        priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
-        weight: config.weight ?? null,
-        prefix: config.prefix?.trim() || '',
-        'base-url': config.baseUrl?.trim() || '',
-        'proxy-url': config.proxyUrl?.trim() || '',
-        headers: config.headers ?? {},
-        models: serializeModelAliases(config.models) ?? [],
-        'excluded-models': config.excludedModels ?? [],
+        ...changedProviderFields(geminiPatchFields(config), geminiPatchFields(original)),
     },
+})
+
+const providerKeyPatchFields = (config: ProviderKeyConfig, models: unknown[], supportsErrorRules: boolean) => ({
+    ...(supportsErrorRules && config.requestScopedErrors !== undefined ?
+        {'request-scoped-errors': serializeRequestScopedErrors(config.requestScopedErrors)} : {}),
+    priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
+    weight: config.weight ?? null,
+    prefix: config.prefix?.trim() || '',
+    'base-url': config.baseUrl?.trim() || '',
+    ...(config.websockets !== undefined ? {websockets: Boolean(config.websockets)} : {}),
+    'proxy-url': config.proxyUrl?.trim() || '',
+    headers: config.headers ?? {},
+    models,
+    'excluded-models': config.excludedModels ?? [],
 })
 
 const buildProviderKeyPatchRequest = (
@@ -332,21 +406,18 @@ const buildProviderKeyPatchRequest = (
     config: ProviderKeyConfig,
     original: ProviderKeyConfig,
     models: unknown[],
+    supportsErrorRules = true,
 ) => ({
     index,
-    ...(original.authIndex?.trim() ? { 'auth-index': original.authIndex.trim() } : {}),
+    ...(original.authIndex?.trim() ? {'auth-index': original.authIndex.trim()} : {}),
     value: {
         ...changedApiKeyPayload(config.apiKey, original.apiKey),
         ...buildCredentialOverridePatch(config, original),
-        priority: config.priority !== undefined ? Math.trunc(config.priority) : 0,
-        weight: config.weight ?? null,
-        prefix: config.prefix?.trim() || '',
-        'base-url': config.baseUrl?.trim() || '',
-        ...(config.websockets !== undefined ? { websockets: Boolean(config.websockets) } : {}),
-        'proxy-url': config.proxyUrl?.trim() || '',
-        headers: config.headers ?? {},
-        models,
-        'excluded-models': config.excludedModels ?? [],
+        ...changedProviderFields(
+            providerKeyPatchFields(config, models, supportsErrorRules),
+            providerKeyPatchFields(original, supportsErrorRules ? serializeModelAliases(original.models) ?? []
+                                                   : serializeVertexModelAliases(original.models) ?? [], supportsErrorRules),
+        ),
     },
 })
 
@@ -354,7 +425,19 @@ export const buildCodexConfigPatchRequest = (
     index: number,
     config: ProviderKeyConfig,
     original: ProviderKeyConfig,
-) => buildProviderKeyPatchRequest(index, config, original, serializeModelAliases(config.models) ?? [])
+) => {
+    const patch = buildProviderKeyPatchRequest(index, config, original, serializeModelAliases(config.models) ?? [])
+    return {
+        ...patch,
+        value: {
+            ...patch.value,
+            ...(config.alphaSearch !== undefined && config.alphaSearch !== original.alphaSearch ?
+                {'alpha-search': config.alphaSearch} : {}),
+            ...(config.disableCodexCloaking !== original.disableCodexCloaking ?
+                {'disable-codex-cloaking': config.disableCodexCloaking ?? null} : {}),
+        },
+    }
+}
 
 export const buildXAIConfigPatchRequest = (
     index: number,
@@ -366,7 +449,22 @@ export const buildVertexConfigPatchRequest = (
     index: number,
     config: ProviderKeyConfig,
     original: ProviderKeyConfig,
-) => buildProviderKeyPatchRequest(index, config, original, serializeVertexModelAliases(config.models) ?? [])
+) => buildProviderKeyPatchRequest(index, config, original, serializeVertexModelAliases(config.models) ?? [], false)
+
+const openAIProviderPatchFields = (provider: OpenAIProviderConfig) => ({
+    ...(provider.requestScopedErrors !== undefined ?
+        {'request-scoped-errors': serializeRequestScopedErrors(provider.requestScopedErrors)} : {}),
+    name: provider.name.trim(),
+    priority: provider.priority !== undefined ? Math.trunc(provider.priority) : 0,
+    prefix: provider.prefix?.trim() || '',
+    'base-url': provider.baseUrl.trim(),
+    disabled: Boolean(provider.disabled),
+    ...(provider.supportPromptCacheKey !== undefined ?
+        {'support-prompt-cache-key': provider.supportPromptCacheKey} : {}),
+    'api-key-entries': provider.apiKeyEntries.map((entry) => serializeApiKeyEntry(entry)),
+    models: serializeModelAliases(provider.models) ?? [],
+    headers: provider.headers ?? {},
+})
 
 export const buildOpenAIProviderPatchRequest = (
     index: number,
@@ -377,14 +475,7 @@ export const buildOpenAIProviderPatchRequest = (
     name: original.name,
     value: {
         ...buildCredentialOverridePatch(provider, original),
-        name: provider.name.trim(),
-        priority: provider.priority !== undefined ? Math.trunc(provider.priority) : 0,
-        prefix: provider.prefix?.trim() || '',
-        'base-url': provider.baseUrl.trim(),
-        disabled: Boolean(provider.disabled),
-        'api-key-entries': provider.apiKeyEntries.map((entry) => serializeApiKeyEntry(entry)),
-        models: serializeModelAliases(provider.models) ?? [],
-        headers: provider.headers ?? {},
+        ...changedProviderFields(openAIProviderPatchFields(provider), openAIProviderPatchFields(original)),
     },
 })
 
@@ -397,8 +488,11 @@ export const providersApi = {
 
     createGeminiKey: (config: GeminiKeyConfig) => apiClient.post('/gemini-api-key', serializeGeminiKey(config)),
 
-    patchGeminiKey: (index: number, config: GeminiKeyConfig, original: GeminiKeyConfig) =>
-        apiClient.patch('/gemini-api-key', buildGeminiConfigPatchRequest(index, config, original)),
+    patchGeminiKey: async (_index: number, config: GeminiKeyConfig, original: GeminiKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getGeminiKeys, original)
+        return apiClient.patch('/gemini-api-key', buildGeminiConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteGeminiKey: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/gemini-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
@@ -412,8 +506,11 @@ export const providersApi = {
     createInteractionsKey: (config: GeminiKeyConfig) =>
         apiClient.post('/interactions-api-key', serializeGeminiKey(config)),
 
-    patchInteractionsKey: (index: number, config: GeminiKeyConfig, original: GeminiKeyConfig) =>
-        apiClient.patch('/interactions-api-key', buildGeminiConfigPatchRequest(index, config, original)),
+    patchInteractionsKey: async (_index: number, config: GeminiKeyConfig, original: GeminiKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getInteractionsKeys, original)
+        return apiClient.patch('/interactions-api-key', buildGeminiConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteInteractionsKey: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/interactions-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
@@ -424,13 +521,34 @@ export const providersApi = {
         return list.map((item) => normalizeProviderKeyConfig(item)).filter(Boolean) as ProviderKeyConfig[]
     },
 
-    createCodexConfig: (config: ProviderKeyConfig) => apiClient.post('/codex-api-key', serializeProviderKey(config)),
+    createCodexConfig: (config: ProviderKeyConfig) => apiClient.post('/codex-api-key', serializeProviderKey(config, 'codex')),
 
-    patchCodexConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
-        apiClient.patch('/codex-api-key', buildCodexConfigPatchRequest(index, config, original)),
+    patchCodexConfig: async (_index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getCodexConfigs, original)
+        return apiClient.patch('/codex-api-key', buildCodexConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteCodexConfig: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/codex-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
+
+    async getMetaConfigs(): Promise<ProviderKeyConfig[]> {
+        const data = await apiClient.get('/meta-api-key')
+        const list = extractArrayPayload(data, 'meta-api-key')
+        return list.map((item) => normalizeProviderKeyConfig(item)).filter(Boolean) as ProviderKeyConfig[]
+    },
+
+    createMetaConfig: (config: ProviderKeyConfig) => apiClient.post('/meta-api-key', serializeProviderKey(config)),
+
+    patchMetaConfig: async (_index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getMetaConfigs, original)
+        return apiClient.patch('/meta-api-key', buildProviderKeyPatchRequest(
+            index, config, original, serializeModelAliases(config.models) ?? [],
+        ), {__authGeneration: generation})
+    },
+
+    deleteMetaConfig: (apiKey: string, baseUrl?: string) =>
+        apiClient.delete('/meta-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
 
     async getXAIConfigs(): Promise<ProviderKeyConfig[]> {
         const data = await apiClient.get('/xai-api-key')
@@ -440,8 +558,11 @@ export const providersApi = {
 
     createXAIConfig: (config: ProviderKeyConfig) => apiClient.post('/xai-api-key', serializeProviderKey(config)),
 
-    patchXAIConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
-        apiClient.patch('/xai-api-key', buildXAIConfigPatchRequest(index, config, original)),
+    patchXAIConfig: async (_index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getXAIConfigs, original)
+        return apiClient.patch('/xai-api-key', buildXAIConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteXAIConfig: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/xai-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
@@ -455,8 +576,11 @@ export const providersApi = {
     createClaudeConfig: (config: ProviderKeyConfig) =>
         apiClient.post('/claude-api-key', serializeProviderKey(config, 'claude')),
 
-    patchClaudeConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
-        apiClient.patch('/claude-api-key', buildClaudeConfigPatchRequest(index, config, original)),
+    patchClaudeConfig: async (_index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getClaudeConfigs, original)
+        return apiClient.patch('/claude-api-key', buildClaudeConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteClaudeConfig: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/claude-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
@@ -469,8 +593,11 @@ export const providersApi = {
 
     createVertexConfig: (config: ProviderKeyConfig) => apiClient.post('/vertex-api-key', serializeVertexKey(config)),
 
-    patchVertexConfig: (index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) =>
-        apiClient.patch('/vertex-api-key', buildVertexConfigPatchRequest(index, config, original)),
+    patchVertexConfig: async (_index: number, config: ProviderKeyConfig, original: ProviderKeyConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getVertexConfigs, original)
+        return apiClient.patch('/vertex-api-key', buildVertexConfigPatchRequest(index, config, original),
+            {__authGeneration: generation})
+    },
 
     deleteVertexConfig: (apiKey: string, baseUrl?: string) =>
         apiClient.delete('/vertex-api-key', { data: providerDeleteBody(apiKey, baseUrl) }),
@@ -484,8 +611,11 @@ export const providersApi = {
     createOpenAIProvider: (provider: OpenAIProviderConfig) =>
         apiClient.post('/openai-compatibility', serializeOpenAIProvider(provider)),
 
-    patchOpenAIProvider: (index: number, provider: OpenAIProviderConfig, original: OpenAIProviderConfig) =>
-        apiClient.patch('/openai-compatibility', buildOpenAIProviderPatchRequest(index, provider, original)),
+    patchOpenAIProvider: async (_index: number, provider: OpenAIProviderConfig, original: OpenAIProviderConfig) => {
+        const {index, generation} = await unchangedProviderIndex(providersApi.getOpenAIProviders, original)
+        return apiClient.patch('/openai-compatibility', buildOpenAIProviderPatchRequest(index, provider, original),
+            {__authGeneration: generation})
+    },
 
     deleteOpenAIProvider: (name: string) => apiClient.delete('/openai-compatibility', { data: { name } }),
 }

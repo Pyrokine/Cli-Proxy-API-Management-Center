@@ -1,20 +1,21 @@
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
-import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ProviderKeyConfig} from '@/types'
+import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ProviderKeyConfig, RequestScopedErrorRule} from '@/types'
 import type {HeaderEntry} from '@/utils/headers'
 
 export type {ModelEntry} from '@/components/ui/modelInputListUtils'
 
 export interface OpenAIFormState extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     name: string
     priority?: number
     prefix: string
     baseUrl: string
     headers: HeaderEntry[]
     authIndex?: string
-    testModel?: string
     modelEntries: ModelEntry[]
     apiKeyEntries: ApiKeyEntry[]
     disabled?: boolean
+    supportPromptCacheKey?: boolean
 }
 
 export type GeminiFormState = Omit<GeminiKeyConfig, 'headers' | 'models'> & {

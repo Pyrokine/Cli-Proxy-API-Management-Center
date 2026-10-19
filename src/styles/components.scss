@@ -168,6 +168,60 @@ textarea {
     }
 }
 
+.request-error-rules {
+    min-width: 0;
+    padding: $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-lg;
+
+    legend {
+        color: var(--text-primary);
+        font-weight: $font-weight-semibold;
+    }
+
+    .request-error-rule {
+        padding: $spacing-md;
+        border: 1px solid var(--border-color);
+        border-radius: $radius-lg;
+        background: var(--bg-secondary);
+    }
+
+    .request-error-conditions {
+        display: flex;
+        flex-direction: column;
+        gap: $spacing-xs;
+        min-width: 0;
+        padding: 0;
+        border: 0;
+
+        legend {
+            margin-bottom: $spacing-xs;
+        }
+
+        > .btn {
+            align-self: flex-start;
+        }
+    }
+
+    .request-error-condition-row {
+        display: flex;
+        align-items: flex-start;
+        gap: $spacing-xs;
+
+        textarea {
+            flex: 1;
+            min-width: 0;
+            resize: vertical;
+        }
+    }
+
+    .request-error-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: $spacing-xs;
+    }
+}
+
 .card {
     background-color: var(--bg-primary);
     border: 1px solid var(--border-color);

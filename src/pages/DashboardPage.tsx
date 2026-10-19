@@ -20,6 +20,7 @@ interface QuickStat {
 interface ProviderStats {
     gemini: number | null
     codex: number | null
+    meta: number | null
     claude: number | null
     openai: number | null
 }
@@ -66,6 +67,7 @@ export function DashboardPage() {
     const [providerStats, setProviderStats] = useState<ProviderStats>({
                                                                           gemini: null,
                                                                           codex: null,
+                                                                          meta: null,
                                                                           claude: null,
                                                                           openai: null,
                                                                       })
@@ -120,11 +122,12 @@ export function DashboardPage() {
                                                              authFilesApi.list(),
                                                              providersApi.getGeminiKeys(),
                                                              providersApi.getCodexConfigs(),
+                                                             providersApi.getMetaConfigs(),
                                                              providersApi.getClaudeConfigs(),
                                                              providersApi.getOpenAIProviders(),
                                                          ])
 
-                const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] = results
+                const [keysRes, filesRes, geminiRes, codexRes, metaRes, claudeRes, openaiRes] = results
 
                 setStats({
                              apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
@@ -134,6 +137,7 @@ export function DashboardPage() {
                 setProviderStats({
                                      gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
                                      codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
+                                     meta: metaRes.status === 'fulfilled' ? metaRes.value.length : null,
                                      claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
                                      openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null,
                                  })
@@ -159,21 +163,11 @@ export function DashboardPage() {
         }
     }, [connectionStatus, fetchModels, invalidateModelsRequest, pageLayerStatus])
 
-    const providerStatsReady =
-              providerStats.gemini !== null &&
-              providerStats.codex !== null &&
-              providerStats.claude !== null &&
-              providerStats.openai !== null
-    const hasProviderStats   =
-              providerStats.gemini !== null ||
-              providerStats.codex !== null ||
-              providerStats.claude !== null ||
-              providerStats.openai !== null
+    const providerCounts     = Object.values(providerStats)
+    const providerStatsReady = providerCounts.every((count) => count !== null)
+    const hasProviderStats   = providerCounts.some((count) => count !== null)
     const totalProviderKeys  = providerStatsReady
-                               ? (providerStats.gemini ?? 0) +
-                                 (providerStats.codex ?? 0) +
-                                 (providerStats.claude ?? 0) +
-                                 (providerStats.openai ?? 0)
+                               ? providerCounts.reduce((total, count) => total + (count ?? 0), 0)
                                : 0
     const totalCredentials   = totalProviderKeys + (stats.authFiles ?? 0)
 

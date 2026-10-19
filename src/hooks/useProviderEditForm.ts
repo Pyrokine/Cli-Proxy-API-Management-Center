@@ -1,8 +1,9 @@
-import type {ModelEntry} from '@/components/ui/modelInputListUtils'
+import {getModelEntriesValidationKey, type ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useEditPageNavigation} from '@/hooks/useEditPageNavigation'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
+import {apiClient} from '@/services/api/client'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
-import type {CredentialOverrides} from '@/types'
+import type {CredentialOverrides, RequestScopedErrorRule} from '@/types'
 import type {RawConfigSection} from '@/types/config'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {normalizeHeaderEntries} from '@/utils/headers'
@@ -16,6 +17,7 @@ export {normalizeModelEntriesForSignature} from '@/utils/modelMetadata'
 // ---- Generic form state constraint ----
 
 interface BaseFormState extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
     priority?: number
     weight?: number
@@ -64,7 +66,7 @@ export interface ProviderEditFormConfig<TForm extends BaseFormState, TConfig ext
     updateConfig: (index: number, config: TConfig, original: TConfig) => Promise<unknown>
 
     /** Optional pre-save validation. Return an error notification key to abort, or undefined to proceed. */
-    validateBeforeSave?: (form: TForm) => string | undefined
+    validateBeforeSave?: (form: TForm, original?: TConfig) => string | undefined
 
     /** Translation keys */
     i18n: {
@@ -118,18 +120,60 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
 
     const { showNotification } = useNotificationStore()
     const connectionStatus     = useAuthStore((state) => state.connectionStatus)
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
+    const isCurrent            = useCallback(() => apiClient.getAuthGeneration() === authGeneration, [authGeneration])
     const disableControls      = connectionStatus !== 'connected'
 
     const fetchConfig       = useConfigStore((state) => state.fetchConfig)
     const updateConfigValue = useConfigStore((state) => state.updateConfigValue)
     const clearCache        = useConfigStore((state) => state.clearCache)
 
-    const [configs, setConfigs]                     = useState<TConfig[]>([])
+    const configHelpers = useMemo(() => {
+        const assertCurrent = () => {
+            if (!isCurrent()) {
+                throw new Error(t('common.connection_changed'))
+            }
+        }
+        return {
+            fetchConfig: async (key: RawConfigSection) => {
+                assertCurrent()
+                const value = await fetchConfig(key)
+                assertCurrent()
+                return value
+            },
+            updateConfigValue: (key: RawConfigSection, value: unknown) => {
+                assertCurrent()
+                updateConfigValue(key, value)
+            },
+            clearCache: (key: RawConfigSection) => {
+                assertCurrent()
+                clearCache(key)
+            },
+        }
+    }, [clearCache, fetchConfig, isCurrent, t, updateConfigValue])
+
+    const [storedConfigs, setConfigs]               = useState<TConfig[]>([])
+    const [configGeneration, setConfigGeneration]   = useState<number | null>(null)
     const [loading, setLoading]                     = useState(true)
-    const [saving, setSaving]                       = useState(false)
+    const [savingGeneration, setSavingGeneration]   = useState<number | null>(null)
+    const saving = savingGeneration === authGeneration
+    const setSaving = useCallback((value: boolean) => {
+        if (isCurrent()) {
+            setSavingGeneration(value ? authGeneration : null)
+        }
+    }, [authGeneration, isCurrent])
     const [error, setError]                         = useState('')
-    const [form, setForm]                           = useState<TForm>(() => config.buildEmptyForm())
+    const [storedForm, setStoredForm]               = useState<TForm>(() => config.buildEmptyForm())
     const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(config.buildEmptyForm()))
+    const sourceLoaded = configGeneration === authGeneration
+    const configs = useMemo(() => sourceLoaded ? storedConfigs : [], [sourceLoaded, storedConfigs])
+    const form = sourceLoaded ? storedForm : config.buildEmptyForm()
+    const resolvedLoading = loading || !sourceLoaded
+    const setForm: Dispatch<SetStateAction<TForm>> = useCallback((action) => {
+        if (isCurrent()) {
+            setStoredForm(action)
+        }
+    }, [isCurrent])
 
     // ---- Index parsing ----
 
@@ -157,31 +201,36 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
     useEffect(() => {
         let cancelled = false
         queueMicrotask(() => {
-            if (cancelled) {
+            if (cancelled || !isCurrent()) {
                 return
             }
             setLoading(true)
             setError('')
+            setConfigs([])
+            const emptyForm = config.buildEmptyForm()
+            setStoredForm(emptyForm)
+            setBaselineSignature(config.buildSignature(emptyForm))
 
             config
-                .loadConfigs({ fetchConfig, updateConfigValue, clearCache })
+                .loadConfigs(configHelpers)
                 .then((result) => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
                     setConfigs(result)
                 })
                 .catch((err: unknown) => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
                     const message = err instanceof Error ? err.message : ''
                     setError(message || t('notification.refresh_failed'))
                 })
                 .finally(() => {
-                    if (cancelled) {
+                    if (cancelled || !isCurrent()) {
                         return
                     }
+                    setConfigGeneration(authGeneration)
                     setLoading(false)
                 })
         })
@@ -190,28 +239,28 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
             cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fetchConfig, t])
+    }, [authGeneration, fetchConfig, isCurrent])
 
     // ---- Populate form from loaded data ----
 
     useEffect(() => {
-        if (loading) {
+        if (resolvedLoading) {
             return
         }
-
+        let cancelled = false
         queueMicrotask(() => {
-            if (initialData) {
-                const nextForm = config.configToForm(initialData)
-                setForm(nextForm)
-                setBaselineSignature(config.buildSignature(nextForm))
+            if (cancelled || !isCurrent()) {
                 return
             }
-            const nextForm = config.buildEmptyForm()
-            setForm(nextForm)
+            const nextForm = initialData ? config.configToForm(initialData) : config.buildEmptyForm()
+            setStoredForm(nextForm)
             setBaselineSignature(config.buildSignature(nextForm))
         })
+        return () => {
+            cancelled = true
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [initialData, loading])
+    }, [initialData, isCurrent, resolvedLoading])
 
     // ---- Dirty tracking ----
 
@@ -220,9 +269,10 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
 
     // ---- Unsaved changes guard ----
 
-    const canSave  = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex &&
-                     !getCredentialRetryValidationKey(form.requestRetry)
-    const canGuard = isDirty && !loading && !saving && !invalidIndexParam && !invalidIndex
+    const canSave  = !disableControls && !saving && !resolvedLoading && !invalidIndexParam && !invalidIndex &&
+                     !getCredentialRetryValidationKey(form.requestRetry) &&
+                     !getModelEntriesValidationKey(form.modelEntries)
+    const canGuard = isDirty && !resolvedLoading && !saving && !invalidIndexParam && !invalidIndex
 
     const { allowNextNavigation } = useUnsavedChangesGuard({
                                                                enabled: canGuard,
@@ -242,12 +292,12 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
     // ---- Save ----
 
     const handleSave = useCallback(async () => {
-        if (!canSave) {
+        if (!canSave || !isCurrent()) {
             return
         }
 
         if (config.validateBeforeSave) {
-            const validationError = config.validateBeforeSave(form)
+            const validationError = config.validateBeforeSave(form, editIndex !== null ? configs[editIndex] : undefined)
             if (validationError) {
                 showNotification(t(validationError), 'error')
                 return
@@ -271,6 +321,9 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
             } else {
                 await config.createConfig(payload)
             }
+            if (!isCurrent()) {
+                return
+            }
 
             const localValue = editIndex !== null && original
                                ? ({ ...payload, authIndex: original.authIndex } as TConfig)
@@ -285,44 +338,55 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
 
             let nextList = localList
             try {
-                nextList = await config.loadConfigs({ fetchConfig, updateConfigValue, clearCache })
+                nextList = await config.loadConfigs(configHelpers)
             } catch (refreshError: unknown) {
+                if (!isCurrent()) {
+                    return
+                }
                 const message = refreshError instanceof Error ? refreshError.message : ''
                 showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
             }
+            if (!isCurrent()) {
+                return
+            }
 
             setConfigs(nextList)
-            updateConfigValue(config.configKey, nextList)
+            configHelpers.updateConfigValue(config.configKey, nextList)
             allowNextNavigation()
             setBaselineSignature(config.buildSignature(form))
             handleBack()
         } catch (err: unknown) {
+            if (!isCurrent()) {
+                return
+            }
             const message = err instanceof Error ? err.message : ''
             setError(message)
             showNotification(`${t('notification.update_failed')}: ${message}`, 'error')
         } finally {
-            setSaving(false)
+            if (isCurrent()) {
+                setSaving(false)
+            }
         }
     }, [
                                        allowNextNavigation,
                                        canSave,
-                                       clearCache,
                                        config,
+                                       configHelpers,
                                        configs,
                                        editIndex,
-                                       fetchConfig,
                                        form,
                                        handleBack,
+                                       isCurrent,
+                                       setSaving,
                                        showNotification,
                                        t,
-                                       updateConfigValue,
                                    ])
 
     return {
         form,
         setForm,
         configs,
-        loading,
+        loading: resolvedLoading,
         saving,
         error,
         isDirty,
@@ -331,7 +395,7 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
         invalidIndex,
         disableControls,
         canSave,
-        disabled: disableControls || saving,
+        disabled: disableControls || saving || resolvedLoading,
         title,
         handleSave,
         handleBack,
@@ -351,6 +415,7 @@ export const buildBaseSignatureFields = (form: BaseFormState) => ({
     weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
     disableCooling: form.disableCooling ?? null,
     requestRetry: form.requestRetry?.toString() ?? null,
+    requestScopedErrors: form.requestScopedErrors ?? null,
     prefix: String(form.prefix ?? '').trim(),
     baseUrl: String(form.baseUrl ?? '').trim(),
     proxyUrl: String(form.proxyUrl ?? '').trim(),

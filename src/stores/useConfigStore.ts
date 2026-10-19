@@ -66,6 +66,7 @@ const CONFIG_SECTION_DESCRIPTORS: Record<RawConfigSection, ConfigSectionDescript
     'gemini-api-key': configField('geminiApiKeys'),
     'interactions-api-key': configField('interactionsApiKeys'),
     'codex-api-key': configField('codexApiKeys'),
+    'meta-api-key': configField('metaApiKeys'),
     'claude-api-key': configField('claudeApiKeys'),
     'xai-api-key': configField('xaiApiKeys'),
     'vertex-api-key': configField('vertexApiKeys'),

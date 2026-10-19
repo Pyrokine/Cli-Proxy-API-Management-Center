@@ -22,6 +22,7 @@ import {
 } from '@/hooks/useProviderEditForm'
 import {apiCallApi, modelsApi, prepareApiCallAuth, providersApi} from '@/services/api'
 import type {GeminiKeyConfig} from '@/types'
+import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
@@ -59,6 +60,7 @@ export function AiProvidersInteractionsEditPage() {
             weight: form.weight,
             disableCooling: form.disableCooling,
             requestRetry: form.requestRetry,
+            requestScopedErrors: form.requestScopedErrors,
             prefix: form.prefix?.trim() || undefined,
             baseUrl: form.baseUrl?.trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,
@@ -68,7 +70,9 @@ export function AiProvidersInteractionsEditPage() {
         }),
         createConfig: (config) => providersApi.createInteractionsKey(config),
         updateConfig: (index, config, original) => providersApi.patchInteractionsKey(index, config, original),
-        validateBeforeSave: (form) => getCredentialWeightValidationKey(form.weight),
+        validateBeforeSave: (form, original) =>
+            getCredentialWeightValidationKey(form.weight) ??
+            getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors),
         i18n: {
             editTitle: 'ai_providers.interactions_edit_modal_title',
             addTitle: 'ai_providers.interactions_add_modal_title',
@@ -111,6 +115,7 @@ export function AiProvidersInteractionsEditPage() {
               runConnectivityTest,
               showTestError,
           }                = useProviderConnectivityTestState({
+                                                                  authIndex: form.authIndex,
                                                                   apiKey: form.apiKey,
                                                                   baseUrl: form.baseUrl,
                                                                   proxyUrl: form.proxyUrl,

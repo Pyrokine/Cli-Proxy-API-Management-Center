@@ -4,6 +4,7 @@ import {AiProvidersClaudeModelsPage} from '@/pages/AiProvidersClaudeModelsPage'
 import {AiProvidersCodexEditPage} from '@/pages/AiProvidersCodexEditPage'
 import {AiProvidersGeminiEditPage} from '@/pages/AiProvidersGeminiEditPage'
 import {AiProvidersInteractionsEditPage} from '@/pages/AiProvidersInteractionsEditPage'
+import {AiProvidersMetaEditPage} from '@/pages/AiProvidersMetaEditPage'
 import {AiProvidersOpenAIEditLayout} from '@/pages/AiProvidersOpenAIEditLayout'
 import {AiProvidersOpenAIEditPage} from '@/pages/AiProvidersOpenAIEditPage'
 import {AiProvidersOpenAIModelsPage} from '@/pages/AiProvidersOpenAIModelsPage'
@@ -22,7 +23,7 @@ import {SystemPage} from '@/pages/SystemPage'
 import {UsagePage} from '@/pages/UsagePage'
 import {type Location, Navigate, useLocation, useParams, useRoutes} from 'react-router-dom'
 
-const LEGACY_PROVIDER_IDS = new Set(['gemini', 'interactions', 'codex', 'claude', 'xai', 'vertex', 'openai'])
+const LEGACY_PROVIDER_IDS = new Set(['gemini', 'interactions', 'codex', 'meta', 'claude', 'xai', 'vertex', 'openai'])
 
 function LegacyAiProviderRedirect() {
     const location     = useLocation()
@@ -51,6 +52,8 @@ const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
     { path: '/credentials/interactions/:index', element: <AiProvidersInteractionsEditPage /> },
     { path: '/credentials/codex/new', element: <AiProvidersCodexEditPage /> },
     { path: '/credentials/codex/:index', element: <AiProvidersCodexEditPage /> },
+    { path: '/credentials/meta/new', element: <AiProvidersMetaEditPage /> },
+    { path: '/credentials/meta/:index', element: <AiProvidersMetaEditPage /> },
     { path: '/credentials/xai/new', element: <AiProvidersXAIEditPage /> },
     { path: '/credentials/xai/:index', element: <AiProvidersXAIEditPage /> },
     {

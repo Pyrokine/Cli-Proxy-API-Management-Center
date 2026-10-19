@@ -1,8 +1,10 @@
 import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
+import {RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {buildClaudeMessagesEndpoint, parseTextList} from '@/components/providers/utils'
 import {Select} from '@/components/ui/Select'
+import {getModelEntriesValidationKey} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {useEscapeKey} from '@/hooks/useEscapeKey'
@@ -10,7 +12,8 @@ import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
 import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api'
 import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
-import {useNotificationStore} from '@/stores'
+import {apiClient} from '@/services/api/client'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
@@ -37,6 +40,7 @@ export function AiProvidersClaudeEditPage() {
     const location             = useLocation()
     const modalPresentation    = resolveProviderEditModalState(location.state, location.pathname)
     const { showNotification } = useNotificationStore()
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
     const {
               hasIndexParam,
               invalidIndexParam,
@@ -66,6 +70,8 @@ export function AiProvidersClaudeEditPage() {
 
     const swipeRef                  = useEdgeSwipeBack({ onBack: handleBack })
     const [isTesting, setIsTesting] = useState(false)
+    const activeTestAbortRef        = useRef<AbortController | null>(null)
+    const activeTestRequestIdRef    = useRef(0)
     const lastCloakConfigRef        = useRef<typeof form.cloak>(null)
 
     useEscapeKey(handleBack, !modalPresentation)
@@ -86,7 +92,8 @@ export function AiProvidersClaudeEditPage() {
     ]
     const canSave = !disableControls && !loading && !saving && !invalidIndexParam &&
                     !invalidIndex && !isTesting && !invalidFingerprintProfile &&
-                    !getCredentialRetryValidationKey(form.requestRetry)
+                    !getCredentialRetryValidationKey(form.requestRetry) &&
+                    !getModelEntriesValidationKey(form.modelEntries)
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
     const controlsDisabled   = saving || disableControls || isTesting
@@ -117,31 +124,36 @@ export function AiProvidersClaudeEditPage() {
         return 'auto'
     }, [form.cloak?.mode])
 
-    const connectivityConfigSignature = useMemo(() => {
-        const headersSignature = form.headers.map((entry) => `${entry.key.trim()}:${entry.value.trim()}`).join('|')
-        const modelsSignature  = form.modelEntries.map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
-                                     .join('|')
-        return [
-            form.apiKey.trim(),
-            form.authIndex?.trim() ?? '',
-            form.baseUrl?.trim() ?? '',
-            form.proxyUrl?.trim() ?? '',
-            testModel.trim(),
-            headersSignature,
-            modelsSignature,
-        ].join('||')
-    }, [form.apiKey, form.authIndex, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
+    const connectivityConfigSignature = useMemo(() => JSON.stringify({
+        authGeneration,
+        apiKey: form.apiKey.trim(),
+        authIndex: form.authIndex?.trim() ?? '',
+        baseUrl: form.baseUrl?.trim() ?? '',
+        proxyUrl: form.proxyUrl?.trim() ?? '',
+        testModel: testModel.trim(),
+        headers: form.headers.map((entry) => [entry.key.trim(), entry.value.trim()]),
+        models: form.modelEntries.map((entry) => [entry.name.trim(), entry.alias.trim()]),
+    }), [authGeneration, form.apiKey, form.authIndex, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
 
     const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
+    const cancelActiveTest = useCallback(() => {
+        ++activeTestRequestIdRef.current
+        activeTestAbortRef.current?.abort()
+        activeTestAbortRef.current = null
+    }, [])
+
+    useEffect(() => () => cancelActiveTest(), [cancelActiveTest])
 
     useEffect(() => {
         if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
             return
         }
         previousConnectivityConfigRef.current = connectivityConfigSignature
+        cancelActiveTest()
+        setIsTesting(false)
         setTestStatus('idle')
         setTestMessage('')
-    }, [connectivityConfigSignature, setTestMessage, setTestStatus])
+    }, [cancelActiveTest, connectivityConfigSignature, setTestMessage, setTestStatus])
 
     const openClaudeModelDiscovery = () => {
         navigate('models', {
@@ -150,7 +162,7 @@ export function AiProvidersClaudeEditPage() {
     }
 
     const runClaudeConnectivityTest = useCallback(async () => {
-        if (isTesting) {
+        if (authGeneration !== apiClient.getAuthGeneration() || isTesting || activeTestAbortRef.current) {
             return
         }
         if (!credentialIdentityAvailable) {
@@ -219,6 +231,9 @@ export function AiProvidersClaudeEditPage() {
             headers['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
         }
 
+        const requestId = ++activeTestRequestIdRef.current
+        const controller = new AbortController()
+        activeTestAbortRef.current = controller
         setIsTesting(true)
         setTestStatus('loading')
         setTestMessage(t('ai_providers.claude_test_running'))
@@ -238,9 +253,13 @@ export function AiProvidersClaudeEditPage() {
                     authIndex: form.authIndex?.trim() || undefined,
                     draftToken: preparedAuth.draftToken,
                 },
-                { timeout: CLAUDE_TEST_TIMEOUT_MS },
+                { timeout: CLAUDE_TEST_TIMEOUT_MS, signal: controller.signal },
             )
 
+            if (authGeneration !== apiClient.getAuthGeneration() || requestId !== activeTestRequestIdRef.current ||
+                controller.signal.aborted) {
+                return
+            }
             if (result.statusCode < 200 || result.statusCode >= 300) {
                 const detail   = getApiCallErrorMessage(result) || t('common.unknown_error')
                 const errorMsg = `${t('ai_providers.claude_test_failed')}: ${detail}`
@@ -259,6 +278,10 @@ export function AiProvidersClaudeEditPage() {
                       typeof err === 'object' && err !== null && 'code' in err ?
                       String((err as { code?: string }).code) :
                       ''
+            if (authGeneration !== apiClient.getAuthGeneration() || requestId !== activeTestRequestIdRef.current ||
+                controller.signal.aborted || errorCode === 'ERR_CANCELED') {
+                return
+            }
             const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
             const resolvedMessage = isTimeout
                                     ? t('ai_providers.claude_test_timeout', { seconds: CLAUDE_TEST_TIMEOUT_MS / 1000 })
@@ -267,9 +290,15 @@ export function AiProvidersClaudeEditPage() {
             setTestMessage(resolvedMessage)
             showNotification(resolvedMessage, 'error')
         } finally {
-            setIsTesting(false)
+            if (requestId === activeTestRequestIdRef.current) {
+                activeTestAbortRef.current = null
+                if (authGeneration === apiClient.getAuthGeneration() && !controller.signal.aborted) {
+                    setIsTesting(false)
+                }
+            }
         }
     }, [
+                                                      authGeneration,
                                                       apiKeyIsMasked,
                                                       availableModels,
                                                       credentialIdentityAvailable,
@@ -315,8 +344,24 @@ export function AiProvidersClaudeEditPage() {
                     onApiKeyChange={updateApiKey}
                     onHeadersChange={updateHeaders}
                 />
+                <RequestScopedErrorsField
+                    rules={form.requestScopedErrors}
+                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    disabled={controlsDisabled}
+                />
+
+                <div className='form-group'>
+                    <ToggleSwitch
+                        label={t('ai_providers.claude_rebuild_system_messages_label')}
+                        checked={Boolean(form.rebuildMidSystemMessage)}
+                        onChange={(value) => setForm((prev) => ({...prev, rebuildMidSystemMessage: value}))}
+                        disabled={controlsDisabled}
+                    />
+                    <div className='hint'>{t('ai_providers.claude_rebuild_system_messages_hint')}</div>
+                </div>
 
                 <ModelConfigSection
+                    provider='claude'
                     title={t('ai_providers.claude_models_label')}
                     hint={t('ai_providers.claude_models_hint')}
                     addLabel={t('ai_providers.claude_models_add_btn')}
@@ -351,6 +396,7 @@ export function AiProvidersClaudeEditPage() {
                         options={fingerprintProfileOptions}
                         onChange={(value) => setForm((prev) => ({ ...prev, fingerprintProfile: value }))}
                         ariaLabel={t('ai_providers.claude_fingerprint_profile_label')}
+                        ariaInvalid={invalidFingerprintProfile}
                         ariaDescribedBy={invalidFingerprintProfile
                                          ? 'claude-fingerprint-profile-hint claude-fingerprint-profile-error'
                                          : 'claude-fingerprint-profile-hint'}

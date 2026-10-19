@@ -1,7 +1,8 @@
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {getApiCallErrorMessage} from '@/services/api'
-import {useNotificationStore} from '@/stores'
+import {apiClient} from '@/services/api/client'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import type {HeaderEntry} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
@@ -9,6 +10,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 type ProviderConnectivityTestStatus = 'idle' | 'loading' | 'success' | 'error'
 
 interface ProviderConnectivityTestSignatureInput {
+    authIndex?: string
     apiKey: string
     baseUrl?: string
     proxyUrl?: string
@@ -31,6 +33,7 @@ export function buildProviderConnectivityTestSignature(
     input: ProviderConnectivityTestSignatureInput,
 ): string {
     return JSON.stringify({
+                              authIndex: input.authIndex?.trim() ?? '',
                               apiKey: input.apiKey.trim(),
                               baseUrl: input.baseUrl?.trim() ?? '',
                               proxyUrl: input.proxyUrl?.trim() ?? '',
@@ -71,29 +74,43 @@ export function useProviderConnectivityTestModel(
 }
 
 export function useProviderConnectivityTestState(input: ProviderConnectivityTestSignatureInput) {
-    const configSignature               = buildProviderConnectivityTestSignature(input)
-    const { showNotification }          = useNotificationStore()
+    const authGeneration               = useAuthStore(() => apiClient.getAuthGeneration())
+    const configSignature              = JSON.stringify([authGeneration, buildProviderConnectivityTestSignature(input)])
+    const { showNotification }         = useNotificationStore()
     const [testStatus, setTestStatus]   = useState<ProviderConnectivityTestStatus>('idle')
     const [testMessage, setTestMessage] = useState('')
     const [isTesting, setIsTesting]     = useState(false)
-    const previousConfigRef             = useRef(configSignature)
+    const previousConfigRef            = useRef<string | null>(configSignature)
+    const testRequestRef               = useRef<{authGeneration: number; configSignature: string} | null>(null)
+    const isCurrentConfig              = previousConfigRef.current === configSignature &&
+                                         authGeneration === apiClient.getAuthGeneration()
 
     useEffect(() => {
         if (previousConfigRef.current === configSignature) {
             return
         }
         previousConfigRef.current = configSignature
+        testRequestRef.current = null
+        setIsTesting(false)
         setTestStatus('idle')
         setTestMessage('')
     }, [configSignature])
 
+    useEffect(() => () => {
+        previousConfigRef.current = null
+        testRequestRef.current = null
+    }, [])
+
     const showTestError = useCallback(
         (message: string) => {
+            if (previousConfigRef.current !== configSignature || authGeneration !== apiClient.getAuthGeneration()) {
+                return
+            }
             setTestStatus('error')
             setTestMessage(message)
             showNotification(message, 'error')
         },
-        [showNotification],
+        [authGeneration, configSignature, showNotification],
     )
 
     const runConnectivityTest = useCallback(
@@ -101,16 +118,25 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
             request: () => Promise<ProviderConnectivityTestResult>,
             messages: ProviderConnectivityTestMessages,
         ) => {
-            if (isTesting) {
+            if (previousConfigRef.current !== configSignature || authGeneration !== apiClient.getAuthGeneration() ||
+                testRequestRef.current) {
                 return
             }
 
+            const testRequest = {authGeneration, configSignature}
+            testRequestRef.current = testRequest
+            const isCurrentTest = () => testRequestRef.current === testRequest &&
+                                        previousConfigRef.current === testRequest.configSignature &&
+                                        testRequest.authGeneration === apiClient.getAuthGeneration()
             setIsTesting(true)
             setTestStatus('loading')
             setTestMessage(messages.running)
 
             try {
                 const result = await request()
+                if (!isCurrentTest()) {
+                    return
+                }
                 if (result.statusCode < 200 || result.statusCode >= 300) {
                     const detail = getApiCallErrorMessage(result) || messages.unknownError
                     showTestError(`${messages.failed}: ${detail}`)
@@ -121,6 +147,9 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
                 setTestMessage(messages.success)
                 showNotification(messages.success, 'success')
             } catch (err: unknown) {
+                if (!isCurrentTest()) {
+                    return
+                }
                 const message   = getErrorMessage(err)
                 const errorCode =
                           typeof err === 'object' && err !== null && 'code' in err
@@ -129,18 +158,21 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
                 const isTimeout = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
                 showTestError(isTimeout ? messages.timeout : `${messages.failed}: ${message || messages.unknownError}`)
             } finally {
-                setIsTesting(false)
+                if (isCurrentTest()) {
+                    testRequestRef.current = null
+                    setIsTesting(false)
+                }
             }
         },
-        [isTesting, showNotification, showTestError],
+        [authGeneration, configSignature, showNotification, showTestError],
     )
 
     return {
-        testStatus,
+        testStatus: isCurrentConfig ? testStatus : 'idle',
         setTestStatus,
-        testMessage,
+        testMessage: isCurrentConfig ? testMessage : '',
         setTestMessage,
-        isTesting,
+        isTesting: isCurrentConfig && isTesting,
         runConnectivityTest,
         showTestError,
     }

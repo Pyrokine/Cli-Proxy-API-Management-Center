@@ -1,5 +1,6 @@
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
-import {useNotificationStore} from '@/stores'
+import {apiClient} from '@/services/api/client'
+import {useAuthStore, useNotificationStore} from '@/stores'
 import {buildHeaderObject} from '@/utils/headers'
 import type {ModelInfo} from '@/utils/models'
 import {
@@ -78,6 +79,7 @@ export interface ModelDiscoveryReturn {
 }
 
 interface DiscoveryFormState {
+    authIndex?: string
     apiKey: string
     baseUrl?: string
     proxyUrl?: string
@@ -103,6 +105,9 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 ): ModelDiscoveryReturn {
     const { t }                = useTranslation()
     const { showNotification } = useNotificationStore()
+    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
+    const [discoveryGeneration, setDiscoveryGeneration] = useState(authGeneration)
+    const sourceLoaded         = discoveryGeneration === authGeneration
 
     const [open, setOpen]                         = useState(false)
     const [endpoint, setEndpoint]                 = useState('')
@@ -149,12 +154,15 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 
     const mergeDiscoveredModels = useCallback(
         (selectedModels: ModelInfo[]) => {
-            if (!selectedModels.length) {
+            if (!selectedModels.length || authGeneration !== apiClient.getAuthGeneration()) {
                 return
             }
 
             let addedCount = 0
             setForm((prev) => {
+                if (authGeneration !== apiClient.getAuthGeneration()) {
+                    return prev
+                }
                 const merged = mergeProviderModelEntries(prev.modelEntries, selectedModels, normalizeName)
                 addedCount   = merged.addedCount
                 return {
@@ -168,17 +176,23 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 showNotification(t(key, { count: addedCount }), 'success')
             }
         },
-        [normalizeName, setForm, showNotification, t],
+        [authGeneration, normalizeName, setForm, showNotification, t],
     )
 
     // ---- Fetch models ----
 
     const fetchDiscovery = useCallback(
         async () => {
+            if (authGeneration !== apiClient.getAuthGeneration()) {
+                return
+            }
             requestControllerRef.current?.abort()
             const controller             = new AbortController()
             requestControllerRef.current = controller
             const requestId              = (requestIdRef.current += 1)
+            setDiscoveredModels([])
+            setSelected(new Set())
+            setDiscoveryGeneration(authGeneration)
             setFetching(true)
             setError('')
 
@@ -194,13 +208,15 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                     proxyUrl,
                     controller.signal,
                 )
-                if (requestIdRef.current !== requestId || controller.signal.aborted) {
+                if (authGeneration !== apiClient.getAuthGeneration() || requestIdRef.current !== requestId ||
+                    controller.signal.aborted) {
                     return
                 }
                 setDiscoveredModels(list)
                 setSelected(findMissingProviderModelNames(formState.modelEntries, list, normalizeName))
             } catch (err: unknown) {
-                if (requestIdRef.current !== requestId || controller.signal.aborted) {
+                if (authGeneration !== apiClient.getAuthGeneration() || requestIdRef.current !== requestId ||
+                    controller.signal.aborted) {
                     return
                 }
                 setDiscoveredModels([])
@@ -215,12 +231,14 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                 if (requestControllerRef.current === controller) {
                     requestControllerRef.current = null
                 }
-                if (requestIdRef.current === requestId) {
+                if (authGeneration === apiClient.getAuthGeneration() && requestIdRef.current === requestId &&
+                    !controller.signal.aborted) {
                     setFetching(false)
                 }
             }
         },
         [
+            authGeneration,
             formState.apiKey,
             formState.baseUrl,
             formState.headers,
@@ -234,55 +252,68 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
 
     useEffect(
         () => {
+            let cancelled = false
             queueMicrotask(() => {
+                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
+                    return
+                }
                 if (!open) {
                     autoFetchSignatureRef.current = ''
                     requestControllerRef.current?.abort()
                     requestControllerRef.current = null
                     requestIdRef.current += 1
                     setFetching(false)
+                    setDiscoveredModels([])
+                    setSelected(new Set())
+                    setEndpoint('')
+                    setError('')
+                    setSearch('')
+                    setDiscoveryGeneration(authGeneration)
                     return
                 }
-
-                requestControllerRef.current?.abort()
-                requestControllerRef.current = null
-                requestIdRef.current += 1
-                setFetching(false)
 
                 const config       = discoveryConfigRef.current
                 const nextEndpoint = config.buildEndpoint(formState.baseUrl ?? '')
-                setEndpoint(nextEndpoint)
-                setDiscoveredModels([])
-                setSearch('')
-                setSelected(new Set())
-                setError('')
-
-                if (!nextEndpoint) {
-                    return
-                }
-
                 const headerObject = buildHeaderObject(formState.headers)
-                if (!config.canAutoFetch(formState.apiKey.trim(), headerObject)) {
-                    return
-                }
-
                 const headerSignature = Object.entries(headerObject)
                                               .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                                              .map(([key, value]) => `${key}:${value}`)
-                                              .join('|')
-                const signature       = `${nextEndpoint}||${formState.apiKey.trim()}||${formState.proxyUrl?.trim() ??
-                                                                                        ''}||${headerSignature}`
+                const signature = JSON.stringify([
+                    authGeneration,
+                    formState.authIndex?.trim() ?? '',
+                    nextEndpoint,
+                    formState.apiKey.trim(),
+                    formState.proxyUrl?.trim() ?? '',
+                    headerSignature,
+                ])
                 if (autoFetchSignatureRef.current === signature) {
                     return
                 }
                 autoFetchSignatureRef.current = signature
 
-                void fetchDiscovery()
+                requestControllerRef.current?.abort()
+                requestControllerRef.current = null
+                requestIdRef.current += 1
+                setFetching(false)
+                setEndpoint(nextEndpoint)
+                setDiscoveredModels([])
+                setSearch('')
+                setSelected(new Set())
+                setError('')
+                setDiscoveryGeneration(authGeneration)
+
+                if (nextEndpoint && config.canAutoFetch(formState.apiKey.trim(), headerObject)) {
+                    void fetchDiscovery()
+                }
             })
+            return () => {
+                cancelled = true
+            }
         },
         [
+            authGeneration,
             fetchDiscovery,
             formState.apiKey,
+            formState.authIndex,
             formState.baseUrl,
             formState.headers,
             formState.proxyUrl,
@@ -293,6 +324,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     useEffect(
         () => () => {
             requestControllerRef.current?.abort()
+            requestControllerRef.current = null
+            requestIdRef.current += 1
         },
         [],
     )
@@ -318,6 +351,9 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     // ---- Apply selected ----
 
     const applySelected = () => {
+        if (!sourceLoaded || authGeneration !== apiClient.getAuthGeneration()) {
+            return
+        }
         const selectedModels = discoveredModels.filter((model) => selected.has(model.name))
         if (selectedModels.length) {
             mergeDiscoveredModels(selectedModels)
@@ -334,24 +370,24 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
               !flags.invalidIndexParam &&
               !flags.invalidIndex
 
-    const canApply = canApplyDiscoveredModels(selected.size, flags.disableControls, flags.saving, fetching)
+    const canApply = sourceLoaded && canApplyDiscoveredModels(selected.size, flags.disableControls, flags.saving, fetching)
 
     return {
         open,
         setOpen,
-        endpoint,
-        discoveredModels,
-        filteredModels,
-        fetching,
-        error,
-        search,
+        endpoint: sourceLoaded ? endpoint : '',
+        discoveredModels: sourceLoaded ? discoveredModels : [],
+        filteredModels: sourceLoaded ? filteredModels : [],
+        fetching: sourceLoaded && fetching,
+        error: sourceLoaded ? error : '',
+        search: sourceLoaded ? search : '',
         setSearch,
-        selected,
+        selected: sourceLoaded ? selected : new Set<string>(),
         fetchDiscovery,
         toggleSelection,
         selectMissingModels,
         applySelected,
-        missingCount: missingModelNames.size,
+        missingCount: sourceLoaded ? missingModelNames.size : 0,
         canOpen,
         canApply,
     }

@@ -12,13 +12,14 @@ type ModelMetadata = {
     family: string
 }
 
-const modelProviderOrder = ['GPT', 'Claude', 'Gemini', 'Kimi', 'Qwen', 'GLM', 'Grok', 'DeepSeek', 'MiniMax', 'Other']
+const modelProviderOrder = ['GPT', 'Claude', 'Gemini', 'Meta', 'Kimi', 'Qwen', 'GLM', 'Grok', 'DeepSeek', 'MiniMax', 'Other']
 
 const providerChannels: Record<string, string[]> = {
     GPT: ['codex', 'openai'],
     Claude: ['claude'],
     Gemini: ['gemini-cli', 'vertex', 'aistudio', 'antigravity'],
-    Kimi: ['kimi', 'iflow'],
+    Meta: ['meta'],
+    Kimi: ['kimi', 'kimi-ai', 'iflow'],
     Qwen: ['qwen', 'iflow'],
     GLM: ['glm', 'iflow'],
     Grok: ['xai'],
@@ -52,6 +53,9 @@ export function getModelProvider(model: string): string {
     }
     if (lower.includes('gemini') || lower.startsWith('imagen-') || /\bgai\b/i.test(lower)) {
         return 'Gemini'
+    }
+    if (/\bmuse(?:[-/\s]|$)/i.test(lower)) {
+        return 'Meta'
     }
     if (lower.includes('kimi')) {
         return 'Kimi'

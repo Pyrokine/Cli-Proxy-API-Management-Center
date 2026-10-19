@@ -6,9 +6,11 @@ import type {
     ModelAlias,
     OpenAIProviderConfig,
     ProviderKeyConfig,
+    RequestScopedErrorRule,
 } from '@/types'
 import type {Config, ImageArtifactCacheConfig, PluginsConfig, RemoteManagementConfig} from '@/types/config'
 import {readCredentialWeight} from '@/utils/credentialWeight'
+import {readRequestScopedErrorRule} from '@/utils/credentialOverrides'
 import {buildHeaderObject} from '@/utils/headers'
 import {normalizeModelMetadataFromManagement} from '@/utils/modelMetadata'
 
@@ -153,8 +155,37 @@ const normalizeCredentialOverrides = (record: Record<string, unknown> | null): C
     return overrides
 }
 
+const normalizeRequestScopedErrors = (value: unknown): RequestScopedErrorRule[] | undefined => {
+    if (value === undefined || value === null) {
+        return undefined
+    }
+    if (!Array.isArray(value)) {
+        throw new Error('request-scoped-errors must be an array')
+    }
+    return value.map((rule) => {
+        if (!isRecord(rule) ||
+            (rule.status !== undefined && (typeof rule.status !== 'number' || !Number.isSafeInteger(rule.status))) ||
+            (rule.match !== undefined && (!Array.isArray(rule.match) || !rule.match.every((entry) => typeof entry === 'string'))) ||
+            (rule['match-regexr'] !== undefined &&
+                (!Array.isArray(rule['match-regexr']) || !rule['match-regexr'].every((entry) => typeof entry === 'string'))) ||
+            (rule.action !== undefined && typeof rule.action !== 'string')) {
+            throw new Error('Invalid request-scoped-errors rule')
+        }
+        return readRequestScopedErrorRule({
+            ...(rule.status !== undefined ? {status: rule.status as number} : {}),
+            ...(rule.match !== undefined ? {match: rule.match as string[]} : {}),
+            ...(rule['match-regexr'] !== undefined ? {matchRegex: rule['match-regexr'] as string[]} : {}),
+            ...(rule.action !== undefined ? {action: rule.action as string} : {}),
+        })
+    })
+}
+
 const normalizeProviderKeyBase = (record: Record<string, unknown> | null): Partial<ProviderKeyConfig> => {
     const config: Partial<ProviderKeyConfig> = normalizeCredentialOverrides(record)
+    const requestScopedErrors = normalizeRequestScopedErrors(record?.['request-scoped-errors'])
+    if (requestScopedErrors !== undefined) {
+        config.requestScopedErrors = requestScopedErrors
+    }
     const authIndex                          = record?.['auth-index'] ?? record?.authIndex
     if (typeof authIndex === 'string' && authIndex.trim()) {
         config.authIndex = authIndex.trim()
@@ -230,6 +261,18 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
     const websockets                = normalizeBoolean(record?.websockets)
     if (websockets !== undefined) {
         config.websockets = websockets
+    }
+    const alphaSearch = normalizeBoolean(record?.['alpha-search'])
+    if (alphaSearch !== undefined) {
+        config.alphaSearch = alphaSearch
+    }
+    const disableCodexCloaking = normalizeBoolean(record?.['disable-codex-cloaking'])
+    if (disableCodexCloaking !== undefined) {
+        config.disableCodexCloaking = disableCodexCloaking
+    }
+    const rebuildMidSystemMessage = normalizeBoolean(record?.['rebuild-mid-system-message'])
+    if (rebuildMidSystemMessage !== undefined) {
+        config.rebuildMidSystemMessage = rebuildMidSystemMessage
     }
     if (proxyUrl) {
         config.proxyUrl = String(proxyUrl)
@@ -334,6 +377,7 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
     const priority  = provider.priority
     const testModel = provider['test-model']
     const disabled  = normalizeBoolean(provider.disabled)
+    const supportPromptCacheKey = normalizeBoolean(provider['support-prompt-cache-key'])
     const authIndex = provider['auth-index']
 
     const result: OpenAIProviderConfig = {
@@ -341,6 +385,10 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
         name: String(name),
         baseUrl: String(baseUrl),
         apiKeyEntries,
+    }
+    const requestScopedErrors = normalizeRequestScopedErrors(provider['request-scoped-errors'])
+    if (requestScopedErrors !== undefined) {
+        result.requestScopedErrors = requestScopedErrors
     }
 
     const prefix = normalizePrefix(provider.prefix ?? provider['prefix'])
@@ -361,6 +409,9 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
     }
     if (disabled !== undefined) {
         result.disabled = disabled
+    }
+    if (supportPromptCacheKey !== undefined) {
+        result.supportPromptCacheKey = supportPromptCacheKey
     }
     if (typeof authIndex === 'string' || typeof authIndex === 'number') {
         const normalizedAuthIndex = String(authIndex).trim()
@@ -528,6 +579,7 @@ const applyConfigAuthIndexes = (config: Config, payload: unknown): void => {
     applyList(config.interactionsApiKeys, payload.interactions)
     applyList(config.claudeApiKeys, payload.claude)
     applyList(config.codexApiKeys, payload.codex)
+    applyList(config.metaApiKeys, payload.meta)
     applyList(config.xaiApiKeys, payload.xai)
     applyList(config.vertexApiKeys, payload.vertex)
 
@@ -691,6 +743,13 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
     const claudeList = raw['claude-api-key']
     if (Array.isArray(claudeList)) {
         config.claudeApiKeys = claudeList
+            .map((item) => normalizeProviderKeyConfig(item))
+            .filter(Boolean) as ProviderKeyConfig[]
+    }
+
+    const metaList = raw['meta-api-key']
+    if (Array.isArray(metaList)) {
+        config.metaApiKeys = metaList
             .map((item) => normalizeProviderKeyConfig(item))
             .filter(Boolean) as ProviderKeyConfig[]
     }

@@ -1,4 +1,5 @@
 import {modelsApi} from '@/services/api'
+import {apiClient} from '@/services/api/client'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {useCallback, useMemo} from 'react'
 import {useOutletContext} from 'react-router-dom'
@@ -17,6 +18,7 @@ export function AiProvidersOpenAIModelsPage() {
     const buildEndpoint = useCallback(() => modelsApi.buildV1ModelsEndpoint(form.baseUrl), [form.baseUrl])
 
     const fetchModels = useCallback(async (signal: AbortSignal) => {
+        const authGeneration = apiClient.getAuthGeneration()
         const trimmedBaseUrl = form.baseUrl.trim()
         if (!trimmedBaseUrl) {
             return []
@@ -38,6 +40,9 @@ export function AiProvidersOpenAIModelsPage() {
                 signal,
             )
         } catch (v1Error: unknown) {
+            if (signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                throw v1Error
+            }
             try {
                 return await modelsApi.fetchModelsViaApiCall(
                     trimmedBaseUrl,
@@ -48,23 +53,30 @@ export function AiProvidersOpenAIModelsPage() {
                     signal,
                 )
             } catch {
+                if (signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                    throw v1Error
+                }
                 try {
                     return await modelsApi.fetchV1ModelsViaApiCall(
                         trimmedBaseUrl,
                         undefined,
                         undefined,
+                        keyEntry?.proxyUrl,
                         undefined,
-                        authIndex,
                         signal,
                     )
                 } catch {
+                    if (signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                        throw v1Error
+                    }
                     try {
                         return await modelsApi.fetchModelsViaApiCall(
                             trimmedBaseUrl,
                             undefined,
                             undefined,
+                            keyEntry?.proxyUrl,
                             undefined,
-                            authIndex,
+                            signal,
                         )
                     } catch {
                         throw v1Error

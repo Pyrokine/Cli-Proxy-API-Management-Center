@@ -46,30 +46,30 @@ export function mergeProviderModelEntries(
     discoveredModels: ModelInfo[],
     normalizeName: (name: string) => string = (name) => name.trim(),
 ): { entries: ModelEntry[]; addedCount: number } {
-    const mergedMap = new Map<string, ModelEntry>()
-    entries.forEach((entry) => {
-        const name = normalizeName(entry.name)
-        if (!name) {
-            return
-        }
-        mergedMap.set(name.toLowerCase(), {
-            ...entry,
-            name,
-            alias: entry.alias.trim(),
-        })
-    })
+    const configured = new Set(
+        entries.map((entry) => normalizeName(entry.name).toLowerCase()).filter(Boolean),
+    )
+    const mergedEntries = [...entries]
+    const placeholderIndex = mergedEntries.findIndex(
+        (entry) => !normalizeName(entry.name) && !entry.alias.trim() &&
+            Object.entries(entry).every(([key, value]) => key === 'name' || key === 'alias' || value === undefined),
+    )
+    if (placeholderIndex >= 0) {
+        mergedEntries.splice(placeholderIndex, 1)
+    }
 
     let addedCount = 0
     discoveredModels.forEach((model) => {
         const name = normalizeName(model.name)
-        if (!name || mergedMap.has(name.toLowerCase())) {
+        const key = name.toLowerCase()
+        if (!name || configured.has(key)) {
             return
         }
-        mergedMap.set(name.toLowerCase(), { name, alias: '' })
+        configured.add(key)
+        mergedEntries.push({ name, alias: model.alias?.trim() ?? '' })
         ++addedCount
     })
 
-    const mergedEntries = Array.from(mergedMap.values())
     return {
         entries: mergedEntries.length ? mergedEntries : [{ name: '', alias: '' }],
         addedCount,

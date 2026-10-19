@@ -1,15 +1,25 @@
-import {normalizeMaxContextLength, normalizeModelThinking} from '@/utils/modelMetadata'
+import {normalizeModelThinking} from '@/utils/modelMetadata'
 import {Fragment} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Button} from './Button'
 import {IconX} from './icons'
 import styles from './ModelInputList.module.scss'
-import {type ModelEntry, parseThinkingLevelsInput} from './modelInputListUtils'
+import {type ModelEntry, getModelEntriesValidationKey, parseThinkingLevelsInput, updateModelNumericField} from './modelInputListUtils'
 
 const THINKING_BOOLEAN_FIELDS = [
     { field: 'zeroAllowed', label: 'ai_providers.model_thinking_zero_allowed_label' },
     { field: 'dynamicAllowed', label: 'ai_providers.model_thinking_dynamic_allowed_label' },
 ] as const
+
+const ADVANCED_BOOLEAN_FIELDS = [
+    { field: 'isCompat', label: 'ai_providers.model_is_compat_label' },
+    { field: 'forceMapping', label: 'ai_providers.model_force_mapping_label' },
+    { field: 'supportConfigurationUpdate', label: 'ai_providers.model_configuration_update_label' },
+    { field: 'useMaxCompletionTokens', label: 'ai_providers.model_max_completion_tokens_label' },
+    { field: 'image', label: 'ai_providers.model_image_label' },
+] as const
+
+export type ModelProvider = 'gemini' | 'interactions' | 'claude' | 'codex' | 'xai' | 'meta' | 'vertex' | 'openai'
 
 interface ModelInputListProps {
     entries: ModelEntry[]
@@ -27,6 +37,7 @@ interface ModelInputListProps {
     removeButtonTitle?: string
     removeButtonAriaLabel?: string
     metadataEditing?: boolean
+    provider: ModelProvider
 }
 
 export function ModelInputList({
@@ -45,12 +56,23 @@ export function ModelInputList({
                                    removeButtonTitle = 'Remove',
                                    removeButtonAriaLabel = 'Remove',
                                    metadataEditing = false,
+                                   provider,
                                }: ModelInputListProps) {
     const { t }              = useTranslation()
     const currentEntries     = entries.length ? entries : [{ name: '', alias: '' }]
     const containerClassName = ['header-input-list', className].filter(Boolean).join(' ')
     const inputClassNames    = ['input', inputClassName].filter(Boolean).join(' ')
     const rowClassNames      = ['header-input-row', rowClassName].filter(Boolean).join(' ')
+    const advancedFlags      = ADVANCED_BOOLEAN_FIELDS.filter(({field}) =>
+        (field === 'isCompat' && provider !== 'vertex') ||
+        (field === 'forceMapping' && ['codex', 'xai', 'meta'].includes(provider)) ||
+        (field === 'supportConfigurationUpdate' && provider === 'codex') ||
+        (['useMaxCompletionTokens', 'image'].includes(field) && provider === 'openai'),
+    )
+
+    const updateMetadata = (index: number, patch: Partial<ModelEntry>) => {
+        onChange(currentEntries.map((entry, idx) => idx === index ? {...entry, ...patch} : entry))
+    }
 
     const updateEntry = (index: number, field: 'name' | 'alias', value: string) => {
         const next = currentEntries.map((entry, idx) => (idx === index ? { ...entry, [field]: value } : entry))
@@ -58,20 +80,8 @@ export function ModelInputList({
     }
 
     const updateMaxContextLength = (index: number, value: string) => {
-        const maxContextLength = normalizeMaxContextLength(value)
-        const next             = currentEntries.map((entry, idx) => {
-            if (idx !== index) {
-                return entry
-            }
-            const updated = { ...entry }
-            if (maxContextLength === undefined) {
-                delete updated.maxContextLength
-            } else {
-                updated.maxContextLength = maxContextLength
-            }
-            return updated
-        })
-        onChange(next)
+        onChange(currentEntries.map((entry, idx) =>
+            idx === index ? updateModelNumericField(entry, 'maxContextLength', value) : entry))
     }
 
     const updateThinking = (
@@ -98,9 +108,8 @@ export function ModelInputList({
     }
 
     const updateThinkingInteger = (index: number, field: 'min' | 'max', value: string) => {
-        const trimmed = value.trim()
-        const parsed  = trimmed === '' ? undefined : Number(value)
-        updateThinking(index, field, parsed !== undefined && Number.isInteger(parsed) ? parsed : undefined)
+        onChange(currentEntries.map((entry, idx) =>
+            idx === index ? updateModelNumericField(entry, field, value) : entry))
     }
 
     const addEntry = () => {
@@ -118,12 +127,15 @@ export function ModelInputList({
 
     return (
         <div className={containerClassName}>
-            {currentEntries.map((entry, index) => (
+            {currentEntries.map((entry, index) => {
+                const validationKey = getModelEntriesValidationKey([entry])
+                return (
                 <Fragment key={index}>
                     <div className={rowClassNames}>
                         <input
                             className={inputClassNames}
                             placeholder={namePlaceholder}
+                            aria-label={namePlaceholder}
                             value={entry.name}
                             onChange={(e) => updateEntry(index, 'name', e.target.value)}
                             disabled={disabled}
@@ -132,6 +144,7 @@ export function ModelInputList({
                         <input
                             className={inputClassNames}
                             placeholder={aliasPlaceholder}
+                            aria-label={aliasPlaceholder}
                             value={entry.alias}
                             onChange={(e) => updateEntry(index, 'alias', e.target.value)}
                             disabled={disabled}
@@ -149,25 +162,29 @@ export function ModelInputList({
                         </Button>
                         {metadataEditing && (
                             <div className={styles.metadataFields}>
-                                <label className={styles.metadataField}>
-                                    <span>{t('ai_providers.model_max_context_length_label')}</span>
-                                    <input
-                                        className={inputClassNames}
-                                        type='number'
-                                        min={1}
-                                        step={1}
-                                        value={entry.maxContextLength ?? ''}
-                                        onChange={(event) => updateMaxContextLength(index, event.target.value)}
-                                        disabled={disabled}
-                                    />
-                                </label>
+                                {provider !== 'vertex' && (
+                                    <label className={styles.metadataField}>
+                                        <span>{t('ai_providers.model_max_context_length_label')}</span>
+                                        <input
+                                            className={inputClassNames}
+                                            type='text'
+                                            inputMode='numeric'
+                                            value={entry.maxContextLengthDraft ?? entry.maxContextLength ?? ''}
+                                            aria-invalid={validationKey === 'ai_providers.model_context_invalid'}
+                                            onChange={(event) => updateMaxContextLength(index, event.target.value)}
+                                            disabled={disabled}
+                                        />
+                                    </label>
+                                )}
                                 <label className={styles.metadataField}>
                                     <span>{t('ai_providers.model_thinking_min_label')}</span>
                                     <input
                                         className={inputClassNames}
-                                        type='number'
-                                        step={1}
-                                        value={entry.thinking?.min ?? ''}
+                                        type='text'
+                                        inputMode='numeric'
+                                        value={entry.thinkingMinDraft ?? entry.thinking?.min ?? ''}
+                                        aria-invalid={validationKey === 'ai_providers.model_thinking_budget_invalid' ||
+                                                      validationKey === 'ai_providers.model_thinking_budget_range'}
                                         onChange={(event) => updateThinkingInteger(index, 'min', event.target.value)}
                                         disabled={disabled}
                                     />
@@ -176,13 +193,18 @@ export function ModelInputList({
                                     <span>{t('ai_providers.model_thinking_max_label')}</span>
                                     <input
                                         className={inputClassNames}
-                                        type='number'
-                                        step={1}
-                                        value={entry.thinking?.max ?? ''}
+                                        type='text'
+                                        inputMode='numeric'
+                                        value={entry.thinkingMaxDraft ?? entry.thinking?.max ?? ''}
+                                        aria-invalid={validationKey === 'ai_providers.model_thinking_budget_invalid' ||
+                                                      validationKey === 'ai_providers.model_thinking_budget_range'}
                                         onChange={(event) => updateThinkingInteger(index, 'max', event.target.value)}
                                         disabled={disabled}
                                     />
                                 </label>
+                                {validationKey && (
+                                    <span className={styles.metadataError} role='alert'>{t(validationKey)}</span>
+                                )}
                                 {THINKING_BOOLEAN_FIELDS.map(({ field, label }) => {
                                     const value = entry.thinking?.[field]
                                     return (
@@ -221,11 +243,63 @@ export function ModelInputList({
                                         disabled={disabled}
                                     />
                                 </label>
+                                <details className={styles.advancedOptions}>
+                                    <summary>{t('ai_providers.model_advanced_options_label')}</summary>
+                                    <div className={styles.metadataFields}>
+                                        <label className={styles.metadataField}>
+                                            <span>{t('ai_providers.model_display_name_label')}</span>
+                                            <input
+                                                className={inputClassNames}
+                                                value={entry.displayName ?? ''}
+                                                onChange={(event) => updateMetadata(index, {
+                                                    displayName: event.target.value,
+                                                })}
+                                                disabled={disabled}
+                                            />
+                                        </label>
+                                        {advancedFlags.map(({field, label}) => (
+                                            <label className={styles.metadataField} key={field}>
+                                                <span>{t(label)}</span>
+                                                <select
+                                                    className={inputClassNames}
+                                                    value={entry[field] === undefined ? '' : String(entry[field])}
+                                                    onChange={(event) => updateMetadata(index, {
+                                                        [field]: event.target.value === '' ? undefined :
+                                                                 event.target.value === 'true',
+                                                    })}
+                                                    disabled={disabled}
+                                                >
+                                                    <option value=''>{t('common.not_set')}</option>
+                                                    <option value='true'>{t('common.yes')}</option>
+                                                    <option value='false'>{t('common.no')}</option>
+                                                </select>
+                                            </label>
+                                        ))}
+                                        {provider === 'openai' && ([
+                                            {field: 'inputModalities', label: 'ai_providers.model_input_modalities_label'},
+                                            {field: 'outputModalities', label: 'ai_providers.model_output_modalities_label'},
+                                        ] as const).map(({field, label}) => (
+                                                <label className={styles.metadataField} key={field}>
+                                                    <span>{t(label)}</span>
+                                                    <input
+                                                        className={inputClassNames}
+                                                        value={entry[field]?.join(', ') ?? ''}
+                                                        onChange={(event) => updateMetadata(index, {
+                                                            [field]: event.target.value.split(',')
+                                                                .map((value) => value.trim()).filter(Boolean),
+                                                        })}
+                                                        disabled={disabled}
+                                                    />
+                                                </label>
+                                            ))}
+                                    </div>
+                                </details>
                             </div>
                         )}
                     </div>
                 </Fragment>
-            ))}
+                )
+            })}
             {!hideAddButton && addLabel && (
                 <Button variant='secondary' size='sm' onClick={addEntry} disabled={disabled} className='align-start'>
                     {addLabel}

@@ -25,7 +25,11 @@ const original: ProviderKeyConfig = {
 }
 
 describe('Claude fingerprint profile transport', () => {
-    afterEach(() => { spyOn(apiClient, 'post').mockRestore(); spyOn(apiClient, 'patch').mockRestore() })
+    afterEach(() => {
+        spyOn(apiClient, 'post').mockRestore()
+        spyOn(apiClient, 'patch').mockRestore()
+        spyOn(providersApi, 'getClaudeConfigs').mockRestore()
+    })
 
     test.each([
         ['', ''],
@@ -54,13 +58,16 @@ describe('Claude fingerprint profile transport', () => {
     })
 
     test('patches only the profile with stable identity and preserves masked credentials', async () => {
+        spyOn(providersApi, 'getClaudeConfigs').mockResolvedValue([
+            {...original, authIndex: 'claude:other-a'}, {...original, authIndex: 'claude:other-b'}, original,
+        ])
         const patch = spyOn(apiClient, 'patch').mockResolvedValue({})
         await providersApi.patchClaudeConfig(2, { ...original, fingerprintProfile: '' }, original)
         expect(patch).toHaveBeenCalledWith('/claude-api-key', {
             index: 2,
             'auth-index': 'claude:synthetic',
             value: { 'fingerprint-profile': '' },
-        })
+        }, {__authGeneration: apiClient.getAuthGeneration()})
         expect(original.fingerprintProfile).toBe('claude-code-cli')
         expect(original.headers).toEqual({ Authorization: 'Bearer synthetic...masked' })
     })
@@ -78,6 +85,7 @@ describe('Claude fingerprint profile transport', () => {
     })
 
     test('propagates backend validation errors without reporting success', async () => {
+        spyOn(providersApi, 'getClaudeConfigs').mockResolvedValue([original])
         spyOn(apiClient, 'patch').mockRejectedValue(new Error('Unsupported fingerprint-profile'))
         await expect(providersApi.patchClaudeConfig(0, { ...original, fingerprintProfile: 'unknown' }, original))
             .rejects.toThrow('Unsupported fingerprint-profile')
@@ -136,6 +144,9 @@ describe('Claude fingerprint profile drafts and YAML', () => {
         expect(layout).toContain('fingerprintProfile: normalizeClaudeFingerprintProfile(data.fingerprintProfile)')
         expect(page).toContain('claude_fingerprint_profile_unknown')
         expect(page).toContain('ariaDescribedBy=')
+        expect(page).toContain('ariaInvalid={invalidFingerprintProfile}')
+        expect(readFileSync(new URL('../src/components/ui/Select.tsx', import.meta.url), 'utf8'))
+            .toContain('aria-invalid={ariaInvalid}')
         expect(layout).toContain('claude_fingerprint_profile_unknown')
     })
 

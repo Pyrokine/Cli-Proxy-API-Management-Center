@@ -18,6 +18,14 @@ export interface ModelAlias {
     testModel?: string
     maxContextLength?: number
     thinking?: ModelThinking
+    displayName?: string
+    forceMapping?: boolean
+    isCompat?: boolean
+    supportConfigurationUpdate?: boolean
+    useMaxCompletionTokens?: boolean
+    image?: boolean
+    inputModalities?: string[]
+    outputModalities?: string[]
 }
 
 export interface ApiKeyEntry {
@@ -39,7 +47,15 @@ export interface CredentialOverrides {
     requestRetry?: number
 }
 
+export interface RequestScopedErrorRule {
+    status?: number
+    match?: string[]
+    matchRegex?: string[]
+    action?: string
+}
+
 export interface GeminiKeyConfig extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
     authIndex?: string
     priority?: number
@@ -53,6 +69,7 @@ export interface GeminiKeyConfig extends CredentialOverrides {
 }
 
 export interface ProviderKeyConfig extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
     authIndex?: string
     priority?: number
@@ -60,6 +77,9 @@ export interface ProviderKeyConfig extends CredentialOverrides {
     prefix?: string
     baseUrl?: string
     websockets?: boolean
+    alphaSearch?: boolean
+    disableCodexCloaking?: boolean
+    rebuildMidSystemMessage?: boolean
     proxyUrl?: string
     headers?: Record<string, string>
     models?: ModelAlias[]
@@ -69,6 +89,7 @@ export interface ProviderKeyConfig extends CredentialOverrides {
 }
 
 export interface OpenAIProviderConfig extends CredentialOverrides {
+    requestScopedErrors?: RequestScopedErrorRule[]
     name: string
     prefix?: string
     baseUrl: string
@@ -78,6 +99,7 @@ export interface OpenAIProviderConfig extends CredentialOverrides {
     priority?: number
     testModel?: string
     disabled?: boolean
+    supportPromptCacheKey?: boolean
     authIndex?: string
 
     [key: string]: unknown

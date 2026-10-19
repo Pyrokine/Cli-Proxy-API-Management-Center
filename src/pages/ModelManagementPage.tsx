@@ -102,6 +102,7 @@ type OptionalPriceParseResult =
     | { ok: false }
 
 const BUILTIN_GROUP_OPTIONS = [
+    'GPT-6',
     'GPT-5.6',
     'GPT-5.5',
     'GPT Image',
@@ -112,6 +113,7 @@ const BUILTIN_GROUP_OPTIONS = [
     'DeepSeek V4',
     'GLM 5',
     'GLM 4',
+    'Grok 4.7',
     'Grok 4.6',
     'Kimi K3',
     'Kimi K2.5',

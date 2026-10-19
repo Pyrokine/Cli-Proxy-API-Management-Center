@@ -1,6 +1,6 @@
 import type {ProviderFormState} from '@/components/providers/types'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {entriesToModels, getModelEntriesValidationKey, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
 import {useProviderEditLayout} from '@/hooks/useProviderEditLayout'
 import {findProviderConfigIndexByAuthIndex, providersApi} from '@/services/api'
@@ -8,7 +8,7 @@ import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {useClaudeEditDraftStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {ProviderKeyConfig} from '@/types'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
-import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
+import {getCredentialRetryValidationKey, getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, getChangedHeaderNames, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
@@ -78,6 +78,7 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                        weight: form.weight !== undefined && Number.isFinite(form.weight) ? form.weight : null,
                        disableCooling: form.disableCooling ?? null,
                        requestRetry: form.requestRetry?.toString() ?? null,
+                       requestScopedErrors: form.requestScopedErrors ?? null,
                        prefix: String(form.prefix ?? '').trim(),
                        baseUrl: String(form.baseUrl ?? '').trim(),
                        proxyUrl: String(form.proxyUrl ?? '').trim(),
@@ -86,11 +87,13 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                        excludedModels: parseTextList(form.excludedText ?? ''),
                        cloak: normalizeCloakConfig(form.cloak),
                        fingerprintProfile: normalizeClaudeFingerprintProfile(form.fingerprintProfile),
+                       rebuildMidSystemMessage: Boolean(form.rebuildMidSystemMessage),
                    })
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
     fingerprintProfile: '',
+    rebuildMidSystemMessage: false,
     priority: undefined,
     weight: undefined,
     prefix: '',
@@ -132,6 +135,7 @@ export function AiProvidersClaudeEditLayout() {
         const seededForm: ProviderFormState = {
             ...data,
             fingerprintProfile: normalizeClaudeFingerprintProfile(data.fingerprintProfile),
+            rebuildMidSystemMessage: Boolean(data.rebuildMidSystemMessage),
             headers: headersToEntries(data.headers),
             modelEntries: modelsToEntries(data.models),
             excludedText: excludedModelsToText(data.excludedModels),
@@ -152,6 +156,7 @@ export function AiProvidersClaudeEditLayout() {
 
     const onSave = useCallback(
         async (ctx: {
+            isCurrent: () => boolean
             form: ProviderFormState
             editIndex: number | null
             configs: ProviderKeyConfig[]
@@ -161,6 +166,9 @@ export function AiProvidersClaudeEditLayout() {
             updateBaselineSignature: (signature: string) => void
             handleBack: () => void
         }) => {
+            if (!ctx.isCurrent()) {
+                return
+            }
             const { form, editIndex, configs, setConfigs, setSaving, handleBack } = ctx
             const weightError                                                     = getCredentialWeightValidationKey(
                 form.weight)
@@ -175,9 +183,23 @@ export function AiProvidersClaudeEditLayout() {
                 return
             }
 
+            const modelError = getModelEntriesValidationKey(form.modelEntries)
+            if (modelError) {
+                showNotification(t(modelError), 'error')
+                return
+            }
+
             const fingerprintProfile = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
             if (fingerprintProfile !== '' && fingerprintProfile !== 'claude-code-cli') {
                 showNotification(t('ai_providers.claude_fingerprint_profile_unknown', { value: fingerprintProfile }), 'error')
+                return
+            }
+
+            const stableIndex = editIndex !== null ? findProviderConfigIndexByAuthIndex(configs, form.authIndex ?? '') : -1
+            const rulesError = getRequestScopedErrorsValidationKey(
+                form.requestScopedErrors, stableIndex >= 0 ? configs[stableIndex].requestScopedErrors : undefined)
+            if (rulesError) {
+                showNotification(t(rulesError), 'error')
                 return
             }
 
@@ -189,6 +211,7 @@ export function AiProvidersClaudeEditLayout() {
                     weight: form.weight,
                     disableCooling: form.disableCooling,
                     requestRetry: form.requestRetry,
+                    requestScopedErrors: form.requestScopedErrors,
                     prefix: form.prefix?.trim() || undefined,
                     baseUrl: (form.baseUrl ?? '').trim() || undefined,
                     proxyUrl: form.proxyUrl?.trim() || undefined,
@@ -200,11 +223,11 @@ export function AiProvidersClaudeEditLayout() {
                     excludedModels: parseTextList(form.excludedText),
                     cloak: form.cloak,
                     fingerprintProfile,
+                    rebuildMidSystemMessage: Boolean(form.rebuildMidSystemMessage),
                 }
 
                 let localList: ProviderKeyConfig[]
                 if (editIndex !== null) {
-                    const stableIndex = findProviderConfigIndexByAuthIndex(configs, form.authIndex ?? '')
                     if (stableIndex < 0) {
                         showNotification(
                             `${t('notification.update_failed')}: ${t('common.invalid_provider_index')}`,
@@ -223,6 +246,9 @@ export function AiProvidersClaudeEditLayout() {
                     await providersApi.createClaudeConfig(payload)
                     localList = [...configs, payload]
                 }
+                if (!ctx.isCurrent()) {
+                    return
+                }
 
                 showNotification(
                     editIndex !== null
@@ -235,8 +261,14 @@ export function AiProvidersClaudeEditLayout() {
                 try {
                     nextList = await providersApi.getClaudeConfigs()
                 } catch (refreshError: unknown) {
+                    if (!ctx.isCurrent()) {
+                        return
+                    }
                     const message = refreshError instanceof Error ? refreshError.message : ''
                     showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+                }
+                if (!ctx.isCurrent()) {
+                    return
                 }
                 setConfigs(nextList)
                 updateConfigValue('claude-api-key', nextList)
@@ -244,9 +276,14 @@ export function AiProvidersClaudeEditLayout() {
                 ctx.updateBaselineSignature(buildClaudeSignature(form, ''))
                 handleBack()
             } catch (err: unknown) {
+                if (!ctx.isCurrent()) {
+                    return
+                }
                 showNotification(`${t('notification.update_failed')}: ${getErrorMessage(err)}`, 'error')
             } finally {
-                setSaving(false)
+                if (ctx.isCurrent()) {
+                    setSaving(false)
+                }
             }
         },
         [showNotification, t, updateConfigValue],

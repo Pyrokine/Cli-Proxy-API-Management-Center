@@ -6,6 +6,7 @@ import iconGrokDark from '@/assets/icons/grok-dark.svg'
 import iconGrok from '@/assets/icons/grok.svg'
 import iconKimiDark from '@/assets/icons/kimi-dark.svg'
 import iconKimiLight from '@/assets/icons/kimi-light.svg'
+import iconMeta from '@/assets/icons/meta.svg'
 import iconMinimax from '@/assets/icons/minimax.svg'
 import iconOpenaiDark from '@/assets/icons/openai-dark.svg'
 import iconOpenaiLight from '@/assets/icons/openai-light.svg'
@@ -35,6 +36,7 @@ import styles from './SystemPage.module.scss'
 const MODEL_CATEGORY_ICONS: Record<string, string | { light: string; dark: string }> = {
     gpt: { light: iconOpenaiLight, dark: iconOpenaiDark },
     claude: iconClaude,
+    meta: iconMeta,
     gemini: iconGemini,
     qwen: iconQwen,
     kimi: { light: iconKimiLight, dark: iconKimiDark },

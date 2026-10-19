@@ -75,6 +75,7 @@ export interface Config {
     geminiApiKeys?: GeminiKeyConfig[]
     interactionsApiKeys?: GeminiKeyConfig[]
     codexApiKeys?: ProviderKeyConfig[]
+    metaApiKeys?: ProviderKeyConfig[]
     claudeApiKeys?: ProviderKeyConfig[]
     xaiApiKeys?: ProviderKeyConfig[]
     vertexApiKeys?: ProviderKeyConfig[]
@@ -107,6 +108,7 @@ export type RawConfigSection =
     | 'gemini-api-key'
     | 'interactions-api-key'
     | 'codex-api-key'
+    | 'meta-api-key'
     | 'claude-api-key'
     | 'xai-api-key'
     | 'vertex-api-key'

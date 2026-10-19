@@ -11,6 +11,20 @@
     }
 }
 
+.advancedOptions {
+    grid-column: 1 / -1;
+
+    summary {
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: $font-size-xs;
+    }
+
+    .metadataFields {
+        margin-top: $spacing-xs;
+    }
+}
+
 .metadataField {
     display: flex;
     flex-direction: column;
@@ -21,4 +35,10 @@
         color: var(--text-secondary);
         font-size: $font-size-xs;
     }
+}
+
+.metadataError {
+    grid-column: 1 / -1;
+    color: var(--error-color);
+    font-size: $font-size-xs;
 }
