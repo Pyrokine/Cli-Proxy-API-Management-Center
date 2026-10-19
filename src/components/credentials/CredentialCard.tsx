@@ -1,5 +1,5 @@
 import {Button} from '@/components/ui/Button'
-import {IconDownload, IconKey, IconPencil, IconRefreshCw, IconTrash2} from '@/components/ui/icons'
+import {IconDownload, IconPencil, IconRefreshCw, IconTimer, IconTrash2} from '@/components/ui/icons'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import type {QuotaFreshness} from '@/types'
@@ -24,14 +24,16 @@ export interface QuotaItem {
     id: string
     /** Model name or bucket label */
     model: string
-    /** Usage percentage 0-100 */
-    percent: number
+    /** Remaining percentage 0-100; null when usage is unavailable */
+    percent: number | null
     /** Additional quota details, such as remaining credits */
     detail?: string
     /** Human-readable absolute reset label */
     resetLabel?: string
     /** Absolute reset instant used for live relative time */
     resetAtMs?: number | null
+    /** Whether this row represents a quota window with a reset time */
+    showReset?: boolean
     /** Provider window length, preserved for quota timeline consumers */
     periodHours?: number | null
     /** Antigravity countdowns update on their exact rounded-minute boundary */
@@ -60,14 +62,15 @@ interface RefreshState {
     nextRefreshTime: Date | null
     isRefreshing: boolean
     autoRefreshEnabled: boolean
+    disabled?: boolean
     /** Backend scheduler status: idle/loading/success/error/banned/quota_exceeded */
     status?: string
     onRefresh: () => void
 }
 
-interface ManualTokenRefreshState {
-    isRefreshing: boolean
-    onRefresh: () => void
+interface QuotaResetState {
+    isResetting: boolean
+    onReset: () => void
     disabled?: boolean
     title?: string
 }
@@ -77,6 +80,7 @@ export interface CredentialField {
     label: string
     value: string
     wrap?: boolean
+    expiresAtMs?: number | null
 }
 
 interface CredentialCardProps {
@@ -121,10 +125,12 @@ interface CredentialCardProps {
     runtimeState?: CredentialRuntimeState
     /** Backend cooldown snapshot for this credential; undefined means unsupported or omitted. */
     cooldownSnapshot?: AuthFileCooldownSnapshot
+    onClearCooldown?: () => void
     /** Quota capability for credentials without a queryable quota endpoint */
-    quotaCapability?: 'unsupported'
+    quotaCapability?: 'unsupported' | 'meta_unavailable' | 'kimi_ai_unavailable'
     /** Quota usage data */
     quotaItems?: QuotaItem[]
+    quotaSummary?: CredentialField[]
     /** Quota fetch error message */
     quotaError?: string
     /** Quota is currently loading */
@@ -143,8 +149,8 @@ interface CredentialCardProps {
     statusBar?: StatusBarData
     /** Quota refresh scheduling state */
     refreshState?: RefreshState
-    /** Explicit credential token refresh, separate from quota refresh. */
-    manualTokenRefreshState?: ManualTokenRefreshState
+    /** Account quota reset requiring an explicit confirmation. */
+    quotaResetState?: QuotaResetState
 }
 
 /** Classify quota bar color by remaining percentage. */
@@ -199,18 +205,24 @@ const quotaHttpStatusMessages: Record<string, string> = {
 }
 
 function formatQuotaErrorMessage(error: string, t: ReturnType<typeof useTranslation>['t']): string {
-    const statusMatch = /\bstatus\s+(?<status>\d{3})\b/i.exec(error)
-    if (!statusMatch?.groups) {
-        return error
-    }
-    const status = statusMatch.groups.status
-    return t(quotaHttpStatusMessages[status] ?? 'credentials.quota_status_http_default', {
-        status,
-        defaultValue: error,
-    })
+    return error.replace(/\bstatus\s+(\d{3})\b/gi, (match, status: string) =>
+        t(quotaHttpStatusMessages[status] ?? 'credentials.quota_status_http_default', {
+            status,
+            defaultValue: match,
+        }),
+    )
 }
 
-function refreshStatusLabel(status: string | undefined, t: ReturnType<typeof useTranslation>['t']): string {
+function refreshStatusLabel(
+    status: string | undefined,
+    freshness: QuotaFreshness | undefined,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    if (status !== 'loading' && status !== 'error' && status !== 'banned' && status !== 'quota_exceeded') {
+        if (freshness === 'partial') {
+            return t('credentials.refresh_status_partial', {defaultValue: '部分更新'})
+        }
+    }
     switch (status) {
         case 'loading':
             return t('credentials.refresh_status_loading', { defaultValue: '刷新中' })
@@ -291,9 +303,12 @@ function cooldownReasonLabel(reason: string, t: ReturnType<typeof useTranslation
 
 interface CredentialCooldownsProps {
     snapshot: AuthFileCooldownSnapshot
+    controlLabel: string
+    onClear?: () => void
+    clearDisabled?: boolean
 }
 
-function CredentialCooldowns({snapshot}: CredentialCooldownsProps) {
+function CredentialCooldowns({snapshot, controlLabel, onClear, clearDisabled}: CredentialCooldownsProps) {
     const {t} = useTranslation()
 
     if (snapshot.records === null) {
@@ -318,11 +333,16 @@ function CredentialCooldowns({snapshot}: CredentialCooldownsProps) {
         )
     }
 
-    return <ActiveCredentialCooldowns snapshot={snapshot}/>
+    return <ActiveCredentialCooldowns
+        snapshot={snapshot}
+        controlLabel={controlLabel}
+        onClear={onClear}
+        clearDisabled={clearDisabled}
+    />
 }
 
-function ActiveCredentialCooldowns({snapshot}: CredentialCooldownsProps) {
-    const {t}   = useTranslation()
+function ActiveCredentialCooldowns({snapshot, controlLabel, onClear, clearDisabled}: CredentialCooldownsProps) {
+    const {t, i18n} = useTranslation()
     const nowMs = useSyncExternalStore(SECOND_CLOCK.subscribe, SECOND_CLOCK.getSnapshot, SECOND_CLOCK.getSnapshot)
     const activeCooldowns = snapshot.records?.flatMap((cooldown, index) => {
         const remainingSeconds = getCooldownRemainingSeconds(
@@ -363,10 +383,47 @@ function ActiveCredentialCooldowns({snapshot}: CredentialCooldownsProps) {
                             <span className={styles.cooldownReason}>
                                 {cooldownReasonLabel(cooldown.reason, t)}
                             </span>
+                            {cooldown.httpStatus !== undefined && (
+                                <span className={styles.cooldownReason}>
+                                    {t('credentials.cooldown_http_status', {status: cooldown.httpStatus})}
+                                </span>
+                            )}
+                            {cooldown.backoffLevel !== undefined && (
+                                <span className={styles.cooldownReason}>
+                                    {t('credentials.cooldown_backoff_level', {level: cooldown.backoffLevel})}
+                                </span>
+                            )}
+                            <time className={styles.cooldownReason} dateTime={cooldown.retryAt}>
+                                {t('credentials.cooldown_deadline', {
+                                    time: formatDateTime(cooldown.retryAt, i18n.language),
+                                })}
+                            </time>
                         </div>
                     )
                 })}
             </div>
+            {(snapshot.observedAt || onClear) && (
+                <div className={styles.cooldownFooter}>
+                    {snapshot.observedAt && (
+                        <time className={styles.cooldownReason} dateTime={snapshot.observedAt}>
+                            {t('credentials.cooldown_observed_at', {
+                                time: formatDateTime(snapshot.observedAt, i18n.language),
+                            })}
+                        </time>
+                    )}
+                    {onClear && (
+                        <Button
+                            variant='secondary'
+                            size='xs'
+                            onClick={onClear}
+                            disabled={clearDisabled}
+                            aria-label={t('credentials.cooldown_clear_aria', {name: controlLabel})}
+                        >
+                            {t('credentials.cooldown_clear')}
+                        </Button>
+                    )}
+                </div>
+            )}
         </details>
     )
 }
@@ -393,8 +450,10 @@ export function CredentialCard({
                                    onDownload,
                                    runtimeState,
                                    cooldownSnapshot,
+                                   onClearCooldown,
                                    quotaCapability,
                                    quotaItems,
+                                   quotaSummary,
                                    quotaError,
                                    quotaLoading,
                                    quotaFreshness,
@@ -404,14 +463,20 @@ export function CredentialCard({
                                    statsError,
                                    statusBar,
                                    refreshState,
-                                   manualTokenRefreshState,
+                                   quotaResetState,
                                }: CredentialCardProps) {
     const { t, i18n }                     = useTranslation()
     const [editingAlias, setEditingAlias] = useState(false)
     const [aliasInput, setAliasInput]     = useState('')
     const quotaErrorText                  = quotaError ? formatQuotaErrorMessage(quotaError, t) : ''
     const freshnessLabel                  = quotaFreshnessLabel(quotaFreshness, t)
-    const refreshResultLabel              = refreshStatusLabel(refreshState?.status, t)
+    const refreshResultLabel              = refreshStatusLabel(
+        refreshState?.isRefreshing || quotaLoading ? 'loading' :
+            quotaError && quotaFreshness !== 'partial' && refreshState?.status !== 'banned' &&
+            refreshState?.status !== 'quota_exceeded' ? 'error' : refreshState?.status,
+        quotaFreshness,
+        t,
+    )
     const hasQuotaItems                   = Boolean(quotaItems?.length)
     const quotaStatusReasonShown          = Boolean(
         quotaErrorText && (refreshState?.status === 'banned' || refreshState?.status === 'quota_exceeded'),
@@ -419,14 +484,14 @@ export function CredentialCard({
     const showFreshnessNotice             = Boolean(
         (freshnessLabel || quotaObservationWarning) && !quotaStatusReasonShown,
     )
-    const showQuotaSection                = quotaCapability ===
-                                            'unsupported' ||
+    const showQuotaSection                = Boolean(quotaCapability) ||
                                             category ===
                                             'auth-file' ||
                                             Boolean(
                                             quotaLoading ||
                                             quotaError ||
                                             quotaItems?.length ||
+                                            quotaSummary?.length ||
                                             quotaFreshness ||
                                             quotaObservationWarning ||
                                             quotaSuccessfulEmpty ||
@@ -496,6 +561,7 @@ export function CredentialCard({
         () =>
             pickUrgentRecoveryRowId(
                 (quotaItems ?? []).flatMap((item) =>
+                                               item.percent !== null && item.percent < 100 &&
                                                typeof item.resetAtMs === 'number' && Number.isFinite(item.resetAtMs) ?
                                                    [{ rowId: item.id, atMs: item.resetAtMs }] :
                                                    [],
@@ -583,21 +649,27 @@ export function CredentialCard({
             {/* Metadata fields */}
             {fields && fields.length > 0 && (
                 <div className={styles.fields}>
-                    {fields.map((field) => (
-                        <div
-                            key={field.id}
-                            className={`${styles.field} ${field.wrap ? styles.fieldWrap : ''}`}
-                            data-field-id={field.id}
-                        >
-                            <span className={styles.fieldLabel}>{field.label}</span>
-                            <span
-                                className={`${styles.fieldValue} ${field.wrap ? styles.fieldValueWrap : ''}`}
-                                title={field.value}
+                    {fields.map((field) => {
+                        const expiry = buildResetDisplay(null, field.expiresAtMs, sharedNowMs, i18n.resolvedLanguage)
+                        return (
+                            <div
+                                key={field.id}
+                                className={`${styles.field} ${field.wrap ? styles.fieldWrap : ''}`}
+                                data-field-id={field.id}
                             >
-                                {field.value}
-                            </span>
-                        </div>
-                    ))}
+                                <span className={styles.fieldLabel}>{field.label}</span>
+                                <span
+                                    className={`${styles.fieldValue} ${field.wrap ? styles.fieldValueWrap : ''}`}
+                                    title={field.value}
+                                >
+                                    {field.value}
+                                    {expiry?.relative && (
+                                        <span className={styles.quotaResetRelative}> · {expiry.relative}</span>
+                                    )}
+                                </span>
+                            </div>
+                        )
+                    })}
                 </div>
             )}
 
@@ -762,7 +834,12 @@ export function CredentialCard({
             )}
 
             {cooldownSnapshot !== undefined && (
-                <CredentialCooldowns snapshot={cooldownSnapshot}/>
+                <CredentialCooldowns
+                    snapshot={cooldownSnapshot}
+                    controlLabel={controlLabel}
+                    onClear={disabled ? undefined : onClearCooldown}
+                    clearDisabled={disableControls}
+                />
             )}
 
             {/* Request statistics: badges + status blocks */}
@@ -839,11 +916,15 @@ export function CredentialCard({
                             {t('credentials.quota_section_title', { defaultValue: '配额信息' })}
                         </span>
                     </div>
-                    {quotaCapability === 'unsupported' ? (
+                    {quotaCapability ? (
                         <div className={styles.quotaUnsupported}>
-                            {t('credentials.quota_not_supported', {
-                                defaultValue: '该凭证类型没有可查询的配额接口',
-                            })}
+                            {quotaCapability === 'meta_unavailable' ?
+                             t('meta_quota.usage_unavailable') :
+                             quotaCapability === 'kimi_ai_unavailable' ?
+                             t('credentials.kimi_ai_quota_unavailable') :
+                             t('credentials.quota_not_supported', {
+                                 defaultValue: '该凭证类型没有可查询的配额接口',
+                             })}
                         </div>
                     ) : (
                          <>
@@ -913,6 +994,16 @@ export function CredentialCard({
                                      {quotaErrorText}
                                  </div>
                              )}
+                             {quotaSummary && quotaSummary.length > 0 && (
+                                 <div className={styles.fields}>
+                                     {quotaSummary.map((field) => (
+                                         <div key={field.id} className={styles.field}>
+                                             <span className={styles.fieldLabel}>{field.label}</span>
+                                             <span className={styles.fieldValue} title={field.value}>{field.value}</span>
+                                         </div>
+                                     ))}
+                                 </div>
+                             )}
                              {hasQuotaItems ? (
                                  quotaItems?.map((item) => {
                                      const resetDisplay      = buildResetDisplay(
@@ -956,7 +1047,7 @@ export function CredentialCard({
                                                             })}
                                                         </span>
                                                     )}
-                                                     {resetDisplay ? (
+                                                     {item.showReset !== false && (resetDisplay ? (
                                                          <span className={styles.quotaReset}>
                                                             <span>
                                                                 {t('credentials.quota_reset_value', {
@@ -989,7 +1080,7 @@ export function CredentialCard({
                                                                 defaultValue: 'Renewal time -',
                                                             })}
                                                         </span>
-                                                      )}
+                                                      ))}
                                                 </span>
                                              </div>
                                              {displayPercent !== null && (
@@ -1006,7 +1097,7 @@ export function CredentialCard({
                                          </div>
                                      )
                                  })
-                             ) : quotaSuccessfulEmpty ? (
+                             ) : quotaSummary?.length ? null : quotaSuccessfulEmpty ? (
                                  <div className={styles.quotaEmpty} role='status'>
                                      {t('credentials.quota_successful_empty', {
                                          defaultValue: '上游已确认当前没有配额数据',
@@ -1102,7 +1193,7 @@ export function CredentialCard({
                             variant='secondary'
                             size='sm'
                             onClick={refreshState.onRefresh}
-                            disabled={disableControls || refreshState.isRefreshing || manualTokenRefreshState?.isRefreshing}
+                            disabled={disableControls || refreshState.disabled || refreshState.isRefreshing || quotaResetState?.isResetting}
                             title={
                                 refreshState.isRefreshing
                                 ? t('credentials.refreshing', { defaultValue: 'Refreshing...' })
@@ -1110,32 +1201,25 @@ export function CredentialCard({
                                     defaultValue: 'Refresh quota for this credential only',
                                 })
                             }
+                            aria-label={t('auth_files.quota_refresh_hint', {
+                                defaultValue: 'Refresh quota for this credential only',
+                            })}
                             className={refreshState.isRefreshing ? styles.spinning : ''}
                         >
                             <IconRefreshCw size={14} />
-                            {refreshState.isRefreshing && (
-                                <span className={styles.refreshButtonLabel}>
-                                    {t('credentials.refreshing', { defaultValue: 'Refreshing...' })}
-                                </span>
-                            )}
                         </Button>
                     )}
-                    {manualTokenRefreshState && (
+                    {quotaResetState && (
                         <Button
                             variant='secondary'
                             size='sm'
-                            onClick={manualTokenRefreshState.onRefresh}
-                            disabled={
-                                disableControls ||
-                                manualTokenRefreshState.isRefreshing ||
-                                manualTokenRefreshState.disabled ||
-                                refreshState?.isRefreshing
-                            }
-                            title={manualTokenRefreshState.title ?? t('credentials.manual_token_refresh', {
-                                defaultValue: 'Refresh token',
-                            })}
+                            onClick={quotaResetState.onReset}
+                            loading={quotaResetState.isResetting}
+                            disabled={disableControls || quotaResetState.disabled || refreshState?.isRefreshing}
+                            title={quotaResetState.title}
+                            aria-label={t('auth_files.quota_reset_codex_title')}
                         >
-                            <IconKey size={14} />
+                            {quotaResetState.isResetting ? null : <IconTimer size={14} />}
                         </Button>
                     )}
                     {onDownload && (

@@ -29,6 +29,7 @@ import type {
     GeminiCliQuotaBucketState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    MetaQuotaState,
     QuotaCacheMetadata,
     QuotaFreshness,
     XaiQuotaState,
@@ -36,10 +37,14 @@ import type {
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import {buildClaudeQuotaWindows, buildKimiQuotaRows} from '@/utils/quota/builders'
+import {parseClaudeResetGrants} from '@/utils/quota/claudeResetGrants'
 import {resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
 import {parseDevinQuotaPayload} from '@/utils/quota/devin'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
+import {parseMetaSubscriptionSnapshot} from '@/utils/quota/metaSubscription'
+import {normalizeCodexAccountCredits} from '@/utils/quota/parsers'
 import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
+import {resolveClaudePlanType} from '@/utils/quota/resolvers'
 import {parseXaiQuotaPayload} from '@/utils/quota/xaiBilling'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -332,7 +337,13 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                     })
                 }
 
-                const terminalTask = await waitForQuotaRefreshTask(initialTask)
+                const terminalTask = await waitForQuotaRefreshTask(initialTask, {
+                    onProgress: async () => {
+                        if (isUIClaimCurrent()) {
+                            await pollLatest()
+                        }
+                    },
+                })
                 if (isUIClaimCurrent()) {
                     setMeta((prev) => {
                         const next      = applyQuotaRefreshTaskToMeta(prev, terminalTask, previousMeta)
@@ -580,6 +591,8 @@ function mapQuotaPayload(type: string, data: unknown): QuotaCachePayload {
             return { provider: type, value: mapGemini(data) }
         case 'kimi':
             return { provider: type, value: mapKimi(data) }
+        case 'meta':
+            return { provider: type, value: mapMeta(data) }
         case 'xai':
             return { provider: type, value: mapXai(data) }
         default:
@@ -795,35 +808,13 @@ function mapClaude(data: unknown): ClaudeQuotaState {
         throw invalidQuotaPayload('Claude')
     }
 
-    const windows = buildClaudeQuotaWindows(usage, (key) => i18n.t(key))
-
-    // Extract plan type from profile
-    const profileRaw            = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
-    const profile               =
-              profileRaw !== null && typeof profileRaw === 'object' ? (profileRaw as Record<string, unknown>) : null
-    const account               =
-              profile?.account !== null && typeof profile?.account === 'object'
-              ? (profile?.account as Record<string, unknown>)
-              : null
-    let planType: string | null = null
-    const organization          =
-              profile?.organization !== null && typeof profile?.organization === 'object'
-              ? (profile.organization as Record<string, unknown>)
-              : null
-    const organizationType      =
-              typeof organization?.organization_type === 'string' ?
-              organization.organization_type.trim().toLowerCase() :
-              ''
-    if (account?.has_claude_max) {
-        planType = 'Max'
-    } else if (account?.has_claude_pro) {
-        planType = 'Pro'
-    } else if (organizationType === 'team') {
-        planType = 'Team'
-    }
+    const windows    = buildClaudeQuotaWindows(usage, (key) => i18n.t(key))
+    const profileRaw = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
+    const planType   = resolveClaudePlanType(profileRaw)
 
     const extraUsage = parseClaudeExtraUsage(usage.extra_usage)
-    if (windows.length === 0 && !planType) {
+    const resetGrants = parseClaudeResetGrants(usage.cedar_ember)
+    if (windows.length === 0 && !planType && resetGrants.state !== 'present') {
         throw invalidQuotaPayload('Claude')
     }
 
@@ -831,6 +822,7 @@ function mapClaude(data: unknown): ClaudeQuotaState {
         status: 'success',
         windows,
         extraUsage,
+        resetGrants,
         planType,
     }
 }
@@ -845,6 +837,7 @@ function mapCodex(data: unknown): CodexQuotaState {
     const planType                    = typeof planTypeRaw === 'string' && planTypeRaw.trim() !== '' ?
                                         planTypeRaw.trim() :
                                         null
+    const accountCredits              = normalizeCodexAccountCredits(d.credits)
     const resetCreditsRaw             = d.rate_limit_reset_credits ?? d.rateLimitResetCredits
     const resetCreditsDetailsRaw      =
               d.rate_limit_reset_credits_details ??
@@ -866,13 +859,9 @@ function mapCodex(data: unknown): CodexQuotaState {
                                          ) :
                                          '')
     const subscriptionActiveUntil     =
-              d.chatgpt_subscription_active_until ??
-              d.chatgptSubscriptionActiveUntil ??
-              d.subscription_active_until ??
-              d.subscriptionActiveUntil ??
-              asRecord(d.subscription)?.active_until ??
-              asRecord(d.subscription)?.activeUntil ??
-              null
+              d.subscription_active_until_source === 'codex_subscriptions' &&
+              typeof d.subscription_active_until === 'string' ?
+              d.subscription_active_until : null
 
     type RateLimitInfo = Record<string, unknown>
 
@@ -1047,7 +1036,8 @@ function mapCodex(data: unknown): CodexQuotaState {
               resetCredits.availableCount.state !== 'missing' ||
               resetCredits.applicableAvailableCount.state !== 'missing' ||
               resetCreditsDetailsState !== 'missing'
-    if (windows.length === 0 && !planType && !hasResetCreditSummary && subscriptionActiveUntil === null) {
+    if (windows.length === 0 && !planType && !hasResetCreditSummary && subscriptionActiveUntil === null &&
+        accountCredits.balance === null && !accountCredits.unlimited) {
         throw invalidQuotaPayload('Codex')
     }
 
@@ -1056,6 +1046,8 @@ function mapCodex(data: unknown): CodexQuotaState {
         windows,
         planType,
         subscriptionActiveUntil: subscriptionActiveUntil as string | number | null,
+        creditBalance: accountCredits.balance,
+        creditsUnlimited: accountCredits.unlimited,
         rateLimitResetCreditsAvailableCount: resetCredits.availableCount,
         rateLimitResetCreditsApplicableAvailableCount: resetCredits.applicableAvailableCount,
         rateLimitResetCredits: resetCredits.credits,
@@ -1161,6 +1153,14 @@ function numberValue(value: unknown): number | null {
         return numberValue(record.val)
     }
     return null
+}
+
+function mapMeta(data: unknown): MetaQuotaState {
+    const subscription = parseMetaSubscriptionSnapshot(data)
+    if (!subscription) {
+        throw invalidQuotaPayload('Meta')
+    }
+    return {status: 'success', ...subscription}
 }
 
 function mapXai(data: unknown): XaiQuotaState {

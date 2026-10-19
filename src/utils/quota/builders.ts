@@ -294,6 +294,21 @@ export function buildKimiQuotaRows(payload: unknown, nowMs = Date.now()): KimiQu
         }
     }
 
+    const monthly = asRecord(asRecord(root?.usages)?.limit_month_total)
+    const monthlyRatio = numberValue(monthly?.used_ratio)
+    if (monthly && monthlyRatio !== null && monthlyRatio >= 0) {
+        const used = Math.round(monthlyRatio * 100)
+        if (Number.isSafeInteger(used)) {
+            const row = toKimiRow(
+                {used, limit: 100, reset_time: monthly.reset_time},
+                {labelKey: 'kimi_quota.monthly_limit'}, 'monthly', nowMs,
+            )
+            if (row) {
+                rows.push(row)
+            }
+        }
+    }
+
     if (rows.length > 0) {
         return rows
     }
@@ -372,23 +387,27 @@ export function buildClaudeQuotaWindows(
     const fableLimit                   = findFableLimit(usage)
 
     for (const definition of claudeWindowDefinitions) {
-        if (definition.key === 'iguana_necktie' && fableLimit) {
+        const window       = asRecord(usage[definition.key])
+        const isCreditPool = definition.key === 'iguana_necktie' &&
+                             ['limit_dollars', 'used_dollars', 'remaining_dollars']
+                                 .some((key) => numberValue(window?.[key]) !== null)
+        if (definition.key === 'iguana_necktie' && fableLimit && !isCreditPool) {
             continue
         }
-        const window      = asRecord(usage[definition.key])
         const usedPercent = numberValue(window?.utilization)
-        if (!window || usedPercent === null) {
+        if (!window || (usedPercent === null && !isCreditPool)) {
             continue
         }
-        const reset = stringValue(window.resets_at)
+        const reset    = stringValue(window.resets_at)
+        const labelKey = isCreditPool ? 'claude_quota.cloud_session_credits' : definition.labelKey
         windows.push({
-                         id: definition.id,
-                         label: translate(definition.labelKey),
-                         labelKey: definition.labelKey,
+                         id: isCreditPool ? 'cloud-session-credits' : definition.id,
+                         label: translate(labelKey),
+                         labelKey,
                          usedPercent,
                          resetLabel: formatQuotaResetTime(reset ?? undefined),
                          resetAtMs: resolveResetMs([reset]),
-                         periodHours: definition.periodHours,
+                         periodHours: isCreditPool ? null : definition.periodHours,
                      })
     }
 

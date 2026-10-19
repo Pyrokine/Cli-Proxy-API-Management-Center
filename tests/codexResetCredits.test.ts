@@ -5,10 +5,11 @@ import {
     resolveCodexResetCredits,
     runCodexResetCreditAction,
 } from '@/utils/quota/codexResetCredits'
+import {normalizeCodexAccountCredits} from '@/utils/quota/parsers'
 import {describe, expect, test} from 'bun:test'
 
 describe('Codex reset credits', () => {
-    test('keeps total credits for display while zero applicable credits disable reset', () => {
+    test('keeps owned credits available when the applicable count is zero', () => {
         const resolved = resolveCodexResetCredits({
                                                       available_count: 1,
                                                       applicable_available_count: 0,
@@ -16,8 +17,8 @@ describe('Codex reset credits', () => {
 
         expect(resolved.availableCount).toMatchObject({ state: 'known', value: 1 })
         expect(resolved.applicableAvailableCount).toMatchObject({ state: 'known', value: 0 })
-        expect(codexResetCreditAvailability(resolved.applicableAvailableCount)).toBe('none')
-        expect(canUseCodexResetCredit(resolved.applicableAvailableCount)).toBeFalse()
+        expect(codexResetCreditAvailability(resolved.availableCount)).toBe('available')
+        expect(canUseCodexResetCredit(resolved.availableCount)).toBeTrue()
     })
 
     test('normalizes snake_case and camelCase payload fields', () => {
@@ -45,7 +46,7 @@ describe('Codex reset credits', () => {
                                                                    })
     })
 
-    test('accepts explicit details counts without treating total or array length as applicable', () => {
+    test('uses explicit owned counts without inferring them from applicable counts or detail length', () => {
         const fromDetails = resolveCodexResetCredits(null, JSON.stringify({
                                                                               availableCount: 2,
                                                                               applicableAvailableCount: 1,
@@ -63,21 +64,25 @@ describe('Codex reset credits', () => {
         expect(fromDetails.applicableAvailableCount).toMatchObject({ state: 'known', value: 1 })
         expect(fromDetails.detailsState).toBe('present')
         expect(fromDetails.credits).toHaveLength(1)
-        expect(canUseCodexResetCredit(fromDetails.applicableAvailableCount)).toBeTrue()
+        expect(canUseCodexResetCredit(fromDetails.availableCount)).toBeTrue()
 
         const totalOnly = resolveCodexResetCredits({ available_count: 1 }, null)
         expect(totalOnly.availableCount).toMatchObject({ state: 'known', value: 1 })
         expect(totalOnly.applicableAvailableCount.state).toBe('missing')
-        expect(canUseCodexResetCredit(totalOnly.applicableAvailableCount)).toBeFalse()
+        expect(canUseCodexResetCredit(totalOnly.availableCount)).toBeTrue()
+
+        const applicableOnly = resolveCodexResetCredits({ applicable_available_count: 1 }, null)
+        expect(applicableOnly.availableCount.state).toBe('missing')
+        expect(canUseCodexResetCredit(applicableOnly.availableCount)).toBeFalse()
     })
 
     test('rejects malformed, negative, and fractional counts', () => {
         for (const value of [-1, 1.5, '-1', '1.5', '', 'unknown']) {
-            const summary = normalizeCodexResetCreditsPayload({ applicable_available_count: value })
-            expect(summary.applicableAvailableCount.state, String(value)).toBe('invalid')
-            expect(canUseCodexResetCredit(summary.applicableAvailableCount)).toBeFalse()
+            const summary = normalizeCodexResetCreditsPayload({ available_count: value })
+            expect(summary.availableCount.state, String(value)).toBe('invalid')
+            expect(canUseCodexResetCredit(summary.availableCount)).toBeFalse()
         }
-        expect(normalizeCodexResetCreditsPayload({}).applicableAvailableCount.state).toBe('missing')
+        expect(normalizeCodexResetCreditsPayload({}).availableCount.state).toBe('missing')
     })
 
     test('preserves conflicts between usage, details, and duplicate field spellings', () => {
@@ -87,7 +92,7 @@ describe('Codex reset credits', () => {
         )
         expect(conflict.availableCount.state).toBe('conflict')
         expect(conflict.applicableAvailableCount.state).toBe('conflict')
-        expect(canUseCodexResetCredit(conflict.applicableAvailableCount)).toBeFalse()
+        expect(canUseCodexResetCredit(conflict.availableCount)).toBeFalse()
 
         const duplicateConflict = normalizeCodexResetCreditsPayload({
                                                                         applicable_available_count: 1,
@@ -161,12 +166,12 @@ describe('Codex reset credits', () => {
         expect(resolveCodexResetCredits(null, { available_count: 1 }).detailsState).toBe('missing')
         expect(resolveCodexResetCredits(null, { credits: [] }).detailsState).toBe('empty')
         const malformed = resolveCodexResetCredits(null, {
-            applicable_available_count: 1,
+            available_count: 1,
             credits: [42],
         })
         expect(malformed.detailsState).toBe('invalid')
-        expect(malformed.applicableAvailableCount.state).toBe('invalid')
-        expect(canUseCodexResetCredit(malformed.applicableAvailableCount)).toBeFalse()
+        expect(malformed.availableCount.state).toBe('invalid')
+        expect(canUseCodexResetCredit(malformed.availableCount)).toBeFalse()
         expect(resolveCodexResetCredits(null, {
             credits: [{ id: 'missing-type', status: 'available' }],
         }).detailsState).toBe('invalid')
@@ -182,9 +187,9 @@ describe('Codex reset credits', () => {
         }).detailsState).toBe('invalid')
     })
 
-    test('rechecks applicable credits before executing the confirmed action', async () => {
-        const initiallyAvailable = resolveCodexResetCredits({ applicable_available_count: 1 }, null)
-            .applicableAvailableCount
+    test('rechecks owned credits before executing the confirmed action', async () => {
+        const initiallyAvailable = resolveCodexResetCredits({available_count: 1, applicable_available_count: 0}, null)
+            .availableCount
         expect(canUseCodexResetCredit(initiallyAvailable)).toBeTrue()
         let allowedCalls = 0
         expect(await runCodexResetCreditAction(
@@ -197,8 +202,8 @@ describe('Codex reset credits', () => {
 
         let current = initiallyAvailable
         expect(codexResetCreditAvailability(current)).toBe('available')
-        current                   = resolveCodexResetCredits({ applicable_available_count: 0 }, null)
-            .applicableAvailableCount
+        current = resolveCodexResetCredits({available_count: 0, applicable_available_count: 1}, null)
+            .availableCount
         let changedAfterOpenCalls = 0
         expect(await runCodexResetCreditAction(
             () => current,
@@ -208,25 +213,11 @@ describe('Codex reset credits', () => {
         )).toBe('none')
         expect(changedAfterOpenCalls).toBe(0)
 
-        const blocked   = [
-            [
-                'none', resolveCodexResetCredits({ applicable_available_count: 0 }, null)
-                .applicableAvailableCount,
-            ],
-            [
-                'missing', resolveCodexResetCredits({ available_count: 1 }, null)
-                .applicableAvailableCount,
-            ],
-            [
-                'invalid', resolveCodexResetCredits({ applicable_available_count: 'invalid' }, null)
-                .applicableAvailableCount,
-            ],
-            [
-                'conflict', resolveCodexResetCredits(
-                { applicable_available_count: 1 },
-                { applicable_available_count: 2 },
-            ).applicableAvailableCount,
-            ],
+        const blocked = [
+            ['none', resolveCodexResetCredits({available_count: 0}, null).availableCount],
+            ['missing', resolveCodexResetCredits({applicable_available_count: 1}, null).availableCount],
+            ['invalid', resolveCodexResetCredits({available_count: 'invalid'}, null).availableCount],
+            ['conflict', resolveCodexResetCredits({available_count: 1}, {available_count: 2}).availableCount],
         ] as const
         let actionCalls = 0
         for (const [expected, current] of blocked) {
@@ -240,5 +231,23 @@ describe('Codex reset credits', () => {
         }
 
         expect(actionCalls).toBe(0)
+    })
+})
+
+describe('Codex account credits', () => {
+    test('shows only a returned finite balance or an explicit unlimited flag', () => {
+        expect(normalizeCodexAccountCredits({balance: 0, unlimited: false})).toEqual({
+            balance: '0', unlimited: false,
+        })
+        expect(normalizeCodexAccountCredits({balance: ' 12.50 ', unlimited: true})).toEqual({
+            balance: '12.50', unlimited: true,
+        })
+        for (const value of [-1, '-2', 'unknown', Infinity]) {
+            expect(normalizeCodexAccountCredits({balance: value})).toEqual({
+                balance: null, unlimited: false,
+            })
+        }
+        expect(normalizeCodexAccountCredits(null)).toEqual({balance: null, unlimited: false})
+        expect(normalizeCodexAccountCredits({unlimited: 'true'})).toEqual({balance: null, unlimited: false})
     })
 })

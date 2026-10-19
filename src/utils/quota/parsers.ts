@@ -33,6 +33,9 @@ export function normalizePlanType(value: unknown): string | null {
     if (compact === 'chatgptprolite' || compact === 'prolite') {
         return 'prolite'
     }
+    if (compact === 'selfservebusinessprolite' || compact === 'businesspremium') {
+        return 'business_premium'
+    }
     if (compact === 'team' || compact === 'chatgptteam') {
         return 'team'
     }
@@ -60,6 +63,9 @@ export function normalizePlanType(value: unknown): string | null {
     if (compact === 'max') {
         return 'max'
     }
+    if (compact === 'xpremiumplus' || /^x[\s_-]*premium\s*\+$/i.test(normalized)) {
+        return 'xpremiumplus'
+    }
     if (compact === 'supergrok') {
         return 'supergrok'
     }
@@ -68,4 +74,16 @@ export function normalizePlanType(value: unknown): string | null {
     }
 
     return compact
+}
+
+export function normalizeCodexAccountCredits(value: unknown): { balance: string | null; unlimited: boolean } {
+    const credits = value !== null && typeof value === 'object' && !Array.isArray(value) ?
+                    value as Record<string, unknown> : null
+    const raw     = credits?.balance
+    const amount  = typeof raw === 'number' && Number.isFinite(raw) ? String(raw) :
+                    typeof raw === 'string' ? raw.trim() : null
+    return {
+        balance: amount && /^\d+(?:\.\d+)?$/.test(amount) && Number.isFinite(Number(amount)) ? amount : null,
+        unlimited: credits?.unlimited === true,
+    }
 }

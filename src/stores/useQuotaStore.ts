@@ -9,9 +9,11 @@ import type {
     DevinQuotaState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    MetaQuotaState,
     QuotaCacheMetadata,
     XaiQuotaState,
 } from '@/types'
+import type {PluginQuotaResult} from '@/components/credentials/pluginQuota'
 import {create} from 'zustand'
 
 interface QuotaSubjectVersion {
@@ -53,6 +55,7 @@ export type QuotaCachePayload =
     | { provider: 'devin'; value: DevinQuotaState }
     | { provider: 'gemini-cli'; value: GeminiCliQuotaState }
     | { provider: 'kimi'; value: KimiQuotaState }
+    | { provider: 'meta'; value: MetaQuotaState }
     | { provider: 'xai'; value: XaiQuotaState }
 
 interface QuotaSnapshotCommit {
@@ -73,7 +76,10 @@ interface QuotaStoreState {
     devinQuota: Record<string, DevinQuotaState>
     geminiCliQuota: Record<string, GeminiCliQuotaState>
     kimiQuota: Record<string, KimiQuotaState>
+    metaQuota: Record<string, MetaQuotaState>
     xaiQuota: Record<string, XaiQuotaState>
+    pluginQuota: Record<string, PluginQuotaResult>
+    advanceQuotaSubjects: (keys: string[]) => void
     clearQuotaSubjects: (keys: string[]) => void
     clearQuotaCache: () => void
 }
@@ -107,7 +113,9 @@ const quotaDataKeys = (state: QuotaStoreState): Set<string> => new Set([
                                                                            ...Object.keys(state.devinQuota),
                                                                            ...Object.keys(state.geminiCliQuota),
                                                                            ...Object.keys(state.kimiQuota),
+                                                                           ...Object.keys(state.metaQuota),
                                                                            ...Object.keys(state.xaiQuota),
+                                                                           ...Object.keys(state.pluginQuota),
                                                                        ])
 
 const invalidateQuotaSubjects = (state: QuotaStoreState, keys: Set<string>): Partial<QuotaStoreState> => {
@@ -132,7 +140,9 @@ const invalidateQuotaSubjects = (state: QuotaStoreState, keys: Set<string>): Par
         devinQuota: withoutKeys(state.devinQuota, keys),
         geminiCliQuota: withoutKeys(state.geminiCliQuota, keys),
         kimiQuota: withoutKeys(state.kimiQuota, keys),
+        metaQuota: withoutKeys(state.metaQuota, keys),
         xaiQuota: withoutKeys(state.xaiQuota, keys),
+        pluginQuota: withoutKeys(state.pluginQuota, keys),
     }
 }
 
@@ -146,7 +156,23 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     devinQuota: {},
     geminiCliQuota: {},
     kimiQuota: {},
+    metaQuota: {},
     xaiQuota: {},
+    pluginQuota: {},
+    advanceQuotaSubjects: (keys) => {
+        const normalized = new Set(keys.map((key) => key.trim()).filter(Boolean))
+        if (normalized.size === 0) {
+            return
+        }
+        set((state) => {
+            const subjectVersions = {...state.subjectVersions}
+            for (const key of normalized) {
+                const current = subjectVersions[key] ?? emptySubjectVersion()
+                subjectVersions[key] = {...current, localGeneration: current.localGeneration + 1}
+            }
+            return {subjectVersions}
+        })
+    },
     clearQuotaSubjects: (keys) => {
         const normalized = new Set(keys.map((key) => key.trim()).filter(Boolean))
         if (normalized.size === 0) {
@@ -165,7 +191,9 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
             devinQuota: {},
             geminiCliQuota: {},
             kimiQuota: {},
+            metaQuota: {},
             xaiQuota: {},
+            pluginQuota: {},
         })),
 }))
 
@@ -215,7 +243,9 @@ const hasQuotaData = (state: QuotaStoreState, key: string): boolean =>
     key in state.devinQuota ||
     key in state.geminiCliQuota ||
     key in state.kimiQuota ||
-    key in state.xaiQuota
+    key in state.metaQuota ||
+    key in state.xaiQuota ||
+    key in state.pluginQuota
 
 export const commitQuotaSnapshot = (
     claim: QuotaRequestClaim,
@@ -280,7 +310,9 @@ export const commitQuotaSnapshot = (
         let devinQuota       = replaceData ? withoutKeys(state.devinQuota, keys) : state.devinQuota
         let geminiCliQuota   = replaceData ? withoutKeys(state.geminiCliQuota, keys) : state.geminiCliQuota
         let kimiQuota        = replaceData ? withoutKeys(state.kimiQuota, keys) : state.kimiQuota
+        let metaQuota        = replaceData ? withoutKeys(state.metaQuota, keys) : state.metaQuota
         let xaiQuota         = replaceData ? withoutKeys(state.xaiQuota, keys) : state.xaiQuota
+        const pluginQuota    = replaceData ? withoutKeys(state.pluginQuota, keys) : state.pluginQuota
         switch (snapshot.payload?.provider) {
             case 'antigravity':
                 antigravityQuota = { ...antigravityQuota, [snapshot.key]: snapshot.payload.value }
@@ -299,6 +331,9 @@ export const commitQuotaSnapshot = (
                 break
             case 'kimi':
                 kimiQuota = { ...kimiQuota, [snapshot.key]: snapshot.payload.value }
+                break
+            case 'meta':
+                metaQuota = { ...metaQuota, [snapshot.key]: snapshot.payload.value }
                 break
             case 'xai':
                 xaiQuota = { ...xaiQuota, [snapshot.key]: snapshot.payload.value }
@@ -324,7 +359,9 @@ export const commitQuotaSnapshot = (
             devinQuota,
             geminiCliQuota,
             kimiQuota,
+            metaQuota,
             xaiQuota,
+            pluginQuota,
         }
     })
     return result

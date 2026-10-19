@@ -9,6 +9,7 @@ import {useQuotaStore} from '@/stores/useQuotaStore'
 import type {
     AntigravityQuotaState,
     ClaudeQuotaState,
+    ClaudeResetGrants,
     CodexQuotaState,
     CodexRateLimitResetCredit,
     CodexResetCreditCountState,
@@ -16,6 +17,7 @@ import type {
     DevinQuotaState,
     GeminiCliQuotaState,
     KimiQuotaState,
+    QuotaCacheMetadata,
     QuotaFreshness,
     XaiAmountUnit,
     XaiQuotaState,
@@ -48,11 +50,11 @@ function fromUsedQuotaWindows(
         return []
     }
     return state.windows
-                .filter((window) => window.usedPercent !== null)
+                .filter((window) => window.usedPercent !== null || window.id === 'cloud-session-credits')
                 .map((window) => ({
                     id: window.id,
                     model: window.label,
-                    percent: Math.max(0, 100 - (window.usedPercent ?? 0)),
+                    percent: window.usedPercent === null ? null : Math.max(0, 100 - window.usedPercent),
                     resetLabel: window.resetLabel || undefined,
                     resetAtMs: window.resetAtMs,
                     periodHours: window.periodHours,
@@ -115,7 +117,8 @@ function formatXaiAmount(
     amountUnit: XaiAmountUnit,
     currency: string | null,
 ): string | null {
-    if (value === null || value === undefined) {
+    if (value === null || value === undefined || amountUnit === 'unknown' ||
+        (amountUnit !== 'credits' && !currency)) {
         return null
     }
     const amount = amountUnit === 'currency_minor' ? value / 100 : value
@@ -132,7 +135,7 @@ function formatXaiAmount(
            formatted
 }
 
-function fromXai(state: XaiQuotaState): QuotaItem[] {
+export function buildXaiQuotaItems(state: XaiQuotaState): QuotaItem[] {
     if (state.status !== 'success' || !state.billing) {
         return []
     }
@@ -141,15 +144,15 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
     if (state.billing.periodType === 'weekly') {
         const weeklyUsed      = state.billing.usagePercent !== null ? Math.max(0, state.billing.usagePercent) : null
         const weeklyRemaining = weeklyUsed !== null ? Math.max(0, 100 - weeklyUsed) : null
-        if (weeklyRemaining !== null || state.billing.periodEnd) {
+        if (weeklyRemaining !== null || state.billing.periodEnd || state.billing.productUsage.length > 0) {
             items.push({
                            id: 'xai-weekly',
                            model: i18n.t('xai_quota.weekly_limit', { defaultValue: 'Weekly limit' }),
-                           percent: Math.round(weeklyRemaining ?? 100),
+                           percent: weeklyRemaining === null ? null : Math.round(weeklyRemaining),
                            detail: weeklyUsed !== null ? i18n.t('xai_quota.used_percent', {
                                percent: Math.round(weeklyUsed),
                                defaultValue: '{{percent}}% used',
-                           }) : undefined,
+                           }) : i18n.t('xai_quota.usage_unavailable', {defaultValue: 'Usage unavailable'}),
                            resetLabel: state.billing.periodEnd ?
                                        formatQuotaResetTime(state.billing.periodEnd) :
                                        undefined,
@@ -157,26 +160,31 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
                            periodHours: state.billing.periodHours,
                        })
         }
-        for (const [index, usage] of state.billing.productUsage.entries()) {
-            if (usage.usagePercent === null) {
-                continue
-            }
-            items.push({
-                           id: `xai-product-${index}-${usage.product}`,
-                           model: usage.product,
-                           percent: Math.round(Math.max(0, 100 - usage.usagePercent)),
-                           detail: i18n.t('xai_quota.used_percent', {
-                               percent: Math.round(Math.max(0, usage.usagePercent)),
-                               defaultValue: '{{percent}}% used',
-                           }),
-                       })
-        }
+    }
+    for (const [index, usage] of state.billing.productUsage.entries()) {
+        const used = usage.usagePercent
+        items.push({
+                       id: `xai-product-${index}-${usage.product}`,
+                       model: i18n.t('xai_quota.product_usage', {
+                           product: usage.product,
+                           defaultValue: 'Shared usage · {{product}}',
+                       }),
+                       // Product figures are observations, not independent remaining balances.
+                       percent: null,
+                       showReset: false,
+                       detail: used === null ?
+                               i18n.t('xai_quota.usage_unavailable', {defaultValue: 'Usage unavailable'}) :
+                               i18n.t('xai_quota.used_percent', {
+                                   percent: Math.round(Math.max(0, Math.min(100, used))),
+                                   defaultValue: '{{percent}}% used',
+                               }),
+                   })
     }
 
-    if (state.billing.usedPercent === null) {
-        return items
-    }
-
+    const hasMonthlyData = state.billing.usedPercent !== null ||
+                           state.billing.monthlyLimit !== null ||
+                           state.billing.used !== null ||
+                           Boolean(state.billing.billingPeriodEnd)
     const limit                  = formatXaiAmount(
         state.billing.monthlyLimit,
         state.billing.amountUnit,
@@ -189,25 +197,32 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
     )
     const monthlyItem: QuotaItem = {
         id: 'xai-monthly-credits',
-        model: i18n.t('xai_quota.monthly_credits', { defaultValue: 'Monthly credits' }),
-        percent: Math.round(Math.max(0, 100 - state.billing.usedPercent)),
-        detail: remaining !== null && limit !== null ? `${remaining} / ${limit}` : undefined,
+        model: state.billing.amountUnit === 'credits' ?
+               i18n.t('xai_quota.monthly_credits') : i18n.t('xai_quota.monthly_usage'),
+        percent: state.billing.usedPercent === null ?
+                 null : Math.round(Math.max(0, 100 - state.billing.usedPercent)),
+        detail: state.billing.usedPercent === null ?
+                i18n.t('xai_quota.usage_unavailable') :
+                remaining !== null && limit !== null ? `${remaining} / ${limit}` : undefined,
         resetLabel: state.billing.billingPeriodEnd ?
                     formatQuotaResetTime(state.billing.billingPeriodEnd) :
                     undefined,
         resetAtMs: resolveResetMs([state.billing.billingPeriodEnd]),
     }
+    const monthlyItems = hasMonthlyData &&
+                         !(items.length > 0 && state.billing.monthlyLimit === 0 && state.billing.used === 0) ?
+                         [monthlyItem] : []
 
     if (state.billing.onDemandEnabled === false || state.billing.onDemandCap === 0) {
         monthlyItem.detail = [
                                  monthlyItem.detail,
                                  i18n.t('xai_quota.pay_as_you_go_disabled', { defaultValue: 'Pay-as-you-go disabled' }),
                              ].filter(Boolean).join(' · ') || undefined
-        return [...items, monthlyItem]
+        return [...items, ...monthlyItems]
     }
     if (state.billing.onDemandCap === null || state.billing.onDemandCap <= 0 ||
         state.billing.onDemandUsedPercent === null) {
-        return [...items, monthlyItem]
+        return [...items, ...monthlyItems]
     }
 
     const onDemandCap       = formatXaiAmount(
@@ -233,8 +248,12 @@ function fromXai(state: XaiQuotaState): QuotaItem[] {
                     `${onDemandRemaining} / ${onDemandCap}` :
                     undefined,
         },
-        monthlyItem,
+        ...monthlyItems,
     ]
+}
+
+export function quotaErrorForDisplay(metadata: QuotaCacheMetadata | undefined): string | undefined {
+    return metadata?.freshness === 'fresh' ? undefined : metadata?.lastError
 }
 
 interface CredentialQuotaResult {
@@ -245,8 +264,13 @@ interface CredentialQuotaResult {
     observedAt?: string | null
     successfulEmpty?: boolean
     planType?: string | null
+    prepaidBalance?: string | null
+    metaSubscriptionActive?: boolean | null
     premium?: boolean | null
     subscriptionActiveUntil?: string | number | null
+    creditBalance?: string | null
+    creditsUnlimited?: boolean
+    claudeResetGrants?: ClaudeResetGrants
     manualResetCount?: CodexResetCreditCountState
     applicableManualResetCount?: CodexResetCreditCountState
     resetCreditExpiries?: CodexRateLimitResetCredit[]
@@ -271,13 +295,14 @@ export function useCredentialQuota(
     const devin       = useQuotaStore((s) => s.devinQuota[key])
     const geminiCli   = useQuotaStore((s) => s.geminiCliQuota[key])
     const kimi        = useQuotaStore((s) => s.kimiQuota[key])
+    const meta        = useQuotaStore((s) => s.metaQuota[key])
     const xai         = useQuotaStore((s) => s.xaiQuota[key])
 
     return useMemo(() => {
-        const states                        = [antigravity, claude, codex, devin, geminiCli, kimi, xai]
+        const states                        = [antigravity, claude, codex, devin, geminiCli, kimi, meta, xai]
         const active                        = states.find((state) => state != null)
         const result: CredentialQuotaResult = {
-            lastError: metadata?.lastError,
+            lastError: quotaErrorForDisplay(metadata),
             loading: metadata?.status === 'loading' || (!metadata && active?.status === 'loading'),
             freshness: metadata?.freshness,
             observedAt: metadata?.observedAt,
@@ -296,7 +321,12 @@ export function useCredentialQuota(
             }
         }
         if (claude?.status === 'success') {
-            return { ...result, items: fromUsedQuotaWindows(claude), planType: claude.planType }
+            return {
+                ...result,
+                items: fromUsedQuotaWindows(claude),
+                planType: claude.planType,
+                claudeResetGrants: claude.resetGrants,
+            }
         }
         if (codex?.status === 'success') {
             return {
@@ -304,6 +334,8 @@ export function useCredentialQuota(
                 items: fromUsedQuotaWindows(codex),
                 planType: codex.planType,
                 subscriptionActiveUntil: codex.subscriptionActiveUntil,
+                creditBalance: codex.creditBalance,
+                creditsUnlimited: codex.creditsUnlimited,
                 manualResetCount: codex.rateLimitResetCreditsAvailableCount,
                 applicableManualResetCount: codex.rateLimitResetCreditsApplicableAvailableCount,
                 resetCreditExpiries: codex.rateLimitResetCredits,
@@ -325,10 +357,25 @@ export function useCredentialQuota(
         if (kimi?.status === 'success') {
             return { ...result, items: fromKimi(kimi) }
         }
+        if (meta?.status === 'success') {
+            return {
+                ...result,
+                planType: meta.isSubscriptionActive === false ? null : meta.planName,
+                metaSubscriptionActive: meta.isSubscriptionActive,
+            }
+        }
         if (xai?.status === 'success') {
-            return { ...result, items: fromXai(xai), planType: xai.planType }
+            const billing = xai.billing
+            return {
+                ...result,
+                items: buildXaiQuotaItems(xai),
+                planType: xai.planType,
+                prepaidBalance: billing && billing.prepaidBalance !== null && billing.prepaidBalance > 0 ?
+                                formatXaiAmount(billing.prepaidBalance, billing.amountUnit, billing.currency) :
+                                null,
+            }
         }
 
         return metadata || active ? result : {}
-    }, [metadata, antigravity, claude, codex, devin, geminiCli, kimi, xai])
+    }, [metadata, antigravity, claude, codex, devin, geminiCli, kimi, meta, xai])
 }

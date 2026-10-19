@@ -4,7 +4,7 @@ interface ProjectedQuotaProgress {
 }
 
 export const projectQuotaProgress = (
-    percent: number,
+    percent: number | null,
     resetAtMs: number | null | undefined,
     nowMs: number,
 ): ProjectedQuotaProgress => ({

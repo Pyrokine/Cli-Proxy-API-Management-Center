@@ -53,10 +53,32 @@ export interface ClaudeQuotaWindow {
     periodHours?: number | null
 }
 
+export interface ClaudeResetGrant {
+    id: string
+    label: string
+    resetsTotal: number
+    resetsLeft: number
+    startsAt: string | null
+    endsAt: string | null
+    paused: boolean
+    usableNow: boolean
+}
+
+export type ClaudeResetGrants =
+    | {state: 'missing' | 'invalid'}
+    | {
+        state: 'present'
+        eligible: boolean
+        grants: ClaudeResetGrant[]
+        weeklyResetsAt: string | null
+        cooldownUntil: string | null
+    }
+
 export interface ClaudeQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error'
     windows: ClaudeQuotaWindow[]
     extraUsage?: ClaudeExtraUsage | null
+    resetGrants?: ClaudeResetGrants
     planType?: string | null
     error?: string
     errorStatus?: number
@@ -147,6 +169,8 @@ export interface CodexQuotaState {
     windows: CodexQuotaWindow[]
     planType?: string | null
     subscriptionActiveUntil?: string | number | null
+    creditBalance?: string | null
+    creditsUnlimited?: boolean
     rateLimitResetCreditsAvailableCount?: CodexResetCreditCountState
     rateLimitResetCreditsApplicableAvailableCount?: CodexResetCreditCountState
     rateLimitResetCredits?: CodexRateLimitResetCredit[]
@@ -190,6 +214,12 @@ export interface KimiQuotaState {
     rows: KimiQuotaRow[]
     error?: string
     errorStatus?: number
+}
+
+export interface MetaQuotaState {
+    status: 'success'
+    planName: string | null
+    isSubscriptionActive: boolean | null
 }
 
 export type XaiBillingPeriodType = 'weekly' | 'monthly' | 'unknown'

@@ -37,6 +37,7 @@ const registryIcons = {
     Gemini: icon,
     Claude: icon,
     Codex: icon,
+    Meta: icon,
     Vertex: icon,
     OpenAI: icon,
     Kimi: icon,
@@ -44,6 +45,7 @@ const registryIcons = {
     IFlow: icon,
     Grok: icon,
     Devin: icon,
+    Generic: icon,
 }
 
 const vertexEditSource             = readFileSync(
@@ -106,6 +108,10 @@ const claudeModelsPageSource       = readFileSync(
     new URL('../src/pages/AiProvidersClaudeModelsPage.tsx', import.meta.url),
     'utf8',
 )
+const openAIModelsPageSource       = readFileSync(
+    new URL('../src/pages/AiProvidersOpenAIModelsPage.tsx', import.meta.url),
+    'utf8',
+)
 
 const flattenKeys = (value: unknown, prefix = ''): string[] => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -129,6 +135,13 @@ describe('provider identity and status UX', () => {
                                                                                 editRoute: '/credentials/xai',
                                                                                 createRoute: '/credentials/xai/new',
                                                                             })
+        expect(vendors.find((vendor) => vendor.id === 'meta')).toMatchObject({
+                                                                                 oauthProviders: ['meta'],
+                                                                                 authFileTypes: ['meta', 'muse'],
+                                                                                 editRoute: '/credentials/meta',
+                                                                                 createRoute: '/credentials/meta/new',
+                                                                             })
+        expect(vendors.find((vendor) => vendor.id === 'kimi')?.oauthProviders).toEqual(['kimi', 'kimi-ai'])
     })
 
     test('keeps active API keys in available and disabled providers in disabled', () => {
@@ -213,12 +226,20 @@ describe('provider identity and status UX', () => {
         expect(apiKeyMatchesStatus({ disabled: true }, 'disabled', { status: 'normal' })).toBe(true)
     })
 
+    test('keeps the manual OAuth callback available when polling fails for a current attempt', () => {
+        expect(oauthLoginActionSource).toContain('attemptsRef.current.get(provider)?.isCurrent()')
+        expect(oauthLoginActionSource).toContain("if (status === 'error' && !canContinueAfterError)")
+        expect(oauthLoginActionSource).toContain("if (status === 'waiting' || canContinueAfterError)")
+        expect(oauthLoginActionSource).toContain('onClick={resumePolling}')
+        expect(oauthLoginActionSource).toContain("disabled={!callbackUrl.trim() || (!plugin && provider === 'devin' && canContinueAfterError)}")
+    })
+
     test('waits for the OAuth session terminal state after submitting a callback', () => {
         const submitStart = oauthLoginActionSource.indexOf('const submitCallback')
         const submitEnd   = oauthLoginActionSource.indexOf('const handleCancel', submitStart)
         const submitBody  = oauthLoginActionSource.slice(submitStart, submitEnd)
 
-        expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal)')
+        expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal, plugin)')
         expect(submitBody).toContain('if (attempt.isCurrent())')
         expect(submitBody).toContain('setCallbackAccepted(true)')
         expect(submitBody).not.toContain('setStatus(\'success\')')
@@ -330,33 +351,52 @@ describe('provider identity and status UX', () => {
         ).toHaveLength(2)
     })
 
-    test('keeps quota refresh and token refresh separate without reset or consume paths', () => {
-        expect(vendorSectionSource).toContain(
-            'await scheduler.refreshNow(quotaKey)\n        await onRefresh()',
+    test('keeps quota refresh and sign-in renewal separate from explicit quota reset', () => {
+        expect(vendorSectionSource).toMatch(
+            /await scheduler\.refreshNow\(quotaKey\)\s+if \(isCurrent\(\)\) \{\s+await onRefresh\(\)/,
         )
+        expect(vendorSectionSource).not.toContain('authFilesApi.requestManualRefresh')
         expect(vendorSectionSource).toContain(
-            'await authFilesApi.requestManualRefresh(file.name, authIndex)',
+            'quotaResetState={isCodexProvider && !isPluginQuota ? quotaResetState : undefined}',
         )
-        expect(vendorSectionSource).toContain('manualTokenRefreshState={manualTokenRefreshState}')
-        expect(credentialCardSource).toContain('manualTokenRefreshState?: ManualTokenRefreshState')
+        expect(vendorSectionSource).toContain('await authFilesApi.clearLocalCooldown(authIndex)')
+        expect(vendorSectionSource).toContain('onClearCooldown={authIndex ? handleClearCooldown : undefined}')
+        expect(credentialCardSource).toContain('onClear={disabled ? undefined : onClearCooldown}')
+        expect(authFilesApiSource).toContain("'/routing/cooldown/reset'")
+        expect(vendorSectionSource).toContain(
+            'refreshState={isPluginQuota ? pluginRefreshState : isMetaProvider || isKimiAIProvider ? undefined : refreshState}',
+        )
+        expect(credentialCardSource).toContain('quotaResetState?: QuotaResetState')
         expect(credentialCardSource).toContain("t('auth_files.quota_refresh_hint'")
-        expect(credentialCardSource).toContain("t('credentials.manual_token_refresh'")
+        expect(credentialCardSource).toContain("t('auth_files.quota_reset_codex_title'")
+        expect(credentialCardSource).not.toContain('manualTokenRefreshState')
         expect(credentialCardSource).toContain('refreshState?.isRefreshing')
         expect(authFilesApiSource).toContain('{all: true}')
-        expect(authFilesApiSource).toContain('{timeout: AUTH_FILE_REFRESH_TIMEOUT_MS}')
+        expect(authFilesApiSource).toContain('}, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)')
+        expect(authFilesApiSource).toContain('refreshAuthFileTokens({all: true}, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS)')
         expect(accountInspectionPanelSource).toContain('authFilesApi.requestManualRefreshAll()')
         expect(accountInspectionPanelSource).toContain("busyAction === 'refresh-all-tokens'")
+        expect(accountInspectionPanelSource).toContain('if (result.results.length === 0)')
+        expect(accountInspectionPanelSource).toContain("t('credentials.manual_token_refresh_all_none'")
+        expect(accountInspectionPanelSource).toContain("failed === 0 ? 'success' : succeeded === 0 ? 'error' : 'warning'")
         expect(quotaApiSource).toContain('apiClient.post<QuotaRefreshTask>(')
         expect(quotaApiSource).toContain('const quotaRefreshTaskPath')
         expect(quotaApiSource).toContain('quotaRefreshTaskPath(taskId)')
-        for (const source of [authFilesApiSource, quotaApiSource, vendorSectionSource, accountInspectionPanelSource]) {
+        for (const source of [authFilesApiSource, accountInspectionPanelSource]) {
             expect(source).not.toContain('/reset-quota')
+        }
+        for (const source of [authFilesApiSource, quotaApiSource, vendorSectionSource, accountInspectionPanelSource]) {
             expect(source).not.toContain('rate-limit-reset-credits/consume')
             expect(source).not.toContain('banked reset')
         }
-        expect(vendorSectionSource).not.toContain('quotaApi.reset')
-        expect(vendorSectionSource).not.toContain('runCodexResetCreditAction')
-        expect(vendorSectionSource).not.toContain('handleResetQuota')
+        expect(quotaApiSource).toContain("('/reset-quota', {")
+        expect(vendorSectionSource).toContain('await quotaApi.reset(authIndex)')
+        expect(vendorSectionSource).toContain('await runCodexResetCreditAction(readAvailableCount, async () => {')
+        expect(vendorSectionSource).toContain("message: t('auth_files.quota_reset_codex_confirm', {name})")
+        expect(vendorSectionSource).not.toContain('reset-credits-applicable')
+        expect(vendorSectionSource).toContain('manualResetCount: quotaManualResetCount')
+        expect(vendorSectionSource).toContain('value: formatCodexResetCreditCount(quotaManualResetCount, t)')
+        expect(vendorSectionSource).not.toContain('applicableManualResetCount:')
         expect(backendQuotaHookSource).toContain('waitForQuotaRefreshTask(initialTask')
         expect(backendQuotaHookSource).toContain('applyQuotaRefreshTaskToMeta')
         expectSourceToContain(backendQuotaHookSource, 'const { i18n: translation } = useTranslation()')
@@ -560,17 +600,58 @@ describe('provider request and discovery contracts', () => {
         expect(modelDiscoveryHookSource).toContain('requestControllerRef.current?.abort()')
         expectSourceToContain(modelDiscoveryHookSource, 'const requestId = (requestIdRef.current += 1)')
         expect(modelDiscoveryHookSource).toContain('controller.signal,')
-        expect(modelDiscoveryHookSource).toContain(
-            'if (requestIdRef.current !== requestId || controller.signal.aborted)',
+        expectSourceToContain(modelDiscoveryHookSource,
+            'if (authGeneration !== apiClient.getAuthGeneration() || requestIdRef.current !== requestId || controller.signal.aborted)',
         )
         expect(providerModelsPageSource).toContain('requestControllerRef.current?.abort()')
         expectSourceToContain(providerModelsPageSource, 'const generation = ++requestGenerationRef.current')
         expect(providerModelsPageSource).toContain('fetchModels(controller.signal)')
-        expect(providerModelsPageSource).toContain(
-            'if (requestGenerationRef.current !== generation || controller.signal.aborted)',
+        expectSourceToContain(providerModelsPageSource,
+            'if (authGeneration !== apiClient.getAuthGeneration() || requestGenerationRef.current !== generation || controller.signal.aborted)',
         )
         expect(claudeModelsPageSource).toContain('const fetchModels = useCallback(async (signal: AbortSignal)')
         expect(claudeModelsPageSource).toMatch(/maskedCredentialHeaderNames,\s+signal,\s+\)/)
+    })
+
+    test('keeps proxy and abort signal without reusing authentication on OpenAI discovery fallback', async () => {
+        const proxyUrl = 'socks5://proxy.example.test:1080'
+        const controller = new AbortController()
+        const request = apiCallApi.request
+        const calls: Array<{ payload: unknown; signal: AbortSignal | undefined }> = []
+        apiCallApi.request = async (payload, config) => {
+            calls.push({ payload, signal: config?.signal as AbortSignal | undefined })
+            return { statusCode: 200, header: {}, bodyText: '{"data":[]}', body: { data: [] } }
+        }
+        try {
+            await modelsApi.fetchV1ModelsViaApiCall(
+                'https://api.example.test', undefined, undefined, proxyUrl, undefined, controller.signal,
+            )
+            await modelsApi.fetchModelsViaApiCall(
+                'https://api.example.test', undefined, undefined, proxyUrl, undefined, controller.signal,
+            )
+            expect(calls).toEqual([
+                {
+                    payload: {
+                        method: 'GET', url: 'https://api.example.test/v1/models',
+                        header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
+                    },
+                    signal: controller.signal,
+                },
+                {
+                    payload: {
+                        method: 'GET', url: 'https://api.example.test/models',
+                        header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
+                    },
+                    signal: controller.signal,
+                },
+            ])
+        } finally {
+            apiCallApi.request = request
+        }
+
+        const unauthenticatedCall = /modelsApi\.fetch(?:V1)?ModelsViaApiCall\(\s*trimmedBaseUrl,\s*undefined,\s*undefined,\s*keyEntry\?\.proxyUrl,\s*undefined,\s*signal,\s*\)/g
+        expect([...openAIModelsPageSource.matchAll(unauthenticatedCall)]).toHaveLength(2)
+        expect(openAIModelsPageSource.match(/if \(signal\.aborted \|\| authGeneration !== apiClient\.getAuthGeneration\(\)\) \{/g)).toHaveLength(3)
     })
 
     test('uses the DeepSeek root model endpoint with bearer authentication', async () => {

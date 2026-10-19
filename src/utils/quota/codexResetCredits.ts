@@ -295,11 +295,11 @@ const mergeCountStates = (
 }
 
 export const codexResetCreditAvailability = (
-    applicableAvailableCount: CodexResetCreditCountState | null | undefined,
+    availableCount: CodexResetCreditCountState | null | undefined,
 ): CodexResetCreditAvailability => {
-    switch (applicableAvailableCount?.state) {
+    switch (availableCount?.state) {
         case 'known':
-            return applicableAvailableCount.value > 0 ? 'available' : 'none'
+            return availableCount.value > 0 ? 'available' : 'none'
         case 'invalid':
             return 'invalid'
         case 'conflict':
@@ -310,14 +310,14 @@ export const codexResetCreditAvailability = (
 }
 
 export const canUseCodexResetCredit = (
-    applicableAvailableCount: CodexResetCreditCountState | null | undefined,
-): boolean => codexResetCreditAvailability(applicableAvailableCount) === 'available'
+    availableCount: CodexResetCreditCountState | null | undefined,
+): boolean => codexResetCreditAvailability(availableCount) === 'available'
 
 export async function runCodexResetCreditAction(
-    readApplicableCount: () => CodexResetCreditCountState | null | undefined,
+    readAvailableCount: () => CodexResetCreditCountState | null | undefined,
     action: () => Promise<void>,
 ): Promise<CodexResetCreditAvailability> {
-    const availability = codexResetCreditAvailability(readApplicableCount())
+    const availability = codexResetCreditAvailability(readAvailableCount())
     if (availability !== 'available') {
         return availability
     }

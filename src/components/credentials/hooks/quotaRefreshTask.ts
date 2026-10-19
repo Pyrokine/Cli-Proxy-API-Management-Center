@@ -55,6 +55,7 @@ type WaitForQuotaRefreshTaskOptions = {
     timeoutMs?: number
     pollIntervalMs?: number
     fetchTask?: QuotaRefreshTaskRequest
+    onProgress?: () => Promise<void>
     now?: () => number
     wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 }
@@ -112,6 +113,8 @@ export async function waitForQuotaRefreshTask(
         if (isQuotaRefreshTaskTerminal(task)) {
             return task
         }
+        await options.onProgress?.()
+        throwIfWaitCancelled(options.signal)
         try {
             await wait(pollIntervalMs, options.signal)
         } catch (error) {

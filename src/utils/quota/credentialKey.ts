@@ -9,6 +9,9 @@ const normalizeQuotaCredentialProvider = (type: string | undefined): string => {
     if (normalized === 'cognition') {
         return 'devin'
     }
+    if (normalized === 'muse') {
+        return 'meta'
+    }
     return normalized
 }
 
@@ -20,5 +23,8 @@ export const quotaCredentialKey = (
     const provider = normalizeQuotaCredentialProvider(type)
     const baseKey  = `${provider}::${fileName.trim()}`
     const identity = String(authIndex ?? '').trim()
+    if (provider === 'meta' && identity) {
+        return `meta::${identity}`
+    }
     return provider === 'devin' && identity ? `${baseKey}::${identity}` : baseKey
 }

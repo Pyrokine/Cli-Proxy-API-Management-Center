@@ -1,4 +1,5 @@
-import {describe, expect, test} from 'bun:test'
+import {describe, expect, mock, test} from 'bun:test'
+import {sourceCallback} from './sourceCallbacks'
 
 import {
     isQuotaRefreshTaskTerminal,
@@ -58,6 +59,71 @@ describe('quota refresh task polling', () => {
         expect(terminalTask.status).toBe('succeeded')
         expect(terminalTask.targets[0]?.status).toBe('succeeded')
         expect(requestCount).toBe(2)
+    })
+
+    test('awaits progress reads before the next poll and skips them after completion', async () => {
+        const events: string[] = []
+        let requests = 0
+        const terminalTask = await waitForQuotaRefreshTask(createTask('queued', 'queued'), {
+            fetchTask: async () => {
+                requests += 1
+                const status = requests === 1 ? 'running' : 'succeeded'
+                events.push(`fetch:${status}`)
+                return createTask(status, status)
+            },
+            onProgress: async () => {
+                const event = await Promise.resolve('progress')
+                events.push(event)
+            },
+            wait: async () => {
+                events.push('wait')
+            },
+        })
+
+        expect(terminalTask.status).toBe('succeeded')
+        expect(events).toEqual(['fetch:running', 'progress', 'wait', 'fetch:succeeded'])
+    })
+
+    test('does not read progress for an already completed task', async () => {
+        const initialTask = createTask('succeeded', 'succeeded')
+        const fetchTask = mock(async () => initialTask)
+        const onProgress = mock(async () => {})
+        const wait = mock(async () => {})
+        expect(await waitForQuotaRefreshTask(initialTask, {fetchTask, onProgress, wait})).toBe(initialTask)
+        expect(fetchTask).not.toHaveBeenCalled()
+        expect(onProgress).not.toHaveBeenCalled()
+        expect(wait).not.toHaveBeenCalled()
+    })
+
+    test('stops before the next wait when progress aborts its request signal', async () => {
+        const controller = new AbortController()
+        const fetchTask = mock(async () => createTask('running', 'running'))
+        const wait = mock(async () => {})
+        await expect(waitForQuotaRefreshTask(createTask('queued', 'queued'), {
+            signal: controller.signal,
+            fetchTask,
+            onProgress: async () => {
+                controller.abort()
+            },
+            wait,
+        })).rejects.toBeInstanceOf(QuotaRefreshTaskWaitCancelledError)
+        expect(fetchTask).toHaveBeenCalledTimes(1)
+        expect(wait).not.toHaveBeenCalled()
+    })
+
+    test('preserves a rejected progress read without reporting task completion', async () => {
+        const error = new Error('cached quota read failed')
+        const fetchTask = mock(async () => createTask('running', 'running'))
+        const wait = mock(async () => {})
+        await expect(waitForQuotaRefreshTask(createTask('queued', 'queued'), {
+            fetchTask,
+            onProgress: async () => {
+                throw error
+            },
+            wait,
+        })).rejects.toBe(error)
+        expect(fetchTask).toHaveBeenCalledTimes(1)
+        expect(wait).not.toHaveBeenCalled()
     })
 
     test('does not accept a terminal task with a non-terminal target', async () => {
@@ -122,6 +188,54 @@ describe('quota refresh task polling', () => {
         })).rejects.toBeInstanceOf(QuotaRefreshTaskWaitTimeoutError)
     })
 })
+
+for (const change of ['current', 'stale', 'unmounted'] as const) {
+    test(`reads cached quota during a pending task only for the ${change} UI claim`, async () => {
+        const mounted = {current: true}
+        let claimCurrent = true
+        let taskFinished = false
+        let readBeforeCompletion = false
+        let requests = 0
+        const pollLatest = mock(async () => {
+            if (!taskFinished) {
+                readBeforeCompletion = true
+            }
+        })
+        const refreshControllersRef = {current: new Set<AbortController>()}
+        const waitForTask = (initial: QuotaRefreshTask, options?: {onProgress?: () => Promise<void>}) =>
+            waitForQuotaRefreshTask(initial, {
+                ...options,
+                fetchTask: async () => {
+                    requests += 1
+                    mounted.current = change !== 'unmounted'
+                    claimCurrent = change !== 'stale'
+                    taskFinished = requests > 1
+                    return taskFinished ? createTask('succeeded', 'succeeded') : createTask('running', 'running')
+                },
+                wait: async () => {},
+            })
+        const refreshMany = sourceCallback<(names: string[]) => Promise<void>>(
+            'components/credentials/hooks/useBackendQuotaRegistration.ts', 'refreshMany', {
+                apiClient: {getAuthGeneration: () => 1},
+                captureQuotaRequestClaim: () => ({}), areQuotaSubjectsCurrent: () => claimCurrent,
+                mounted, quotaEnabled: false, refreshControllersRef,
+                quotaApi: {refresh: async () => createTask('queued', 'queued')},
+                metaRef: {current: {}}, setMeta: mock(),
+                refreshMetaKeysForIdentifiers: () => ['claude::credential.json'],
+                refreshMetaKeysForTask: () => ['claude::credential.json'],
+                markQuotaMetaLoading: (value: unknown) => value,
+                applyQuotaRefreshTaskToMeta: (value: unknown) => value,
+                waitForQuotaRefreshTask: waitForTask, pollLatest,
+            },
+        )
+        await refreshMany(['claude::credential.json'])
+        expect(taskFinished).toBe(true)
+        expect(requests).toBe(2)
+        expect(readBeforeCompletion).toBe(change === 'current')
+        expect(pollLatest).toHaveBeenCalledTimes(change === 'current' ? 2 : change === 'stale' ? 1 : 0)
+        expect(refreshControllersRef.current.size).toBe(0)
+    })
+}
 
 describe('quota refresh task API', () => {
     test('creates a task and preserves the caller abort signal', async () => {

@@ -34,6 +34,46 @@ function normalizeNumberValue(value: unknown): number | null {
     return null
 }
 
+function normalizeBooleanFlag(value: unknown): boolean | null {
+    if (typeof value === 'boolean') {
+        return value
+    }
+    if (typeof value === 'number') {
+        return value === 1 ? true : value === 0 ? false : null
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase()
+        if (['true', '1', 'yes', 'on'].includes(normalized)) {
+            return true
+        }
+        if (['false', '0', 'no', 'off'].includes(normalized)) {
+            return false
+        }
+    }
+    return null
+}
+
+export function resolveClaudePlanType(profile: unknown): string | null {
+    const record       = toRecord(profile)
+    const account      = toRecord(record?.account)
+    const organization = toRecord(record?.organization)
+    const orgType      = normalizeStringValue(organization?.organization_type)?.toLowerCase()
+    const status       = normalizeStringValue(organization?.subscription_status)?.toLowerCase()
+    if ((orgType === 'claude_team' && status === 'active') ||
+        (orgType === 'team' && (!status || status === 'active'))) {
+        return 'Team'
+    }
+    const hasMax = normalizeBooleanFlag(account?.has_claude_max)
+    const hasPro = normalizeBooleanFlag(account?.has_claude_pro)
+    if (hasMax) {
+        return 'Max'
+    }
+    if (hasPro) {
+        return 'Pro'
+    }
+    return hasMax === false && hasPro === false ? 'Free' : null
+}
+
 function decodeBase64Url(value: string): string | null {
     const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
     const padded     = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=')

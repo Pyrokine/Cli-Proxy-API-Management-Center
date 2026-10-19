@@ -30,11 +30,19 @@ function parseStandardPayload(root: Record<string, unknown>): ParsedXaiQuota | n
     const planCode        = stringValue(normalized.plan_code)
     const planName        = stringValue(normalized.plan_name)
     const planTier        = stringValue(normalized.plan_tier)
+    const weekly          = asRecord(normalized.weekly)
+    const monthly         = asRecord(normalized.monthly)
+    const hasSplitPeriods = weekly !== null || monthly !== null
+    const weeklyType      = normalizePeriodType(stringValue(weekly?.period_type))
+    const monthlyType     = normalizePeriodType(stringValue(monthly?.period_type))
+    const activePeriod    = weeklyType === 'weekly' ? weekly : monthlyType === 'monthly' ? monthly : null
     const usagePeriod     = asRecord(normalized.usage_period)
     const billingPeriod   = asRecord(normalized.billing_period)
-    const periodType      = normalizePeriodType(stringValue(usagePeriod?.type))
-    const periodStart     = stringValue(usagePeriod?.start)
-    const periodEnd       = stringValue(usagePeriod?.end)
+    const periodType      = hasSplitPeriods ?
+                            (weeklyType === 'weekly' ? 'weekly' : monthlyType === 'monthly' ? 'monthly' : 'unknown') :
+                            normalizePeriodType(stringValue(usagePeriod?.type))
+    const periodStart     = hasSplitPeriods ? stringValue(activePeriod?.period_start) : stringValue(usagePeriod?.start)
+    const periodEnd       = hasSplitPeriods ? stringValue(activePeriod?.period_end) : stringValue(usagePeriod?.end)
     const periodStartMs   = resolveResetMs([periodStart])
     const resetAtMs       = resolveResetMs([periodEnd])
     const periodHours     = periodStartMs !== null && resetAtMs !== null && resetAtMs > periodStartMs ?
@@ -45,8 +53,16 @@ function parseStandardPayload(root: Record<string, unknown>): ParsedXaiQuota | n
     const remaining       = numberValue(normalized.remaining)
     const onDemandCap     = numberValue(normalized.on_demand_cap)
     const onDemandUsed    = numberValue(normalized.on_demand_used)
-    const usagePercent    = normalizePercent(numberValue(normalized.usage_percent))
-    const usedPercent     = percentage(includedUsed, monthlyLimit) ??
+    const usageSource     = stringValue(asRecord(root.value_source)?.usage_percent)
+    const monthlyDerived  = usageSource === 'derived:included_used/monthly_limit' ||
+                            usageSource === 'derived:on_demand_used/on_demand_cap'
+    const usagePercent    = hasSplitPeriods ?
+                            numberValue(activePeriod?.usage_percent) :
+                            periodType === 'weekly' && monthlyDerived ?
+                            null : numberValue(normalized.usage_percent)
+    const usedPercent     = hasSplitPeriods ?
+                            (monthlyType === 'monthly' ? numberValue(monthly?.usage_percent) : null) :
+                            percentage(includedUsed, monthlyLimit) ??
                             (periodType === 'monthly' ? usagePercent : null)
     const onDemandPercent = onDemandCap !== null && onDemandCap > 0 && onDemandUsed !== null ?
                             (onDemandUsed / onDemandCap) * 100 :
@@ -71,8 +87,10 @@ function parseStandardPayload(root: Record<string, unknown>): ParsedXaiQuota | n
             onDemandUsedPercent: onDemandPercent,
             usedPercent,
             prepaidBalance: numberValue(normalized.prepaid_balance),
-            billingPeriodStart: stringValue(billingPeriod?.start),
-            billingPeriodEnd: stringValue(billingPeriod?.end),
+            billingPeriodStart: hasSplitPeriods ?
+                                stringValue(monthly?.period_start) : stringValue(billingPeriod?.start),
+            billingPeriodEnd: hasSplitPeriods ?
+                              stringValue(monthly?.period_end) : stringValue(billingPeriod?.end),
             amountUnit: normalizeAmountUnit(stringValue(normalized.amount_unit)),
             currency: normalizeCurrency(stringValue(normalized.currency)),
             source: stringValue(root.source),
@@ -93,7 +111,7 @@ function parseLegacyPayload(root: Record<string, unknown>): ParsedXaiQuota | nul
     const currentPeriod = pickRecord([configRecord, usageRecord, root], ['currentPeriod', 'current_period'])
     const periodType    = normalizePeriodType(stringValue(currentPeriod?.type))
     const productUsage  = parseProductUsage(configRecord.productUsage ?? configRecord.product_usage)
-    const usagePercent  = normalizePercent(pickNumber(sources, ['creditUsagePercent', 'credit_usage_percent']))
+    const usagePercent  = pickNumber(sources, ['creditUsagePercent', 'credit_usage_percent'])
     const periodStart   = stringValue(currentPeriod?.start) ?? pickString(sources, ['period_start', 'periodStart'])
     const periodEnd     = stringValue(currentPeriod?.end) ?? pickString(sources, ['period_end', 'periodEnd'])
 
@@ -142,9 +160,9 @@ function parseLegacyPayload(root: Record<string, unknown>): ParsedXaiQuota | nul
     )
     const remainingPercentRaw  = pickNumber(sources, ['remaining_percent', 'remainingPercent'])
     const usedPercent          = usedPercentRaw !== null ?
-                                 normalizePercent(usedPercentRaw) :
+                                 usedPercentRaw :
                                  remainingPercentRaw !== null ?
-                                 100 - (normalizePercent(remainingPercentRaw) ?? 0) :
+                                 100 - remainingPercentRaw :
                                  percentage(includedUsed, monthlyLimit)
     const onDemandUsedPercent  = percentage(onDemandUsed, onDemandCap)
     const billingPeriodStart   = pickString(sources, [
@@ -235,7 +253,7 @@ function hasRecognizedStandardField(record: Record<string, unknown>): boolean {
     return [
         'plan_code', 'plan_name', 'plan_tier', 'monthly_limit', 'used', 'included_used', 'remaining',
         'on_demand_enabled', 'on_demand_cap', 'on_demand_used', 'prepaid_balance', 'usage_percent',
-        'usage_period', 'billing_period', 'product_usage',
+        'usage_period', 'billing_period', 'weekly', 'monthly', 'product_usage',
     ].some((key) => hasOwn(record, key))
 }
 
@@ -393,7 +411,7 @@ function parseProductUsage(value: unknown): Array<{ product: string; usagePercen
         return [
             {
                 product: stringValue(record.product) ?? `Product ${index + 1}`,
-                usagePercent: normalizePercent(numberValue(record.usage_percent ?? record.usagePercent)),
+                usagePercent: numberValue(record.usage_percent ?? record.usagePercent),
             },
         ]
     })
@@ -468,13 +486,6 @@ function legacyAmountUnit(sources: Array<Record<string, unknown> | null>): XaiAm
 function normalizeCurrency(value: string | null): string | null {
     const normalized = value?.trim().toUpperCase() ?? ''
     return /^[A-Z]{3}$/.test(normalized) ? normalized : null
-}
-
-function normalizePercent(value: number | null): number | null {
-    if (value === null) {
-        return null
-    }
-    return value >= 0 && value <= 1 ? value * 100 : value
 }
 
 function percentage(value: number | null, limit: number | null): number | null {

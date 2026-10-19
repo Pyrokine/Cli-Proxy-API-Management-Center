@@ -19,6 +19,30 @@ describe('Kimi quota rows', () => {
         expect(rows[1]?.periodHours).toBe(168)
     })
 
+    test('shows the monthly total from cached usage when a weekly bucket is absent', () => {
+        const rows = buildKimiQuotaRows({
+            limits: [{detail: {used: 5, limit: 100}, window: {duration: 300, timeUnit: 'TIME_UNIT_MINUTE'}}],
+            usages: {limit_month_total: {used_ratio: 0.2529, reset_time: '2099-10-22T00:00:00Z'}},
+        })
+        expect(rows.map(({id}) => id)).toEqual(['limit-0', 'monthly'])
+        expect(rows[1]).toMatchObject({
+            labelKey: 'kimi_quota.monthly_limit',
+            used: 25,
+            limit: 100,
+            resetAtMs: Date.parse('2099-10-22T00:00:00Z'),
+            periodHours: 720,
+        })
+    })
+
+    test('keeps cached rows unchanged when the monthly ratio is absent or invalid', () => {
+        const root = {usage: {used: 97, limit: 100}}
+        expect(buildKimiQuotaRows({...root, usages: {}}).map(({id}) => id)).toEqual(['summary'])
+        expect(buildKimiQuotaRows({...root, usages: {limit_month_total: {used_ratio: null}}})
+            .map(({id}) => id)).toEqual(['summary'])
+        expect(buildKimiQuotaRows({...root, usages: {limit_month_total: {used_ratio: -0.3}}})
+            .map(({id}) => id)).toEqual(['summary'])
+    })
+
     test('supports week windows and readable multi-day reset durations', () => {
         const rows = buildKimiQuotaRows({
                                             limits: [

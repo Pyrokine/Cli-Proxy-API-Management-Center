@@ -4,13 +4,16 @@ import {Children, createElement, isValidElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {CredentialCard} from '@/components/credentials/CredentialCard'
 import {getCooldownRemainingSeconds} from '@/utils/time/durations'
+import {formatDateTime} from '@/utils/format'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import type {AuthFileCooldownSnapshot} from '@/types/authFile'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import i18n from '@/i18n'
 
 interface CheckboxInputProps {
+    id?: string
     type?: string
+    'aria-describedby'?: string
     onChange?: (event: ChangeEvent<HTMLInputElement>) => void
 }
 
@@ -50,13 +53,21 @@ const cooldownSnapshot = (
     records,
 })
 
-const renderCooldownCard = (snapshot: AuthFileCooldownSnapshot) =>
+const renderCooldownCard = (
+    snapshot: AuthFileCooldownSnapshot,
+    onClearCooldown?: () => void,
+    disableControls = false,
+    disabled = false,
+) =>
     renderToStaticMarkup(
         createElement(CredentialCard, {
             category: 'auth-file',
             title: 'cooldown-account',
             controlLabel: 'Codex codex:one',
             cooldownSnapshot: snapshot,
+            onClearCooldown,
+            disableControls,
+            disabled,
         }),
     )
 
@@ -123,6 +134,33 @@ describe('credential card accessibility', () => {
         expect(active).toContain(i18n.t('credentials.cooldown_reason_unknown'))
     })
 
+    test('shows HTTP status, backoff, deadline and observation time in every locale', async () => {
+        const originalLanguage = i18n.language
+        const retryAt = '2026-09-16T12:01:00.000Z'
+        const observedAt = '2026-09-16T12:00:00.000Z'
+        const snapshot = cooldownSnapshot([{
+            scope: 'model', modelKey: 'gpt-test', retryAt, remainingSeconds: 60,
+            reason: 'rate_limit', httpStatus: 429, backoffLevel: 2,
+        }])
+        try {
+            for (const language of ['en', 'ru', 'zh-CN', 'zh-TW']) {
+                await i18n.changeLanguage(language)
+                const markup = renderCooldownCard(snapshot)
+                expect(markup).toContain(i18n.t('credentials.cooldown_http_status', {status: 429}))
+                expect(markup).toContain(i18n.t('credentials.cooldown_backoff_level', {level: 2}))
+                expect(markup).toContain(i18n.t('credentials.cooldown_deadline', {
+                    time: formatDateTime(retryAt, language),
+                }))
+                expect(markup).toContain(i18n.t('credentials.cooldown_observed_at', {
+                    time: formatDateTime(observedAt, language),
+                }))
+                expect(markup).toContain(`dateTime="${retryAt}"`)
+            }
+        } finally {
+            await i18n.changeLanguage(originalLanguage)
+        }
+    })
+
     test('stops rendering elapsed cooldowns without claiming credential recovery', () => {
         const expired = renderCooldownCard(cooldownSnapshot([{
                                                                  scope: 'credential',
@@ -136,17 +174,40 @@ describe('credential card accessibility', () => {
         expect(expired).not.toContain('<details')
     })
 
+    test('offers local clearing only for active cooldowns with an action and honors disabled controls', () => {
+        const active = cooldownSnapshot([{
+                                              scope: 'credential',
+                                              retryAt: '2026-09-16T12:01:00.000Z',
+                                              remainingSeconds: 60,
+                                              reason: 'quota',
+                                          }])
+        const onClear = () => undefined
+        expect(renderCooldownCard(active)).not.toContain(i18n.t('credentials.cooldown_clear'))
+        expect(renderCooldownCard(cooldownSnapshot(null), onClear)).not.toContain('<button')
+        expect(renderCooldownCard(cooldownSnapshot([]), onClear)).not.toContain('<button')
+        expect(renderCooldownCard(cooldownSnapshot(active.records, 0), onClear)).not.toContain('<button')
+
+        const enabled = renderCooldownCard(active, onClear)
+        expect(enabled).toContain(i18n.t('credentials.cooldown_clear'))
+        expect(enabled).toContain(i18n.t('credentials.cooldown_clear_aria', {name: 'Codex codex:one'}))
+        expect(renderCooldownCard(active, onClear, true)).toMatch(/<button[^>]*disabled=""/)
+        expect(renderCooldownCard(active, onClear, false, true)).not.toContain(i18n.t('credentials.cooldown_clear_aria', {name: 'Codex codex:one'}))
+    })
+
     test('keeps native checkbox semantics and forwards checked state', () => {
         const changes: boolean[] = []
         const selectionInput = findCheckboxInput(
             SelectionCheckbox({checked: false, onChange: (checked) => changes.push(checked), ariaLabel: 'select'}),
         )
         const toggleInput = findCheckboxInput(
-            ToggleSwitch({checked: true, onChange: (checked) => changes.push(checked), ariaLabel: 'toggle'}),
+            ToggleSwitch({checked: true, onChange: (checked) => changes.push(checked), id: 'toggle-input',
+                ariaLabel: 'toggle', ariaDescribedBy: 'toggle-description'}),
         )
 
         expect(selectionInput.props.type).toBe('checkbox')
         expect(toggleInput.props.type).toBe('checkbox')
+        expect(toggleInput.props.id).toBe('toggle-input')
+        expect(toggleInput.props['aria-describedby']).toBe('toggle-description')
         selectionInput.props.onChange?.({target: {checked: true}} as ChangeEvent<HTMLInputElement>)
         toggleInput.props.onChange?.({target: {checked: false}} as ChangeEvent<HTMLInputElement>)
         expect(changes).toEqual([true, false])

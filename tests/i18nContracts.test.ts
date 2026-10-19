@@ -73,7 +73,7 @@ const literalKeyPatterns: Array<{ pattern: RegExp; keyPrefix?: string }> = [
 ]
 
 const dynamicKeyManifest = [
-    ...['gemini', 'interactions', 'codex'].flatMap((provider) =>
+    ...['gemini', 'interactions', 'codex', 'meta'].flatMap((provider) =>
                                                        [
                                                            'models_label',
                                                            'models_add_btn',
@@ -106,7 +106,7 @@ const dynamicKeyManifest = [
                                                           'search_empty',
                                                       ].map((suffix) => `ai_providers.${provider}_${suffix}`),
     ),
-    ...['gemini', 'interactions', 'codex', 'claude', 'openai'].flatMap((provider) =>
+    ...['gemini', 'interactions', 'codex', 'meta', 'claude', 'openai'].flatMap((provider) =>
                                                                            [
                                                                                'title',
                                                                                'hint',
@@ -204,7 +204,7 @@ const technicalOnlyPatterns = [
         '^(?:Qwen|Gemini|GeminiCLI|Gemini CLI|Kimi|AIStudio|Claude|Anthropic|' +
         'Codex|Antigravity|xAI|iFlow|Vertex|Interactions|OpenAI|Devin)(?: OAuth)?$',
     ),
-    /^(?:Free|Plus|Team|Pro(?: (?:5x|20x))?|Ultra(?: Lite)?|Max(?: (?:5x|20x))?|SuperGrok(?: Heavy)?|Iguana Necktie)$/,
+    /^(?:Free|Plus|Team|Pro(?: (?:5x|20x|100|200))?|Ultra(?: Lite)?|Max(?: (?:5x|20x))?|SuperGrok(?: Heavy)?|Iguana Necktie)$/,
     new RegExp(
         '^(?:API Key|Request ID|Tokens|Websockets?|WebSocket|IP|OAuth|JSON|' +
         'true|false|Bearer|Basic|GitHub Token|User-Agent|Registry|Metadata|' +
@@ -393,40 +393,27 @@ describe('global i18n contract', () => {
         }
     })
 
-    test('distinguishes available reset credits from credits applicable to the current account', () => {
-        expect({
-                   en: [
-                       flatLocales.en['codex_quota.reset_credits_label'],
-                       flatLocales.en['codex_quota.reset_credits_applicable_label'],
-                   ],
-                   ru: [
-                       flatLocales.ru['codex_quota.reset_credits_label'],
-                       flatLocales.ru['codex_quota.reset_credits_applicable_label'],
-                   ],
-                   'zh-CN': [
-                       flatLocales['zh-CN']['codex_quota.reset_credits_label'],
-                       flatLocales['zh-CN']['codex_quota.reset_credits_applicable_label'],
-                   ],
-                   'zh-TW': [
-                       flatLocales['zh-TW']['codex_quota.reset_credits_label'],
-                       flatLocales['zh-TW']['codex_quota.reset_credits_applicable_label'],
-                   ],
-               }).toEqual({
-                              en: [
-                                  'Available manual reset credits',
-                                  'Manual reset credits applicable to this account',
-                              ],
-                              ru: [
-                                  // cspell:disable-next-line
-                                  'Доступные кредиты ручного сброса',
-                                  // cspell:disable-next-line
-                                  'Кредиты ручного сброса для текущего аккаунта',
-                              ],
-                              'zh-CN': ['可用主动重置次数', '当前账号适用的主动重置次数'],
-                              'zh-TW': ['可用主動重置次數', '目前帳號適用的主動重置次數'],
-                          })
+    test('names the single reset count and requires explicit consumption confirmation in every locale', () => {
+        expect(Object.fromEntries(localeNames.map((locale) => [locale,
+            flatLocales[locale]['codex_quota.reset_credits_label']]))).toEqual({
+            en: 'Available resets', ru: 'Доступные сбросы', 'zh-CN': '可用重置次数', 'zh-TW': '可用重置次數',
+        })
+        localeNames.forEach((locale) => {
+            expect(flatLocales[locale]['codex_quota.reset_credits_applicable_label']).toBeUndefined()
+            expect(flatLocales[locale]['codex_quota.reset_credits_expiry_label']).not.toContain('GMT+8')
+            expect(flatLocales[locale]['auth_files.quota_reset_codex_title']).toBeTruthy()
+            expect(flatLocales[locale]['auth_files.quota_reset_codex_confirm_button']).toBeTruthy()
+            expect(flatLocales[locale]['auth_files.quota_reset_codex_confirm']).toContain('{{name}}')
+            expect(flatLocales[locale]['auth_files.quota_reset_codex_failed']).toContain('{{message}}')
+            expect(flatLocales[locale]['credentials.manual_token_refresh']).not.toMatch(/token|токен/i)
+        })
+    })
+
+    test('distinguishes credential-recorded Codex subscription dates in every locale', () => {
         localeNames.forEach((localeName) => {
-            expect(flatLocales[localeName]['codex_quota.reset_credits_expiry_label']).not.toContain('GMT+8')
+            expect(flatLocales[localeName]['credentials.subscription_recorded_until']).not.toBe(
+                flatLocales[localeName]['credentials.subscription_active_until'],
+            )
         })
     })
 

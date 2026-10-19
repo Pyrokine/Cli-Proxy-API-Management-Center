@@ -106,6 +106,52 @@ describe('quota cache session isolation', () => {
         expect(useQuotaStore.getState().codexQuota['codex::b.json']?.windows[0]?.id).toBe('new-b')
     })
 
+    test('status changes reject old claims while preserving payload metadata and backend version bounds', () => {
+        const key = 'codex::a.json'
+        const sibling = 'codex::b.json'
+        const initial = captureQuotaRequestClaim(3)
+        const snapshot = {key, metadata: metadata('a.json', 4, 8, {
+            observedAt: '2026-10-19T01:00:00Z', freshness: 'partial', lastError: 'subscription: status 403',
+        }), payload: codexPayload('retained')}
+        expect(commitQuotaSnapshot(initial, 3, snapshot)).toBe('committed')
+        expect(commitQuotaSnapshot(initial, 3, {
+            key: sibling, metadata: metadata('b.json', 1, 1), payload: codexPayload('sibling'),
+        })).toBe('committed')
+        const previous = useQuotaStore.getState()
+        const oldClaim = captureQuotaRequestClaim(3)
+        useQuotaStore.getState().advanceQuotaSubjects([key, key])
+        const changed = useQuotaStore.getState()
+        expect(changed.codexQuota[key]).toBe(previous.codexQuota[key])
+        expect(changed.quotaMetadata[key]).toBe(previous.quotaMetadata[key])
+        expect(changed.cacheGeneration).toBe(previous.cacheGeneration)
+        expect(changed.subjectVersions[key]).toEqual({
+            ...previous.subjectVersions[key], localGeneration: previous.subjectVersions[key].localGeneration + 1,
+        })
+        expect(changed.subjectVersions[sibling]).toBe(previous.subjectVersions[sibling])
+        expect(commitQuotaSnapshot(oldClaim, 3, snapshot)).toBe('stale_subject')
+        expect(commitQuotaSnapshot(oldClaim, 3, {
+            key: sibling, metadata: metadata('b.json', 1, 2), payload: codexPayload('updated-sibling'),
+        })).toBe('committed')
+        expect(commitQuotaSnapshot(captureQuotaRequestClaim(3), 3, snapshot)).toBe('committed')
+    })
+
+    test('status fencing preserves tombstones and their backend generation floor', () => {
+        const key = 'codex::a.json'
+        expect(commitQuotaSnapshot(captureQuotaRequestClaim(3), 3, {
+            key, metadata: metadata('a.json', 4, 1), payload: codexPayload('removed'),
+        })).toBe('committed')
+        useQuotaStore.getState().clearQuotaSubjects([key])
+        const tombstone = useQuotaStore.getState().subjectVersions[key]
+        useQuotaStore.getState().advanceQuotaSubjects([key])
+        expect(useQuotaStore.getState().subjectVersions[key]).toEqual({
+            ...tombstone, localGeneration: tombstone.localGeneration + 1,
+        })
+        expect(useQuotaStore.getState().codexQuota[key]).toBeUndefined()
+        expect(commitQuotaSnapshot(captureQuotaRequestClaim(3), 3, {
+            key, metadata: metadata('a.json', 4, 2), payload: codexPayload('stale-binding'),
+        })).toBe('older_backend_version')
+    })
+
     test('requires a newer backend generation after a subject tombstone', () => {
         const initial = captureQuotaRequestClaim(3)
         expect(commitQuotaSnapshot(initial, 3, {

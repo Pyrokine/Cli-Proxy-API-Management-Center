@@ -3,6 +3,7 @@
  * 用于读取后端缓存的 quota 数据（替代前端直接查询 provider API）
  */
 
+import i18n from '@/i18n'
 import {apiClient} from './client'
 
 export interface QuotaEntry {
@@ -131,6 +132,12 @@ const quotaRefreshTaskPath = (taskId: string): string =>
 export const quotaApi = {
     getStatus: () => apiClient.get<QuotaStatusResponse>('/quota/status'),
 
+    fetchCredential: (authIndex: string, provider?: string, options?: QuotaRequestOptions) =>
+        apiClient.post<unknown>('/quota/fetch', {
+            auth_index: authIndex,
+            ...(provider ? {provider} : {}),
+        }, {signal: options?.signal}),
+
     refresh: (credentials?: string[], options?: QuotaRequestOptions) =>
         apiClient.post<QuotaRefreshTask>(
             '/quota/refresh',
@@ -155,6 +162,19 @@ export const quotaApi = {
         apiClient.post<QuotaRefreshTask>(`${quotaRefreshTaskPath(taskId)}/cancel`, undefined, {
             signal: options?.signal,
         }),
+
+    reset: async (authIndex: string): Promise<void> => {
+        const identity = authIndex.trim()
+        if (!identity) {
+            throw new Error(i18n.t('auth_files.quota_reset_manual_missing_auth_index'))
+        }
+        const result = await apiClient.post<{status: string; auth_index: string}>('/reset-quota', {
+            auth_index: identity,
+        })
+        if (result?.status !== 'ok' || result.auth_index !== identity) {
+            throw new Error(i18n.t('auth_files.quota_reset_invalid_response'))
+        }
+    },
 
     getConfig: () => apiClient.get<QuotaConfig>('/quota/config'),
 }
