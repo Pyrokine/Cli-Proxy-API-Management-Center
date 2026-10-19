@@ -1,11 +1,13 @@
 import type {DataStatusValue} from '@/components/common/DataStatusCard'
 import {Sheet, type SheetColumn} from '@/components/common/Sheet'
+import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {
     IconChevronDown,
     IconChevronUp,
     IconCode,
+    IconCopy,
     IconDownload,
     IconEyeOff,
     IconMaximize2,
@@ -20,6 +22,7 @@ import {
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Pagination} from '@/components/ui/Pagination'
+import {lockScroll, unlockScroll} from '@/components/ui/scrollLock'
 import {Select} from '@/components/ui/Select'
 import {Tabs} from '@/components/ui/Tabs'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
@@ -37,26 +40,31 @@ import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp} f
 import {redactSensitiveText} from '@/utils/redaction'
 import {formatDurationMs, formatThinkingLabel} from '@/utils/usage'
 import type {PointerEvent as ReactPointerEvent} from 'react'
-import {useDeferredValue, useEffect, useMemo, useReducer, useRef, useState} from 'react'
+import {useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {errorLogViewerReducer} from './hooks/errorLogViewer'
-import {parseLogLine} from './hooks/logParsing'
+import {appendLogBuffer, emptyLogBuffer, replaceLogBuffer, shouldCatchUpLogPage} from './hooks/logBuffer'
+import {shouldExitLogFullscreen} from './hooks/logFullscreen'
+import {createLogParserCache} from './hooks/logParsing'
 import {createLogRequestGuard, createLogRequestQueue} from './hooks/logRequests'
 import {
     HTTP_METHODS,
     type LogState,
     type ParsedLogLine,
     type PersistedLogFilters,
-    resolveStatusGroup,
     STATUS_GROUPS,
 } from './hooks/logTypes'
 import type {RouteDecisionCooldown, RouteDecisionQuotaStatus} from './hooks/routeDecisionTrace'
-import {useLogFilters} from './hooks/useLogFilters'
+import {matchesLogFilters, useLogFilters} from './hooks/useLogFilters'
 import {isTraceableRequestPath, useTraceResolver} from './hooks/useTraceResolver'
 import styles from './LogsPage.module.scss'
 
-// 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
+// 每页只渲染当前页的日志，缓存最多保留 10000 行
 const MAX_BUFFER_LINES          = 10000
+const MAX_LOG_PAGES_PER_READ    = 3
+const FAST_CATCH_UP_MS          = 1000
+const INITIAL_RETRY_MS          = 8000
+const MAX_RETRY_MS              = 60000
 const DEFAULT_LOG_PAGE_SIZE     = 50
 const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
@@ -226,8 +234,13 @@ type LogPosition = {
 
 export function LogsPage() {
     const { t, i18n }                            = useTranslation()
+    const transitionLayer                        = usePageTransitionLayer()
+    const pageLayerStatus                        = transitionLayer?.status ?? 'current'
     const { showNotification, showConfirmation } = useNotificationStore()
     const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
+    const authGeneration                         = useAuthStore(() => apiClient.getAuthGeneration())
+    const mountedRef                             = useRef(true)
+    const isCurrentConnection                    = () => mountedRef.current && authGeneration === apiClient.getAuthGeneration()
     const apiBase                                = useAuthStore((state) => state.apiBase)
     const managementKey                          = useAuthStore((state) => state.managementKey)
     const traceScopeKey                          = `${apiBase}::${managementKey}`
@@ -235,12 +248,14 @@ export function LogsPage() {
     const requestLogEnabled                      = config?.requestLog ?? false
 
     const [activeTab, setActiveTab]                                 = useState<TabType>('logs')
-    const [logState, setLogState]                                   = useState<LogState>({
-                                                                                             buffer: [],
-                                                                                         })
+    const [logState, setLogState]                                   = useState<LogState>(emptyLogBuffer)
+    const parseCachedLogs                                            = useMemo(createLogParserCache, [])
     const [loading, setLoading]                                     = useState(true)
     const [clearingLogs, setClearingLogs]                           = useState(false)
     const [error, setError]                                         = useState('')
+    const [catchingUp, setCatchingUp]                               = useState(false)
+    const [lastUpdated, setLastUpdated]                             = useState<number | null>(null)
+    const [historyEvicted, setHistoryEvicted]                       = useState(false)
     const configRefreshMs                                           = useMemo(
         () => resolveAutoRefreshMs(config?.autoRefreshInterval),
         [config?.autoRefreshInterval],
@@ -268,12 +283,14 @@ export function LogsPage() {
         ]
     }, [refreshInterval])
     const [searchQuery, setSearchQuery]                             = useState('')
+    const [levelFilter, setLevelFilter]                             = useState('')
     const deferredSearchQuery                                       = useDeferredValue(searchQuery)
     const [hideManagementLogs, setHideManagementLogs]               = useLocalStorage(
         'logsPage.hideManagementLogs',
         true,
     )
     const [showRawLogs, setShowRawLogs]                             = useLocalStorage('logsPage.showRawLogs', false)
+    const [wrapLogs, setWrapLogs]                                   = useLocalStorage('logsPage.wrapLogs', false)
     const [structuredFiltersExpanded, setStructuredFiltersExpanded] = useLocalStorage(
         'logsPage.structuredFiltersExpanded',
         true,
@@ -297,13 +314,16 @@ export function LogsPage() {
                                                                                    totalBytes: number;
                                                                                    fileCount: number
                                                                                } | null>(null)
-    const [totalLogLines, setTotalLogLines]                         = useState(0)
+    const [totalLogLines, setTotalLogLines]                         = useState<number | null>(null)
     const notRecordedLabel                                          = t('usage_stats.request_events_not_recorded', {
         defaultValue: 'Not recorded',
     })
 
     const [requestLogDownloading, setRequestLogDownloading] = useState(false)
     const [logPanelFullscreen, setLogPanelFullscreen]       = useState(false)
+    if (pageLayerStatus !== 'current' && logPanelFullscreen) {
+        setLogPanelFullscreen(false)
+    }
 
     const trace                        = useTraceResolver({
                                                               traceScopeKey,
@@ -423,11 +443,13 @@ export function LogsPage() {
                                                  page: 1,
                                                  pageStart: 0,
                                                  scrollTop: 0,
-                                                 anchorRaw: '',
+                                                 anchorId: null as number | null,
+                                                 anchorOffset: null as number | null,
                                              })
     const pendingViewportRestoreRef = useRef<{
-                                                 anchorRaw: string
+                                                 anchorId: number
                                                  scrollTop: number
+                                                 anchorOffset?: number
                                                  targetPage?: number
                                              } | null>(null)
     const longPressRef              = useRef<{
@@ -447,6 +469,8 @@ export function LogsPage() {
 
     // 保存最新读取位置用于增量获取
     const logPositionRef          = useRef<LogPosition>({})
+    const retryDelayRef           = useRef(INITIAL_RETRY_MS)
+    const nextReadAtRef           = useRef(0)
     const requestLogHomeIpByIdRef = useRef<Record<string, string>>({})
 
     const disableControls = connectionStatus !== 'connected'
@@ -458,13 +482,15 @@ export function LogsPage() {
     const [logPageSize, setLogPageSize] = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
 
     const loadLogs = async (incremental = false) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         if (useAuthStore.getState().connectionStatus !== 'connected') {
             setLoading(false)
             return
         }
 
-        const authGeneration = apiClient.getAuthGeneration()
-        const request        = requests.logs.startRead(incremental, authGeneration)
+        const request = requests.logs.startRead(incremental, authGeneration)
         if (request === null) {
             return
         }
@@ -473,95 +499,112 @@ export function LogsPage() {
         if (!incremental) {
             setLoading(true)
         }
-        setError('')
 
         try {
-            const position          = logPositionRef.current
-            const overlapAfter      = incremental && !position.cursor && position.after !== undefined
-            const requestAfter      = overlapAfter ? overlapAfterValue(position.after) : position.after
-            const params: LogsQuery = incremental
-                                      ? {
-                    limit: MAX_BUFFER_LINES,
-                    ...(requestAfter !== undefined ? { after: requestAfter } : {}),
-                    ...(position.cursor ? { cursor: position.cursor } : {}),
+            for (let page = 0; page < MAX_LOG_PAGES_PER_READ; ++page) {
+                const position          = logPositionRef.current
+                const overlapAfter      = incremental && !position.cursor && position.after !== undefined
+                const requestAfter      = overlapAfter ? overlapAfterValue(position.after) : position.after
+                const params: LogsQuery = incremental
+                                          ? {
+                        limit: MAX_BUFFER_LINES,
+                        ...(requestAfter !== undefined ? { after: requestAfter } : {}),
+                        ...(position.cursor ? { cursor: position.cursor } : {}),
+                    }
+                                          : { limit: MAX_BUFFER_LINES }
+                const [data, logSize]   = await Promise.all([
+                                                                logsApi.fetchLogs(params, {
+                                                                    signal: request.controller.signal,
+                                                                }),
+                                                                incremental || page > 0
+                                                                ? Promise.resolve(null)
+                                                                : logsApi
+                                                                    .fetchLogSize({ signal: request.controller.signal })
+                                                                    .catch((err: unknown) => {
+                                                                        if (requestIsCurrent()) {
+                                                                            console.warn('[LogsPage] fetchLogSize failed', err)
+                                                                        }
+                                                                        return null
+                                                                    }),
+                                                            ])
+                if (!requestIsCurrent()) {
+                    return
                 }
-                                      : { limit: MAX_BUFFER_LINES }
-            const [data, logSize]   = await Promise.all([
-                                                            logsApi.fetchLogs(params, {
-                                                                signal: request.controller.signal,
-                                                            }),
-                                                            incremental
-                                                            ? Promise.resolve(null)
-                                                            : logsApi
-                                                                .fetchLogSize({ signal: request.controller.signal })
-                                                                .catch(() => null),
-                                                        ])
-            if (!requestIsCurrent()) {
-                return
-            }
-            if (logSize) {
-                setLogDiskSize({ totalBytes: logSize.total_bytes, fileCount: logSize.file_count })
-            }
-
-            const nextPosition: LogPosition = incremental ? { ...logPositionRef.current } : {}
-            if (data.latestAfter !== undefined) {
-                nextPosition.after = data.latestAfter
-            }
-            if (typeof data.nextCursor === 'string') {
-                nextPosition.cursor = data.nextCursor
-            } else if (!incremental || data.logBackendKind === 'home-db') {
-                delete nextPosition.cursor
-            }
-            logPositionRef.current = nextPosition
-
-            if (data.requestLogHomeIpById) {
-                requestLogHomeIpByIdRef.current = incremental
-                                                  ? {
-                        ...requestLogHomeIpByIdRef.current,
-                        ...data.requestLogHomeIpById,
-                    }
-                                                  : data.requestLogHomeIpById
-            } else if (!incremental) {
-                requestLogHomeIpByIdRef.current = {}
-            }
-            setTotalLogLines(data.lineCount)
-
-            const newLines    = Array.isArray(data.lines) ? data.lines : []
-            const cursorReset = data.cursorReset === true
-
-            if (incremental && cursorReset) {
-                setLogState({ buffer: newLines.slice(-MAX_BUFFER_LINES) })
-                setLogPage(1)
-            } else if (incremental && newLines.length > 0) {
-                const viewport = logViewportRef.current
-                if (!(viewport.page === 1 && viewport.scrollTop <= 2) && viewport.anchorRaw) {
-                    pendingViewportRestoreRef.current = {
-                        anchorRaw: viewport.anchorRaw,
-                        scrollTop: viewport.scrollTop,
-                    }
+                if (logSize) {
+                    setLogDiskSize({ totalBytes: logSize.total_bytes, fileCount: logSize.file_count })
                 }
 
-                setLogState((prev) => {
-                    const linesToAppend = overlapAfter
-                                          ? dropOverlappingLogLines(
-                            prev.buffer,
-                            newLines,
-                            overlapLineLimit(prev.buffer, requestAfter),
-                        )
-                                          : newLines
-                    const combined      = [...prev.buffer, ...linesToAppend]
-                    const dropCount     = Math.max(combined.length - MAX_BUFFER_LINES, 0)
-                    const buffer        = dropCount > 0 ? combined.slice(dropCount) : combined
-                    return { buffer }
-                })
-            } else if (!incremental) {
-                const buffer = newLines.slice(-MAX_BUFFER_LINES)
-                setLogState({ buffer })
-                setLogPage(1)
+                const nextPosition: LogPosition = incremental ? { ...logPositionRef.current } : {}
+                if (data.latestAfter !== undefined) {
+                    nextPosition.after = data.latestAfter
+                }
+                if (typeof data.nextCursor === 'string') {
+                    if (data.nextCursor) {
+                        nextPosition.cursor = data.nextCursor
+                    } else {
+                        delete nextPosition.cursor
+                    }
+                } else if (!incremental || data.logBackendKind === 'home-db') {
+                    delete nextPosition.cursor
+                }
+                logPositionRef.current = nextPosition
+
+                const newLines = Array.isArray(data.lines) ? data.lines : []
+                if (data.requestLogHomeIpById && newLines.length > 0) {
+                    requestLogHomeIpByIdRef.current = incremental
+                                                      ? {
+                            ...requestLogHomeIpByIdRef.current,
+                            ...data.requestLogHomeIpById,
+                        }
+                                                      : data.requestLogHomeIpById
+                } else if (!incremental) {
+                    requestLogHomeIpByIdRef.current = {}
+                }
+                setTotalLogLines(data.logBackendKind === 'home-db' ? data.total ?? null : null)
+
+                const cursorReset = data.cursorReset === true
+
+                if (incremental && cursorReset) {
+                    setLogState((previous) => replaceLogBuffer(previous, newLines, MAX_BUFFER_LINES))
+                    pendingViewportRestoreRef.current = null
+                    setHistoryEvicted(true)
+                    setLogPage(1)
+                } else if (incremental && newLines.length > 0) {
+                    preserveLogViewport()
+
+                    setLogState((prev) => {
+                        const linesToAppend = overlapAfter
+                                              ? dropOverlappingLogLines(
+                                prev.buffer,
+                                newLines,
+                                overlapLineLimit(prev.buffer, requestAfter),
+                            )
+                                              : newLines
+                        return appendLogBuffer(prev, linesToAppend, MAX_BUFFER_LINES)
+                    })
+                } else if (!incremental) {
+                    setLogState((previous) => replaceLogBuffer(previous, newLines, MAX_BUFFER_LINES))
+                    pendingViewportRestoreRef.current = null
+                    setHistoryEvicted(false)
+                    setLogPage(1)
+                }
+
+                const more = incremental && shouldCatchUpLogPage(data, position.cursor, MAX_BUFFER_LINES)
+                setCatchingUp(more)
+                setLastUpdated(Date.now())
+                setError('')
+                retryDelayRef.current = INITIAL_RETRY_MS
+                nextReadAtRef.current = Date.now() + (more ? FAST_CATCH_UP_MS : refreshInterval)
+                if (!more) {
+                    break
+                }
             }
         } catch (err: unknown) {
             if (requestIsCurrent()) {
+                setCatchingUp(false)
                 setError(getErrorMessage(err) || t('logs.load_error'))
+                nextReadAtRef.current = Date.now() + retryDelayRef.current
+                retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_MS)
             }
         } finally {
             const result = requests.logs.finish(request, apiClient.getAuthGeneration())
@@ -576,10 +619,13 @@ export function LogsPage() {
         }
     }
 
-    useHeaderRefresh(() => loadLogs(false))
+    useHeaderRefresh(pageLayerStatus === 'current' ? () => activeTab === 'errors' ? loadErrorLogs() : loadLogs(false) : null)
 
     const clearLogs = async () => {
-        const session = requests.session.capture(apiClient.getAuthGeneration())
+        if (!isCurrentConnection()) {
+            return
+        }
+        const session = requests.session.capture(authGeneration)
         showConfirmation({
                              title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
                              message: t('logs.clear_confirm'),
@@ -587,7 +633,7 @@ export function LogsPage() {
                              confirmText: t('common.confirm'),
                              onConfirm: async () => {
                                  const currentAuthGeneration = apiClient.getAuthGeneration()
-                                 if (!requests.session.isCurrent(session, currentAuthGeneration) ||
+                                 if (!isCurrentConnection() || !requests.session.isCurrent(session, currentAuthGeneration) ||
                                      useAuthStore.getState().connectionStatus !== 'connected') {
                                      return
                                  }
@@ -604,10 +650,16 @@ export function LogsPage() {
                                      if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
                                          return
                                      }
-                                     setLogState({ buffer: [] })
+                                     setLogState((previous) => replaceLogBuffer(previous, [], MAX_BUFFER_LINES))
+                                     pendingViewportRestoreRef.current = null
                                      logPositionRef.current          = {}
                                      requestLogHomeIpByIdRef.current = {}
-                                     setTotalLogLines(0)
+                                     nextReadAtRef.current           = 0
+                                     retryDelayRef.current           = INITIAL_RETRY_MS
+                                     setCatchingUp(false)
+                                     setHistoryEvicted(false)
+                                     setLastUpdated(null)
+                                     setTotalLogLines(null)
                                      setLogDiskSize(null)
                                      setLogPage(1)
 
@@ -651,18 +703,24 @@ export function LogsPage() {
     }
 
     const downloadLogs = () => {
+        if (!isCurrentConnection()) {
+            return
+        }
         const text = logState.buffer.map(redactSensitiveText).join('\n')
         downloadBlob({ filename: 'logs.txt', blob: new Blob([text], { type: 'text/plain' }) })
         showNotification(t('logs.download_success'), 'success')
     }
 
     const loadErrorLogs = async () => {
+        if (!isCurrentConnection()) {
+            return
+        }
         if (useAuthStore.getState().connectionStatus !== 'connected') {
             setLoadingErrors(false)
             return
         }
 
-        const request = requests.errors.begin(apiClient.getAuthGeneration())
+        const request = requests.errors.begin(authGeneration)
         setLoadingErrors(true)
         setErrorLogsError('')
         try {
@@ -670,7 +728,7 @@ export function LogsPage() {
             if (!requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
             }
-            setErrorLogs(Array.isArray(res.files) ? res.files : [])
+            setErrorLogs(res.files)
         } catch (err: unknown) {
             if (!requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
@@ -690,7 +748,10 @@ export function LogsPage() {
     }
 
     const downloadErrorLog = async (name: string) => {
-        const request = requests.errorDownload.begin(apiClient.getAuthGeneration())
+        if (!isCurrentConnection()) {
+            return
+        }
+        const request = requests.errorDownload.begin(authGeneration)
         setErrorLogDownloading(name)
         try {
             const response = await logsApi.downloadErrorLog(name, { signal: request.controller.signal })
@@ -718,7 +779,10 @@ export function LogsPage() {
     }
 
     const previewErrorLog = async (item: ErrorLogFile) => {
-        const request = requests.preview.begin(apiClient.getAuthGeneration())
+        if (!isCurrentConnection()) {
+            return
+        }
+        const request = requests.preview.begin(authGeneration)
         dispatchErrorLogViewer({ type: 'open', item })
         try {
             const result = await logsApi.previewErrorLog(item.name, 500, {
@@ -747,11 +811,16 @@ export function LogsPage() {
     }
 
     const closeErrorLogViewer = () => {
+        if (!isCurrentConnection()) {
+            return
+        }
         requests.preview.invalidate()
         dispatchErrorLogViewer({ type: 'close' })
     }
 
     useEffect(() => {
+        mountedRef.current = true
+        let observedAuthGeneration = apiClient.getAuthGeneration()
         const invalidateRequests = () => {
             requests.session.invalidate()
             requests.logs.invalidate()
@@ -767,12 +836,18 @@ export function LogsPage() {
         const resetLogs = () => {
             logPositionRef.current          = {}
             requestLogHomeIpByIdRef.current = {}
-            setLogState({ buffer: [] })
+            nextReadAtRef.current           = 0
+            retryDelayRef.current           = INITIAL_RETRY_MS
+            setCatchingUp(false)
+            setHistoryEvicted(false)
+            setLastUpdated(null)
+            setLogState((previous) => replaceLogBuffer(previous, [], MAX_BUFFER_LINES))
+            pendingViewportRestoreRef.current = null
             setLoading(false)
             setClearingLogs(false)
             setError('')
             setLogDiskSize(null)
-            setTotalLogLines(0)
+            setTotalLogLines(null)
             setLogPage(1)
         }
         const resetErrors = () => {
@@ -783,15 +858,19 @@ export function LogsPage() {
             setErrorLogDownloading(null)
             setRequestLogId(null)
             setRequestLogDownloading(false)
+            setRequestLogUpdating(false)
         }
 
         const unsubscribeAuth = useAuthStore.subscribe((next, previous) => {
-            if (next.apiBase === previous.apiBase &&
+            const nextAuthGeneration = apiClient.getAuthGeneration()
+            if (nextAuthGeneration === observedAuthGeneration &&
+                next.apiBase === previous.apiBase &&
                 next.managementKey === previous.managementKey &&
                 next.connectionStatus === previous.connectionStatus &&
                 next.isAuthenticated === previous.isAuthenticated) {
                 return
             }
+            observedAuthGeneration = nextAuthGeneration
             invalidateRequests()
             resetLogs()
             resetErrors()
@@ -807,6 +886,7 @@ export function LogsPage() {
             resetErrors()
         })
         return () => {
+            mountedRef.current = false
             unsubscribeAuth()
             unsubscribeConfig()
             invalidateRequests()
@@ -818,7 +898,7 @@ export function LogsPage() {
             void loadLogs(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionStatus, apiBase, managementKey])
+    }, [connectionStatus, apiBase, managementKey, authGeneration])
 
     useEffect(() => {
         if (activeTab !== 'errors' || connectionStatus !== 'connected') {
@@ -829,36 +909,57 @@ export function LogsPage() {
             void loadErrorLogs()
         })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab, connectionStatus, apiBase, managementKey, requestLogEnabled])
+    }, [activeTab, connectionStatus, apiBase, managementKey, requestLogEnabled, authGeneration])
 
     useEffect(() => {
-        if (!autoRefresh || refreshInterval <= 0 || connectionStatus !== 'connected') {
+        if (!autoRefresh || refreshInterval <= 0 || connectionStatus !== 'connected' || activeTab !== 'logs' ||
+            pageLayerStatus !== 'current') {
             return
         }
         const id = window.setInterval(() => {
+            if (document.visibilityState === 'hidden' || Date.now() < nextReadAtRef.current) {
+                return
+            }
             void loadLogs(true)
-        }, refreshInterval)
+        }, FAST_CATCH_UP_MS)
         return () => window.clearInterval(id)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [autoRefresh, connectionStatus, refreshInterval])
+    }, [activeTab, autoRefresh, connectionStatus, refreshInterval, authGeneration, pageLayerStatus])
 
     const trimmedSearchQuery = deferredSearchQuery.trim()
     const isSearching        = trimmedSearchQuery.length > 0
 
+    const parsedLines = useMemo(() => parseCachedLogs(logState), [logState, parseCachedLogs])
+    useEffect(() => {
+        const byRequestId = requestLogHomeIpByIdRef.current
+        if (Object.keys(byRequestId).length <= MAX_BUFFER_LINES) {
+            return
+        }
+        const retainedIds = new Set(parsedLines.map((line) => line.requestId))
+        for (const requestId of Object.keys(byRequestId)) {
+            if (!retainedIds.has(requestId)) {
+                delete byRequestId[requestId]
+            }
+        }
+    }, [parsedLines])
+
     const parsedSearchLines = useMemo(() => {
-        let working = logState.buffer
+        let working = parsedLines
 
         if (hideManagementLogs) {
-            working = working.filter((line) => !line.includes(MANAGEMENT_API_PREFIX))
+            working = working.filter((line) => {
+                const path = line.path?.split('?')[0]
+                return path !== MANAGEMENT_API_PREFIX && !path?.startsWith(`${MANAGEMENT_API_PREFIX}/`)
+            })
         }
 
         if (trimmedSearchQuery) {
             const queryLowered = trimmedSearchQuery.toLowerCase()
-            working            = working.filter((line) => line.toLowerCase().includes(queryLowered))
+            working            = working.filter((line) => line.raw.toLowerCase().includes(queryLowered))
         }
 
-        return working.map((line) => parseLogLine(line))
-    }, [logState.buffer, hideManagementLogs, trimmedSearchQuery])
+        return working
+    }, [parsedLines, hideManagementLogs, trimmedSearchQuery])
 
     const filters                  = useLogFilters({
                                                        parsedLines: parsedSearchLines,
@@ -869,23 +970,16 @@ export function LogsPage() {
     const structuredFilterCount    =
               filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length
 
-    const { filteredParsedLines, filteredLines, removedCount } = useMemo(() => {
-        const filteredParsed = parsedSearchLines.filter((line) => {
-            if (filters.methodFilterSet.size > 0 && (!line.method || !filters.methodFilterSet.has(line.method))) {
-                return false
-            }
-
-            const statusGroup = resolveStatusGroup(line.statusCode)
-            if (filters.statusFilterSet.size > 0 && (!statusGroup || !filters.statusFilterSet.has(statusGroup))) {
-                return false
-            }
-
-            return !(filters.pathFilterSet.size > 0 && (!line.path || !filters.pathFilterSet.has(line.path)))
-        })
+    const { filteredParsedLines, removedCount } = useMemo(() => {
+        const activeFilters = {
+            methodFilterSet: filters.methodFilterSet,
+            statusFilterSet: filters.statusFilterSet,
+            pathFilterSet: filters.pathFilterSet,
+        }
+        const filteredParsed = parsedSearchLines.filter((line) => matchesLogFilters(line, levelFilter, activeFilters))
 
         return {
             filteredParsedLines: filteredParsed,
-            filteredLines: filteredParsed.map((line) => line.raw).reverse(),
             removedCount: Math.max(logState.buffer.length - filteredParsed.length, 0),
         }
     }, [
@@ -893,6 +987,7 @@ export function LogsPage() {
                                                                              filters.methodFilterSet,
                                                                              filters.pathFilterSet,
                                                                              filters.statusFilterSet,
+                                                                             levelFilter,
                                                                              parsedSearchLines,
                                                                          ])
 
@@ -902,12 +997,15 @@ export function LogsPage() {
 
     // 过滤/搜索条件变化时重置到第 1 页
     useEffect(() => {
+        pendingViewportRestoreRef.current = null
+        logScrollerRef.current?.scrollTo({top: 0})
         queueMicrotask(() => {
             setLogPage(1)
         })
     }, [
                   isSearching,
                   trimmedSearchQuery,
+                  levelFilter,
                   filters.methodFilters,
                   filters.statusFilters,
                   filters.pathFilters,
@@ -916,45 +1014,78 @@ export function LogsPage() {
 
     const pageStart      = (logPage - 1) * logPageSize
     const pageEnd        = pageStart + logPageSize
-    const pagedParsed    = useMemo(
-        () => (showRawLogs ? [] : reversedParsedLines.slice(pageStart, pageEnd)),
-        [showRawLogs, reversedParsedLines, pageStart, pageEnd],
-    )
-    const rawVisibleText = useMemo(
-        () => filteredLines.slice(pageStart, pageEnd).map(redactSensitiveText).join('\n'),
-        [filteredLines, pageStart, pageEnd],
+    const pagedParsed = useMemo(
+        () => reversedParsedLines.slice(pageStart, pageEnd),
+        [reversedParsedLines, pageStart, pageEnd],
     )
 
-    useEffect(() => {
+    const captureLogViewport = useCallback(() => {
+        const node = logScrollerRef.current
+        const top = node ? node.getBoundingClientRect().top + node.clientTop : null
+        const anchor = node && top !== null
+                       ? Array.from(node.querySelectorAll<HTMLElement>('[data-log-id]')).find((row) =>
+                Boolean(row.dataset.logId?.trim()) && Number.isFinite(Number(row.dataset.logId)) &&
+                row.getBoundingClientRect().bottom > top)
+                       : undefined
         logViewportRef.current = {
             page: logPage,
             pageStart,
-            scrollTop: logScrollerRef.current?.scrollTop ?? logViewportRef.current.scrollTop,
-            anchorRaw: pagedParsed[0]?.raw ?? '',
+            scrollTop: node?.scrollTop ?? logViewportRef.current.scrollTop,
+            anchorId: anchor ? Number(anchor.dataset.logId) : reversedParsedLines[pageStart]?.id ?? null,
+            anchorOffset: anchor && top !== null ? anchor.getBoundingClientRect().top - top : null,
         }
-    }, [logPage, pageStart, pagedParsed])
+    }, [logPage, pageStart, reversedParsedLines])
+
+    const preserveLogViewport = () => {
+        const viewport = logViewportRef.current
+        if (!(viewport.page === 1 && viewport.scrollTop <= 2) && viewport.anchorId !== null) {
+            pendingViewportRestoreRef.current = {
+                anchorId: viewport.anchorId,
+                scrollTop: viewport.scrollTop,
+                ...(typeof viewport.anchorOffset === 'number' ? {anchorOffset: viewport.anchorOffset} : {}),
+            }
+        }
+    }
+
+    useEffect(() => {
+        captureLogViewport()
+    }, [captureLogViewport, showRawLogs, wrapLogs])
 
     useEffect(() => {
         const pending = pendingViewportRestoreRef.current
         if (!pending) {
             return
         }
-        const anchorIndex = reversedParsedLines.findIndex((line) => line.raw === pending.anchorRaw)
+        const anchorIndex = reversedParsedLines.findIndex((line) => line.id === pending.anchorId)
         if (anchorIndex < 0) {
             pendingViewportRestoreRef.current = null
+            if (pending.anchorId < logState.bufferStart) {
+                setLogPage(1)
+                setHistoryEvicted(true)
+            }
             return
         }
         const targetPage                  = Math.floor(anchorIndex / logPageSize) + 1
-        pendingViewportRestoreRef.current = { ...pending, targetPage }
+        const restore                     = { ...pending, targetPage }
+        pendingViewportRestoreRef.current = restore
         if (logPage !== targetPage) {
             setLogPage(targetPage)
             return
         }
         window.requestAnimationFrame(() => {
-            logScrollerRef.current?.scrollTo({ top: pending.scrollTop })
+            if (pendingViewportRestoreRef.current !== restore) {
+                return
+            }
+            const node = logScrollerRef.current
+            const anchor = node?.querySelector<HTMLElement>(`[data-log-id="${restore.anchorId}"]`)
+            const top = node && anchor && typeof restore.anchorOffset === 'number'
+                        ? Math.max(0, node.scrollTop + anchor.getBoundingClientRect().top -
+                            node.getBoundingClientRect().top - node.clientTop - restore.anchorOffset)
+                        : restore.scrollTop
+            node?.scrollTo({top})
             pendingViewportRestoreRef.current = null
         })
-    }, [logPage, logPageSize, reversedParsedLines])
+    }, [logPage, logPageSize, logState.bufferStart, reversedParsedLines, showRawLogs, wrapLogs])
 
     const logSheetStatus: DataStatusValue = loading ? 'loading' : totalFilteredLines > 0 ? 'ready' : 'empty'
     const logSheetEmptyText               = logState.buffer.length > 0 ?
@@ -963,7 +1094,7 @@ export function LogsPage() {
     const logSheetEmptyHint               = logState.buffer.length > 0 ?
                                             t('logs.search_empty_desc') :
                                             t('logs.empty_desc')
-    const logColumns                      = useMemo<SheetColumn<ParsedLogLine>[]>(() => [
+    const logColumns                      = useMemo<SheetColumn<ParsedLogLine & {id: number}>[]>(() => [
         {
             key: 'time',
             header: t('logs.column_time', { defaultValue: '时间' }),
@@ -991,6 +1122,13 @@ export function LogsPage() {
             cell: () => null,
             className: styles.pathColumn,
             headerClassName: styles.pathColumn,
+        },
+        {
+            key: 'message',
+            header: t('logs.trace_message'),
+            cell: () => null,
+            className: styles.messageColumn,
+            headerClassName: styles.messageColumn,
         },
         {
             key: 'status',
@@ -1027,9 +1165,16 @@ export function LogsPage() {
             className: styles.traceColumn,
             headerClassName: styles.traceColumn,
         },
+        {
+            key: 'copy',
+            header: t('common.copy'),
+            cell: () => null,
+            className: styles.copyColumn,
+            headerClassName: styles.copyColumn,
+        },
     ], [t])
 
-    const renderLogRow = (line: ParsedLogLine) => {
+    const renderLogRow = (line: ParsedLogLine & {id: number}) => {
         const canTraceRequest = isTraceableRequestPath(line.path)
         const rowClassNames   = [styles.logTableRow]
         if (line.level === 'warn') {
@@ -1059,10 +1204,13 @@ export function LogsPage() {
                 : styles.statusError,
         ].join(' ')
         const redactedPath    = line.path ? redactSensitiveText(line.path) : ''
+        const redactedMessage = redactSensitiveText(line.message || line.raw)
+        const redactedSource  = line.source ? redactSensitiveText(line.source) : ''
         const emptyCell       = <span className={styles.emptyCell}>—</span>
 
         return (
             <tr
+                data-log-id={line.id}
                 className={rowClassNames.join(' ')}
                 onDoubleClick={() => {
                     void copyLogLine(line.raw)
@@ -1092,6 +1240,12 @@ export function LogsPage() {
                         </span>
                     ) : emptyCell}
                 </td>
+                <td className={styles.messageCell}>
+                    {redactedSource && <span className={styles.source} title={redactedSource}>{redactedSource}</span>}
+                    {redactedMessage ? (
+                        <span className={styles.messageText} title={redactedMessage}>{redactedMessage}</span>
+                    ) : emptyCell}
+                </td>
                 <td className={styles.statusCell}>
                     {typeof line.statusCode === 'number' ?
                      <span className={statusClassName}>{line.statusCode}</span> :
@@ -1115,6 +1269,7 @@ export function LogsPage() {
                         <button
                             type='button'
                             className={styles.traceButton}
+                            onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => {
                                 event.stopPropagation()
                                 cancelLongPress()
@@ -1129,12 +1284,32 @@ export function LogsPage() {
                         </button>
                     ) : emptyCell}
                 </td>
+                <td className={styles.copyCell}>
+                    <Button
+                        variant='ghost'
+                        size='xs'
+                        className={styles.copyButton}
+                        aria-label={t('common.copy')}
+                        title={t('common.copy')}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onClick={() => void copyLogLine(line.raw)}
+                    >
+                        <IconCopy size={14} />
+                    </Button>
+                </td>
             </tr>
         )
     }
 
     const copyLogLine = async (raw: string) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         const ok = await copyToClipboard(redactSensitiveText(raw))
+        if (!isCurrentConnection()) {
+            return
+        }
         if (ok) {
             showNotification(t('logs.copy_success', { defaultValue: 'Copied to clipboard' }), 'success')
         } else {
@@ -1150,6 +1325,9 @@ export function LogsPage() {
     }
 
     const startLongPress = (event: ReactPointerEvent<HTMLElement>, id?: string) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         if (!requestLogEnabled) {
             return
         }
@@ -1162,6 +1340,9 @@ export function LogsPage() {
         clearLongPressTimer()
         longPressRef.current = {
             timer: window.setTimeout(() => {
+                if (!isCurrentConnection()) {
+                    return
+                }
                 setRequestLogId(id)
                 if (longPressRef.current) {
                     longPressRef.current.fired = true
@@ -1192,6 +1373,9 @@ export function LogsPage() {
     }
 
     const closeRequestLogModal = () => {
+        if (!isCurrentConnection()) {
+            return
+        }
         if (requestLogDownloading) {
             return
         }
@@ -1199,7 +1383,10 @@ export function LogsPage() {
     }
 
     const downloadRequestLog = async (id: string, frozenHomeIp?: string | null) => {
-        const request = requests.requestDownload.begin(apiClient.getAuthGeneration())
+        if (!isCurrentConnection()) {
+            return
+        }
+        const request = requests.requestDownload.begin(authGeneration)
         setRequestLogDownloading(true)
         try {
             const homeIp   = frozenHomeIp === undefined ?
@@ -1236,44 +1423,56 @@ export function LogsPage() {
     }
 
     const toggleRequestLog = async (enabled: boolean) => {
-        if (requestLogUpdating) {
+        if (!isCurrentConnection() || requestLogUpdating) {
             return
         }
         setRequestLogUpdating(true)
         try {
             await configApi.updateRequestLog(enabled)
+            if (!isCurrentConnection()) {
+                return
+            }
             useConfigStore.getState().updateConfigValue('request-log', enabled)
             showNotification(t('notification.request_log_updated'), 'success')
             if (!enabled) {
                 setRequestLogId(null)
             }
         } catch (err: unknown) {
+            if (!isCurrentConnection()) {
+                return
+            }
             const message = getErrorMessage(err)
             showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
         } finally {
-            setRequestLogUpdating(false)
+            if (isCurrentConnection()) {
+                setRequestLogUpdating(false)
+            }
         }
     }
 
+    const handleTabChange = (tab: TabType) => {
+        setLogPanelFullscreen(false)
+        setActiveTab(tab)
+    }
+
     useEffect(() => {
-        if (!logPanelFullscreen) {
+        if (!logPanelFullscreen || activeTab !== 'logs' || pageLayerStatus !== 'current') {
             return
         }
 
-        const previousOverflow = document.body.style.overflow
-        const handleKeyDown    = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (shouldExitLogFullscreen(event, Boolean(document.querySelector('.modal-overlay')))) {
                 setLogPanelFullscreen(false)
             }
         }
 
-        document.body.style.overflow = 'hidden'
+        lockScroll()
         window.addEventListener('keydown', handleKeyDown)
         return () => {
-            document.body.style.overflow = previousOverflow
+            unlockScroll()
             window.removeEventListener('keydown', handleKeyDown)
         }
-    }, [logPanelFullscreen])
+    }, [activeTab, logPanelFullscreen, pageLayerStatus])
 
     return (
         <div className={styles.container}>
@@ -1286,13 +1485,13 @@ export function LogsPage() {
                     { value: 'errors', label: t('logs.error_logs_modal_title') },
                 ]}
                 activeValue={activeTab}
-                onChange={setActiveTab}
+                onChange={handleTabChange}
                 ariaLabel={t('logs.title')}
             />
 
             <div className={styles.content}>
                 {activeTab === 'logs' && (
-                    <Card className={styles.logCard}>
+                    <Card className={`${styles.logCard} ${logPanelFullscreen ? styles.logCardFullscreen : ''}`}>
                         {error && <div className='error-box'>{error}</div>}
 
                         <div className={styles.filters}>
@@ -1350,6 +1549,21 @@ export function LogsPage() {
                                          )}
                                     </span>
                                 </Button>
+                                <Select
+                                    value={levelFilter}
+                                    onChange={setLevelFilter}
+                                    options={[
+                                        {value: '', label: t('logs.all_levels')},
+                                        ...(['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const).map((level) => ({
+                                            value: level,
+                                            label: level.toUpperCase(),
+                                        })),
+                                    ]}
+                                    ariaLabel={t('logs.level_filter')}
+                                    fullWidth={false}
+                                    disabled={disableControls}
+                                    className={styles.levelSelect}
+                                />
                             </div>
 
                             {structuredFiltersExpanded && (
@@ -1455,8 +1669,20 @@ export function LogsPage() {
                             />
 
                             <ToggleSwitch
+                                checked={wrapLogs}
+                                onChange={(value) => {
+                                    preserveLogViewport()
+                                    setWrapLogs(value)
+                                }}
+                                label={t('logs.wrap_lines')}
+                            />
+
+                            <ToggleSwitch
                                 checked={showRawLogs}
-                                onChange={setShowRawLogs}
+                                onChange={(value) => {
+                                    preserveLogViewport()
+                                    setShowRawLogs(value)
+                                }}
                                 label={
                                     <span
                                         className={styles.switchLabel}
@@ -1583,6 +1809,33 @@ export function LogsPage() {
                                             {t('logs.disk_usage', { size: formatFileSize(logDiskSize.totalBytes) })}
                                         </span>
                                     )}
+                                    <span className={styles.logReadStatus} role='status'>
+                                        {error ? t('logs.read_failed') :
+                                         loading ? t('logs.loading') :
+                                         catchingUp ? t(autoRefresh ? 'logs.catching_up' : 'logs.more_logs') :
+                                         t(autoRefresh ? 'logs.reading_continuously' : 'logs.reading_paused')}
+                                    </span>
+                                    {lastUpdated !== null && (
+                                        <span className={styles.logReadStatus}>
+                                            {t('logs.last_read', {
+                                                time: new Date(lastUpdated).toLocaleTimeString(i18n.language),
+                                            })}
+                                        </span>
+                                    )}
+                                    {historyEvicted && (
+                                        <Button
+                                            variant='secondary'
+                                            size='sm'
+                                            onClick={() => {
+                                                setLogPage(1)
+                                                setHistoryEvicted(false)
+                                                logScrollerRef.current?.scrollTo({ top: 0 })
+                                            }}
+                                            className={styles.actionButton}
+                                        >
+                                            {t('logs.history_evicted')}
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1590,10 +1843,14 @@ export function LogsPage() {
                         <>
                             <div
                                 ref={logScrollerRef}
-                                className={`${styles.logPanel} ${logPanelFullscreen ? styles.logPanelFullscreen : ''}`}
-                                onScroll={(event) => {
-                                    logViewportRef.current.scrollTop = event.currentTarget.scrollTop
+                                className={`${styles.logPanel} ${logPanelFullscreen ? styles.logPanelFullscreen : ''} ${wrapLogs ? styles.logPanelWrapped : ''}`}
+                                onScroll={() => {
+                                    captureLogViewport()
                                 }}
+                                tabIndex={0}
+                                role='region'
+                                aria-label={t('logs.log_content')}
+                                aria-busy={loading}
                             >
                                 {logPanelFullscreen && (
                                     <div className={styles.fullscreenExitBar}>
@@ -1616,9 +1873,11 @@ export function LogsPage() {
                                             <span>
                                                 {t('logs.buffered_lines', { count: logState.buffer.length })}
                                             </span>
-                                            <span className={styles.loadMoreCount}>
-                                                {t('logs.total_lines', { count: totalLogLines })}
-                                            </span>
+                                            {totalLogLines !== null && (
+                                                <span className={styles.loadMoreCount}>
+                                                    {t('logs.total_lines', { count: totalLogLines })}
+                                                </span>
+                                            )}
                                             <span className={styles.loadMoreCount}>
                                                 {t('logs.filtered_lines', { count: removedCount })}
                                             </span>
@@ -1632,13 +1891,17 @@ export function LogsPage() {
                                 )}
                                 {showRawLogs && logSheetStatus === 'ready' ? (
                                     <pre className={styles.rawLog} spellCheck={false}>
-                                        {rawVisibleText}
+                                        {pagedParsed.map((line) => (
+                                            <span key={line.id} data-log-id={line.id} style={{display: 'block'}}>
+                                                {redactSensitiveText(line.raw) || ' '}
+                                            </span>
+                                        ))}
                                     </pre>
                                 ) : (
                                      <Sheet
                                          rows={showRawLogs ? [] : pagedParsed}
                                          columns={logColumns}
-                                         rowKey={(line, index) => `${pageStart + index}-${line.raw}`}
+                                         rowKey={(line) => String(line.id)}
                                          status={logSheetStatus}
                                          emptyText={logSheetEmptyText}
                                          emptyHint={logSheetEmptyHint}
@@ -1658,12 +1921,15 @@ export function LogsPage() {
                                     page={logPage}
                                     pageSize={logPageSize}
                                     onPageChange={(p) => {
+                                        pendingViewportRestoreRef.current = null
                                         setLogPage(p)
                                         logScrollerRef.current?.scrollTo({ top: 0 })
                                     }}
                                     onPageSizeChange={(size) => {
+                                        pendingViewportRestoreRef.current = null
                                         setLogPageSize(size)
                                         setLogPage(1)
+                                        logScrollerRef.current?.scrollTo({top: 0})
                                     }}
                                 />
                             )}
@@ -2453,18 +2719,31 @@ export function LogsPage() {
                 title={selectedErrorLog?.name ?? ''}
                 width={720}
                 footer={
-                    <Button
-                        variant='secondary'
-                        onClick={() => {
-                            if (selectedErrorLog) {
-                                void downloadErrorLog(selectedErrorLog.name)
-                            }
-                        }}
-                        disabled={errorLogViewer.status === 'loading' || errorLogDownloading !== null}
-                        loading={selectedErrorLog !== null && errorLogDownloading === selectedErrorLog.name}
-                    >
-                        {t('logs.error_logs_download')}
-                    </Button>
+                    <>
+                        <Button
+                            variant='secondary'
+                            onClick={() => {
+                                if (errorLogViewer.status === 'ready') {
+                                    void copyLogLine(errorLogViewer.text)
+                                }
+                            }}
+                            disabled={errorLogViewer.status !== 'ready' || !errorLogViewer.text}
+                        >
+                            {t('common.copy')}
+                        </Button>
+                        <Button
+                            variant='secondary'
+                            onClick={() => {
+                                if (selectedErrorLog) {
+                                    void downloadErrorLog(selectedErrorLog.name)
+                                }
+                            }}
+                            disabled={errorLogViewer.status === 'loading' || errorLogDownloading !== null}
+                            loading={selectedErrorLog !== null && errorLogDownloading === selectedErrorLog.name}
+                        >
+                            {t('logs.error_logs_download')}
+                        </Button>
+                    </>
                 }
             >
                 {errorLogViewer.status === 'loading' && (

@@ -8,6 +8,8 @@ export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
 export type LogState = {
     buffer: string[]
+    bufferStart: number
+    nextId: number
 }
 
 export interface PersistedLogFilters {

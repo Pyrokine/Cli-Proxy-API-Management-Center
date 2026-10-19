@@ -2,6 +2,7 @@
  * 日志相关 API
  */
 
+import type {ApiError} from '@/types/api'
 import {LOGS_TIMEOUT_MS} from '@/utils/constants'
 import {apiClient} from './client'
 import type {RequestLogState} from './usage'
@@ -38,7 +39,7 @@ export interface ErrorLogFile {
 }
 
 interface ErrorLogsResponse {
-    files?: ErrorLogFile[]
+    files: ErrorLogFile[]
 }
 
 interface LogSizeResponse {
@@ -149,7 +150,7 @@ function normalizeCPALogs(raw: RawLogRecord): LogsResponse {
     const lines       = rawLines(raw.lines)
     const lineCount   = numberValue(raw['line-count']) ?? lines.length
     const latestAfter = numberValue(raw['latest-timestamp']) ?? stringValue(raw['latest-timestamp'])
-    const nextCursor  = stringValue(raw['next-cursor'])
+    const nextCursor  = typeof raw['next-cursor'] === 'string' ? raw['next-cursor'] : undefined
     return {
         lines,
         lineCount,
@@ -192,7 +193,7 @@ function normalizeHomeLogs(raw: RawLogRecord): LogsResponse {
 function normalizeLogsResponse(raw: unknown): LogsResponse {
     const record = asRecord(raw)
     if (!record) {
-        return { lines: [], lineCount: 0, logBackendKind: 'unknown' }
+        throw new Error('Invalid logs response')
     }
     if (Array.isArray(record.logs)) {
         return normalizeHomeLogs(record)
@@ -200,7 +201,7 @@ function normalizeLogsResponse(raw: unknown): LogsResponse {
     if (Array.isArray(record.lines)) {
         return normalizeCPALogs(record)
     }
-    return { lines: [], lineCount: 0, logBackendKind: 'unknown' }
+    throw new Error('Invalid logs response')
 }
 
 function normalizeRequestLogPreview(raw: unknown): RequestLogPreview {
@@ -215,10 +216,65 @@ function normalizeRequestLogPreview(raw: unknown): RequestLogPreview {
     }
 }
 
+function normalizeErrorLogsResponse(raw: unknown): ErrorLogsResponse {
+    const record = asRecord(raw)
+    if (!Array.isArray(record?.files)) {
+        throw new Error('Invalid error log list response')
+    }
+    return {
+        files: record.files.map((item: unknown): ErrorLogFile => {
+            const file = asRecord(item)
+            if (!file || typeof file.name !== 'string' || !file.name.trim() ||
+                typeof file.size !== 'number' || !Number.isFinite(file.size) || file.size < 0 ||
+                typeof file.modified !== 'number' || !Number.isFinite(file.modified) || file.modified < 0) {
+                throw new Error('Invalid error log file metadata')
+            }
+            return { name: file.name, size: file.size, modified: file.modified }
+        }),
+    }
+}
+
+async function downloadLog(path: string, options?: { signal?: AbortSignal }, params?: { home_ip: string }) {
+    try {
+        return await apiClient.getRaw(path, {
+            params,
+            responseType: 'blob',
+            timeout: LOGS_TIMEOUT_MS,
+            signal: options?.signal,
+        })
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            const apiError = error as ApiError
+            const body     = apiError.data instanceof Blob ? apiError.data : apiError.details
+            if (body instanceof Blob) {
+                try {
+                    const parsed: unknown = JSON.parse(await body.text())
+                    const record          = asRecord(parsed)
+                    const nestedError     = asRecord(record?.error)
+                    const message         = stringValue(record?.error) ??
+                                            stringValue(nestedError?.message) ??
+                                            stringValue(record?.message)
+                    if (message) {
+                        apiError.message = message
+                    }
+                    const backendCode = stringValue(record?.code) ?? stringValue(nestedError?.code)
+                    if (backendCode) {
+                        apiError.backendCode = backendCode
+                    }
+                } catch {
+                    // Keep the original transport error if its body is not readable JSON.
+                }
+            }
+        }
+        throw error
+    }
+}
+
 async function fetchCompleteHomeLogs(
     firstPage: unknown,
     params: LogsQuery,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    ensureActive: () => void,
 ): Promise<unknown> {
     const firstRecord = asRecord(firstPage)
     if (!firstRecord || !Array.isArray(firstRecord.logs)) {
@@ -242,13 +298,18 @@ async function fetchCompleteHomeLogs(
     let nextOffset   = offset + firstLogs.length
     let pageRequests = 0
     while (nextOffset < targetEnd && pageRequests < maxCompleteHomeLogPageRequests) {
+        ensureActive()
         const nextLimit = Math.min(maxCompleteHomeLogRows, targetEnd - nextOffset)
         const page      = asRecord(await apiClient.get('/logs', {
             params: { ...pageParamsBase, limit: nextLimit, offset: nextOffset },
             timeout: LOGS_TIMEOUT_MS,
             signal,
         }))
-        const pageLogs  = Array.isArray(page?.logs) ? page.logs : []
+        ensureActive()
+        if (!Array.isArray(page?.logs)) {
+            throw new Error('Invalid supplemental Home logs response')
+        }
+        const pageLogs = page.logs
         if (pageLogs.length === 0) {
             break
         }
@@ -257,7 +318,7 @@ async function fetchCompleteHomeLogs(
         pageRequests += 1
     }
     if (nextOffset < targetEnd) {
-        console.warn('[Logs] home-db pagination stopped after maximum supplemental pages')
+        console.warn('[Logs] home-db pagination stopped before the announced total was reached')
     }
     return { ...firstRecord, logs }
 }
@@ -267,28 +328,34 @@ export const logsApi = {
         apiClient.get('/log-size', { signal: options?.signal }),
 
     fetchLogs: async (params: LogsQuery = {}, options?: { signal?: AbortSignal }): Promise<LogsResponse> => {
+        const authGeneration = apiClient.getAuthGeneration()
+        const ensureActive = () => {
+            if (options?.signal?.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                throw new DOMException('Log request is no longer active', 'AbortError')
+            }
+        }
+        ensureActive()
         const raw = await apiClient.get('/logs', {
             params,
             timeout: LOGS_TIMEOUT_MS,
             signal: options?.signal,
         })
-        return normalizeLogsResponse(await fetchCompleteHomeLogs(raw, params, options?.signal))
+        ensureActive()
+        const complete = await fetchCompleteHomeLogs(raw, params, options?.signal, ensureActive)
+        ensureActive()
+        return normalizeLogsResponse(complete)
     },
 
     clearLogs: (options?: { signal?: AbortSignal }) => apiClient.delete('/logs', { signal: options?.signal }),
 
-    fetchErrorLogs: (options?: { signal?: AbortSignal }): Promise<ErrorLogsResponse> =>
-        apiClient.get('/request-error-logs', {
+    fetchErrorLogs: async (options?: { signal?: AbortSignal }): Promise<ErrorLogsResponse> =>
+        normalizeErrorLogsResponse(await apiClient.get('/request-error-logs', {
             timeout: LOGS_TIMEOUT_MS,
             signal: options?.signal,
-        }),
+        })),
 
     downloadErrorLog: (filename: string, options?: { signal?: AbortSignal }) =>
-        apiClient.getRaw(`/request-error-logs/${encodeURIComponent(filename)}`, {
-            responseType: 'blob',
-            timeout: LOGS_TIMEOUT_MS,
-            signal: options?.signal,
-        }),
+        downloadLog(`/request-error-logs/${encodeURIComponent(filename)}`, options),
 
     previewErrorLog: (
         filename: string,
@@ -302,12 +369,8 @@ export const logsApi = {
         }),
 
     downloadRequestLogById: (id: string, homeIp?: string, options?: { signal?: AbortSignal }) =>
-        apiClient.getRaw(`/request-log-by-id/${encodeURIComponent(id)}`, {
-            params: homeIp ? { home_ip: homeIp } : undefined,
-            responseType: 'blob',
-            timeout: LOGS_TIMEOUT_MS,
-            signal: options?.signal,
-        }),
+        downloadLog(`/request-log-by-id/${encodeURIComponent(id)}`, options,
+                    homeIp ? { home_ip: homeIp } : undefined),
 
     previewRequestLogById: async (
         id: string,

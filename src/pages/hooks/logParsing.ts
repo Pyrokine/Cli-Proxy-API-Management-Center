@@ -1,14 +1,15 @@
-import {HTTP_METHODS, type HttpMethod, type LogLevel, type ParsedLogLine} from './logTypes'
+import {HTTP_METHODS, type HttpMethod, type LogLevel, type LogState, type ParsedLogLine} from './logTypes'
 
 const HTTP_METHOD_REGEX = new RegExp(`\\b(?<method>${HTTP_METHODS.join('|')})\\b`)
 
 const LOG_TIMESTAMP_REGEX         = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)]?/
-const LOG_LEVEL_REGEX             = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal)\s*]?(?=\s|\[|$)\s*/i
-const LOG_SOURCE_REGEX            = /^\[(?<source>[^\]]+)]/
-const LOG_LATENCY_REGEX           = /\b\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m)(?:\s*\d+(?:\.\d+)?\s*(?:µs|us|ms|s|m))*\b/i
+const LOG_LEVEL_REGEX             = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal|panic)\s*]?(?=\s|\[|$)\s*/i
+const LOG_SOURCE_REGEX            = /^\[(?<source>[^\]\s]+\.go:\d+)]/
+const LOG_LATENCY_REGEX           = /\b\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h)(?:\s*\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h))*\b/i
 const LOG_IPV4_REGEX              = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
-const LOG_IPV6_REGEX              = /\b(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}\b/i
+const LOG_IPV6_REGEX              = /(?<![\w:])(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}(?![\w:])/i
 const LOG_REQUEST_ID_REGEX        = /^(?<id>[a-f0-9]{8}|--------)$/i
+const LOG_NAMED_REQUEST_ID_REGEX  = /\brequest[_-]?id=(?<id>[A-Za-z0-9][A-Za-z0-9._:-]{0,127})\b/i
 const LOG_TIME_OF_DAY_REGEX       = /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
 const GIN_TIMESTAMP_SEGMENT_REGEX =
           /^\[GIN]\s+(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{2})\s*-\s*(?<time>\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s*$/
@@ -113,7 +114,7 @@ const extractLogLevel = (value: string): LogLevel | undefined => {
     if (normalized === 'error') {
         return 'error'
     }
-    if (normalized === 'fatal') {
+    if (normalized === 'fatal' || normalized === 'panic') {
         return 'fatal'
     }
     if (normalized === 'debug') {
@@ -127,7 +128,7 @@ const extractLogLevel = (value: string): LogLevel | undefined => {
 
 const inferLogLevel = (line: string): LogLevel | undefined => {
     const lowered = line.toLowerCase()
-    if (/\bfatal\b/.test(lowered)) {
+    if (/\b(?:fatal|panic)\b/.test(lowered)) {
         return 'fatal'
     }
     if (/\berror\b/.test(lowered)) {
@@ -163,17 +164,38 @@ const normalizeLogPath = (path: string | undefined): string | undefined => {
     return trimmed
 }
 
+const extractNamedRequestId = (text: string): string | undefined => {
+    const id = text.match(LOG_NAMED_REQUEST_ID_REGEX)?.groups?.id
+    return id && !/^-+$/.test(id) ? id : undefined
+}
+
 const extractHttpMethodAndPath = (text: string): { method?: HttpMethod; path?: string } => {
     const match = text.match(HTTP_METHOD_REGEX)
     if (!match) {
         return {}
     }
 
-    const method = match.groups!.method as HttpMethod
-    const index  = match.index ?? 0
-    const after  = text.slice(index + match[0].length).trim()
-    const path   = normalizeLogPath(after ? after.split(/\s+/)[0] : undefined)
-    return { method, path }
+    const after     = text.slice((match.index ?? 0) + match[0].length).trim()
+    const pathMatch = after.match(/^(?<quoted>"[^"]*"|'[^']*'|`[^`]*`)|^(?<absolute>\/\S*)/)
+    const path      = normalizeLogPath(pathMatch?.groups?.quoted ?? pathMatch?.groups?.absolute)
+    return path ? {method: match.groups!.method as HttpMethod, path} : {}
+}
+
+const splitLogSegments = (text: string): string[] => {
+    const segments: string[] = []
+    let start                = 0
+    let quoted               = false
+    for (let index = 0; index < text.length; ++index) {
+        if (text[index] === '"') {
+            quoted = !quoted
+        }
+        if (text[index] === '|' && !quoted) {
+            segments.push(text.slice(start, index).trim())
+            start = index + 1
+        }
+    }
+    segments.push(text.slice(start).trim())
+    return segments.filter(Boolean)
 }
 
 export const parseLogLine = (raw: string): ParsedLogLine => {
@@ -218,10 +240,7 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
     let message = remaining
 
     if (remaining.includes('|')) {
-        const segments = remaining
-            .split('|')
-            .map((segment) => segment.trim())
-            .filter(Boolean)
+        const segments = splitLogSegments(remaining)
         const consumed = new Set<number>()
 
         const ginIndex = segments.findIndex((segment) => GIN_TIMESTAMP_SEGMENT_REGEX.test(segment))
@@ -242,13 +261,20 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             }
         }
 
-        // request id (8-char hex or dashes)
-        const requestIdIndex = segments.findIndex((segment) => LOG_REQUEST_ID_REGEX.test(segment))
+        const requestIdIndex = segments.findIndex(
+            (segment) => LOG_REQUEST_ID_REGEX.test(segment) || Boolean(extractNamedRequestId(segment)),
+        )
         if (requestIdIndex >= 0) {
-            const match = segments[requestIdIndex].match(LOG_REQUEST_ID_REGEX)
-            if (match?.groups) {
-                const id = match.groups.id
-                if (!/^-+$/.test(id)) {
+            const segment = segments[requestIdIndex]
+            const namedId = extractNamedRequestId(segment)
+            if (namedId) {
+                requestId = namedId
+                if (/^request[_-]?id=\S+$/i.test(segment)) {
+                    consumed.add(requestIdIndex)
+                }
+            } else {
+                const id = segment.match(LOG_REQUEST_ID_REGEX)?.groups?.id
+                if (id && !/^-+$/.test(id)) {
                     requestId = id
                 }
                 consumed.add(requestIdIndex)
@@ -274,7 +300,9 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             const extracted = extractLatency(segments[latencyIndex])
             if (extracted) {
                 latency = extracted
-                consumed.add(latencyIndex)
+                if (segments[latencyIndex].replace(/\s+/g, '') === extracted) {
+                    consumed.add(latencyIndex)
+                }
             }
         }
 
@@ -284,20 +312,27 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             const extracted = extractIp(segments[ipIndex])
             if (extracted) {
                 ip = extracted
-                consumed.add(ipIndex)
+                if (segments[ipIndex] === extracted) {
+                    consumed.add(ipIndex)
+                }
             }
         }
 
         // method + path
-        const methodIndex = segments.findIndex((segment) => {
-            const { method: parsedMethod } = extractHttpMethodAndPath(segment)
-            return Boolean(parsedMethod)
-        })
+        const methodIndex = segments.findIndex((segment) => Boolean(extractHttpMethodAndPath(segment).path))
         if (methodIndex >= 0) {
             const parsed = extractHttpMethodAndPath(segments[methodIndex])
             method       = parsed.method
             path         = parsed.path
-            consumed.add(methodIndex)
+            const prefix = segments[methodIndex].match(
+                new RegExp(`^(?:${HTTP_METHODS.join('|')})\\s+(?:"[^"]*"|/\\S+)`),
+            )
+            if (prefix) {
+                segments[methodIndex] = segments[methodIndex].slice(prefix[0].length).trim()
+                if (!segments[methodIndex]) {
+                    consumed.add(methodIndex)
+                }
+            }
         }
 
         // source (e.g. [gin_logger.go:94])
@@ -306,7 +341,10 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             const match = segments[sourceIndex].match(LOG_SOURCE_REGEX)
             if (match?.groups) {
                 source = match.groups.source
-                consumed.add(sourceIndex)
+                segments[sourceIndex] = segments[sourceIndex].slice(match[0].length).trim()
+                if (!segments[sourceIndex]) {
+                    consumed.add(sourceIndex)
+                }
             }
         }
 
@@ -324,6 +362,9 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         const parsed = extractHttpMethodAndPath(remaining)
         method       = parsed.method
         path         = parsed.path
+        if (!requestId) {
+            requestId = extractNamedRequestId(remaining)
+        }
     }
 
     if (!level) {
@@ -355,5 +396,22 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         method,
         path,
         message,
+    }
+}
+
+export function createLogParserCache() {
+    type Entry = ParsedLogLine & { id: number }
+    let previous = new Map<number, Entry>()
+    return (state: LogState): Entry[] => {
+        const next = new Map<number, Entry>()
+        const parsed = state.buffer.map((raw, index) => {
+            const id = state.bufferStart + index
+            const cached = previous.get(id)
+            const entry = cached?.raw === raw ? cached : { ...parseLogLine(raw), id }
+            next.set(id, entry)
+            return entry
+        })
+        previous = next
+        return parsed
     }
 }

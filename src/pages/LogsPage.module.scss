@@ -132,7 +132,12 @@
 .filterPanelHeader {
     display: flex;
     align-items: center;
+    gap: $spacing-sm;
     flex: 1 1 100%;
+}
+
+.levelSelect {
+    min-width: 120px;
 }
 
 .filterPanelToggle {
@@ -236,6 +241,11 @@
 @include mobile {
     .filterPanelHeader {
         width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .levelSelect {
+        width: 100%;
     }
 
     .filterPanelToggle {
@@ -305,6 +315,12 @@
     }
 }
 
+.logReadStatus {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+}
+
 .buttonContent {
     display: inline-flex;
     align-items: center;
@@ -353,7 +369,7 @@
     }
 }
 
-.logPanelFullscreen {
+.logCard.logCardFullscreen {
     position: fixed;
     inset: 16px;
     z-index: 1100;
@@ -361,8 +377,14 @@
     height: auto;
     min-height: 0;
     max-height: none;
-    resize: none;
+    overflow: auto;
     box-shadow: 0 18px 60px rgba(15, 23, 42, 0.32);
+
+    .filters {
+        flex: 0 0 auto;
+        max-height: 40vh;
+        overflow: auto;
+    }
 
     @include mobile {
         inset: 8px;
@@ -371,6 +393,14 @@
         max-height: none;
         flex: 1 1 auto;
     }
+}
+
+.logPanel.logPanelFullscreen {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    resize: none;
 }
 
 .fullscreenExitBar {
@@ -454,11 +484,11 @@
 }
 
 .logSheetTableWrap {
-    min-width: 1320px;
+    min-width: 1800px;
 }
 
 .logTable {
-    min-width: 1320px;
+    min-width: 1800px;
     table-layout: fixed;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: $font-size-xs;
@@ -491,6 +521,10 @@
     width: 420px;
 }
 
+.messageColumn {
+    width: 360px;
+}
+
 .statusColumn {
     width: 64px;
 }
@@ -509,6 +543,20 @@
 
 .traceColumn {
     width: 60px;
+}
+
+.copyColumn {
+    width: 64px;
+}
+
+.copyCell {
+    text-align: center;
+}
+
+.copyButton {
+    min-width: $control-height-xs;
+    min-height: $control-height-xs;
+    padding: 0;
 }
 
 .rawLog {
@@ -530,6 +578,22 @@
     @include mobile {
         padding: 8px 10px;
         font-size: $font-size-xs;
+    }
+}
+
+.logPanelWrapped {
+    .rawLog {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .path,
+    .messageText,
+    .ipText {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 }
 
@@ -566,6 +630,7 @@
 .levelCell,
 .methodCell,
 .pathCell,
+.messageCell,
 .statusCell,
 .latencyCell,
 .requestIdCell,
@@ -696,6 +761,19 @@
     color: var(--text-primary);
     font-weight: $font-weight-semibold;
     @include text-ellipsis;
+}
+
+.messageText {
+    display: block;
+    min-width: 0;
+    color: var(--text-primary);
+    @include text-ellipsis;
+}
+
+.source {
+    display: block;
+    color: var(--text-tertiary);
+    overflow-wrap: anywhere;
 }
 
 .traceButton {
