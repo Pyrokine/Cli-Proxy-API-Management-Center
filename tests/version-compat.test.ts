@@ -21,8 +21,10 @@ describe('version compatibility', () => {
         expect(parseLooseSemver('-')).toBeNull()
     })
 
-    test('requires the backend release that provides manual credential refresh', () => {
-        expect(viteConfig).toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.3.2-aug.1\')')
-        expect(viteConfig).not.toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.2.67-aug.2\')')
+    test('requires the backend release that provides Meta management routes', () => {
+        expect(viteConfig).toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'8.0.23-aug.1\')')
+        expect(viteConfig).not.toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.3.2-aug.1\')')
+        expect(compareLooseSemver([7, 3, 2, 1], [8, 0, 23, 1])).toBeLessThan(0)
+        expect(parseLooseSemver('v8.0.23-aug.1-candidate')).toEqual([8, 0, 23, 1])
     })
 })

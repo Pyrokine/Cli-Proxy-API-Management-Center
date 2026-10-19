@@ -1257,6 +1257,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         })
 
                     // 配置 API 客户端
+                    useConfigStore.getState().clearCache()
                     apiClient.setConfig({
                                             apiBase,
                                             managementKey,

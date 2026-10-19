@@ -3,6 +3,7 @@ import {NotificationCenter} from '@/components/common/NotificationCenter'
 import {PageTransition} from '@/components/common/PageTransition'
 import {VersionCompatBanner} from '@/components/common/VersionCompatBanner'
 import {Button} from '@/components/ui/Button'
+import {countCredentialCards} from '@/components/credentials/hooks/useVendorRegistry'
 import {
     IconBot,
     IconSidebarAuthFiles,
@@ -214,6 +215,7 @@ export function MainLayout() {
     const config      = useConfigStore((state) => state.config)
     const fetchConfig = useConfigStore((state) => state.fetchConfig)
     const clearCache  = useConfigStore((state) => state.clearCache)
+    const credentialsCount = useMemo(() => countCredentialCards(config, authFilesCount), [config, authFilesCount])
 
     const theme       = useThemeStore((state) => state.theme)
     const setTheme    = useThemeStore((state) => state.setTheme)
@@ -532,7 +534,7 @@ export function MainLayout() {
                         path: '/credentials',
                         label: t('nav.credentials'),
                         icon: sidebarIcons.aiProviders,
-                        badge: authFilesCount,
+                        badge: credentialsCount,
                     },
                     { path: '/models', label: t('nav.model_management'), icon: sidebarIcons.models },
                 ],
@@ -557,7 +559,7 @@ export function MainLayout() {
                 ],
             },
         ].filter((section) => section.items.length > 0),
-        [t, config?.loggingToFile, pluginsFeatureEnabled, authFilesCount],
+        [t, config?.loggingToFile, pluginsFeatureEnabled, credentialsCount],
     )
     const navItems      = useMemo(() => navSections.flatMap((section) => section.items), [navSections])
     const getRouteOrder = useCallback((pathname: string) => {

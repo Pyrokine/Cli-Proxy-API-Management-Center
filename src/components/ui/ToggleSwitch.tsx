@@ -4,8 +4,10 @@ import styles from './ToggleSwitch.module.scss'
 interface ToggleSwitchProps {
     checked: boolean
     onChange: (value: boolean) => void
+    id?: string
     label?: ReactNode
     ariaLabel?: string
+    ariaDescribedBy?: string
     disabled?: boolean
     labelPosition?: 'left' | 'right'
 }
@@ -13,8 +15,10 @@ interface ToggleSwitchProps {
 export function ToggleSwitch({
                                  checked,
                                  onChange,
+                                 id,
                                  label,
                                  ariaLabel,
+                                 ariaDescribedBy,
                                  disabled = false,
                                  labelPosition = 'right',
                              }: ToggleSwitchProps) {
@@ -29,11 +33,13 @@ export function ToggleSwitch({
     return (
         <label className={className}>
             <input
+                id={id}
                 type='checkbox'
                 checked={checked}
                 onChange={handleChange}
                 disabled={disabled}
                 aria-label={ariaLabel}
+                aria-describedby={ariaDescribedBy}
             />
             <span className={styles.track}>
                 <span className={styles.thumb} />

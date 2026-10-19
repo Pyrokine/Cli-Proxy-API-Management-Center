@@ -56,6 +56,10 @@
     transform: translateX($control-height-sm - 18px);
 }
 
+.root input:disabled + .track {
+    opacity: 0.55;
+}
+
 .root:not(.disabled):hover .track {
     outline: 2px solid var(--accent-color, #f59e0b);
     outline-offset: 2px;
@@ -64,6 +68,18 @@
 
 .root:not(.disabled):hover input:not(:checked) + .track {
     background: var(--text-secondary);
+}
+
+.root:not(.disabled) input:focus-visible + .track {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .track,
+    .thumb {
+        transition: none;
+    }
 }
 
 .label {

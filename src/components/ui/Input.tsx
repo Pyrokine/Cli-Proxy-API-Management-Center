@@ -1,6 +1,6 @@
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import type {InputHTMLAttributes, ReactNode} from 'react'
-import {useState} from 'react'
+import {useId, useState} from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string
@@ -27,6 +27,11 @@ export function Input({
                           style,
                           ...rest
                       }: InputProps) {
+    const generatedId = useId()
+    const inputId = rest.id ?? generatedId
+    const hintId = hint ? `${inputId}-hint` : undefined
+    const errorId = error ? `${inputId}-error` : undefined
+    const describedBy = [rest['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') || undefined
     const [secretVisible, setSecretVisible] = useState(false)
     const resolvedType                      = secret ? (secretVisible ? 'text' : 'password') : type
     const resolvedAutoComplete              = secret ? (autoComplete ?? 'new-password') : autoComplete
@@ -63,7 +68,7 @@ export function Input({
 
     return (
         <div className='form-group'>
-            {label && <label>{label}</label>}
+            {label && <label htmlFor={inputId}>{label}</label>}
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                 {leftElement && (
                     <div
@@ -81,6 +86,9 @@ export function Input({
                 )}
                 <input
                     {...rest}
+                    id={inputId}
+                    aria-describedby={describedBy}
+                    aria-invalid={rest['aria-invalid'] ?? (error ? true : undefined)}
                     type={resolvedType}
                     autoComplete={resolvedAutoComplete}
                     spellCheck={resolvedSpellCheck}
@@ -95,8 +103,8 @@ export function Input({
                     </div>
                 )}
             </div>
-            {hint && <div className='hint'>{hint}</div>}
-            {error && <div className='error-box'>{error}</div>}
+            {hint && <div id={hintId} className='hint'>{hint}</div>}
+            {error && <div id={errorId} className='error-box'>{error}</div>}
         </div>
     )
 }

@@ -13,7 +13,8 @@ export const normalizeApiBase = (input: string | null | undefined): string => {
     if (!base || containsEncodedStorageValue(base)) {
         return ''
     }
-    base = base.replace(/\/?v0\/management\/?$/i, '')
+    base = base.replace(/\/+$/i, '')
+    base = base.replace(/\/?v0\/management$/i, '')
     base = base.replace(/\/+$/i, '')
     if (!/^https?:\/\//i.test(base)) {
         // noinspection HttpUrlsUsage

@@ -1,5 +1,73 @@
 # Changelog
 
+## v1.26.0-aug.1 - 2026-10-19
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.23.1-aug.1
+- Paired release: CLIProxyAPI v8.0.23-aug.1
+
+### Changes
+
+- Place the local cooldown action on its own row with an 8-pixel gap below the observation time
+- Keep credential actions icon-only during refresh and reset progress, and allow action rows to wrap
+- Count all credential cards in the sidebar, including manual providers and each OpenAI-compatible key
+- Preserve cached quota and observation times on enable/disable changes; reconcile server state after uncertain failures
+- Label partial refreshes separately from successful refreshes and retain each query's error details
+
+- Make configuration search focus the exact quota switch in both simple and full modes
+
+- Update provider and Meta forms, model metadata editing, and discovery while retaining flat configuration and `/v0/management` requests
+- Preserve configuration drafts, comments, unknown fields, and concurrent-save checks; associate field errors with their labels and configuration sections
+- Keep credential login, refresh, mutation, and confirmation results bound to the active connection and credential identity
+- Display subscription, native quota, and plugin quota states without presenting unavailable usage as a measured balance
+- Display owned Codex reset credits and allow confirmation when the applicable count is zero; recheck the owned balance and snapshot freshness before submitting
+- Preserve plugin OAuth and resource state across connection changes
+- Preserve log cursors, reading position, filtering, pagination, and fullscreen state across updates
+
+### Compatibility
+
+The minimum backend version is `8.0.23-aug.1`; older versions produce a dismissible compatibility warning without blocking login or disabling the panel
+
+Model availability and image-generation access depend on the connected backend, provider, and account
+
+### 中文
+
+### 版本依据
+
+- 上游版本：v1.26.0（`c9e2f7cb0b065c13211285d9525bcc8761f17837`）
+- 分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.23.1-aug.1
+- 配套版本：CLIProxyAPI v8.0.23-aug.1
+
+#### 更新内容
+
+- 清除本地冷却按钮独立成行，与更新时间保留 8px 间距
+- 凭证操作在刷新和重置过程中保持图标按钮，操作区允许换行
+- 侧栏按全部凭证卡片计数，包含手动配置和 OpenAI-compatible 的每个 Key
+- 启停时保留配额缓存与观测时间，返回结果不确定时读取服务端状态
+- 部分刷新单独显示为部分更新，保留各查询的错误明细
+
+- 配置搜索在简单和完整模式下均定位并聚焦对应的配额开关
+
+- 更新 Provider 与 Meta 表单、模型元数据编辑和模型发现，保留 flat 配置与 `/v0/management` 请求
+- 保留配置草稿、注释、未知字段和并发保存检查，字段错误关联到标签与配置分区
+- 凭证登录、续期、状态修改和确认结果按当前连接与凭证身份处理
+- 展示订阅、原生额度和插件额度状态，用量不可用时不显示为已测得的余额
+- Codex 主动重置按持有次数显示，适用次数为 0 时仍可打开确认框；提交前重新检查持有次数和快照新鲜度
+- 连接变化时保留插件 OAuth 与资源状态的归属
+- 日志更新保留游标、阅读位置、筛选、分页和全屏状态
+
+#### 兼容性
+
+最低后端版本为 `8.0.23-aug.1`，较旧版本显示可关闭的兼容警告，不阻止登录或禁用面板
+
+模型可用性和生图权限取决于连接的后端、Provider 与账号
+
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.23.1-aug.1...v1.26.0-aug.1
+
 ## v1.23.1-aug.1 - 2026-09-25
 
 ### Release Basis

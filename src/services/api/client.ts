@@ -3,6 +3,7 @@
  * 替代原项目 src/core/api-client.js
  */
 
+import i18n from '@/i18n'
 import type {ApiClientConfig, ApiError} from '@/types'
 import {computeApiUrl} from '@/utils/connection'
 import {BUILD_DATE_HEADER_KEYS, REQUEST_TIMEOUT_MS, VERSION_HEADER_KEYS} from '@/utils/constants'
@@ -72,11 +73,15 @@ class ApiClient {
         return this.authGeneration
     }
 
+    private scopeRequest(config?: AuthScopedRequestConfig): AuthScopedRequestConfig {
+        return {...config, __authGeneration: config?.__authGeneration ?? this.authGeneration}
+    }
+
     /**
      * GET 请求
      */
     async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.get<T>(url, config)
+        const response = await this.instance.get<T>(url, this.scopeRequest(config))
         return response.data
     }
 
@@ -84,7 +89,7 @@ class ApiClient {
      * POST 请求
      */
     async post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.post<T>(url, data, config)
+        const response = await this.instance.post<T>(url, data, this.scopeRequest(config))
         return response.data
     }
 
@@ -92,15 +97,15 @@ class ApiClient {
      * PUT 请求
      */
     async put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.put<T>(url, data, config)
+        const response = await this.instance.put<T>(url, data, this.scopeRequest(config))
         return response.data
     }
 
     /**
      * PATCH 请求
      */
-    async patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.patch<T>(url, data, config)
+    async patch<T = unknown>(url: string, data?: unknown, config?: AuthScopedRequestConfig): Promise<T> {
+        const response = await this.instance.patch<T>(url, data, this.scopeRequest(config))
         return response.data
     }
 
@@ -108,7 +113,7 @@ class ApiClient {
      * DELETE 请求
      */
     async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.delete<T>(url, config)
+        const response = await this.instance.delete<T>(url, this.scopeRequest(config))
         return response.data
     }
 
@@ -116,20 +121,20 @@ class ApiClient {
      * 获取原始响应（用于下载等场景）
      */
     async getRaw(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse> {
-        return this.instance.get(url, config)
+        return this.instance.get(url, this.scopeRequest(config))
     }
 
     /**
      * 发送 FormData
      */
     async postForm<T = unknown>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
-        const response = await this.instance.post<T>(url, formData, {
+        const response = await this.instance.post<T>(url, formData, this.scopeRequest({
             ...config,
             headers: {
                 ...(config?.headers || {}),
                 'Content-Type': 'multipart/form-data',
             },
-        })
+        }))
         return response.data
     }
 
@@ -188,7 +193,11 @@ class ApiClient {
                 }
 
                 // 记录请求发起时的认证会话
-                const authScopedConfig            = config as AuthScopedRequestConfig
+                const authScopedConfig = config as AuthScopedRequestConfig
+                if (authScopedConfig.__authGeneration !== undefined &&
+                    authScopedConfig.__authGeneration !== this.authGeneration) {
+                    return Promise.reject(new axios.Cancel(i18n.t('common.connection_changed')))
+                }
                 authScopedConfig.__authGeneration = this.authGeneration
 
                 // 设置 baseURL
