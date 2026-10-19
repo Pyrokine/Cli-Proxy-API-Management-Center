@@ -155,6 +155,13 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['gpt-image-2-base-model'],
     },
     {
+        fieldId: 'videoResultAuthCacheTTL',
+        sectionId: 'network',
+        labelKey: L('sections.network.video_result_auth_cache_ttl'),
+        hintKey: L('sections.network.video_result_auth_cache_ttl_hint'),
+        yamlKeys: ['video-result-auth-cache-ttl'],
+    },
+    {
         fieldId: 'corsAllowedOrigins',
         sectionId: 'network',
         labelKey: L('sections.network.cors_allowed_origins'),
@@ -189,6 +196,13 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         labelKey: L('sections.network.session_affinity'),
         hintKey: L('sections.network.session_affinity_desc'),
         yamlKeys: ['routing', 'session-affinity'],
+    },
+    {
+        fieldId: 'routingSessionAffinitySubagents',
+        sectionId: 'network',
+        labelKey: L('sections.network.session_affinity_subagents'),
+        hintKey: L('sections.network.session_affinity_subagents_desc'),
+        yamlKeys: ['routing', 'session-affinity-subagents'],
     },
     {
         fieldId: 'wsAuth',
@@ -328,6 +342,20 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['disable-cooling'],
     },
     {
+        fieldId: 'saveCooldownStatus',
+        sectionId: 'quota',
+        labelKey: L('sections.quota.save_cooldown_status'),
+        hintKey: L('sections.quota.save_cooldown_status_desc'),
+        yamlKeys: ['save-cooldown-status'],
+    },
+    {
+        fieldId: 'transientErrorCooldownSeconds',
+        sectionId: 'quota',
+        labelKey: L('sections.quota.transient_error_cooldown_seconds'),
+        hintKey: L('sections.quota.transient_error_cooldown_seconds_hint'),
+        yamlKeys: ['transient-error-cooldown-seconds'],
+    },
+    {
         fieldId: 'quotaRefreshEnabled',
         sectionId: 'quota',
         labelKey: L('sections.quota.refresh_enabled'),
@@ -415,6 +443,21 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         keywords: ['antigravity', 'obfuscate', 'zero-width'],
     },
     {
+        fieldId: 'antigravityConnectionPoolEnabled', sectionId: 'advanced',
+        labelKey: L('sections.advanced.pool_enabled'),
+        yamlKeys: ['antigravity', 'connection-pool', 'enabled'],
+    },
+    {
+        fieldId: 'antigravityConnectionPoolIdleTimeout', sectionId: 'advanced',
+        labelKey: L('sections.advanced.pool_idle_timeout'),
+        yamlKeys: ['antigravity', 'connection-pool', 'idle-conn-timeout'],
+    },
+    {
+        fieldId: 'antigravityConnectionPoolMaxIdleConnsPerHost', sectionId: 'advanced',
+        labelKey: L('sections.advanced.pool_max_idle_conns'),
+        yamlKeys: ['antigravity', 'connection-pool', 'max-idle-conns-per-host'],
+    },
+    {
         fieldId: 'devinSensitiveWords',
         sectionId: 'advanced',
         labelKey: L('sections.system.devin_sensitive_words'),
@@ -450,6 +493,91 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['codex', 'identity-confuse'],
     },
     {
+        fieldId: 'codexOptimizeMultiAgentV2',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.codex_optimize_multi_agent_v2'),
+        hintKey: L('sections.network.codex_optimize_multi_agent_v2_desc'),
+        yamlKeys: ['codex', 'optimize-multi-agent-v2'],
+    },
+    {
+        fieldId: 'codexDisableCloaking',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.codex_disable_cloaking'),
+        hintKey: L('sections.network.codex_disable_cloaking_desc'),
+        yamlKeys: ['codex', 'disable-codex-cloaking'],
+    },
+    {
+        fieldId: 'codexOrphanDelegationCompatibility',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.codex_orphan_delegation_compatibility'),
+        hintKey: L('sections.network.codex_orphan_delegation_compatibility_desc'),
+        yamlKeys: ['codex', 'orphan-delegation-compatibility'],
+    },
+    {
+        fieldId: 'claudeDisableCloakMode',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.claude_disable_cloak_mode'),
+        hintKey: L('sections.network.claude_disable_cloak_mode_desc'),
+        yamlKeys: ['disable-claude-cloak-mode'],
+    },
+    {
+        fieldId: 'claudeCodeDisableCloakingModelList',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.claude_code_disable_cloaking_model_list'),
+        hintKey: L('sections.network.claude_code_disable_cloaking_model_list_desc'),
+        yamlKeys: ['claude-code', 'disable-cloaking-model-list'],
+    },
+    {
+        fieldId: 'claudeModelLevelCooling',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.claude_model_level_cooling'),
+        hintKey: L('sections.network.claude_model_level_cooling_desc'),
+        yamlKeys: ['claude', 'model-level-cooling'],
+    },
+    {
+        fieldId: 'xaiInjectXSearch',
+        sectionId: 'advanced',
+        labelKey: L('sections.network.xai_inject_x_search'),
+        hintKey: L('sections.network.xai_inject_x_search_desc'),
+        yamlKeys: ['xai', 'inject-x-search'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayEnabled', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_enabled'),
+        yamlKeys: ['codex', 'live-media-relay', 'enabled'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayMaxSessions', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_max_sessions'),
+        yamlKeys: ['codex', 'live-media-relay', 'max-sessions'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayDisablePrivateRemoteIPs', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_block_private_ips'),
+        yamlKeys: ['codex', 'live-media-relay', 'disable-private-remote-ips'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayPublicIP', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_public_ip'),
+        yamlKeys: ['codex', 'live-media-relay', 'public-ip'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayUDPPortMin', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_udp_min'),
+        yamlKeys: ['codex', 'live-media-relay', 'udp-port-min'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayUDPPortMax', sectionId: 'advanced',
+        labelKey: L('sections.advanced.relay_udp_max'),
+        yamlKeys: ['codex', 'live-media-relay', 'udp-port-max'],
+    },
+    {
+        fieldId: 'codexLiveMediaRelayICEServers', sectionId: 'advanced',
+        labelKey: L('sections.advanced.ice_servers'),
+        yamlKeys: ['codex', 'live-media-relay', 'ice-servers'],
+        keywords: ['stun', 'turn'],
+    },
+    {
         fieldId: 'codexHeaderDefaults',
         sectionId: 'advanced',
         labelKey: L('sections.network.codex_header_defaults'),
@@ -467,6 +595,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'payload',
         labelKey: L('sections.payload.default_rules'),
         hintKey: L('sections.payload.default_rules_desc'),
+        yamlKeys: ['payload', 'default'],
         keywords: ['payload', 'rule'],
     },
     {
@@ -474,6 +603,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'payload',
         labelKey: L('sections.payload.default_raw_rules'),
         hintKey: L('sections.payload.default_raw_rules_desc'),
+        yamlKeys: ['payload', 'default-raw'],
         keywords: ['payload', 'rule', 'json'],
     },
     {
@@ -481,6 +611,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'payload',
         labelKey: L('sections.payload.override_rules'),
         hintKey: L('sections.payload.override_rules_desc'),
+        yamlKeys: ['payload', 'override'],
         keywords: ['payload', 'rule'],
     },
     {
@@ -488,6 +619,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'payload',
         labelKey: L('sections.payload.override_raw_rules'),
         hintKey: L('sections.payload.override_raw_rules_desc'),
+        yamlKeys: ['payload', 'override-raw'],
         keywords: ['payload', 'rule', 'json'],
     },
     {
@@ -495,6 +627,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'payload',
         labelKey: L('sections.payload.filter_rules'),
         hintKey: L('sections.payload.filter_rules_desc'),
+        yamlKeys: ['payload', 'filter'],
         keywords: ['payload', 'rule', 'filter'],
     },
 ]

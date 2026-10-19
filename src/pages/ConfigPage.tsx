@@ -8,6 +8,7 @@ import {Tabs} from '@/components/ui/Tabs'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useVisualConfig} from '@/hooks/useVisualConfig'
 import {artifactsApi} from '@/services/api/artifacts'
+import {apiClient} from '@/services/api/client'
 import {configFileApi, type ConfigValidationError} from '@/services/api/configFile'
 import {logsApi} from '@/services/api/logs'
 import {usageApi} from '@/services/api/usage'
@@ -69,6 +70,14 @@ export function ConfigPage() {
     const showNotification = useNotificationStore((state) => state.showNotification)
     const showConfirmation = useNotificationStore((state) => state.showConfirmation)
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const apiBase = useAuthStore((state) => state.apiBase)
+    const managementKey = useAuthStore((state) => state.managementKey)
+    const authGeneration = useAuthStore(() => apiClient.getAuthGeneration())
+    const mountedRef = useRef(true)
+    const isCurrentConnection = useCallback(
+        () => mountedRef.current && authGeneration === apiClient.getAuthGeneration(),
+        [authGeneration],
+    )
     const clearConfigCache = useConfigStore((state) => state.clearCache)
     const fetchConfig      = useConfigStore((state) => state.fetchConfig)
     const resolvedTheme    = useThemeStore((state) => state.resolvedTheme)
@@ -102,10 +111,10 @@ export function ConfigPage() {
     const [content, setContent]                       = useState('')
     const [loading, setLoading]                       = useState(true)
     const [saving, setSaving]                         = useState(false)
+    const [saveNeedsReload, setSaveNeedsReload] = useState(false)
     const [error, setError]                           = useState('')
     const [dirty, setDirty]                           = useState(false)
     const [diffModalOpen, setDiffModalOpen]           = useState(false)
-    const [serverYaml, setServerYaml]                 = useState('')
     const [diffOriginalYaml, setDiffOriginalYaml]     = useState('')
     const [mergedYaml, setMergedYaml]                 = useState('')
     const [validationWarnings, setValidationWarnings] = useState<string[]>([])
@@ -125,18 +134,20 @@ export function ConfigPage() {
     const [lastSearchedQuery, setLastSearchedQuery] = useState('')
     const editorRef                                 = useRef<ReactCodeMirrorRef>(null)
     const floatingActionsRef                        = useRef<HTMLDivElement>(null)
-    const revisionStateRef                          = useRef(new ConfigEditorRevisionState())
+    const revisionStateRef = useRef(new ConfigEditorRevisionState(() => apiClient.getAuthGeneration()))
+    const runtimeRequestSequenceRef = useRef(0)
     const preparedSaveRef                           = useRef<PreparedConfigSave | null>(null)
     const isDirtyRef                                = useRef(false)
     const handledFieldRequestRef                    = useRef('')
     const pendingFieldRequestRef                    = useRef('')
     const [fieldJumpRequest, setFieldJumpRequest]   = useState<ConfigFieldJumpRequest | null>(null)
 
-    const disableControls           = connectionStatus !== 'connected'
+    const disableControls = connectionStatus !== 'connected' ||
+                            revisionStateRef.current.snapshot().authGeneration !== authGeneration
     const isDirty                   = dirty || visualDirty
     isDirtyRef.current              = isDirty
     const { allowNextNavigation }   = useUnsavedChangesGuard({
-                                                                 enabled: isDirty && !loading && !disableControls,
+                                                                 enabled: isDirty && !disableControls,
                                                                  shouldBlock: isDirty,
                                                                  dialog: {
                                                                      title: t('common.unsaved_changes_title'),
@@ -151,6 +162,11 @@ export function ConfigPage() {
               activeTab === 'visual' &&
               (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors)
     const loadRuntimeInfo           = useCallback(async () => {
+        if (!isCurrentConnection()) {
+            return
+        }
+        const sequence = ++runtimeRequestSequenceRef.current
+        const generation = apiClient.getAuthGeneration()
         setRuntimeInfo({
                            logSize: { status: 'loading' },
                            usageDbSize: { status: 'loading' },
@@ -162,6 +178,9 @@ export function ConfigPage() {
                                                                                                               usageApi.getDBSize(),
                                                                                                               artifactsApi.fetchImageArtifactCacheSize(),
                                                                                                           ])
+        if (sequence !== runtimeRequestSequenceRef.current || generation !== apiClient.getAuthGeneration()) {
+            return
+        }
 
         setRuntimeInfo({
                            logSize:
@@ -192,34 +211,41 @@ export function ConfigPage() {
                                    }
                                : { status: 'error' },
                        })
-    }, [])
+    }, [isCurrentConnection])
 
     const clearPreparedSave = useCallback(() => {
+        if (!isCurrentConnection()) {
+            return
+        }
         preparedSaveRef.current = null
         setDiffModalOpen(false)
-    }, [])
+    }, [isCurrentConnection])
 
     const markDraftChanged = useCallback(() => {
+        if (!isCurrentConnection()) {
+            return
+        }
         revisionStateRef.current.markDraftChanged()
         isDirtyRef.current = true
         clearPreparedSave()
-    }, [clearPreparedSave])
+    }, [clearPreparedSave, isCurrentConnection])
 
     const handleVisualChange = useCallback((values: Partial<VisualConfigValues>) => {
+        if (!isCurrentConnection() || saveNeedsReload) {
+            return
+        }
         markDraftChanged()
         setVisualValues(values)
-    }, [markDraftChanged, setVisualValues])
+    }, [isCurrentConnection, markDraftChanged, saveNeedsReload, setVisualValues])
 
-    useEffect(
-        () => () => {
-            revisionStateRef.current.invalidate()
-            preparedSaveRef.current = null
-        },
-        [],
-    )
-
-    const loadConfig = useCallback(async () => {
+    const loadConfig = useCallback(async (discardDraft = false) => {
+        if (!isCurrentConnection()) {
+            return
+        }
         const request = revisionStateRef.current.beginLoad()
+        if (!revisionStateRef.current.isCurrentGeneration(request)) {
+            return
+        }
         setLoading(true)
         setError('')
         try {
@@ -231,9 +257,8 @@ export function ConfigPage() {
 
             preparedSaveRef.current = null
             setDiffModalOpen(false)
-            setServerYaml(snapshot.content)
             setDiffOriginalYaml(snapshot.content)
-            if (isDirtyRef.current) {
+            if (isDirtyRef.current && !discardDraft) {
                 revisionStateRef.current.observeServerRevision()
                 return
             }
@@ -241,6 +266,7 @@ export function ConfigPage() {
             revisionStateRef.current.acceptServerRevision()
             isDirtyRef.current = false
             revisionStateRef.current.resetSource(snapshot.content)
+            setSaveNeedsReload(false)
             setContent(merged)
             setDirty(false)
             setMergedYaml(merged)
@@ -258,14 +284,54 @@ export function ConfigPage() {
                 setLoading(false)
             }
         }
-    }, [loadVisualValuesFromYaml, t])
+    }, [isCurrentConnection, loadVisualValuesFromYaml, t])
 
     useEffect(() => {
+        mountedRef.current = true
+        return () => {
+            mountedRef.current = false
+        }
+    }, [])
+
+    useEffect(() => {
+        const revisions = revisionStateRef
+        const preparedSaves = preparedSaveRef
+        const runtimeRequests = runtimeRequestSequenceRef
+        let cancelled = false
         queueMicrotask(() => {
+            if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
+                return
+            }
+            if (revisions.current.snapshot().authGeneration !== authGeneration) {
+                revisions.current.invalidate()
+                revisions.current = new ConfigEditorRevisionState(() => apiClient.getAuthGeneration())
+                preparedSaves.current = null
+                isDirtyRef.current = false
+                setContent('')
+                setDirty(false)
+                setSaving(false)
+                setSaveNeedsReload(false)
+                setDiffModalOpen(false)
+                setDiffOriginalYaml('')
+                setMergedYaml('')
+                setValidationWarnings([])
+                setValidationErrors([])
+                loadVisualValuesFromYaml('')
+            }
+            if (connectionStatus !== 'connected') {
+                setLoading(false)
+                return
+            }
             void loadConfig()
             void loadRuntimeInfo()
         })
-    }, [loadConfig, loadRuntimeInfo])
+        return () => {
+            cancelled = true
+            revisions.current.invalidate()
+            preparedSaves.current = null
+            ++runtimeRequests.current
+        }
+    }, [apiBase, managementKey, authGeneration, connectionStatus, loadConfig, loadRuntimeInfo, loadVisualValuesFromYaml])
 
     useEffect(() => {
         if (activeTab !== 'visual' || !visualParseError) {
@@ -273,6 +339,9 @@ export function ConfigPage() {
         }
 
         queueMicrotask(() => {
+            if (!isCurrentConnection()) {
+                return
+            }
             setActiveTab('source')
             localStorage.setItem('config-management:tab', 'source')
             showNotification(
@@ -280,11 +349,14 @@ export function ConfigPage() {
                 'error',
             )
         })
-    }, [activeTab, showNotification, t, visualParseError])
+    }, [activeTab, isCurrentConnection, showNotification, t, visualParseError])
 
     const handleConfirmSave = async () => {
+        if (!isCurrentConnection()) {
+            return
+        }
         const prepared = preparedSaveRef.current
-        if (!prepared || !revisionStateRef.current.matches(prepared.revision)) {
+        if (disableControls || saveNeedsReload || !prepared || !revisionStateRef.current.matches(prepared.revision)) {
             clearPreparedSave()
             return
         }
@@ -307,7 +379,6 @@ export function ConfigPage() {
             setDiffModalOpen(false)
             revisionStateRef.current.resetSource(prepared.content)
             setContent(prepared.content)
-            setServerYaml(prepared.content)
             setDiffOriginalYaml(prepared.content)
             setMergedYaml(prepared.content)
             setValidationWarnings([])
@@ -343,7 +414,6 @@ export function ConfigPage() {
                 isDirtyRef.current = false
                 revisionStateRef.current.resetSource(latestSnapshot.content)
                 setContent(latestMerged)
-                setServerYaml(latestSnapshot.content)
                 setDiffOriginalYaml(latestSnapshot.content)
                 setMergedYaml(latestMerged)
                 loadVisualValuesFromYaml(latestMerged, latestSnapshot.content)
@@ -366,7 +436,6 @@ export function ConfigPage() {
                         return
                     }
 
-                    setServerYaml(latestSnapshot.content)
                     setDiffOriginalYaml(latestSnapshot.content)
                     let nextMergedYaml = prepared.content
                     let diffOriginal   = latestSnapshot.content
@@ -380,7 +449,6 @@ export function ConfigPage() {
                             })
                             revisionStateRef.current.observeServerRevision()
                             preparedSaveRef.current = null
-                            setServerYaml(latestSnapshot.content)
                             setDiffOriginalYaml(latestSnapshot.content)
                             setMergedYaml(prepared.content)
                             setValidationWarnings([])
@@ -406,7 +474,6 @@ export function ConfigPage() {
                         const message = t('config_management.validation_unavailable_message', { message: detail })
                         revisionStateRef.current.observeServerRevision()
                         preparedSaveRef.current = null
-                        setServerYaml(latestSnapshot.content)
                         setDiffOriginalYaml(diffOriginal)
                         setMergedYaml(nextMergedYaml)
                         setValidationWarnings([])
@@ -430,7 +497,6 @@ export function ConfigPage() {
                         serverEtag: latestSnapshot.etag,
                     }
                     preparedSaveRef.current                = nextPrepared
-                    setServerYaml(nextPrepared.serverYaml)
                     setDiffOriginalYaml(nextPrepared.diffOriginalYaml)
                     setMergedYaml(nextPrepared.content)
                     setValidationErrors(validation.valid ? [] : (validation.errors ?? []))
@@ -451,6 +517,53 @@ export function ConfigPage() {
                     return
                 }
             }
+            const status = apiErrorStatus(err)
+            if (status === undefined || status >= 500 || status === 408) {
+                clearPreparedSave()
+                setSaveNeedsReload(true)
+                try {
+                    const latestSnapshot = await configFileApi.fetchConfigYaml()
+                    if (!revisionStateRef.current.isCurrentRequest(request)) {
+                        return
+                    }
+                    setDiffOriginalYaml(latestSnapshot.content)
+                    const data = (err as {data?: {error?: unknown}} | null)?.data
+                    if (status === 503 && data?.error === 'runtime_sync_failed') {
+                        revisionStateRef.current.acceptServerRevision()
+                        revisionStateRef.current.resetSource(latestSnapshot.content)
+                        isDirtyRef.current = false
+                        setDirty(false)
+                        setContent(latestSnapshot.content)
+                        setMergedYaml(latestSnapshot.content)
+                        setValidationWarnings([])
+                        setValidationErrors([])
+                        setError('')
+                        setSaveNeedsReload(false)
+                        loadVisualValuesFromYaml(latestSnapshot.content, latestSnapshot.content)
+                        clearConfigCache()
+                        showNotification(t('config_management.save_committed_runtime_failed'), 'error')
+                        try {
+                            await fetchConfig(undefined, true)
+                        } catch (refreshError: unknown) {
+                            if (!revisionStateRef.current.isCurrentGeneration(request)) {
+                                return
+                            }
+                            const message = refreshError instanceof Error ? refreshError.message : ''
+                            showNotification(`${t('notification.refresh_failed')}: ${message}`, 'warning')
+                        }
+                        return
+                    }
+                } catch (reloadError: unknown) {
+                    if (!revisionStateRef.current.isCurrentRequest(request)) {
+                        return
+                    }
+                    const message = reloadError instanceof Error ? reloadError.message : ''
+                    showNotification(`${t('notification.refresh_failed')}: ${message}`, 'error')
+                }
+                setError(t('config_management.save_result_uncertain'))
+                showNotification(t('config_management.save_result_uncertain'), 'error')
+                return
+            }
             const message = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.save_failed')}: ${message}`, 'error')
         } finally {
@@ -461,6 +574,21 @@ export function ConfigPage() {
     }
 
     const handleSave = async () => {
+        if (!isCurrentConnection()) {
+            return
+        }
+        if (saveNeedsReload) {
+            showNotification(t('config_management.save_result_uncertain'), 'error')
+            return
+        }
+        if (disableControls || !revisionStateRef.current.matches(revisionStateRef.current.snapshot())) {
+            clearPreparedSave()
+            return
+        }
+        if (activeTab === 'visual' && revisionStateRef.current.sourceDirty) {
+            showNotification(t('config_management.source_changes_before_visual'), 'warning')
+            return
+        }
         if (activeTab === 'visual' && visualParseError) {
             showNotification(t('config_management.visual_mode_save_blocked'), 'error')
             return
@@ -485,7 +613,6 @@ export function ConfigPage() {
                 latestDocument = parseDocument(latestServerYaml)
                 if (latestDocument.errors.length > 0) {
                     revisionStateRef.current.observeServerRevision()
-                    setServerYaml(latestServerYaml)
                     setDiffOriginalYaml(latestServerYaml)
                     showNotification(
                         t('config_management.visual_mode_latest_yaml_invalid', {
@@ -511,7 +638,6 @@ export function ConfigPage() {
                                 validationError.message :
                                 t('config_management.validation_unavailable')
                 revisionStateRef.current.observeServerRevision()
-                setServerYaml(latestServerYaml)
                 setDiffOriginalYaml(
                     latestDocument ?
                     latestDocument.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 }) :
@@ -541,7 +667,6 @@ export function ConfigPage() {
                 setDirty(false)
                 revisionStateRef.current.resetSource(latestServerYaml)
                 setContent(latestServerYaml)
-                setServerYaml(latestServerYaml)
                 setDiffOriginalYaml(latestServerYaml)
                 setMergedYaml(nextMergedYaml)
                 loadVisualValuesFromYaml(latestServerYaml, latestServerYaml)
@@ -559,7 +684,6 @@ export function ConfigPage() {
                 serverEtag: latestSnapshot.etag,
             }
             preparedSaveRef.current            = prepared
-            setServerYaml(prepared.serverYaml)
             setDiffOriginalYaml(prepared.diffOriginalYaml)
             setMergedYaml(prepared.content)
             setDiffModalOpen(true)
@@ -577,6 +701,9 @@ export function ConfigPage() {
     }
 
     const handleChange = useCallback((value: string) => {
+        if (!isCurrentConnection() || saveNeedsReload) {
+            return
+        }
         const revisions = revisionStateRef.current
         if (!revisions.editSource(value)) {
             return
@@ -590,11 +717,15 @@ export function ConfigPage() {
                 revisions.acceptVisualSource()
             }
         }
-    }, [loadVisualValuesFromYaml, markDraftChanged])
+    }, [isCurrentConnection, loadVisualValuesFromYaml, markDraftChanged, saveNeedsReload])
 
     const handleTabChange = useCallback(
         (tab: ConfigEditorTab) => {
-            if (tab === activeTab) {
+            if (!isCurrentConnection() || tab === activeTab) {
+                return
+            }
+            if (tab === 'visual' && revisionStateRef.current.sourceDirty) {
+                showNotification(t('config_management.source_changes_before_visual'), 'warning')
                 return
             }
 
@@ -645,6 +776,7 @@ export function ConfigPage() {
             clearPreparedSave,
             content,
             hasVisualValidationErrors,
+            isCurrentConnection,
             loadVisualValuesFromYaml,
             showNotification,
             t,
@@ -654,7 +786,7 @@ export function ConfigPage() {
     )
 
     useEffect(() => {
-        if (!requestedField || loading || saving || (activeTab === 'visual' && visualParseError)) {
+        if (!isCurrentConnection() || !requestedField || loading || saving || (activeTab === 'visual' && visualParseError)) {
             return
         }
 
@@ -666,6 +798,9 @@ export function ConfigPage() {
             if (pendingFieldRequestRef.current !== requestKey) {
                 pendingFieldRequestRef.current = requestKey
                 queueMicrotask(() => {
+                    if (!isCurrentConnection()) {
+                        return
+                    }
                     pendingFieldRequestRef.current = ''
                     handleTabChange('visual')
                 })
@@ -675,6 +810,9 @@ export function ConfigPage() {
 
         handledFieldRequestRef.current = requestKey
         queueMicrotask(() => {
+            if (!isCurrentConnection()) {
+                return
+            }
             setFieldJumpRequest({ key: requestKey, entry: requestedField })
             const params = new URLSearchParams(location.search)
             params.delete('field')
@@ -690,6 +828,7 @@ export function ConfigPage() {
         activeTab,
         allowNextNavigation,
         handleTabChange,
+        isCurrentConnection,
         loading,
         location.hash,
         location.key,
@@ -856,6 +995,9 @@ export function ConfigPage() {
         if (loading) {
             return t('config_management.status_loading')
         }
+        if (saveNeedsReload) {
+            return t('config_management.status_save_failed')
+        }
         if (error) {
             return t('config_management.status_load_failed')
         }
@@ -875,7 +1017,7 @@ export function ConfigPage() {
     }
 
     const getStatusClass = () => {
-        if (error || hasVisualModeError || hasVisualValidationErrors) {
+        if (error || saveNeedsReload || hasVisualModeError || hasVisualValidationErrors) {
             return styles.error
         }
         if (isDirty) {
@@ -888,6 +1030,9 @@ export function ConfigPage() {
     }
 
     const handleReload = useCallback(() => {
+        if (!isCurrentConnection()) {
+            return
+        }
         if (!isDirty) {
             void Promise.all([loadConfig(), loadRuntimeInfo()])
             return
@@ -900,30 +1045,10 @@ export function ConfigPage() {
                              cancelText: t('common.cancel'),
                              variant: 'danger',
                              onConfirm: () => {
-                                 const baseline = serverYaml
-                                 revisionStateRef.current.resetDraftToServer()
-                                 isDirtyRef.current = false
-                                 clearPreparedSave()
-                                 revisionStateRef.current.resetSource(baseline)
-                                 setContent(baseline)
-                                 setDirty(false)
-                                 setDiffOriginalYaml(serverYaml)
-                                 setMergedYaml(baseline)
-                                 setValidationWarnings([])
-                                 setValidationErrors([])
-                                 loadVisualValuesFromYaml(baseline, serverYaml)
+                                 void Promise.all([loadConfig(true), loadRuntimeInfo()])
                              },
                          })
-    }, [
-                                         clearPreparedSave,
-                                         isDirty,
-                                         loadConfig,
-                                         loadRuntimeInfo,
-                                         loadVisualValuesFromYaml,
-                                         serverYaml,
-                                         showConfirmation,
-                                         t,
-                                     ])
+    }, [isCurrentConnection, isDirty, loadConfig, loadRuntimeInfo, showConfirmation, t])
 
     const shouldShowFloatingActions =
               isDirty || saving || loading || Boolean(error) || hasVisualModeError || hasVisualValidationErrors
@@ -950,6 +1075,7 @@ export function ConfigPage() {
                         disableControls ||
                         loading ||
                         saving ||
+                        saveNeedsReload ||
                         !isDirty ||
                         diffModalOpen ||
                         hasVisualModeError ||
@@ -1020,7 +1146,7 @@ export function ConfigPage() {
                             values={visualValues}
                             validationErrors={visualValidationErrors}
                             hasPayloadValidationErrors={visualHasPayloadValidationErrors}
-                            disabled={disableControls || loading || saving}
+                            disabled={disableControls || loading || saving || saveNeedsReload}
                             runtimeInfo={runtimeInfo}
                             requestedField={fieldJumpRequest?.entry}
                             requestedFieldRequestKey={fieldJumpRequest?.key}
@@ -1103,7 +1229,8 @@ export function ConfigPage() {
                                      onChange={handleChange}
                                      extensions={extensions}
                                      theme={resolvedTheme}
-                                     editable={!disableControls && !loading && !saving}
+                                     editable={!disableControls && !loading && !saving && !saveNeedsReload}
+                                     readOnly={saveNeedsReload}
                                      placeholder={t('config_management.editor_placeholder')}
                                      height='100%'
                                      style={{ height: '100%' }}

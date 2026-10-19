@@ -2,6 +2,7 @@ import {describe, expect, spyOn, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
 import {apiClient} from '@/services/api/client'
+import {configApi} from '@/services/api/config'
 import {configFileApi, normalizeConfigYamlSaveResult} from '@/services/api/configFile'
 
 import {expectSourceToContain} from './sourceContractAssertions'
@@ -9,6 +10,10 @@ import {useConfigStore} from '@/stores/useConfigStore'
 
 const configStoreSource = readFileSync(
     fileURLToPath(new URL('../src/stores/useConfigStore.ts', import.meta.url)),
+    'utf8',
+)
+const authStoreSource   = readFileSync(
+    fileURLToPath(new URL('../src/stores/useAuthStore.ts', import.meta.url)),
     'utf8',
 )
 const configPageSource  = readFileSync(
@@ -108,19 +113,53 @@ describe('config section descriptors', () => {
         expect(useConfigStore.getState().loading).toBe(false)
     })
 
+    test('a new login does not reuse or publish an in-flight config from the old connection', async () => {
+        const loginStart = authStoreSource.indexOf('login: async (credentials) =>')
+        const logoutStart = authStoreSource.indexOf('logout: () =>', loginStart)
+        const loginBody = authStoreSource.slice(loginStart, logoutStart)
+        expect(loginStart).toBeGreaterThan(-1)
+        expect(loginBody.indexOf('useConfigStore.getState().clearCache()'))
+            .toBeLessThan(loginBody.indexOf('apiClient.setConfig({'))
+        expect(loginBody.indexOf('apiClient.setConfig({'))
+            .toBeLessThan(loginBody.indexOf('useConfigStore.getState().fetchConfig(undefined, true)'))
+
+        const pending: Array<(value: {debug: boolean}) => void> = []
+        const getConfig = spyOn(configApi, 'getConfig').mockImplementation(() =>
+            new Promise((resolve) => pending.push(resolve)))
+        try {
+            useConfigStore.getState().clearCache()
+            const stale = useConfigStore.getState().fetchConfig()
+            expect(pending).toHaveLength(1)
+
+            useConfigStore.getState().clearCache()
+            const current = useConfigStore.getState().fetchConfig(undefined, true)
+            expect(pending).toHaveLength(2)
+            pending[1]!({debug: true})
+            await current
+            pending[0]!({debug: false})
+            await stale
+
+            expect(useConfigStore.getState().config?.debug).toBe(true)
+            expect(await useConfigStore.getState().fetchConfig()).toMatchObject({debug: true})
+            expect(getConfig).toHaveBeenCalledTimes(2)
+        } finally {
+            getConfig.mockRestore()
+            useConfigStore.getState().clearCache()
+        }
+    })
+
     test('keeps the raw server YAML as the API key storage source across tab changes', () => {
         expect(configPageSource).toContain('revisionStateRef.current.sourceNeedsReload || visualParseError')
         expect(configPageSource).toContain('loadVisualValuesFromYaml(content, content)')
     })
 
-    test('discards a dirty draft from the local server baseline without refetching', () => {
+    test('confirmed reload fetches the current server YAML before discarding a dirty draft', () => {
         const reloadStart = configPageSource.indexOf('const handleReload = useCallback')
         const reloadEnd   = configPageSource.indexOf('const shouldShowFloatingActions', reloadStart)
         const reloadBody  = configPageSource.slice(reloadStart, reloadEnd)
 
-        expect(reloadBody).toContain('const baseline = serverYaml')
-        expect(reloadBody).toContain('revisionStateRef.current.resetDraftToServer()')
-        expect(reloadBody).toContain('loadVisualValuesFromYaml(baseline, serverYaml)')
+        expect(reloadBody).toContain('void Promise.all([loadConfig(true), loadRuntimeInfo()])')
+        expect(reloadBody).not.toContain('resetDraftToServer()')
         expect(reloadBody.match(/loadConfig\(\)/g)).toHaveLength(1)
     })
 

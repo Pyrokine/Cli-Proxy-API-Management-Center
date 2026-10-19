@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs'
 import i18n from '@/i18n'
 import {type ApiKeyModelRule, EMPTY_API_KEY_MODEL_RULE} from '@/types/visualConfig'
 
-import {type ApiKeyPolicyValidationErrorCode, validateApiKeyPolicyDraft} from '@/utils/apiKeyPolicy'
+import {type ApiKeyPolicyValidationErrorCode, parseGoDuration, validateApiKeyPolicyDraft} from '@/utils/apiKeyPolicy'
 
 const LOCALES = ['en', 'zh-CN', 'zh-TW', 'ru'] as const
 
@@ -61,6 +61,46 @@ describe('API key policy editor', () => {
                                             },
                                         ],
                                     })
+    })
+
+    test('accepts long compound Go durations and keeps signed overflow validation', () => {
+        expect(parseGoDuration('1ns'.repeat(43))).toBe(43n)
+        expect(parseGoDuration(`${'0s'.repeat(64)}30s`)).toBe(30_000_000_000n)
+        expect(parseGoDuration(`-${'0s'.repeat(64)}3h`)).toBe(-10_800_000_000_000n)
+        expect(parseGoDuration(`${'0s'.repeat(64)}9223372036854775807ns`)).toBe(9223372036854775807n)
+        expect(parseGoDuration(`-${'0s'.repeat(64)}9223372036854775808ns`)).toBe(-9223372036854775808n)
+        expect(parseGoDuration(`${'0s'.repeat(64)}9223372036854775808ns`)).toBeNull()
+        expect(parseGoDuration(`-${'0s'.repeat(64)}9223372036854775809ns`)).toBeNull()
+        expect(parseGoDuration(`${'0s'.repeat(64)}1d`)).toBeNull()
+        const result = validateApiKeyPolicyDraft(policyRule({reservationTtl: '1ns'.repeat(43)}), [],
+            [{window: `${'0s'.repeat(64)}30s`, requests: '1', tokens: '', costMicro: ''}])
+        expect(result.error).toBeUndefined()
+        expect(result.rule?.reservationTtl).toBe('1ns'.repeat(43))
+        expect(result.rule?.limits[0]?.window).toBe(`${'0s'.repeat(64)}30s`)
+        expect(validateApiKeyPolicyDraft(policyRule(), [], [
+            {window: '1ns'.repeat(43), requests: '1', tokens: '', costMicro: ''},
+            {window: '43ns', requests: '1', tokens: '', costMicro: ''},
+        ]).error).toBe('window_duplicate')
+    })
+
+    test('matches Go fractional duration rounding at nanosecond boundaries', () => {
+        const cases: Array<[string, bigint]> = [
+            ['0.9999999999999999999s', 1_000_000_000n],
+            ['0.9999999999999999999h', 3_600_000_000_000n],
+            ['0.333333333333333333333333333333333333h', 1_200_000_000_000n],
+            ['0.000000000277777777777777777777777777h', 1_000n],
+        ]
+        for (const [value, expected] of cases) {
+            expect(parseGoDuration(value)).toBe(expected)
+            expect(parseGoDuration(`-${value}`)).toBe(-expected)
+        }
+    })
+
+    test('rejects windows that become equal after Go fractional rounding', () => {
+        expect(validateApiKeyPolicyDraft(policyRule(), [], [
+            {window: '0.9999999999999999999s', requests: '1', tokens: '', costMicro: ''},
+            {window: '1s', requests: '2', tokens: '', costMicro: ''},
+        ]).error).toBe('window_duplicate')
     })
 
     test('accepts an explicit positive duration sign like Go time.ParseDuration', () => {

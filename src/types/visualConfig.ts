@@ -23,11 +23,20 @@ export type VisualConfigFieldPath =
     | 'usageRetentionWarningThresholdPct'
     | 'autoRefreshInterval'
     | 'modelRefreshInterval'
+    | 'videoResultAuthCacheTTL'
+    | 'antigravityConnectionPoolIdleTimeout'
+    | 'antigravityConnectionPoolMaxIdleConnsPerHost'
+    | 'codexLiveMediaRelayMaxSessions'
+    | 'codexLiveMediaRelayPublicIP'
+    | 'codexLiveMediaRelayUDPPortMin'
+    | 'codexLiveMediaRelayUDPPortMax'
+    | 'codexLiveMediaRelayICEServers'
     | 'requestRetry'
     | 'maxRetryCredentials'
     | 'maxRetryInterval'
     | 'quotaRefreshInterval'
     | 'quotaRefreshMaxInterval'
+    | 'transientErrorCooldownSeconds'
     | 'streaming.keepaliveSeconds'
     | 'streaming.bootstrapRetries'
     | 'streaming.nonstreamKeepaliveInterval'
@@ -36,6 +45,13 @@ export type VisualConfigValidationErrorCode =
     | 'port_range'
     | 'non_negative_integer'
     | 'payload_invalid_number'
+    | 'positive_duration'
+    | 'invalid_duration'
+    | 'invalid_ip'
+    | 'integer_range_0_65535'
+    | 'udp_port_pair'
+    | 'udp_port_capacity'
+    | 'invalid_ice_servers'
     | 'integer_range_1_3600'
     | 'quota_refresh_interval_range'
     | 'quota_refresh_max_interval_range'
@@ -72,6 +88,7 @@ export type VisualConfigRuntimeInfo = {
 
 export type PayloadParamEntry = {
     id: string
+    sourceYaml?: string
     path: string
     valueType: PayloadParamValueType
     value: string
@@ -82,6 +99,8 @@ export type PayloadModelEntry = {
     sourceYaml?: string
     name: string
     protocol?: string
+    match?: PayloadParamEntry[]
+    notMatch?: PayloadParamEntry[]
     extra?: Record<string, unknown>
 }
 
@@ -154,6 +173,17 @@ export type PluginStoreAuthRule = {
     allowInsecure: boolean
 }
 
+export type CodexLiveICEServerDraft = {
+    id: string
+    urlsText: string
+    username: string
+    usernameConfigured: boolean
+    usernameEdited: boolean
+    credential: string
+    credentialConfigured: boolean
+    credentialEdited: boolean
+}
+
 export type VisualConfigValues = {
     host: string
     port: string
@@ -207,6 +237,17 @@ export type VisualConfigValues = {
     passthroughHeaders: boolean
     disableImageGeneration: 'off' | 'all' | 'chat' | 'passthrough'
     gptImage2BaseModel: string
+    videoResultAuthCacheTTL: string
+    antigravityConnectionPoolEnabled: boolean
+    antigravityConnectionPoolIdleTimeout: string
+    antigravityConnectionPoolMaxIdleConnsPerHost: string
+    codexLiveMediaRelayEnabled: boolean
+    codexLiveMediaRelayMaxSessions: string
+    codexLiveMediaRelayDisablePrivateRemoteIPs: boolean
+    codexLiveMediaRelayPublicIP: string
+    codexLiveMediaRelayUDPPortMin: string
+    codexLiveMediaRelayUDPPortMax: string
+    codexLiveMediaRelayICEServers: CodexLiveICEServerDraft[]
     authAutoRefreshWorkers: string
     requestRetry: string
     maxRetryCredentials: string
@@ -215,11 +256,14 @@ export type VisualConfigValues = {
     quotaSwitchPreviewModel: boolean
     quotaAntigravityCredits: boolean
     disableCooling: boolean
+    saveCooldownStatus: boolean
+    transientErrorCooldownSeconds: string
     quotaRefreshEnabled: boolean
     quotaRefreshInterval: string
     quotaRefreshMaxInterval: string
     routingStrategy: 'round-robin' | 'weighted-round-robin' | 'quota-aware' | 'fill-first'
     routingSessionAffinity: boolean
+    routingSessionAffinitySubagents: boolean
     routingSessionAffinityTTL: string
     wsAuth: boolean
     antigravitySensitiveWords: string[]
@@ -230,6 +274,13 @@ export type VisualConfigValues = {
     oauthExcludedModelsText: string
     oauthModelAliasText: string
     codexIdentityConfuse: boolean
+    codexOptimizeMultiAgentV2: boolean
+    codexDisableCloaking: boolean
+    codexOrphanDelegationCompatibility: boolean
+    claudeDisableCloakMode: boolean
+    claudeCodeDisableCloakingModelList: boolean
+    claudeModelLevelCooling: boolean
+    xaiInjectXSearch: boolean
     codexHeaderDefaultsText: string
     claudeHeaderDefaultsText: string
     payloadDefaultRules: PayloadRule[]
@@ -260,7 +311,7 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     rmTrustedProxies: [],
     rmSecretKey: '',
     rmDisableControlPanel: false,
-    rmAutoUpdatePanel: false,
+    rmAutoUpdatePanel: true,
     rmAutoUpdateCPA: false,
     rmAutoCheckUpdate: false,
     rmCheckInterval: '',
@@ -300,6 +351,17 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     passthroughHeaders: false,
     disableImageGeneration: 'off',
     gptImage2BaseModel: '',
+    videoResultAuthCacheTTL: '',
+    antigravityConnectionPoolEnabled: false,
+    antigravityConnectionPoolIdleTimeout: '',
+    antigravityConnectionPoolMaxIdleConnsPerHost: '',
+    codexLiveMediaRelayEnabled: false,
+    codexLiveMediaRelayMaxSessions: '',
+    codexLiveMediaRelayDisablePrivateRemoteIPs: false,
+    codexLiveMediaRelayPublicIP: '',
+    codexLiveMediaRelayUDPPortMin: '',
+    codexLiveMediaRelayUDPPortMax: '',
+    codexLiveMediaRelayICEServers: [],
     authAutoRefreshWorkers: '',
     requestRetry: '',
     maxRetryCredentials: '',
@@ -308,11 +370,14 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     quotaSwitchPreviewModel: false,
     quotaAntigravityCredits: false,
     disableCooling: false,
+    saveCooldownStatus: false,
+    transientErrorCooldownSeconds: '',
     quotaRefreshEnabled: false,
     quotaRefreshInterval: '',
     quotaRefreshMaxInterval: '',
     routingStrategy: 'round-robin',
     routingSessionAffinity: false,
+    routingSessionAffinitySubagents: true,
     routingSessionAffinityTTL: '',
     wsAuth: true,
     antigravitySensitiveWords: [],
@@ -323,6 +388,13 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     oauthExcludedModelsText: '',
     oauthModelAliasText: '',
     codexIdentityConfuse: false,
+    codexOptimizeMultiAgentV2: false,
+    codexDisableCloaking: false,
+    codexOrphanDelegationCompatibility: false,
+    claudeDisableCloakMode: false,
+    claudeCodeDisableCloakingModelList: false,
+    claudeModelLevelCooling: false,
+    xaiInjectXSearch: false,
     codexHeaderDefaultsText: '',
     claudeHeaderDefaultsText: '',
     payloadDefaultRules: [],

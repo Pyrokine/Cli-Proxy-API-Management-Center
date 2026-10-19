@@ -24,6 +24,16 @@ describe('configuration draft and concurrent YAML edits', () => {
         expect(output).toContain('# nested-comment')
     })
 
+    test('renaming and changing the same parameter value rejects a competing server edit', () => {
+        const source = 'payload:\n  default:\n    - models: [one]\n      params: {item: {old: true}}\n'
+        const latest = source.replace('old: true', 'old: false')
+        expect(() => edit(source, (values) => {
+            const entry = values.payloadDefaultRules[0]!.params[0]!
+            entry.path = 'renamed'
+            entry.value = '{"old":"local"}'
+        }, latest)).toThrow('Payload conflict')
+    })
+
     test('an explicit scalar tag cannot undo the selected parameter type', () => {
         const source = 'payload:\n  default:\n    - models: [one]\n      params: {n: !!str 1, untouched: !!str 3}\n'
         const output = edit(source, (values) => {

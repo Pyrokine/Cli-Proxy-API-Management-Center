@@ -1,8 +1,10 @@
 import type {
     ApiKeyModelRule,
     ApiKeyPolicyLimit,
+    CodexLiveICEServerDraft,
     PayloadFilterRule,
     PayloadModelEntry,
+    PayloadParamEntry,
     PayloadParamValueType,
     PayloadRule,
     PluginStoreAuthApplyTo,
@@ -22,25 +24,18 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function normalizeBoolean(value: unknown): boolean | undefined {
-    if (value === undefined || value === null) {
-        return undefined
-    }
     if (typeof value === 'boolean') {
         return value
     }
-    if (typeof value === 'number') {
-        return value !== 0
-    }
     if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase()
-        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) {
+        if (['y', 'Y', 'yes', 'Yes', 'YES', 'on', 'On', 'ON'].includes(value)) {
             return true
         }
-        if (['false', '0', 'no', 'n', 'off'].includes(normalized)) {
+        if (['n', 'N', 'no', 'No', 'NO', 'off', 'Off', 'OFF'].includes(value)) {
             return false
         }
     }
-    return Boolean(value)
+    return undefined
 }
 
 function parseRoutingStrategy(raw: unknown): VisualConfigValues['routingStrategy'] {
@@ -199,6 +194,36 @@ function parseStringList(raw: unknown): string[] {
     return Array.isArray(raw) ? raw.map((item) => String(item ?? '').trim()).filter(Boolean) : []
 }
 
+function parseLiveICEServers(raw: unknown): CodexLiveICEServerDraft[] {
+    if (!Array.isArray(raw)) {
+        return []
+    }
+    return raw.map((item, index) => {
+        const server = asRecord(item)
+        return {
+            id: `ice-${index}`,
+            urlsText: Array.isArray(server?.urls) ? server.urls.map((url) => String(url ?? '')).join('\n') : '',
+            username: '',
+            usernameConfigured: typeof server?.username === 'string' && server.username.length > 0,
+            usernameEdited: false,
+            credential: '',
+            credentialConfigured: typeof server?.credential === 'string' && server.credential.length > 0,
+            credentialEdited: false,
+        }
+    })
+}
+
+function areLiveICEServersEqual(left: CodexLiveICEServerDraft[], right: CodexLiveICEServerDraft[]): boolean {
+    return left.length === right.length && left.every((server, index) => {
+        const other = right[index]
+        return server.id === other.id && server.urlsText === other.urlsText &&
+               server.username === other.username && server.usernameConfigured === other.usernameConfigured &&
+               server.usernameEdited === other.usernameEdited && server.credential === other.credential &&
+               server.credentialConfigured === other.credentialConfigured &&
+               server.credentialEdited === other.credentialEdited
+    })
+}
+
 function setStringListInDoc(doc: YamlDocument, path: YamlPath, value: string[]): void {
     const list = value.map((item) => item.trim()).filter(Boolean)
     if (list.length > 0) {
@@ -318,7 +343,11 @@ function arePayloadModelEntriesEqual(left: PayloadRule['models'], right: Payload
         if (!current || !next) {
             return false
         }
-        if (current.id !== next.id || current.name !== next.name || current.protocol !== next.protocol) {
+        if (
+            current.id !== next.id || current.name !== next.name || current.protocol !== next.protocol ||
+            !arePayloadParamEntriesEqual(current.match ?? [], next.match ?? []) ||
+            !arePayloadParamEntriesEqual(current.notMatch ?? [], next.notMatch ?? [])
+        ) {
             return false
         }
     }
@@ -530,7 +559,8 @@ function areMergeValuesEqual(left: unknown, right: unknown): boolean {
     const leftKeys  = Object.keys(leftRecord)
     const rightKeys = Object.keys(rightRecord)
     return leftKeys.length === rightKeys.length &&
-           leftKeys.every((key) => key in rightRecord && areMergeValuesEqual(leftRecord[key], rightRecord[key]))
+           leftKeys.every((key) => Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+               areMergeValuesEqual(leftRecord[key], rightRecord[key]))
 }
 
 function mergeVisualChanges(
@@ -549,17 +579,25 @@ function mergeVisualChanges(
         return { value: next, baseline }
     }
 
-    const value: Record<string, unknown>          = {}
-    const mergedBaseline: Record<string, unknown> = {}
+    const value: Record<string, unknown>          = Object.create(null)
+    const mergedBaseline: Record<string, unknown> = Object.create(null)
     const keys                                    = new Set([
                                                                 ...Object.keys(currentRecord),
                                                                 ...Object.keys(nextRecord),
                                                                 ...Object.keys(baselineRecord),
                                                             ])
     for (const key of keys) {
-        const merged        = mergeVisualChanges(currentRecord[key], nextRecord[key], baselineRecord[key])
-        value[key]          = merged.value
-        mergedBaseline[key] = merged.baseline
+        const merged = mergeVisualChanges(
+            Object.prototype.hasOwnProperty.call(currentRecord, key) ? currentRecord[key] : undefined,
+            Object.prototype.hasOwnProperty.call(nextRecord, key) ? nextRecord[key] : undefined,
+            Object.prototype.hasOwnProperty.call(baselineRecord, key) ? baselineRecord[key] : undefined,
+        )
+        if (merged.value !== undefined) {
+            value[key] = merged.value
+        }
+        if (merged.baseline !== undefined) {
+            mergedBaseline[key] = merged.baseline
+        }
     }
     return { value, baseline: mergedBaseline }
 }
@@ -618,6 +656,17 @@ export function areVisualConfigValuesEqual(left: VisualConfigValues, right: Visu
         left.passthroughHeaders === right.passthroughHeaders &&
         left.disableImageGeneration === right.disableImageGeneration &&
         left.gptImage2BaseModel === right.gptImage2BaseModel &&
+        left.videoResultAuthCacheTTL === right.videoResultAuthCacheTTL &&
+        left.antigravityConnectionPoolEnabled === right.antigravityConnectionPoolEnabled &&
+        left.antigravityConnectionPoolIdleTimeout === right.antigravityConnectionPoolIdleTimeout &&
+        left.antigravityConnectionPoolMaxIdleConnsPerHost === right.antigravityConnectionPoolMaxIdleConnsPerHost &&
+        left.codexLiveMediaRelayEnabled === right.codexLiveMediaRelayEnabled &&
+        left.codexLiveMediaRelayMaxSessions === right.codexLiveMediaRelayMaxSessions &&
+        left.codexLiveMediaRelayDisablePrivateRemoteIPs === right.codexLiveMediaRelayDisablePrivateRemoteIPs &&
+        left.codexLiveMediaRelayPublicIP === right.codexLiveMediaRelayPublicIP &&
+        left.codexLiveMediaRelayUDPPortMin === right.codexLiveMediaRelayUDPPortMin &&
+        left.codexLiveMediaRelayUDPPortMax === right.codexLiveMediaRelayUDPPortMax &&
+        areLiveICEServersEqual(left.codexLiveMediaRelayICEServers, right.codexLiveMediaRelayICEServers) &&
         left.authAutoRefreshWorkers === right.authAutoRefreshWorkers &&
         left.requestRetry === right.requestRetry &&
         left.maxRetryCredentials === right.maxRetryCredentials &&
@@ -626,11 +675,14 @@ export function areVisualConfigValuesEqual(left: VisualConfigValues, right: Visu
         left.quotaSwitchPreviewModel === right.quotaSwitchPreviewModel &&
         left.quotaAntigravityCredits === right.quotaAntigravityCredits &&
         left.disableCooling === right.disableCooling &&
+        left.saveCooldownStatus === right.saveCooldownStatus &&
+        left.transientErrorCooldownSeconds === right.transientErrorCooldownSeconds &&
         left.quotaRefreshEnabled === right.quotaRefreshEnabled &&
         left.quotaRefreshInterval === right.quotaRefreshInterval &&
         left.quotaRefreshMaxInterval === right.quotaRefreshMaxInterval &&
         left.routingStrategy === right.routingStrategy &&
         left.routingSessionAffinity === right.routingSessionAffinity &&
+        left.routingSessionAffinitySubagents === right.routingSessionAffinitySubagents &&
         left.routingSessionAffinityTTL === right.routingSessionAffinityTTL &&
         left.wsAuth === right.wsAuth &&
         areStringArraysEqual(left.antigravitySensitiveWords, right.antigravitySensitiveWords) &&
@@ -641,6 +693,13 @@ export function areVisualConfigValuesEqual(left: VisualConfigValues, right: Visu
         left.oauthExcludedModelsText === right.oauthExcludedModelsText &&
         left.oauthModelAliasText === right.oauthModelAliasText &&
         left.codexIdentityConfuse === right.codexIdentityConfuse &&
+        left.codexOptimizeMultiAgentV2 === right.codexOptimizeMultiAgentV2 &&
+        left.codexDisableCloaking === right.codexDisableCloaking &&
+        left.codexOrphanDelegationCompatibility === right.codexOrphanDelegationCompatibility &&
+        left.claudeDisableCloakMode === right.claudeDisableCloakMode &&
+        left.claudeCodeDisableCloakingModelList === right.claudeCodeDisableCloakingModelList &&
+        left.claudeModelLevelCooling === right.claudeModelLevelCooling &&
+        left.xaiInjectXSearch === right.xaiInjectXSearch &&
         left.codexHeaderDefaultsText === right.codexHeaderDefaultsText &&
         left.claudeHeaderDefaultsText === right.claudeHeaderDefaultsText &&
         left.streaming.keepaliveSeconds === right.streaming.keepaliveSeconds &&
@@ -691,11 +750,11 @@ function parseApiKeyPolicyLimits(raw: unknown): ApiKeyPolicyLimit[] {
 }
 
 function parseApiKeyRules(raw: unknown): Record<string, ApiKeyModelRule> {
+    const rules: Record<string, ApiKeyModelRule> = Object.create(null)
     const record = asRecord(raw)
     if (!record) {
-        return {}
+        return rules
     }
-    const rules: Record<string, ApiKeyModelRule> = {}
     for (const [apiKey, rawRule] of Object.entries(record)) {
         const key  = apiKey.trim()
         const rule = asRecord(rawRule)
@@ -738,7 +797,7 @@ function serializeApiKeyRuleInteger(raw: string): number | bigint | string {
 }
 
 function serializeApiKeyRulesForYaml(rules: Record<string, ApiKeyModelRule>): Record<string, unknown> {
-    const out: Record<string, unknown> = {}
+    const out: Record<string, unknown> = Object.create(null)
     for (const [apiKey, rule] of Object.entries(rules)) {
         const key = apiKey.trim()
         if (!key || isApiKeyModelRuleEmpty(rule)) {
@@ -903,6 +962,30 @@ function serializePluginStoreAuthForYaml(rules: PluginStoreAuthRule[]): Array<Re
         .filter((rule): rule is Record<string, unknown> => Boolean(rule))
 }
 
+function serializePayloadParamValue(param: PayloadParamEntry): unknown {
+    if (param.valueType === 'number') {
+        const value = Number(param.value)
+        if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+            throw new Error('Invalid payload number: ' + param.path)
+        }
+        return value
+    }
+    if (param.valueType === 'boolean') {
+        if (param.value !== 'true' && param.value !== 'false') {
+            throw new Error('Invalid payload boolean: ' + param.path)
+        }
+        return param.value === 'true'
+    }
+    if (param.valueType === 'json') {
+        try {
+            return JSON.parse(param.value)
+        } catch {
+            throw new Error('Invalid payload JSON: ' + param.path)
+        }
+    }
+    return param.value
+}
+
 function parsePayloadParamValue(raw: unknown): { valueType: PayloadParamValueType; value: string } {
     if (typeof raw === 'number' || typeof raw === 'bigint') {
         return { valueType: 'number', value: String(raw) }
@@ -931,6 +1014,28 @@ function parsePayloadProtocol(raw: unknown): string | undefined {
     return raw.trim() ? raw : undefined
 }
 
+const PAYLOAD_CONDITIONS = {match: 'match', notMatch: 'not-match'} as const
+
+function parsePayloadConditions(raw: unknown, id: string): PayloadParamEntry[] {
+    if (raw === null) {
+        return []
+    }
+    if (!Array.isArray(raw)) {
+        throw new Error('Invalid payload condition sequence')
+    }
+    return raw.flatMap((item, index) => {
+        const record = asRecord(item)
+        if (!record) {
+            throw new Error('Invalid payload condition map')
+        }
+        return Object.entries(record).map(([path, value], fieldIndex) => ({
+            id: `${id}-${index}-${fieldIndex}`,
+            path,
+            ...parsePayloadParamValue(value),
+        }))
+    })
+}
+
 function parsePayloadModel(raw: unknown, id: string): PayloadModelEntry {
     const record  = asRecord(raw)
     const nameRaw = typeof raw === 'string' ? raw : (record?.name ?? record?.id ?? '')
@@ -942,12 +1047,17 @@ function parsePayloadModel(raw: unknown, id: string): PayloadModelEntry {
     const extra = { ...record }
     delete extra.name
     delete extra.protocol
-    return {
-        id,
-        name,
-        protocol: parsePayloadProtocol(record.protocol),
-        ...(Object.keys(extra).length > 0 ? { extra } : {}),
+    const model: PayloadModelEntry = {id, name, protocol: parsePayloadProtocol(record.protocol)}
+    for (const [property, key] of Object.entries(PAYLOAD_CONDITIONS) as Array<[keyof typeof PAYLOAD_CONDITIONS, string]>) {
+        if (record[key] !== undefined) {
+            model[property] = parsePayloadConditions(record[key], `${id}-${key}`)
+            delete extra[key]
+        }
     }
+    if (Object.keys(extra).length > 0) {
+        model.extra = extra
+    }
+    return model
 }
 
 function serializePayloadModel(model: PayloadModelEntry): Record<string, unknown> {
@@ -956,6 +1066,19 @@ function serializePayloadModel(model: PayloadModelEntry): Record<string, unknown
         output.protocol = model.protocol
     } else {
         delete output.protocol
+    }
+    for (const [property, key] of Object.entries(PAYLOAD_CONDITIONS) as Array<[keyof typeof PAYLOAD_CONDITIONS, string]>) {
+        const entries = model[property]
+        if (entries !== undefined) {
+            const conditions = entries.filter((entry) => entry.path.trim()).map((entry) => ({
+                [entry.path]: serializePayloadParamValue(entry),
+            }))
+            if (conditions.length) {
+                output[key] = conditions
+            } else {
+                delete output[key]
+            }
+        }
     }
     return output
 }
@@ -1096,6 +1219,7 @@ function resolveApiKeysStorage(parsed: Record<string, unknown>): { text: string;
                     ? 'object'
                     : 'string',
                 originalEntries: providerEntries,
+                legacyEntries,
                 syncLegacy: legacyEntries.length > 0,
             },
         }
@@ -1107,6 +1231,7 @@ function resolveApiKeysStorage(parsed: Record<string, unknown>): { text: string;
             source: 'legacy',
             entryMode: legacyEntries.some((entry) => Boolean(asRecord(entry))) ? 'object' : 'string',
             originalEntries: legacyEntries,
+            legacyEntries,
             syncLegacy: false,
         },
     }
@@ -1165,23 +1290,7 @@ function serializePayloadRulesForYaml(rules: PayloadRule[]): Array<Record<string
                 if (!param.path?.trim()) {
                     continue
                 }
-                let value: unknown = param.value
-                if (param.valueType === 'number') {
-                    const num = Number(param.value)
-                    if (!Number.isFinite(num) || (Number.isInteger(num) && !Number.isSafeInteger(num))) {
-                        throw new Error('Invalid payload number: ' + param.path)
-                    }
-                    value = num
-                } else if (param.valueType === 'boolean') {
-                    value = param.value === 'true'
-                } else if (param.valueType === 'json') {
-                    try {
-                        value = JSON.parse(param.value)
-                    } catch {
-                        value = param.value
-                    }
-                }
-                params[param.path.trim()] = value
+                params[param.path.trim()] = serializePayloadParamValue(param)
             }
 
             return { models, params }
@@ -1227,6 +1336,7 @@ export type ApiKeysStorageMetadata = {
     providerListKey?: 'api-keys' | 'api-key-entries'
     entryMode: ApiKeysEntryMode
     originalEntries: unknown[]
+    legacyEntries: unknown[]
     syncLegacy: boolean
 }
 
@@ -1234,6 +1344,7 @@ export const DEFAULT_API_KEYS_STORAGE_METADATA: ApiKeysStorageMetadata = {
     source: 'legacy',
     entryMode: 'string',
     originalEntries: [],
+    legacyEntries: [],
     syncLegacy: false,
 }
 
@@ -1330,6 +1441,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
     const quotaRefresh                                        = asRecord(parsed['quota-refresh'])
     const plugins                                             = asRecord(parsed.plugins)
     const antigravity                                         = asRecord(parsed.antigravity)
+    const antigravityPool                                     = asRecord(antigravity?.['connection-pool'])
+    const codexRelay                                          = asRecord(asRecord(parsed.codex)?.['live-media-relay'])
     const devin                                               = asRecord(parsed.devin)
     const routing                                             = asRecord(parsed.routing)
     const payload                                             = asRecord(parsed.payload)
@@ -1414,6 +1527,18 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         gptImage2BaseModel: typeof parsed['gpt-image-2-base-model'] === 'string' ?
                             parsed['gpt-image-2-base-model'] :
                             '',
+        videoResultAuthCacheTTL: typeof parsed['video-result-auth-cache-ttl'] === 'string'
+                                 ? parsed['video-result-auth-cache-ttl'] : '',
+        antigravityConnectionPoolEnabled: normalizeBoolean(antigravityPool?.enabled) ?? false,
+        antigravityConnectionPoolIdleTimeout: String(antigravityPool?.['idle-conn-timeout'] ?? ''),
+        antigravityConnectionPoolMaxIdleConnsPerHost: String(antigravityPool?.['max-idle-conns-per-host'] ?? ''),
+        codexLiveMediaRelayEnabled: normalizeBoolean(codexRelay?.enabled) ?? false,
+        codexLiveMediaRelayMaxSessions: String(codexRelay?.['max-sessions'] ?? ''),
+        codexLiveMediaRelayDisablePrivateRemoteIPs: normalizeBoolean(codexRelay?.['disable-private-remote-ips']) ?? false,
+        codexLiveMediaRelayPublicIP: typeof codexRelay?.['public-ip'] === 'string' ? codexRelay['public-ip'] : '',
+        codexLiveMediaRelayUDPPortMin: String(codexRelay?.['udp-port-min'] ?? ''),
+        codexLiveMediaRelayUDPPortMax: String(codexRelay?.['udp-port-max'] ?? ''),
+        codexLiveMediaRelayICEServers: parseLiveICEServers(codexRelay?.['ice-servers']),
         authAutoRefreshWorkers: String(parsed['auth-auto-refresh-workers'] ?? ''),
         requestRetry: String(parsed['request-retry'] ?? ''),
         maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
@@ -1429,6 +1554,15 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         oauthExcludedModelsText: yamlBlockToText(parsed['oauth-excluded-models'] ?? {}),
         oauthModelAliasText: yamlBlockToText(parsed['oauth-model-alias'] ?? {}),
         codexIdentityConfuse: normalizeBoolean(asRecord(parsed.codex)?.['identity-confuse']) ?? false,
+        codexOptimizeMultiAgentV2: normalizeBoolean(asRecord(parsed.codex)?.['optimize-multi-agent-v2']) ?? false,
+        codexDisableCloaking: normalizeBoolean(asRecord(parsed.codex)?.['disable-codex-cloaking']) ?? false,
+        codexOrphanDelegationCompatibility: normalizeBoolean(
+            asRecord(parsed.codex)?.['orphan-delegation-compatibility']) ?? false,
+        claudeDisableCloakMode: normalizeBoolean(parsed['disable-claude-cloak-mode']) ?? false,
+        claudeCodeDisableCloakingModelList: normalizeBoolean(
+            asRecord(parsed['claude-code'])?.['disable-cloaking-model-list']) ?? false,
+        claudeModelLevelCooling: normalizeBoolean(asRecord(parsed.claude)?.['model-level-cooling']) ?? false,
+        xaiInjectXSearch: normalizeBoolean(asRecord(parsed.xai)?.['inject-x-search']) ?? false,
         codexHeaderDefaultsText: yamlBlockToText(parsed['codex-header-defaults'] ?? {}),
         claudeHeaderDefaultsText: yamlBlockToText(parsed['claude-header-defaults'] ?? {}),
 
@@ -1436,6 +1570,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         quotaSwitchPreviewModel: normalizeBoolean(quotaExceeded?.['switch-preview-model']) ?? false,
         quotaAntigravityCredits: normalizeBoolean(quotaExceeded?.['antigravity-credits']) ?? false,
         disableCooling: normalizeBoolean(parsed['disable-cooling']) ?? false,
+        saveCooldownStatus: normalizeBoolean(parsed['save-cooldown-status']) ?? false,
+        transientErrorCooldownSeconds: String(parsed['transient-error-cooldown-seconds'] ?? ''),
         quotaRefreshEnabled: normalizeBoolean(quotaRefresh?.enabled) ?? false,
         quotaRefreshInterval: String(quotaRefresh?.interval ?? ''),
         quotaRefreshMaxInterval: String(quotaRefresh?.['max-interval'] ?? ''),
@@ -1445,6 +1581,7 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
             normalizeBoolean(
             routing?.['session-affinity'] ?? routing?.sessionAffinity ?? routing?.['sessionAffinity'],
             ) ?? false,
+        routingSessionAffinitySubagents: normalizeBoolean(routing?.['session-affinity-subagents']) ?? true,
         routingSessionAffinityTTL:
             typeof routing?.['session-affinity-ttl'] === 'string'
             ? routing['session-affinity-ttl']
@@ -1473,7 +1610,18 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
             const node = exactDocument.getIn(['payload', section, index], true)
             rule.sourceYaml = stringifyYaml(node, {verifyAliasOrder: false})
             rule.models.forEach((model, modelIndex) => {
-                model.sourceYaml = stringifyYaml(exactDocument.getIn(['payload', section, index, 'models', modelIndex], true), {verifyAliasOrder: false})
+                const original = exactDocument.getIn(['payload', section, index, 'models', modelIndex], true)
+                model.sourceYaml = stringifyYaml(original, {verifyAliasOrder: false})
+                const modelNode = isAlias(original) ? original.resolve(exactDocument) : original
+                for (const [property, key] of Object.entries(PAYLOAD_CONDITIONS) as Array<[keyof typeof PAYLOAD_CONDITIONS, string]>) {
+                    const sequence = isMap(modelNode) ? modelNode.get(key, true) : undefined
+                    if (isSeq(sequence)) {
+                        const nodes = payloadConditionNodes(exactDocument, sequence)
+                        model[property]?.forEach((entry, entryIndex) => {
+                            entry.sourceYaml = stringifyYaml(nodes[entryIndex], {verifyAliasOrder: false})
+                        })
+                    }
+                }
             })
         })
     }
@@ -1507,7 +1655,12 @@ export const VISUAL_INTEGER_FIELDS: Record<string, { path: string[]; minimum: nu
     requestRetry: { path: ['request-retry'], minimum: 0, maximum: 2147483647 },
     maxRetryCredentials: { path: ['max-retry-credentials'], minimum: Number.MIN_SAFE_INTEGER, maximum: 2147483647 },
     maxRetryInterval: { path: ['max-retry-interval'], minimum: -9223372036, maximum: 9223372036 },
+    transientErrorCooldownSeconds: { path: ['transient-error-cooldown-seconds'], minimum: Number.MIN_SAFE_INTEGER, maximum: 9223372036 },
     authAutoRefreshWorkers: { path: ['auth-auto-refresh-workers'], minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+    antigravityConnectionPoolMaxIdleConnsPerHost: { path: ['antigravity', 'connection-pool', 'max-idle-conns-per-host'], minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+    codexLiveMediaRelayMaxSessions: { path: ['codex', 'live-media-relay', 'max-sessions'], minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+    codexLiveMediaRelayUDPPortMin: { path: ['codex', 'live-media-relay', 'udp-port-min'], minimum: 0, maximum: 65535 },
+    codexLiveMediaRelayUDPPortMax: { path: ['codex', 'live-media-relay', 'udp-port-max'], minimum: 0, maximum: 65535 },
     quotaRefreshInterval: { path: ['quota-refresh', 'interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     quotaRefreshMaxInterval: { path: ['quota-refresh', 'max-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     'streaming.keepaliveSeconds': { path: ['streaming', 'keepalive-seconds'], minimum: Number.MIN_SAFE_INTEGER, maximum: 9223372036 },
@@ -1532,8 +1685,37 @@ const PAYLOAD_FIELDS = {
 
 type EditablePayloadRule = PayloadRule | PayloadFilterRule
 
+function payloadConditionNodes(doc: YamlDocument, sequence: YAMLSeq): YAMLMap[] {
+    return sequence.items.flatMap((item, index) => {
+        const original = isAlias(item) ? item.resolve(doc) : item
+        if (!isMap(original)) {
+            throw new Error('Invalid payload condition map')
+        }
+        return Object.keys(original.toJS(doc)).map((key) => {
+            const node = original.clone() as YAMLMap
+            const pairIndex = node.items.findIndex((pair) => isScalar(pair.key) && String(pair.key.value) === key)
+            if (pairIndex < 0) {
+                throw new Error('Invalid payload condition path')
+            }
+            const first = pairIndex === 0
+            node.commentBefore = first
+                ? [index === 0 ? sequence.commentBefore : undefined, node.commentBefore].filter(Boolean).join('\n') || undefined
+                : undefined
+            node.comment = pairIndex === node.items.length - 1 ? node.comment : undefined
+            node.spaceBefore = first ? node.spaceBefore : undefined
+            node.anchor = undefined
+            node.items = [node.items[pairIndex]!]
+            return node
+        })
+    })
+}
+
 function payloadModelIdentity(model: PayloadModelEntry): unknown {
-    return { name: model.name, protocol: model.protocol ?? '', extra: model.extra ?? {} }
+    const conditions = (entries: PayloadParamEntry[] | undefined) => (entries ?? []).map(({path, valueType, value}) => ({path, valueType, value}))
+    return {
+        name: model.name, protocol: model.protocol ?? '', extra: model.extra ?? {},
+        match: conditions(model.match), notMatch: conditions(model.notMatch),
+    }
 }
 
 function payloadRuleIdentity(rule: EditablePayloadRule): unknown {
@@ -1649,6 +1831,61 @@ function syncPayloadSequence<T extends { id: string; sourceYaml?: string }>(
     sequence.items = result
 }
 
+function syncPayloadConditions(
+    doc: YamlDocument,
+    model: YAMLMap,
+    key: string,
+    baseline: PayloadParamEntry[],
+    desired: PayloadParamEntry[],
+    section: string,
+): void {
+    if (arePayloadParamEntriesEqual(baseline, desired)) {
+        return
+    }
+    const previous = model.get(key, true)
+    const sequence = isSeq(previous) ? previous : doc.createNode([])
+    if (!isSeq(previous) && baseline.length) {
+        payloadConflict(section)
+    }
+    const nodes = payloadConditionNodes(doc, sequence)
+    const current = parsePayloadConditions(sequence.toJS(doc), 'current').map((entry, index) => ({
+        ...entry, sourceYaml: stringifyYaml(nodes[index], {verifyAliasOrder: false}),
+    }))
+    sequence.items = nodes
+    sequence.commentBefore = undefined
+    syncPayloadSequence(sequence, current, baseline, desired.filter((entry) => entry.path.trim()),
+        ({path, valueType, value}) => ({path, valueType, value}),
+        (node, prior, entry) => {
+            if (!isMap(node) || !prior) {
+                return doc.createNode({[entry.path]: serializePayloadParamValue(entry)})
+            }
+            const pair = node.items[0]!
+            if (isScalar(pair.key)) {
+                pair.key.value = entry.path
+            }
+            if (prior.valueType !== entry.valueType || prior.value !== entry.value) {
+                const value = serializePayloadParamValue(entry)
+                if (isScalar(pair.value) && (value === null || typeof value !== 'object')) {
+                    pair.value.value = value
+                    pair.value.tag = undefined
+                    pair.value.format = undefined
+                } else {
+                    const replacement = doc.createNode(value)
+                    const previousValue = pair.value as Node | null
+                    replacement.comment = previousValue?.comment
+                    replacement.commentBefore = previousValue?.commentBefore
+                    pair.value = replacement
+                }
+            }
+            return node
+        }, section)
+    if (sequence.items.length) {
+        model.set(key, sequence)
+    } else {
+        model.delete(key)
+    }
+}
+
 function syncPayloadModels(doc: YamlDocument, node: Node, baseline: PayloadModelEntry[], desired: PayloadModelEntry[], section: string): void {
     if (arePayloadModelEntriesEqual(baseline, desired)) {
         return
@@ -1684,6 +1921,16 @@ function syncPayloadModels(doc: YamlDocument, node: Node, baseline: PayloadModel
         if (!existing || !prior) {
             return doc.createNode(serializePayloadModel(model))
         }
+        if (!isMap(existing) && (
+            model.protocol !== prior.protocol ||
+            !arePayloadParamEntriesEqual(prior.match ?? [], model.match ?? []) ||
+            !arePayloadParamEntriesEqual(prior.notMatch ?? [], model.notMatch ?? [])
+        )) {
+            const replacement = doc.createNode(serializePayloadModel(model))
+            replacement.comment = existing.comment
+            replacement.commentBefore = existing.commentBefore
+            return replacement
+        }
         if (model.name !== prior.name) {
             if (isScalar(existing)) {
                 existing.value = model.name
@@ -1691,24 +1938,30 @@ function syncPayloadModels(doc: YamlDocument, node: Node, baseline: PayloadModel
                 existing.set(existing.has('name') ? 'name' : existing.has('id') ? 'id' : 'name', model.name)
             }
         }
-        if (model.protocol !== prior.protocol) {
-            if (!isMap(existing)) {
-                const replacement = doc.createNode(serializePayloadModel(model))
-                replacement.comment = existing.comment
-                replacement.commentBefore = existing.commentBefore
-                return replacement
+        if (isMap(existing)) {
+            if (model.protocol !== prior.protocol) {
+                if (model.protocol) {
+                    existing.set('protocol', model.protocol)
+                } else {
+                    existing.delete('protocol')
+                }
             }
-            if (model.protocol) {
-                existing.set('protocol', model.protocol)
-            } else {
-                existing.delete('protocol')
+            for (const [property, key] of Object.entries(PAYLOAD_CONDITIONS) as Array<[keyof typeof PAYLOAD_CONDITIONS, string]>) {
+                syncPayloadConditions(doc, existing, key, prior[property] ?? [], model[property] ?? [], section)
             }
         }
         return existing
     }, section)
 }
 
-function syncPayloadRules(doc: YamlDocument, section: string, current: EditablePayloadRule[], baseline: EditablePayloadRule[], desired: EditablePayloadRule[]): void {
+function syncPayloadRules(
+    doc: YamlDocument,
+    section: string,
+    current: EditablePayloadRule[],
+    baseline: EditablePayloadRule[],
+    desired: EditablePayloadRule[],
+    baselineSequence?: YAMLSeq,
+): void {
     ensureMapInDoc(doc, ['payload'])
     let sequence = doc.getIn(['payload', section], true)
     if (!isSeq(sequence)) {
@@ -1720,6 +1973,25 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
     }
     const priorIds = new Set(baseline.map((rule) => rule.id))
     const rules = desired.filter((rule) => priorIds.has(rule.id) || rule.models.some((model) => model.name.trim()))
+    if (baselineSequence) {
+        const retainedIds = new Set(rules.map((rule) => rule.id))
+        const nodes = (sequence as YAMLSeq).items as Node[]
+        for (const [index, prior] of baseline.entries()) {
+            if (retainedIds.has(prior.id)) {
+                continue
+            }
+            const original = baselineSequence.items[index] as Node | undefined
+            if (!original) {
+                payloadConflict(section)
+            }
+            const matches = current.flatMap((entry, currentIndex) =>
+                areMergeValuesEqual(payloadRuleIdentity(entry), payloadRuleIdentity(prior)) ? [currentIndex] : [])
+            if (matches.length && matches.filter((currentIndex) =>
+                areMergeValuesEqual(nodes[currentIndex]?.toJSON(), original.toJSON())).length !== 1) {
+                payloadConflict(section)
+            }
+        }
+    }
     const serialize = (rule: EditablePayloadRule) => section === 'filter'
         ? serializePayloadFilterRulesForYaml([rule as PayloadFilterRule])[0]!
         : section.endsWith('-raw')
@@ -1740,10 +2012,17 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
             const previous = existing.get('params', true)
             const params = isSeq(previous) ? previous : doc.createNode([])
             const priorParams = (prior.params as string[]).map((value, index) => ({id: `prior-${index}`, value}))
+            const currentParams = params.items.map((item, index) => ({id: `current-${index}`, value: String((item as Node)?.toJSON())}))
+            const added = (rule.params as string[]).filter((value) => !priorParams.some((entry) => entry.value === value))
             for (const value of new Set(prior.params as string[])) {
                 const count = priorParams.filter((entry) => entry.value === value).length
                 const retained = (rule.params as string[]).filter((entry) => entry === value).length
                 if (count > 1 && retained > 0 && retained !== count) {
+                    payloadConflict(section)
+                }
+                const current = currentParams.filter((entry) => entry.value === value).length
+                if (retained < count && current < count && added.some((entry) =>
+                    !currentParams.some((param) => param.value === entry))) {
                     payloadConflict(section)
                 }
             }
@@ -1752,7 +2031,6 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
                 const match = remaining.findIndex((entry) => entry.value === value)
                 return match < 0 ? {id: `added-${index}`, value} : remaining.splice(match, 1)[0]!
             })
-            const currentParams = params.items.map((item, index) => ({id: `current-${index}`, value: String((item as Node)?.toJSON())}))
             syncPayloadSequence(params, currentParams, priorParams, next, (entry) => entry.value,
                 (node, _prior, entry) => node ?? doc.createNode(entry.value), section)
             if (!isSeq(previous)) {
@@ -1762,6 +2040,11 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
         }
         const previousParams = existing.get('params', true)
         const params: YAMLMap = isMap(previousParams) ? previousParams : doc.createNode({})
+        const firstKey = params.items[0]?.key
+        if (params.commentBefore && isScalar(firstKey)) {
+            firstKey.commentBefore = [params.commentBefore, firstKey.commentBefore].filter(Boolean).join('\n')
+            params.commentBefore = undefined
+        }
         if (!isMap(previousParams)) {
             existing.set('params', params)
         }
@@ -1774,8 +2057,15 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
             payloadConflict(section)
         }
         const pairs = new Map(priorParams.map((entry) => [entry.id, params.items.find((pair) => isScalar(pair.key) && String(pair.key.value) === entry.path.trim())]))
+        const currentValue = (pair: YAMLMap['items'][number] | undefined) => section.endsWith('-raw')
+            ? {valueType: 'json', value: parseRawPayloadParamValue((pair?.value as Node | null)?.toJSON())}
+            : parsePayloadParamValue((pair?.value as Node | null)?.toJSON())
         for (const entry of priorParams) {
             if (!nextIds.has(entry.id)) {
+                const pair = pairs.get(entry.id)
+                if (pair && !areMergeValuesEqual(currentValue(pair), {valueType: entry.valueType, value: entry.value})) {
+                    payloadConflict(section)
+                }
                 params.delete(entry.path.trim())
             }
         }
@@ -1786,6 +2076,12 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
             }
             const pair = pairs.get(entry.id)
             const key = entry.path.trim()
+            if (pair && previous &&
+                (previous.valueType !== entry.valueType || previous.value !== entry.value) &&
+                !areMergeValuesEqual(currentValue(pair), {valueType: previous.valueType, value: previous.value}) &&
+                !areMergeValuesEqual(currentValue(pair), {valueType: entry.valueType, value: entry.value})) {
+                payloadConflict(section)
+            }
             if (pair) {
                 if (previous?.path.trim() !== key && params.has(key)) {
                     payloadConflict(section)
@@ -1828,11 +2124,101 @@ function syncPayloadRules(doc: YamlDocument, section: string, current: EditableP
     }
 }
 
+function syncLiveICEServers(
+    doc: YamlDocument,
+    desired: CodexLiveICEServerDraft[],
+    baseline: CodexLiveICEServerDraft[],
+    baselineDoc?: YamlDocument,
+): void {
+    const path = ['codex', 'live-media-relay', 'ice-servers']
+    const current = doc.getIn(path, true)
+    const original = baselineDoc?.getIn(path, true)
+    if (baselineDoc) {
+        if (isSeq(original) !== isSeq(current) ||
+            (isSeq(original) && isSeq(current) && (
+                original.items.length !== current.items.length ||
+                original.items.some((node, index) => {
+                    const previous = isMap(node) ? asRecord(node.toJSON()) : null
+                    const latest = isMap(current.items[index])
+                                   ? asRecord(current.items[index].toJSON()) : null
+                    return !previous || !latest ||
+                           !['urls', 'username', 'credential'].every((key) =>
+                               areMergeValuesEqual(previous[key], latest[key]))
+                })
+            ))) {
+            throw new Error('ICE server list changed on the server; reload configuration before editing it')
+        }
+    }
+    if (current !== undefined && current !== null && !isSeq(current)) {
+        throw new Error('ICE server list must be a YAML sequence; edit it in source mode')
+    }
+    if (desired.length === 0) {
+        doc.deleteIn(path)
+        deleteIfMapEmpty(doc, ['codex', 'live-media-relay'])
+        deleteIfMapEmpty(doc, ['codex'])
+        return
+    }
+    ensureMapInDoc(doc, ['codex'])
+    ensureMapInDoc(doc, ['codex', 'live-media-relay'])
+    const sequence = isSeq(current) ? current : doc.createNode([]) as YAMLSeq
+    const positions = new Map(baseline.map((row, index) => [row.id, index]))
+    const seen = new Set<string>()
+    sequence.items = desired.map((row, nextIndex) => {
+        if (seen.has(row.id)) {
+            throw new Error('Duplicate ICE server row; reload configuration before saving')
+        }
+        seen.add(row.id)
+        const index = positions.get(row.id)
+        const previous = index === undefined ? undefined : baseline[index]
+        const existing = index === undefined ? undefined : sequence.items[index]
+        if (previous && !isMap(existing)) {
+            throw new Error('ICE server row changed on the server; reload configuration before editing it')
+        }
+        const server = isMap(existing) ? existing : doc.createNode({}) as YAMLMap
+        if (!previous || previous.urlsText !== row.urlsText) {
+            const urls = row.urlsText.split(/\r?\n/).map((url) => url.trim()).filter(Boolean)
+            const oldUrls = server.get('urls', true)
+            const list = isSeq(oldUrls) ? oldUrls : doc.createNode([]) as YAMLSeq
+            const available = [...list.items]
+            list.items = urls.map((url) => {
+                const match = available.findIndex((item) => isScalar(item) && item.value === url)
+                return match < 0 ? doc.createNode(url) : available.splice(match, 1)[0]
+            })
+            server.set('urls', list)
+        }
+        if (row.usernameEdited) {
+            if (row.username) {
+                server.set('username', row.username)
+            } else {
+                server.delete('username')
+            }
+        }
+        if (row.credentialEdited) {
+            if (row.credential) {
+                server.set('credential', row.credential)
+            } else {
+                server.delete('credential')
+            }
+        }
+        if (index !== undefined && index !== nextIndex && (
+            (row.usernameConfigured && !row.usernameEdited) ||
+            (row.credentialConfigured && !row.credentialEdited) ||
+            stringifyYaml(server).includes('__CLI_PROXY_CONFIG_SECRET_') ||
+            stringifyYaml(server).includes('cpa_config_anchor_')
+        )) {
+            throw new Error('ICE server row contains saved redacted values; replace them before moving this row')
+        }
+        return server
+    })
+    doc.setIn(path, sequence)
+}
+
 export function encodeVisualConfigYaml(
     currentYaml: string,
     nextValues: VisualConfigValues,
     originalBaselineValues: VisualConfigValues,
     apiKeysStorage: ApiKeysStorageMetadata,
+    baselineYaml?: string,
 ): string {
     if (areVisualConfigValuesEqual(nextValues, originalBaselineValues)) {
         return currentYaml
@@ -1845,18 +2231,38 @@ export function encodeVisualConfigYaml(
         doc.contents = doc.createNode({})
     }
     const currentValues = decodeVisualConfigYaml(currentYaml).values
+    const baselineDoc = baselineYaml === undefined ? undefined : parseConfigDocument(baselineYaml)
     const merged = mergeVisualChanges(currentValues, nextValues, originalBaselineValues)
     const values = merged.value as VisualConfigValues
-    const baselineValues = merged.baseline as VisualConfigValues
     const dirty = (field: keyof VisualConfigValues) =>
         !areMergeValuesEqual(nextValues[field], originalBaselineValues[field])
+    let serverSnapshot: unknown
+    let baselineSnapshot: unknown
+    const shouldWriteAtomicField = (
+        field: keyof VisualConfigValues, label: string[], paths: string[][] = [label],
+    ): boolean => {
+        if (!dirty(field) || areMergeValuesEqual(nextValues[field], currentValues[field])) {
+            return false
+        }
+        const pathValue = (source: unknown, path: string[]) =>
+            path.reduce<unknown>((value, part) => asRecord(value)?.[part], source)
+        const rawChanged = baselineDoc && paths.some((path) => {
+            serverSnapshot ??= doc.toJS()
+            baselineSnapshot ??= baselineDoc.toJS()
+            return !areMergeValuesEqual(pathValue(serverSnapshot, path), pathValue(baselineSnapshot, path))
+        })
+        if (rawChanged || !areMergeValuesEqual(currentValues[field], originalBaselineValues[field])) {
+            throw new Error(`${label.join('.')} changed on the server; reload configuration before editing it`)
+        }
+        return true
+    }
     const preparePath = (path: string[]) => {
         for (let i = 1; i < path.length; i++) {
             ensureMapInDoc(doc, path.slice(0, i))
         }
     }
     const setField = (field: keyof VisualConfigValues, path: string[], kind: 'string' | 'boolean' | 'list' | 'yaml') => {
-        if (!dirty(field)) {
+        if (kind === 'list' || kind === 'yaml' ? !shouldWriteAtomicField(field, path) : !dirty(field)) {
             return
         }
         preparePath(path)
@@ -1888,6 +2294,9 @@ export function encodeVisualConfigYaml(
     setField('proxyUrl', ['proxy-url'], 'string')
     setField('disableImageGeneration', ['disable-image-generation'], 'string')
     setField('gptImage2BaseModel', ['gpt-image-2-base-model'], 'string')
+    setField('videoResultAuthCacheTTL', ['video-result-auth-cache-ttl'], 'string')
+    setField('antigravityConnectionPoolIdleTimeout', ['antigravity', 'connection-pool', 'idle-conn-timeout'], 'string')
+    setField('codexLiveMediaRelayPublicIP', ['codex', 'live-media-relay', 'public-ip'], 'string')
     setField('routingStrategy', ['routing', 'strategy'], 'string')
     setField('routingSessionAffinityTTL', ['routing', 'session-affinity-ttl'], 'string')
     setField('tlsEnable', ['tls', 'enable'], 'boolean')
@@ -1909,7 +2318,7 @@ export function encodeVisualConfigYaml(
     setField('enableGeminiCliEndpoint', ['enable-gemini-cli-endpoint'], 'boolean')
     setField('passthroughHeaders', ['passthrough-headers'], 'boolean')
     setField('wsAuth', ['ws-auth'], 'boolean')
-    if (dirty('antigravitySensitiveWords')) {
+    if (shouldWriteAtomicField('antigravitySensitiveWords', ['antigravity', 'sensitive-words'])) {
         preparePath(['antigravity', 'sensitive-words'])
         syncStringListInDoc(
             doc,
@@ -1918,7 +2327,7 @@ export function encodeVisualConfigYaml(
         )
         deleteIfMapEmpty(doc, ['antigravity'])
     }
-    if (dirty('devinSensitiveWords')) {
+    if (shouldWriteAtomicField('devinSensitiveWords', ['devin', 'sensitive-words'])) {
         preparePath(['devin', 'sensitive-words'])
         syncStringListInDoc(
             doc,
@@ -1929,10 +2338,22 @@ export function encodeVisualConfigYaml(
     }
     setField('allowQueryAuth', ['allow-query-auth'], 'boolean')
     setField('codexIdentityConfuse', ['codex', 'identity-confuse'], 'boolean')
+    setField('codexOptimizeMultiAgentV2', ['codex', 'optimize-multi-agent-v2'], 'boolean')
+    setField('codexDisableCloaking', ['codex', 'disable-codex-cloaking'], 'boolean')
+    setField('codexOrphanDelegationCompatibility', ['codex', 'orphan-delegation-compatibility'], 'boolean')
+    setField('antigravityConnectionPoolEnabled', ['antigravity', 'connection-pool', 'enabled'], 'boolean')
+    setField('codexLiveMediaRelayEnabled', ['codex', 'live-media-relay', 'enabled'], 'boolean')
+    setField('codexLiveMediaRelayDisablePrivateRemoteIPs', ['codex', 'live-media-relay', 'disable-private-remote-ips'], 'boolean')
+    setField('claudeDisableCloakMode', ['disable-claude-cloak-mode'], 'boolean')
+    setField('claudeCodeDisableCloakingModelList', ['claude-code', 'disable-cloaking-model-list'], 'boolean')
+    setField('claudeModelLevelCooling', ['claude', 'model-level-cooling'], 'boolean')
+    setField('xaiInjectXSearch', ['xai', 'inject-x-search'], 'boolean')
+    setField('routingSessionAffinitySubagents', ['routing', 'session-affinity-subagents'], 'boolean')
     setField('quotaSwitchProject', ['quota-exceeded', 'switch-project'], 'boolean')
     setField('quotaSwitchPreviewModel', ['quota-exceeded', 'switch-preview-model'], 'boolean')
     setField('quotaAntigravityCredits', ['quota-exceeded', 'antigravity-credits'], 'boolean')
     setField('disableCooling', ['disable-cooling'], 'boolean')
+    setField('saveCooldownStatus', ['save-cooldown-status'], 'boolean')
     setField('quotaRefreshEnabled', ['quota-refresh', 'enabled'], 'boolean')
     setField('routingSessionAffinity', ['routing', 'session-affinity'], 'boolean')
     setField('pluginConfigsText', ['plugins', 'configs'], 'yaml')
@@ -1943,6 +2364,10 @@ export function encodeVisualConfigYaml(
     setField('claudeHeaderDefaultsText', ['claude-header-defaults'], 'yaml')
     setField('rmTrustedProxies', ['remote-management', 'trusted-proxies'], 'list')
     setField('pluginStoreSources', ['plugins', 'store-sources'], 'list')
+    if (dirty('codexLiveMediaRelayICEServers')) {
+        syncLiveICEServers(doc, nextValues.codexLiveMediaRelayICEServers,
+            originalBaselineValues.codexLiveMediaRelayICEServers, baselineDoc)
+    }
     for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
         const next = integerFieldValue(nextValues, field)
         if (next === integerFieldValue(originalBaselineValues, field)) {
@@ -1972,54 +2397,46 @@ export function encodeVisualConfigYaml(
     if (dirty('routingSessionAffinityTTL')) {
         doc.deleteIn(['routing', 'sessionAffinityTTL'])
     }
-        if (values.apiKeysText !== baselineValues.apiKeysText) {
-            const apiKeys = parseApiKeysInputText(values.apiKeysText)
-            const entries = buildApiKeyEntries(apiKeys, apiKeysStorage)
+    if (shouldWriteAtomicField('apiKeysText', ['api-keys'], [
+        ['api-keys'], ['auth', 'providers', 'config-api-key'],
+    ])) {
+        const apiKeys = parseApiKeysInputText(values.apiKeysText)
+        const entries = buildApiKeyEntries(apiKeys, apiKeysStorage)
 
-            if (apiKeysStorage.source === 'auth-provider') {
-                ensureMapInDoc(doc, ['auth'])
-                ensureMapInDoc(doc, ['auth', 'providers'])
-                ensureMapInDoc(doc, ['auth', 'providers', 'config-api-key'])
-                if (entries.length > 0) {
-                    doc.setIn(
-                        [
-                            'auth',
-                            'providers',
-                            'config-api-key',
-                            apiKeysStorage.providerListKey ?? 'api-key-entries',
-                        ],
-                        entries,
-                    )
-                } else if (
-                    docHas(doc, [
-                        'auth',
-                        'providers',
-                        'config-api-key',
-                        apiKeysStorage.providerListKey ?? 'api-key-entries',
-                    ])
-                ) {
-                    doc.deleteIn([
-                                     'auth',
-                                     'providers',
-                                     'config-api-key',
-                                     apiKeysStorage.providerListKey ?? 'api-key-entries',
-                                 ])
-                }
-                if (apiKeysStorage.syncLegacy) {
-                    if (entries.length > 0) {
-                        doc.setIn(['api-keys'], entries)
-                    } else if (docHas(doc, ['api-keys'])) {
-                        doc.deleteIn(['api-keys'])
-                    }
-                }
-            } else if (entries.length > 0) {
-                doc.setIn(['api-keys'], entries)
-            } else if (docHas(doc, ['api-keys'])) {
-                doc.deleteIn(['api-keys'])
+        if (apiKeysStorage.source === 'auth-provider') {
+            ensureMapInDoc(doc, ['auth'])
+            ensureMapInDoc(doc, ['auth', 'providers'])
+            ensureMapInDoc(doc, ['auth', 'providers', 'config-api-key'])
+            const providerPath = [
+                'auth', 'providers', 'config-api-key', apiKeysStorage.providerListKey ?? 'api-key-entries',
+            ]
+            if (entries.length > 0) {
+                doc.setIn(providerPath, entries)
+            } else if (docHas(doc, providerPath)) {
+                doc.deleteIn(providerPath)
             }
+            if (apiKeysStorage.syncLegacy) {
+                if (apiKeys.length > 0) {
+                    const baselineKeys = parseApiKeysInputText(originalBaselineValues.apiKeysText)
+                    const legacyKeys = apiKeys.map((key) => {
+                        const originalIndex = baselineKeys.indexOf(key)
+                        return originalIndex < 0
+                            ? key
+                            : extractApiKeyValue(apiKeysStorage.legacyEntries[originalIndex]) ?? key
+                    })
+                    doc.setIn(['api-keys'], legacyKeys)
+                } else if (docHas(doc, ['api-keys'])) {
+                    doc.deleteIn(['api-keys'])
+                }
+            }
+        } else if (entries.length > 0) {
+            doc.setIn(['api-keys'], entries)
+        } else if (docHas(doc, ['api-keys'])) {
+            doc.deleteIn(['api-keys'])
         }
+    }
 
-    if (dirty('apiKeyRules')) {
+    if (shouldWriteAtomicField('apiKeyRules', ['api-key-rules'])) {
         const rules = serializeApiKeyRulesForYaml(values.apiKeyRules)
         if (Object.keys(rules).length) {
             doc.setIn(['api-key-rules'], rules)
@@ -2027,7 +2444,7 @@ export function encodeVisualConfigYaml(
             doc.deleteIn(['api-key-rules'])
         }
     }
-    if (dirty('pluginStoreAuth')) {
+    if (shouldWriteAtomicField('pluginStoreAuth', ['plugins', 'store-auth'])) {
         preparePath(['plugins', 'store-auth'])
         const rules = serializePluginStoreAuthForYaml(values.pluginStoreAuth)
         if (rules.length) {
@@ -2037,16 +2454,40 @@ export function encodeVisualConfigYaml(
             deleteIfMapEmpty(doc, ['plugins'])
         }
     }
-    if (dirty('corsAllowedOrigins')) {
+    if (shouldWriteAtomicField('corsAllowedOrigins', ['cors-allowed-origins'])) {
         setStringListInDoc(doc, ['cors-allowed-origins'], values.corsAllowedOrigins.split(','))
     }
-    if (dirty('providerConfigText')) {
+    if (shouldWriteAtomicField('providerConfigText', ['provider settings'],
+        providerConfigKeys.map((key) => [key]))) {
         setProviderConfigTextInDoc(doc, values.providerConfigText)
     }
     for (const [field, section] of Object.entries(PAYLOAD_FIELDS)) {
         const key = field as keyof typeof PAYLOAD_FIELDS
         if (dirty(key)) {
-            syncPayloadRules(doc, section, currentValues[key], originalBaselineValues[key], nextValues[key])
+            const serialize = (rules: EditablePayloadRule[]) => section === 'filter'
+                ? serializePayloadFilterRulesForYaml(rules as PayloadFilterRule[])
+                : section.endsWith('-raw')
+                  ? serializeRawPayloadRulesForYaml(rules as PayloadRule[])
+                  : serializePayloadRulesForYaml(rules as PayloadRule[])
+            const conditionsReordered = nextValues[key].some((rule) => {
+                const prior = originalBaselineValues[key].find((entry) => entry.id === rule.id)
+                return rule.models.some((model) => {
+                    const previous = prior?.models.find((entry) => entry.id === model.id)
+                    return (['match', 'notMatch'] as const).some((property) => {
+                        const before = previous?.[property] ?? []
+                        const after = model[property] ?? []
+                        const retained = before.filter((entry) => after.some((next) => next.id === entry.id)).map((entry) => entry.id)
+                        const reordered = after.filter((entry) => before.some((next) => next.id === entry.id)).map((entry) => entry.id)
+                        return !areStringArraysEqual(retained, reordered)
+                    })
+                })
+            })
+            if (!conditionsReordered && areMergeValuesEqual(serialize(currentValues[key]), serialize(nextValues[key]))) {
+                continue
+            }
+            const baselineSequence = baselineDoc?.getIn(['payload', section], true)
+            syncPayloadRules(doc, section, currentValues[key], originalBaselineValues[key], nextValues[key],
+                isSeq(baselineSequence) ? baselineSequence : undefined)
         }
     }
     return doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 })

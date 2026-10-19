@@ -1,4 +1,5 @@
 import type {
+    PayloadFilterRule,
     PayloadParamEntry,
     PayloadParamValidationErrorCode,
     PayloadParamValueType,
@@ -8,6 +9,7 @@ import type {
     VisualConfigValues,
 } from '@/types/visualConfig'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
+import {parseGoDuration, parsePositiveGoDuration} from '@/utils/apiKeyPolicy'
 import {useCallback, useMemo, useRef, useState} from 'react'
 import {
     type ApiKeysStorageMetadata,
@@ -47,6 +49,34 @@ function parseOptionalInteger(value: string): number | undefined {
     }
 }
 
+function isLiteralIP(value: string): boolean {
+    const ip = value.trim()
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) {
+        return ip.split('.').every((part) => (part.length === 1 || !part.startsWith('0')) && Number(part) <= 255)
+    }
+    if (!ip.includes(':') || !/^[\da-f:.]+$/i.test(ip)) {
+        return false
+    }
+    try {
+        return new URL(`http://[${ip}]/`).hostname.startsWith('[')
+    } catch {
+        return false
+    }
+}
+
+function isValidIceServerUrl(value: string): boolean {
+    const url = value.trim()
+    if (!/^(stun|stuns|turn|turns):/i.test(url) || /\s|%(?![\da-f]{2})/i.test(url)) {
+        return false
+    }
+    try {
+        new URL(url)
+        return true
+    } catch {
+        return false
+    }
+}
+
 function getQuotaRefreshIntervalError(values: VisualConfigValues): VisualConfigValidationErrorCode | undefined {
     const baseError = getNonNegativeIntegerError(values.quotaRefreshInterval)
     if (baseError || !values.quotaRefreshEnabled) {
@@ -72,7 +102,10 @@ function getQuotaRefreshMaxIntervalError(values: VisualConfigValues): VisualConf
     return undefined
 }
 
-export function getVisualConfigValidationErrors(values: VisualConfigValues): VisualConfigValidationErrors {
+export function getVisualConfigValidationErrors(
+    values: VisualConfigValues,
+    baseline?: VisualConfigValues,
+): VisualConfigValidationErrors {
     const errors: VisualConfigValidationErrors = {}
     for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
         try {
@@ -82,19 +115,66 @@ export function getVisualConfigValidationErrors(values: VisualConfigValues): Vis
                 ? 'port_range'
                 : field === 'redisUsageQueueRetentionSeconds'
                   ? 'integer_range_1_3600'
-                  : contract.minimum < 0 || contract.maximum < Number.MAX_SAFE_INTEGER
-                    ? 'payload_invalid_number'
-                    : 'non_negative_integer'
+                  : field === 'codexLiveMediaRelayUDPPortMin' || field === 'codexLiveMediaRelayUDPPortMax'
+                    ? 'integer_range_0_65535'
+                    : contract.minimum < 0 || contract.maximum < Number.MAX_SAFE_INTEGER
+                      ? 'payload_invalid_number'
+                      : 'non_negative_integer'
         }
     }
     errors.quotaRefreshInterval = getQuotaRefreshIntervalError(values)
     errors.quotaRefreshMaxInterval = getQuotaRefreshMaxIntervalError(values)
+    const ttl = values.videoResultAuthCacheTTL.trim()
+    if (ttl && (!baseline || values.videoResultAuthCacheTTL !== baseline.videoResultAuthCacheTTL) &&
+        parsePositiveGoDuration(ttl) === null) {
+        errors.videoResultAuthCacheTTL = 'positive_duration'
+    }
+    const idleTimeout = values.antigravityConnectionPoolIdleTimeout.trim()
+    if (idleTimeout && (!baseline || idleTimeout !== baseline.antigravityConnectionPoolIdleTimeout.trim()) &&
+        parseGoDuration(idleTimeout) === null) {
+        errors.antigravityConnectionPoolIdleTimeout = 'invalid_duration'
+    }
+    if (!values.codexLiveMediaRelayEnabled) {
+        return errors
+    }
+    const maxSessions = Number(values.codexLiveMediaRelayMaxSessions || 0)
+    if (!errors.codexLiveMediaRelayMaxSessions && maxSessions < 0) {
+        errors.codexLiveMediaRelayMaxSessions = 'non_negative_integer'
+    }
+    const publicIP = values.codexLiveMediaRelayPublicIP.trim()
+    if (publicIP && !isLiteralIP(publicIP)) {
+        errors.codexLiveMediaRelayPublicIP = 'invalid_ip'
+    }
+    if (!errors.codexLiveMediaRelayUDPPortMin && !errors.codexLiveMediaRelayUDPPortMax) {
+        const min = Number(values.codexLiveMediaRelayUDPPortMin || 0)
+        const max = Number(values.codexLiveMediaRelayUDPPortMax || 0)
+        if ((min === 0) !== (max === 0) || min > max) {
+            errors.codexLiveMediaRelayUDPPortMin = 'udp_port_pair'
+            errors.codexLiveMediaRelayUDPPortMax = 'udp_port_pair'
+        } else if (min > 0 && !errors.codexLiveMediaRelayMaxSessions &&
+                   max - min + 1 < (maxSessions || 32) * 2) {
+            errors.codexLiveMediaRelayUDPPortMin = 'udp_port_capacity'
+            errors.codexLiveMediaRelayUDPPortMax = 'udp_port_capacity'
+        }
+    }
+    if (values.codexLiveMediaRelayICEServers.some((server) => {
+        const urls = server.urlsText.split(/\r?\n/).map((url) => url.trim()).filter(Boolean)
+        return urls.length === 0 || urls.some((url) => !isValidIceServerUrl(url))
+    })) {
+        errors.codexLiveMediaRelayICEServers = 'invalid_ice_servers'
+    }
     return errors
 }
 
 export function getPayloadParamValidationError(param: PayloadParamEntry): PayloadParamValidationErrorCode | undefined {
     const trimmedValue = param.value.trim()
     if (!trimmedValue) {
+        if (param.valueType === 'boolean') {
+            return 'payload_invalid_boolean'
+        }
+        if (param.valueType === 'json') {
+            return 'payload_invalid_json'
+        }
         return undefined
     }
 
@@ -122,8 +202,12 @@ export function getPayloadParamValidationError(param: PayloadParamEntry): Payloa
     return undefined
 }
 
-function hasPayloadParamValidationErrors(rules: PayloadRule[]): boolean {
-    return rules.some((rule) => rule.params.some((param) => getPayloadParamValidationError(param) !== undefined))
+function hasPayloadParamValidationErrors(rules: Array<PayloadRule | PayloadFilterRule>): boolean {
+    const invalid = (param: PayloadParamEntry) => Boolean(param.path.trim()) && getPayloadParamValidationError(param) !== undefined
+    return rules.some((rule) =>
+        rule.params.some((param) => typeof param !== 'string' && invalid(param)) ||
+        rule.models.some((model) => (model.match ?? []).some(invalid) || (model.notMatch ?? []).some(invalid)),
+    )
 }
 
 export function useVisualConfig() {
@@ -133,13 +217,14 @@ export function useVisualConfig() {
     const [baselineValues, setBaselineValues]     = useState<VisualConfigValues>({
                                                                                      ...DEFAULT_VISUAL_VALUES,
                                                                                  })
+    const [baselineYaml, setBaselineYaml]         = useState('')
     const [apiKeysStorage, setApiKeysStorage]     = useState<ApiKeysStorageMetadata>(DEFAULT_API_KEYS_STORAGE_METADATA)
     const apiKeysTextRef                          = useRef(DEFAULT_VISUAL_VALUES.apiKeysText)
     const [visualParseError, setVisualParseError] = useState<string | null>(null)
 
     const validationErrors                 = useMemo(
-        () => getVisualConfigValidationErrors(visualValues),
-        [visualValues],
+        () => getVisualConfigValidationErrors(visualValues, baselineValues),
+        [visualValues, baselineValues],
     )
     const visualHasValidationErrors        = useMemo(
         () => Object.values(validationErrors).some(Boolean),
@@ -150,12 +235,14 @@ export function useVisualConfig() {
             hasPayloadParamValidationErrors(visualValues.payloadDefaultRules) ||
             hasPayloadParamValidationErrors(visualValues.payloadDefaultRawRules) ||
             hasPayloadParamValidationErrors(visualValues.payloadOverrideRules) ||
-            hasPayloadParamValidationErrors(visualValues.payloadOverrideRawRules),
+            hasPayloadParamValidationErrors(visualValues.payloadOverrideRawRules) ||
+            hasPayloadParamValidationErrors(visualValues.payloadFilterRules),
         [
             visualValues.payloadDefaultRules,
             visualValues.payloadDefaultRawRules,
             visualValues.payloadOverrideRules,
             visualValues.payloadOverrideRawRules,
+            visualValues.payloadFilterRules,
         ],
     )
     const visualDirty                      = useMemo(
@@ -169,6 +256,7 @@ export function useVisualConfig() {
             apiKeysTextRef.current = decoded.values.apiKeysText
             setVisualValuesState(decoded.values)
             setBaselineValues(deepClone(decoded.values))
+            setBaselineYaml(yamlContent)
             setApiKeysStorage(decoded.apiKeysStorage)
             setVisualParseError(null)
             return { ok: true as const }
@@ -181,8 +269,8 @@ export function useVisualConfig() {
 
     const applyVisualChangesToYaml = useCallback(
         (currentYaml: string): string =>
-            encodeVisualConfigYaml(currentYaml, visualValues, baselineValues, apiKeysStorage),
-        [apiKeysStorage, baselineValues, visualValues],
+            encodeVisualConfigYaml(currentYaml, visualValues, baselineValues, apiKeysStorage, baselineYaml),
+        [apiKeysStorage, baselineValues, baselineYaml, visualValues],
     )
 
     const setVisualValues = useCallback((newValues: Partial<VisualConfigValues>) => {

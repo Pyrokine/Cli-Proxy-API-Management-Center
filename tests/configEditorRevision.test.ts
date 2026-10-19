@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
 
 import {ConfigEditorRevisionState} from '@/pages/configEditorRevision'
 import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
@@ -38,22 +39,45 @@ describe('config editor request revisions', () => {
     test('tracks the server revision used as the draft base', () => {
         const revisions = new ConfigEditorRevisionState()
         expect(revisions.acceptServerRevision()).toEqual({
-                                                             serverRevision: 1,
+                                                             authGeneration: 0, serverRevision: 1,
                                                              draftRevision: 1,
                                                              draftBaseRevision: 1,
                                                          })
 
         revisions.markDraftChanged()
         expect(revisions.observeServerRevision()).toEqual({
-                                                              serverRevision: 2,
+                                                              authGeneration: 0, serverRevision: 2,
                                                               draftRevision: 2,
                                                               draftBaseRevision: 1,
                                                           })
         expect(revisions.resetDraftToServer()).toEqual({
-                                                           serverRevision: 2,
+                                                           authGeneration: 0, serverRevision: 2,
                                                            draftRevision: 3,
                                                            draftBaseRevision: 2,
                                                        })
+    })
+
+    test('confirmed reload fetches the latest revision before discarding a dirty draft', () => {
+        const page = readFileSync(new URL('../src/pages/ConfigPage.tsx', import.meta.url), 'utf8')
+        const load = page.slice(page.indexOf('const loadConfig = useCallback'), page.indexOf('useEffect(() => {\n        queueMicrotask'))
+        expect(load).toContain('const snapshot = await configFileApi.fetchConfigYaml()')
+        expect(load).toContain('if (isDirtyRef.current && !discardDraft)')
+        expect(load.indexOf('const snapshot = await configFileApi.fetchConfigYaml()'))
+            .toBeLessThan(load.indexOf('revisionStateRef.current.acceptServerRevision()'))
+        expect(page).toContain('void Promise.all([loadConfig(true), loadRuntimeInfo()])')
+        expect(page).toContain('enabled: isDirty && !disableControls')
+
+        const revisions = new ConfigEditorRevisionState()
+        revisions.acceptServerRevision()
+        revisions.resetSource('version: A\n')
+        revisions.markDraftChanged()
+        const draft = revisions.snapshot()
+        const pending = revisions.beginLoad()
+        expect(revisions.snapshot()).toEqual(draft)
+        expect(revisions.isCurrentRequest(pending)).toBe(true)
+        revisions.acceptServerRevision()
+        revisions.resetSource('version: B\n')
+        expect(revisions.buildSaveDraft('version: B\n', 'source', (yaml) => yaml)).toBe('version: B\n')
     })
 
     test('rejects an older save after a newer save starts', () => {
@@ -72,7 +96,7 @@ describe('config editor request revisions', () => {
         const request = revisions.beginSave()
 
         expect(revisions.observeServerRevision()).toEqual({
-                                                              serverRevision: 2,
+                                                              authGeneration: 0, serverRevision: 2,
                                                               draftRevision: 2,
                                                               draftBaseRevision: 1,
                                                           })
@@ -108,30 +132,28 @@ describe('config editor request revisions', () => {
         }
     })
 
-    test('real source changes retain unknown data and subsequent visual changes across 412 snapshots', () => {
+    test('source edits remain intact across server changes and cannot enter visual-origin saving', () => {
         const source = 'debug: false\nproxy-url: old\n'
         const revisions = new ConfigEditorRevisionState()
         revisions.acceptServerRevision()
         revisions.resetSource(source)
-        revisions.materializeSource((yaml) => yaml)
         const draft = source + 'unknown:\n  exact: 9007199254740993 # keep\n'
         expect(revisions.editSource(draft)).toBe(true)
         revisions.markDraftChanged()
         expect(revisions.sourceDirty).toBe(true)
         expect(revisions.sourceNeedsReload).toBe(true)
         const decoded = decodeVisualConfigYaml(draft)
-        revisions.acceptVisualSource()
         const next = { ...decoded.values, debug: true }
         const apply = (yaml: string) => encodeVisualConfigYaml(yaml, next, decoded.values, decoded.apiKeysStorage)
-        const before = revisions.buildSaveDraft('debug: false\n', 'visual', apply)
+        expect(() => revisions.buildSaveDraft('debug: false\nremote: changed\n', 'visual', apply))
+            .toThrow('Unsaved source edits must be saved or discarded before visual editing')
+        const before = revisions.buildSaveDraft('debug: false\n', 'source', apply)
         const request = revisions.beginSave()
         revisions.observeServerRevision()
         expect(revisions.isCurrentRequest(request)).toBe(false)
-        expect(revisions.buildSaveDraft('debug: false\nremote: changed\n', 'visual', apply)).toBe(before)
+        expect(revisions.buildSaveDraft('debug: false\nremote: changed\n', 'source', apply)).toBe(before)
         expect(before).toContain('exact: 9007199254740993 # keep')
-        expect(parse(before).debug).toBe(true)
-        revisions.materializeSource(apply)
-        expect(revisions.buildSaveDraft('remote: changed\n', 'source', apply)).toBe(before)
+        expect(parse(before).debug).toBe(false)
         expect(revisions.sourceDirty).toBe(true)
     })
 
@@ -172,7 +194,7 @@ describe('config editor request revisions', () => {
         expect(state.sourceNeedsReload).toBe(true)
         expect(next).toEqual(baseline)
         expect(state.buildSaveDraft(source, 'source', apply)).toBe(view)
-        state.acceptVisualSource()
+        expect(() => state.buildSaveDraft(source, 'visual', apply)).toThrow('Unsaved source edits')
         expect(state.sourceDirty).toBe(true)
     })
 
@@ -183,11 +205,23 @@ describe('config editor request revisions', () => {
         expect(() => decodeVisualConfigYaml(revisions.buildSaveDraft('', 'source', (yaml) => yaml))).toThrow()
         expect(revisions.sourceNeedsReload).toBe(true)
         revisions.editSource('debug: true\nunknown: retained\n')
-        revisions.acceptVisualSource()
-        expect(revisions.buildSaveDraft('remote: true\n', 'visual', (yaml) => yaml)).toContain('unknown: retained')
+        expect(revisions.buildSaveDraft('remote: true\n', 'source', (yaml) => yaml)).toContain('unknown: retained')
+        expect(() => revisions.buildSaveDraft('remote: true\n', 'visual', (yaml) => yaml))
+            .toThrow('Unsaved source edits')
         revisions.resetSource('debug: false\n')
         expect(revisions.sourceDirty).toBe(false)
         expect(revisions.sourceNeedsReload).toBe(false)
+    })
+
+    test('keeps source drafts in source mode until saved or discarded', () => {
+        const page = readFileSync(new URL('../src/pages/ConfigPage.tsx', import.meta.url), 'utf8')
+        expect(page).toContain("if (tab === 'visual' && revisionStateRef.current.sourceDirty)")
+        expect(page).toContain("if (activeTab === 'visual' && revisionStateRef.current.sourceDirty)")
+        expect(page).toContain("t('config_management.source_changes_before_visual')")
+        for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW']) {
+            const strings = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8'))
+            expect(strings.config_management.source_changes_before_visual).toBeTruthy()
+        }
     })
 
     test('invalidates active load and save generations on teardown', () => {

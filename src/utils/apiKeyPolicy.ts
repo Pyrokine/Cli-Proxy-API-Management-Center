@@ -65,20 +65,21 @@ function normalizePolicyStringList(values: string[]): string[] {
     })
 }
 
-function parsePositiveGoDuration(value: string): bigint | null {
+export function parseGoDuration(value: string): bigint | null {
     let duration = value.trim()
-    if (!duration || duration.length > 128) {
+    if (!duration) {
         return null
     }
-    if (duration.startsWith('+')) {
+    const negative = duration.startsWith('-')
+    if (negative || duration.startsWith('+')) {
         duration = duration.slice(1)
-        if (!duration) {
-            return null
-        }
+    }
+    if (duration === '0') {
+        return 0n
     }
     GO_DURATION_PART.lastIndex = 0
-    let total                  = 0n
-    let index                  = 0
+    let total = 0n
+    let index = 0
     for (; ;) {
         const match = GO_DURATION_PART.exec(duration)
         if (!match) {
@@ -93,17 +94,34 @@ function parsePositiveGoDuration(value: string): bigint | null {
         if (factor === undefined) {
             return null
         }
-        const whole    = BigInt(wholeRaw || '0')
-        const fraction = fractionRaw
-                         ? BigInt(fractionRaw) * factor / (10n ** BigInt(fractionRaw.length))
-                         : 0n
+        const whole = BigInt(wholeRaw || '0')
+        let fractionDigits = 0n
+        let fractionScale = 1
+        for (const digit of fractionRaw) {
+            if (fractionDigits > MAX_POLICY_LIMIT / 10n) {
+                break
+            }
+            const next = fractionDigits * 10n + BigInt(digit)
+            if (next > MAX_POLICY_LIMIT + 1n) {
+                break
+            }
+            fractionDigits = next
+            fractionScale *= 10
+        }
+        // 按 Go time.ParseDuration 的有效分数位和 float64 舍入计算
+        const fraction = BigInt(Math.trunc(Number(fractionDigits) * (Number(factor) / fractionScale)))
         total += whole * factor + fraction
-        if (total > MAX_POLICY_LIMIT) {
+        if (total > MAX_POLICY_LIMIT + (negative ? 1n : 0n)) {
             return null
         }
         index = GO_DURATION_PART.lastIndex
     }
-    return index === duration.length && total > 0n ? total : null
+    return index === duration.length && index > 0 ? (negative ? -total : total) : null
+}
+
+export function parsePositiveGoDuration(value: string): bigint | null {
+    const duration = parseGoDuration(value)
+    return duration !== null && duration > 0n ? duration : null
 }
 
 function parsePolicyLimitInteger(value: string): bigint | null {

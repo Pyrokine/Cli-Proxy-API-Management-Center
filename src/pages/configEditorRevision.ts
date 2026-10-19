@@ -1,4 +1,5 @@
 export type ConfigRevisionSnapshot = Readonly<{
+    authGeneration: number
     serverRevision: number
     draftRevision: number
     draftBaseRevision: number
@@ -22,6 +23,11 @@ export class ConfigEditorRevisionState {
     private sourceDirtyBeforeView = false
     sourceDirty = false
     sourceNeedsReload = false
+    private readonly authGeneration: number
+
+    constructor(private readonly getAuthGeneration: () => number = () => 0) {
+        this.authGeneration = getAuthGeneration()
+    }
 
     resetSource(yaml: string): void {
         this.sourceBaseYaml = yaml
@@ -60,14 +66,21 @@ export class ConfigEditorRevisionState {
     }
 
     buildSaveDraft(latestServerYaml: string, mode: 'visual' | 'source', applyVisualChanges: (yaml: string) => string): string {
-        if (mode === 'source' && (this.sourceDirty || this.sourceNeedsReload)) {
+        if (this.sourceDirty) {
+            if (mode !== 'source') {
+                throw new Error('Unsaved source edits must be saved or discarded before visual editing')
+            }
             return this.sourceText
         }
-        return applyVisualChanges(this.sourceDirty ? this.sourceBaseYaml : latestServerYaml)
+        if (mode === 'source' && this.sourceNeedsReload) {
+            return this.sourceText
+        }
+        return applyVisualChanges(latestServerYaml)
     }
 
     snapshot(): ConfigRevisionSnapshot {
         return {
+            authGeneration: this.authGeneration,
             serverRevision: this.serverRevision,
             draftRevision: this.draftRevision,
             draftBaseRevision: this.draftBaseRevision,
@@ -98,13 +111,17 @@ export class ConfigEditorRevisionState {
     }
 
     isCurrentGeneration(request: ConfigRequestRevision): boolean {
-        return request.generation === (
-               request.kind === 'load' ? this.loadGeneration : this.saveGeneration
-        )
+        return request.authGeneration === this.authGeneration &&
+               this.authGeneration === this.getAuthGeneration() &&
+               request.generation === (
+                   request.kind === 'load' ? this.loadGeneration : this.saveGeneration
+               )
     }
 
     matches(revision: ConfigRevisionSnapshot): boolean {
-        return revision.serverRevision === this.serverRevision &&
+        return revision.authGeneration === this.authGeneration &&
+               this.authGeneration === this.getAuthGeneration() &&
+               revision.serverRevision === this.serverRevision &&
                revision.draftRevision === this.draftRevision &&
                revision.draftBaseRevision === this.draftBaseRevision
     }

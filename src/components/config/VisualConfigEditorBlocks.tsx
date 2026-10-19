@@ -10,12 +10,13 @@ import {
     VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS,
     VISUAL_CONFIG_PROTOCOL_OPTIONS,
 } from '@/hooks/useVisualConfig'
-import {apiKeyAliasApi} from '@/services/api/apiKeys'
+import {isMap, parseDocument} from 'yaml'
 import {type ModelCatalogRow, modelsApi} from '@/services/api/models'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {
     ApiKeyModelRule,
     ApiKeyPolicyLimit,
+    CodexLiveICEServerDraft,
     PayloadFilterRule,
     PayloadModelEntry,
     PayloadParamEntry,
@@ -44,6 +45,8 @@ import {Fragment, memo, type ReactNode, useCallback, useEffect, useId, useMemo, 
 import {useTranslation} from 'react-i18next'
 import {ApiKeyStrengthMeter} from './ApiKeyStrengthMeter'
 import styles from './VisualConfigEditor.module.scss'
+
+const CONFIG_SECRET_PLACEHOLDER = /^__CLI_PROXY_CONFIG_SECRET_[0-9a-f]{32}__$/
 
 type ModelLimitCatalogEntry = {
     model: string
@@ -672,15 +675,17 @@ const ApiKeyPolicyEditor = memo(function ApiKeyPolicyEditor({
 
 export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                      value,
-                                                                     modelRules,
+                                                                     aliasesText,
+                                                                     modelRules: configuredModelRules,
                                                                      disabled,
                                                                      onChange,
                                                                      onModelRulesChange,
                                                                  }: {
     value: string
+    aliasesText: string
     modelRules: Record<string, ApiKeyModelRule>
     disabled?: boolean
-    onChange: (nextValue: string) => void
+    onChange: (nextValue: string, nextAliasesText: string) => void
     onModelRulesChange: (nextValue: Record<string, ApiKeyModelRule>) => void
 }) {
     const { t }                     = useTranslation()
@@ -698,6 +703,10 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 .map((key) => key.trim())
                 .filter(Boolean),
         [value],
+    )
+    const modelRules = useMemo<Record<string, ApiKeyModelRule>>(
+        () => Object.assign(Object.create(null), configuredModelRules),
+        [configuredModelRules],
     )
     const [apiKeyIds, setApiKeyIds] = useState(() => apiKeys.map(() => makeClientId()))
     const renderApiKeyIds           = useMemo(() => {
@@ -724,7 +733,25 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const [formError, setFormError]                     = useState('')
     const [aliasValue, setAliasValue]                   = useState('')
     const [aliasError, setAliasError]                   = useState('')
-    const [aliases, setAliases]                         = useState<Record<string, string>>({})
+    const {document: aliasDocument, aliases, error: aliasConfigError} = useMemo(() => {
+        const document = parseDocument(aliasesText || '{}')
+        const aliases: Record<string, string> = Object.create(null)
+        const invalid = () => ({document, aliases, error: t('config_management.visual_mode_save_blocked')})
+        if (document.errors.length || !isMap(document.contents)) {
+            return invalid()
+        }
+        try {
+            for (const [key, alias] of Object.entries(document.toJS() as Record<string, unknown>)) {
+                if (typeof alias !== 'string') {
+                    return invalid()
+                }
+                aliases[key] = alias
+            }
+        } catch {
+            return invalid()
+        }
+        return {document, aliases, error: ''}
+    }, [aliasesText, t])
     const [modelCatalogRows, setModelCatalogRows]       = useState<ModelCatalogRow[]>([])
     const [modelCatalogLoaded, setModelCatalogLoaded]   = useState(false)
     const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
@@ -735,13 +762,6 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const [draftBlockedModels, setDraftBlockedModels]   = useState<Set<string>>(() => new Set())
     const [selectedAllowed, setSelectedAllowed]         = useState<Set<string>>(() => new Set())
     const [selectedBlocked, setSelectedBlocked]         = useState<Set<string>>(() => new Set())
-
-    useEffect(() => {
-        apiKeyAliasApi
-            .list()
-            .then(setAliases)
-            .catch((err) => console.warn('Failed to load aliases:', err))
-    }, [])
 
     const [searchQuery, setSearchQuery] = useState('')
     const showSearch                    = apiKeys.length >= 6
@@ -1036,7 +1056,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
             return
         }
         const blockedModels = uniqueSorted(draftBlockedModels)
-        const nextRules     = { ...modelRules }
+        const nextRules     = Object.assign(Object.create(null), modelRules)
         const nextRule      = {
             ...EMPTY_API_KEY_MODEL_RULE,
             ...modelRules[modelLimitKey],
@@ -1055,7 +1075,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         if (!policyKey) {
             return
         }
-        const nextRules = { ...modelRules }
+        const nextRules = Object.assign(Object.create(null), modelRules)
         if (isApiKeyModelRuleEmpty(rule)) {
             delete nextRules[policyKey]
         } else {
@@ -1076,8 +1096,8 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         setSearchQuery('')
     }
 
-    const updateApiKeys = (nextKeys: string[]) => {
-        onChange(nextKeys.join('\n'))
+    const updateApiKeys = (nextKeys: string[], nextAliasesText: string) => {
+        onChange(nextKeys.join('\n'), nextAliasesText)
     }
 
     const toggleTreeSelection = (
@@ -1124,31 +1144,33 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     }
 
     const handleDelete = (apiKeyId: string) => {
+        if (aliasConfigError) {
+            return
+        }
         const index = renderApiKeyIds.findIndex((id) => id === apiKeyId)
         if (index < 0) {
             return
         }
         const deletedKey = apiKeys[index]
+        const nextKeys = apiKeys.filter((_, i) => i !== index)
+        const aliasDraft = aliasDocument.clone()
+        if (deletedKey && !nextKeys.includes(deletedKey)) {
+            aliasDraft.deleteIn([deletedKey])
+        }
         setApiKeyIds(renderApiKeyIds.filter((id) => id !== apiKeyId))
-        updateApiKeys(apiKeys.filter((_, i) => i !== index))
-        if (deletedKey && modelRules[deletedKey]) {
-            const nextRules = { ...modelRules }
+        updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
+        if (deletedKey && !nextKeys.includes(deletedKey) && modelRules[deletedKey]) {
+            const nextRules = Object.assign(Object.create(null), modelRules)
             delete nextRules[deletedKey]
             onModelRulesChange(nextRules)
         }
-
-        // 清除该 key 的别名
-        if (deletedKey && aliases[deletedKey]) {
-            apiKeyAliasApi.remove(deletedKey).catch((err) => console.warn('Failed to remove alias:', err))
-            setAliases((prev) => {
-                const next = { ...prev }
-                delete next[deletedKey]
-                return next
-            })
-        }
     }
 
-    const handleSave = async () => {
+    const handleSave = () => {
+        if (aliasConfigError) {
+            setAliasError(aliasConfigError)
+            return
+        }
         const trimmed      = inputValue.trim()
         const trimmedAlias = aliasValue.trim()
 
@@ -1187,51 +1209,38 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
 
         const editingIndex = editingApiKeyId ? renderApiKeyIds.findIndex((id) => id === editingApiKeyId) : -1
         const oldKey       = editingIndex >= 0 ? apiKeys[editingIndex] : undefined
+        if (editingApiKeyId !== null && !oldKey) {
+            setFormError(t('config_management.config_changed'))
+            return
+        }
+        if (trimmed !== oldKey && apiKeys.includes(trimmed)) {
+            setFormError(visualT('api_keys.error_duplicate'))
+            return
+        }
         const nextKeys     =
                   editingApiKeyId === null
                   ? [...apiKeys, trimmed]
                   : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key))
+        const aliasDraft = aliasDocument.clone()
+        if (trimmedAlias) {
+            aliasDraft.setIn([trimmed], trimmedAlias)
+        } else {
+            aliasDraft.deleteIn([trimmed])
+        }
+        if (oldKey && oldKey !== trimmed && !nextKeys.includes(oldKey)) {
+            aliasDraft.deleteIn([oldKey])
+        }
         if (editingApiKeyId === null) {
             setApiKeyIds([...renderApiKeyIds, makeClientId()])
         }
-        updateApiKeys(nextKeys)
+        updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
         if (oldKey && oldKey !== trimmed && modelRules[oldKey]) {
             const nextRules = { ...modelRules, [trimmed]: modelRules[oldKey] }
-            delete nextRules[oldKey]
+            if (!nextKeys.includes(oldKey)) {
+                delete nextRules[oldKey]
+            }
             onModelRulesChange(nextRules)
         }
-
-        // 处理别名的增删改
-        try {
-            // key 被改名时，移除旧 key 的别名
-            if (oldKey && oldKey !== trimmed && aliases[oldKey]) {
-                await apiKeyAliasApi.remove(oldKey)
-                setAliases((prev) => {
-                    const next = { ...prev }
-                    delete next[oldKey]
-                    return next
-                })
-            }
-
-            if (trimmedAlias) {
-                await apiKeyAliasApi.set(trimmed, trimmedAlias)
-                setAliases((prev) => ({ ...prev, [trimmed]: trimmedAlias }))
-            } else {
-                // 别名被清空，移除
-                const keyToRemove = oldKey && oldKey !== trimmed ? trimmed : (oldKey ?? trimmed)
-                if (aliases[keyToRemove]) {
-                    await apiKeyAliasApi.remove(keyToRemove)
-                    setAliases((prev) => {
-                        const next = { ...prev }
-                        delete next[keyToRemove]
-                        return next
-                    })
-                }
-            }
-        } catch (err) {
-            console.warn('Alias save failed:', err)
-        }
-
         closeModal()
     }
 
@@ -1253,10 +1262,11 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         <div className='form-group' style={{ marginBottom: 0 }}>
             <div className={styles.blockHeaderRow}>
                 <label style={{ margin: 0 }}>{visualT('api_keys.label')}</label>
-                <Button size='sm' onClick={openAddModal} disabled={disabled}>
+                <Button size='sm' onClick={openAddModal} disabled={disabled || Boolean(aliasConfigError)}>
                     {visualT('api_keys.add')}
                 </Button>
             </div>
+            {aliasConfigError && <div role='alert'>{aliasConfigError}</div>}
 
             {showSearch && (
                 <Input
@@ -1270,7 +1280,9 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 <div className={styles.emptyState}>{visualT('api_keys.empty')}</div>
             ) : (
                  <div className='item-list' style={{ marginTop: 4 }}>
-                     {pagedKeys.map((item) => (
+                     {pagedKeys.map((item) => {
+                         const redacted = CONFIG_SECRET_PLACEHOLDER.test(item.key)
+                         return (
                          <div key={renderApiKeyIds[item.index] ?? `${item.key}-${item.index}`} className='item-row'>
                              <div className='item-meta'>
                                  <div className='pill'>#{item.index + 1}</div>
@@ -1281,9 +1293,11 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      )}
                                  </div>
                                  <div className='item-subtitle'>
-                                     {highlightText(maskApiKey(String(item.key || '')), searchQuery)}
+                                     {redacted
+                                      ? visualT('api_keys.saved_key_hidden')
+                                      : highlightText(maskApiKey(String(item.key || '')), searchQuery)}
                                  </div>
-                                 <div className={styles.apiKeyModelLimitSummary}>
+                                 {!redacted && <Fragment><div className={styles.apiKeyModelLimitSummary}>
                                      {modelRules[item.key]?.blockedModels?.length
                                       ? visualT('api_keys.model_limit_blocked_summary', {
                                              count: modelRules[item.key]?.blockedModels.length,
@@ -1310,9 +1324,9 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                       : visualT('api_keys.policy_unconfigured', {
                                              defaultValue: '额度策略：未配置',
                                          })}
-                                 </div>
+                                 </div></Fragment>}
                              </div>
-                             <div className='item-actions'>
+                             {!redacted && <div className='item-actions'>
                                  <Button
                                      variant='secondary'
                                      size='sm'
@@ -1325,7 +1339,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                      variant='secondary'
                                      size='sm'
                                      onClick={() => openEditModal(renderApiKeyIds[item.index] ?? '')}
-                                     disabled={disabled}
+                                     disabled={disabled || Boolean(aliasConfigError)}
                                  >
                                      {visualT('common.edit')}
                                  </Button>
@@ -1371,13 +1385,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                                                    onConfirm: () => handleDelete(id),
                                                                })
                                      }}
-                                     disabled={disabled}
+                                     disabled={disabled || Boolean(aliasConfigError)}
                                  >
                                      {visualT('common.delete')}
                                  </Button>
-                             </div>
+                             </div>}
                          </div>
-                     ))}
+                         )
+                     })}
                  </div>
              )}
 
@@ -1391,7 +1406,12 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 />
             )}
 
-            <div className='hint'>{visualT('api_keys.hint')}</div>
+            <div className='hint'>
+                {visualT('api_keys.hint')}
+                {apiKeys.some((key) => CONFIG_SECRET_PLACEHOLDER.test(key)) && (
+                    <div>{visualT('api_keys.saved_key_hint')}</div>
+                )}
+            </div>
 
             <Modal
                 open={modalOpen}
@@ -1403,10 +1423,10 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                 }
                 footer={
                     <>
-                        <Button variant='secondary' onClick={closeModal} disabled={disabled}>
+                        <Button variant='secondary' onClick={closeModal} disabled={disabled || Boolean(aliasConfigError)}>
                             {visualT('common.cancel')}
                         </Button>
-                        <Button onClick={handleSave} disabled={disabled}>
+                        <Button onClick={handleSave} disabled={disabled || Boolean(aliasConfigError)}>
                             {editingApiKeyId !== null
                              ? visualT('common.update')
                              : visualT('common.add')}
@@ -1425,7 +1445,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             setAliasValue(e.target.value)
                             setAliasError('')
                         }}
-                        disabled={disabled}
+                        disabled={disabled || Boolean(aliasConfigError)}
                         aria-describedby={aliasError ? `${aliasErrorId} ${aliasHintId}` : aliasHintId}
                         aria-invalid={Boolean(aliasError)}
                     />
@@ -1450,7 +1470,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                 placeholder={visualT('api_keys.input_placeholder')}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
-                                disabled={disabled}
+                                disabled={disabled || Boolean(aliasConfigError)}
                                 aria-describedby={`${apiKeyStrengthId} ${apiKeyHintId}${
                                     formError ? ` ${apiKeyErrorId}` : ''
                                 }`}
@@ -1464,7 +1484,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                                 type='button'
                                 className={styles.apiKeyModalVisibilityButton}
                                 onClick={() => setApiKeyVisible((value) => !value)}
-                                disabled={disabled}
+                                disabled={disabled || Boolean(aliasConfigError)}
                                 aria-label={
                                     apiKeyVisible
                                     ? t('login.hide_key', { defaultValue: 'Hide key' })
@@ -1479,7 +1499,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
                             variant='secondary'
                             size='sm'
                             onClick={handleGenerate}
-                            disabled={disabled}
+                            disabled={disabled || Boolean(aliasConfigError)}
                         >
                             {visualT('api_keys.generate')}
                         </Button>
@@ -1718,6 +1738,115 @@ export const StringListEditor = memo(function StringListEditor({
             <div className={styles.actionRow}>
                 <Button variant='secondary' size='sm' onClick={addItem} disabled={disabled}>
                     {t('config_management.visual.common.add')}
+                </Button>
+            </div>
+        </div>
+    )
+})
+
+export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor({
+    value,
+    disabled,
+    error,
+    onChange,
+}: {
+    value: CodexLiveICEServerDraft[]
+    disabled?: boolean
+    error?: string
+    onChange: (next: CodexLiveICEServerDraft[]) => void
+}) {
+    const { t } = useTranslation()
+    const id = useId()
+    const errorId = `${id}-error`
+    const label = (key: string, fallback: string, index?: number) =>
+        t(`config_management.visual.sections.advanced.${key}`, {defaultValue: fallback, index})
+    const update = (rowId: string, patch: Partial<CodexLiveICEServerDraft>) =>
+        onChange(value.map((row) => row.id === rowId ? {...row, ...patch} : row))
+    const cannotRemove = (index: number) => value.slice(index + 1).some((row) =>
+        (row.usernameConfigured && !row.usernameEdited) ||
+        (row.credentialConfigured && !row.credentialEdited))
+
+    return (
+        <div role='group' aria-label={label('ice_servers', 'ICE servers')}
+             aria-describedby={error ? errorId : undefined} className={styles.storeAuthEditor}>
+            {value.map((row, index) => (
+                <div key={row.id} role='group' aria-label={label('ice_server', 'ICE server {{index}}', index + 1)}
+                     className={styles.storeAuthRule}>
+                    <div className={styles.storeAuthRuleHeader}>
+                        <strong>{label('ice_server', 'ICE server {{index}}', index + 1)}</strong>
+                        <Button type='button' variant='ghost' size='sm'
+                                disabled={disabled || cannotRemove(index)}
+                                aria-label={label('ice_remove', 'Remove ICE server {{index}}', index + 1)}
+                                onClick={() => onChange(value.filter((server) => server.id !== row.id))}>
+                            {t('config_management.visual.common.delete')}
+                        </Button>
+                    </div>
+                    <div className={styles.storeAuthGrid}>
+                        <label className={`${styles.storeAuthField} ${styles.iceUrlsField}`}>
+                            <span>{label('ice_urls', 'STUN/TURN URLs, one per line')}</span>
+                            <textarea className={`input ${styles.yamlTextArea}`} rows={3} value={row.urlsText}
+                                      disabled={disabled} spellCheck={false}
+                                      aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
+                                      onChange={(event) => update(row.id, {urlsText: event.target.value})} />
+                        </label>
+                        <label className={styles.storeAuthField}>
+                            <span>{label('ice_username', 'TURN username')}</span>
+                            <input className='input' value={row.username} disabled={disabled}
+                                   autoComplete='off' aria-describedby={error ? errorId : undefined}
+                                   placeholder={row.usernameConfigured && !row.usernameEdited
+                                                ? label('ice_username_saved', 'Saved username (unchanged)') : undefined}
+                                   onChange={(event) => update(row.id, {
+                                       username: event.target.value, usernameEdited: true,
+                                   })} />
+                        </label>
+                        <label className={styles.storeAuthField}>
+                            <span>{label('ice_credential', 'TURN credential')}</span>
+                            <input className='input' type='password' value={row.credential} disabled={disabled}
+                                   autoComplete='new-password' aria-describedby={error ? errorId : undefined}
+                                   placeholder={row.credentialConfigured && !row.credentialEdited
+                                                ? label('ice_credential_saved', 'Saved credential (unchanged)') : undefined}
+                                   onChange={(event) => update(row.id, {
+                                       credential: event.target.value, credentialEdited: true,
+                                   })} />
+                        </label>
+                    </div>
+                    {cannotRemove(index) ? (
+                        <div role='note' className={styles.storeAuthEmpty}>
+                            {label('ice_remove_blocked',
+                                'Replace saved usernames and credentials in later servers before removing this row')}
+                        </div>
+                    ) : null}
+                    {row.usernameConfigured ? (
+                        <Button type='button' variant='ghost' size='sm' disabled={disabled}
+                                onClick={() => update(row.id, row.usernameEdited
+                                    ? {username: '', usernameEdited: false}
+                                    : {username: '', usernameEdited: true})}>
+                            {row.usernameEdited
+                             ? label('ice_keep_username', 'Keep saved username')
+                             : label('ice_clear_username', 'Clear saved username')}
+                        </Button>
+                    ) : null}
+                    {row.credentialConfigured ? (
+                        <Button type='button' variant='ghost' size='sm' disabled={disabled}
+                                onClick={() => update(row.id, row.credentialEdited
+                                    ? {credential: '', credentialEdited: false}
+                                    : {credential: '', credentialEdited: true})}>
+                            {row.credentialEdited
+                             ? label('ice_keep_credential', 'Keep saved credential')
+                             : label('ice_clear_credential', 'Clear saved credential')}
+                        </Button>
+                    ) : null}
+                </div>
+            ))}
+            {error ? <div id={errorId} className='error-box'>{error}</div> : null}
+            <div className={styles.actionRow}>
+                <Button type='button' variant='secondary' size='sm' disabled={disabled}
+                        onClick={() => onChange([...value, {
+                            id: makeClientId(), urlsText: '', username: '', credential: '',
+                            usernameConfigured: false, usernameEdited: false,
+                            credentialConfigured: false, credentialEdited: false,
+                        }])}>
+                    {label('ice_add', 'Add ICE server')}
                 </Button>
             </div>
         </div>
@@ -1991,6 +2120,129 @@ export const PluginStoreAuthEditor = memo(function PluginStoreAuthEditor({
     )
 })
 
+function renderParamValueEditor(
+    param: PayloadParamEntry,
+    t: ReturnType<typeof useTranslation>['t'],
+    disabled: boolean | undefined,
+    onChange: (patch: Partial<PayloadParamEntry>) => void,
+    rawJsonValues = false,
+    ariaLabel = t('config_management.visual.payload_rules.param_value'),
+): ReactNode {
+    if (param.valueType === 'boolean' && !rawJsonValues) {
+        return (
+            <Select
+                value={param.value === 'true' || param.value === 'false' ? param.value : ''}
+                options={['true', 'false'].map((value) => ({value, label: t(`config_management.visual.payload_rules.boolean_${value}`)}))}
+                placeholder={t('config_management.visual.payload_rules.value_boolean')}
+                disabled={disabled}
+                ariaLabel={ariaLabel}
+                onChange={(value) => onChange({value})}
+            />
+        )
+    }
+    const props = {
+        className: rawJsonValues || param.valueType === 'json' ? `input ${styles.payloadJsonInput}` : 'input',
+        placeholder: t(`config_management.visual.payload_rules.value_${rawJsonValues ? 'raw_json' : param.valueType}`),
+        'aria-label': ariaLabel,
+        value: param.value,
+        disabled,
+        onChange: (event: {target: {value: string}}) => onChange({
+            value: event.target.value,
+            ...(rawJsonValues ? {valueType: 'json' as const} : {}),
+        }),
+    }
+    return rawJsonValues || param.valueType === 'json' ? <textarea {...props} /> : <input {...props} />
+}
+
+const PayloadConditionsEditor = memo(function PayloadConditionsEditor({model, disabled, onChange}: {
+    model: PayloadModelEntry
+    disabled?: boolean
+    onChange: (patch: Partial<PayloadModelEntry>) => void
+}) {
+    const {t} = useTranslation()
+    const valueTypes = useMemo(() => VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS.map((option) => ({
+        value: option.value, label: t(option.labelKey, {defaultValue: option.defaultLabel}),
+    })), [t])
+    return (
+        <details>
+            <summary>{t('config_management.visual.payload_rules.advanced')}</summary>
+            {(['match', 'notMatch'] as const).map((property) => {
+                const entries = model[property] ?? []
+                const update = (index: number, patch: Partial<PayloadParamEntry>) => onChange({
+                    [property]: entries.map((entry, i) => i === index ? {...entry, ...patch} : entry),
+                })
+                const move = (index: number, direction: number) => {
+                    const next = [...entries]
+                    const target = index + direction
+                    if (target < 0 || target >= next.length) {
+                        return
+                    }
+                    const entry = next[index]!
+                    next[index] = next[target]!
+                    next[target] = entry
+                    onChange({[property]: next})
+                }
+                return (
+                    <fieldset key={property} className={styles.payloadConditionGroup} disabled={disabled}>
+                        <legend className={styles.blockLabel}>{t(`config_management.visual.payload_rules.${property}`)}</legend>
+                        {entries.map((entry, index) => {
+                            const error = getValidationMessage(t, getPayloadParamValidationError(entry))
+                            return (
+                                <div key={entry.id} className={styles.payloadRuleParamGroup}>
+                                    <div className={styles.payloadRuleParamRow}>
+                                        <input
+                                            className='input'
+                                            aria-label={t('config_management.visual.payload_rules.condition_path')}
+                                            placeholder={t('config_management.visual.payload_rules.json_path')}
+                                            value={entry.path}
+                                            disabled={disabled}
+                                            onChange={(event) => update(index, {path: event.target.value})}
+                                        />
+                                        <Select
+                                            value={entry.valueType}
+                                            options={valueTypes}
+                                            disabled={disabled}
+                                            ariaLabel={t('config_management.visual.payload_rules.param_type')}
+                                            onChange={(value) => update(index, {
+                                                valueType: value as PayloadParamValueType,
+                                                value: value === 'boolean' ? 'true' : value === 'json' && !entry.value.trim() ? '{}' : entry.value,
+                                            })}
+                                        />
+                                        {renderParamValueEditor(entry, t, disabled, (patch) => update(index, patch), false,
+                                            t('config_management.visual.payload_rules.condition_value'))}
+                                        <div className={styles.payloadConditionActions}>
+                                            <Button variant='ghost' size='sm' disabled={disabled || index === 0}
+                                                aria-label={t('ai_providers.error_rules_move_up')}
+                                                onClick={() => move(index, -1)}>
+                                                ↑
+                                            </Button>
+                                            <Button variant='ghost' size='sm' disabled={disabled || index === entries.length - 1}
+                                                aria-label={t('ai_providers.error_rules_move_down')}
+                                                onClick={() => move(index, 1)}>
+                                                ↓
+                                            </Button>
+                                            <Button variant='ghost' size='sm' disabled={disabled}
+                                                onClick={() => onChange({[property]: entries.filter((_, i) => i !== index)})}>
+                                                {t('config_management.visual.common.delete')}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    {error && <div className={`error-box ${styles.payloadParamError}`}>{error}</div>}
+                                </div>
+                            )
+                        })}
+                        <Button variant='secondary' size='sm' disabled={disabled} onClick={() => onChange({
+                            [property]: [...entries, {id: makeClientId(), path: '', valueType: 'string', value: ''}],
+                        })}>
+                            {t('config_management.visual.payload_rules.add_condition')}
+                        </Button>
+                    </fieldset>
+                )
+            })}
+        </details>
+    )
+})
+
 export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                                                                        value,
                                                                        disabled,
@@ -2015,14 +2267,6 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
             })),
         [t],
     )
-    const booleanValueOptions     = useMemo(
-        () => [
-            { value: 'true', label: t('config_management.visual.payload_rules.boolean_true') },
-            { value: 'false', label: t('config_management.visual.payload_rules.boolean_false') },
-        ],
-        [t],
-    )
-
     const addRule    = () => onChange([...rules, { id: makeClientId(), models: [], params: [] }])
     const removeRule = (ruleIndex: number) => onChange(rules.filter((_, i) => i !== ruleIndex))
 
@@ -2070,80 +2314,9 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
         })
     }
 
-    const getValuePlaceholder = (valueType: PayloadParamValueType) => {
-        switch (valueType) {
-            case 'string':
-                return t('config_management.visual.payload_rules.value_string')
-            case 'number':
-                return t('config_management.visual.payload_rules.value_number')
-            case 'boolean':
-                return t('config_management.visual.payload_rules.value_boolean')
-            case 'json':
-                return t('config_management.visual.payload_rules.value_json')
-            default:
-                return t('config_management.visual.payload_rules.value_default')
-        }
-    }
-
     const getParamErrorMessage = (param: PayloadParamEntry) => {
         const errorCode = getPayloadParamValidationError(rawJsonValues ? { ...param, valueType: 'json' } : param)
         return getValidationMessage(t, errorCode)
-    }
-
-    const renderParamValueEditor = (ruleIndex: number, paramIndex: number, param: PayloadParamEntry) => {
-        if (rawJsonValues) {
-            return (
-                <textarea
-                    className={`input ${styles.payloadJsonInput}`}
-                    placeholder={t('config_management.visual.payload_rules.value_raw_json')}
-                    aria-label={t('config_management.visual.payload_rules.param_value')}
-                    value={param.value}
-                    onChange={(e) => updateParam(ruleIndex, paramIndex, { value: e.target.value, valueType: 'json' })}
-                    disabled={disabled}
-                />
-            )
-        }
-
-        if (param.valueType === 'boolean') {
-            return (
-                <Select
-                    value={
-                        param.value.toLowerCase() === 'true' || param.value.toLowerCase() === 'false'
-                        ? param.value.toLowerCase()
-                        : ''
-                    }
-                    options={booleanValueOptions}
-                    placeholder={t('config_management.visual.payload_rules.value_boolean')}
-                    disabled={disabled}
-                    ariaLabel={t('config_management.visual.payload_rules.param_value')}
-                    onChange={(nextValue) => updateParam(ruleIndex, paramIndex, { value: nextValue })}
-                />
-            )
-        }
-
-        if (param.valueType === 'json') {
-            return (
-                <textarea
-                    className={`input ${styles.payloadJsonInput}`}
-                    placeholder={getValuePlaceholder(param.valueType)}
-                    aria-label={t('config_management.visual.payload_rules.param_value')}
-                    value={param.value}
-                    onChange={(e) => updateParam(ruleIndex, paramIndex, { value: e.target.value })}
-                    disabled={disabled}
-                />
-            )
-        }
-
-        return (
-            <input
-                className='input'
-                placeholder={getValuePlaceholder(param.valueType)}
-                aria-label={t('config_management.visual.payload_rules.param_value')}
-                value={param.value}
-                onChange={(e) => updateParam(ruleIndex, paramIndex, { value: e.target.value })}
-                disabled={disabled}
-            />
-        )
     }
 
     return (
@@ -2162,8 +2335,8 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                     <div className={styles.blockStack}>
                         <div className={styles.blockLabel}>{t('config_management.visual.payload_rules.models')}</div>
                         {(rule.models.length ? rule.models : []).map((model, modelIndex) => (
+                            <div key={model.id} className={styles.blockStack}>
                             <div
-                                key={model.id}
                                 className={[
                                     styles.payloadRuleModelRow,
                                     protocolFirst ? styles.payloadRuleModelRowProtocolFirst : '',
@@ -2231,6 +2404,9 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                                     {t('config_management.visual.common.delete')}
                                 </Button>
                             </div>
+                            <PayloadConditionsEditor model={model} disabled={disabled}
+                                onChange={(patch) => updateModel(ruleIndex, modelIndex, patch)} />
+                            </div>
                         ))}
                         <div className={styles.actionRow}>
                             <Button
@@ -2288,7 +2464,8 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                                                 }
                                             />
                                         )}
-                                        {renderParamValueEditor(ruleIndex, paramIndex, param)}
+                                        {renderParamValueEditor(param, t, disabled,
+                                            (patch) => updateParam(ruleIndex, paramIndex, patch), rawJsonValues)}
                                         <Button
                                             variant='ghost'
                                             size='sm'
@@ -2385,7 +2562,8 @@ export const PayloadFilterRulesEditor = memo(function PayloadFilterRulesEditor({
                     <div className={styles.blockStack}>
                         <div className={styles.blockLabel}>{t('config_management.visual.payload_rules.models')}</div>
                         {rule.models.map((model, modelIndex) => (
-                            <div key={model.id} className={styles.payloadFilterModelRow}>
+                            <div key={model.id} className={styles.blockStack}>
+                            <div className={styles.payloadFilterModelRow}>
                                 <input
                                     className='input'
                                     placeholder={t('config_management.visual.payload_rules.model_name')}
@@ -2414,6 +2592,9 @@ export const PayloadFilterRulesEditor = memo(function PayloadFilterRulesEditor({
                                 >
                                     {t('config_management.visual.common.delete')}
                                 </Button>
+                            </div>
+                            <PayloadConditionsEditor model={model} disabled={disabled}
+                                onChange={(patch) => updateModel(ruleIndex, modelIndex, patch)} />
                             </div>
                         ))}
                         <div className={styles.actionRow}>

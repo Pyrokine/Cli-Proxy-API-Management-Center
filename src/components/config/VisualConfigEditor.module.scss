@@ -162,6 +162,10 @@
     }
 }
 
+.iceUrlsField {
+    grid-column: 1 / -1;
+}
+
 .storeAuthApplyTo {
     display: flex;
     flex-direction: column;
@@ -1184,7 +1188,6 @@
 
 .actionRow {
     display: flex;
-    justify-content: flex-end;
 }
 
 .emptyState {
@@ -1236,6 +1239,22 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.payloadConditionGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 8px 0;
+    border: 0;
+}
+
+.payloadConditionActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
 }
 
 .payloadJsonInput {

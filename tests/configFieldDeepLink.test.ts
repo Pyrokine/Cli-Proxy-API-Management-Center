@@ -1,7 +1,8 @@
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
-import {findConfigFieldById} from '../src/components/config/configSearchIndex'
+import {findConfigFieldById, searchConfigFields} from '../src/components/config/configSearchIndex'
+import i18n from '@/i18n'
 
 const readSource = (relativePath: string) => readFileSync(
     fileURLToPath(new URL(relativePath, import.meta.url)),
@@ -23,6 +24,24 @@ describe('config field deep link', () => {
         })
         expect(findConfigFieldById('unknown')).toBeUndefined()
         expect(findConfigFieldById(null)).toBeUndefined()
+    })
+
+    test('finds every payload rule by its fork YAML path in each locale', () => {
+        const rules = [
+            ['payloadDefaultRules', 'default'], ['payloadDefaultRawRules', 'default-raw'],
+            ['payloadOverrideRules', 'override'], ['payloadOverrideRawRules', 'override-raw'],
+            ['payloadFilterRules', 'filter'],
+        ] as const
+        for (const locale of ['en', 'zh-CN', 'zh-TW', 'ru']) {
+            const translate = i18n.getFixedT(locale)
+            for (const [fieldId, yamlKey] of rules) {
+                expect(findConfigFieldById(fieldId)).toMatchObject({sectionId: 'payload', yamlKeys: ['payload', yamlKey]})
+                for (const separator of ['.', ' ', '_', '-']) {
+                    expect(searchConfigFields(`payload${separator}${yamlKey}`, translate)
+                        .some((entry) => entry.fieldId === fieldId)).toBe(true)
+                }
+            }
+        }
     })
 
     test('switches to the visual editor without dropping its current draft', () => {

@@ -15,6 +15,7 @@ import {
 import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {apiClient} from '@/services/api/client'
 import {TIMEZONE_OPTIONS, useTimezoneStore} from '@/stores/useTimezoneStore'
 import type {
     PayloadFilterRule,
@@ -40,6 +41,7 @@ import {
 import styles from './VisualConfigEditor.module.scss'
 import {
     ApiKeysCardEditor,
+    CodexLiveICEServersEditor,
     PayloadFilterRulesEditor,
     PayloadRulesEditor,
     PluginStoreAuthEditor,
@@ -87,6 +89,8 @@ type ToggleRowProps = {
 }
 
 function ToggleRow({ title, description, checked, disabled, tone = 'default', onChange }: ToggleRowProps) {
+    const inputId = useId()
+    const descriptionId = description ? `${inputId}-description` : undefined
     const className =
               tone === 'danger'
               ? `${styles.toggleRow} ${styles.toggleRowDanger}`
@@ -97,10 +101,11 @@ function ToggleRow({ title, description, checked, disabled, tone = 'default', on
     return (
         <div className={className}>
             <div className={styles.toggleCopy}>
-                <div className={styles.toggleTitle}>{title}</div>
-                {description ? <div className={styles.toggleDescription}>{description}</div> : null}
+                <label htmlFor={inputId} className={styles.toggleTitle}>{title}</label>
+                {description ? <div id={descriptionId} className={styles.toggleDescription}>{description}</div> : null}
             </div>
-            <ToggleSwitch checked={checked} onChange={onChange} disabled={disabled} ariaLabel={title} />
+            <ToggleSwitch id={inputId} checked={checked} onChange={onChange} disabled={disabled}
+                          ariaDescribedBy={descriptionId} />
         </div>
     )
 }
@@ -140,9 +145,13 @@ function TextAreaField({
     disabled?: boolean
     onChange: (value: string) => void
 }) {
+    const inputId = useId()
+    const hintId = hint ? `${inputId}-hint` : undefined
     return (
-        <FieldShell label={label} hint={hint}>
+        <FieldShell label={label} htmlFor={inputId} hint={hint} hintId={hintId}>
             <textarea
+                id={inputId}
+                aria-describedby={hintId}
                 className={`input ${styles.yamlTextArea}`}
                 value={value}
                 placeholder={placeholder}
@@ -250,8 +259,23 @@ export function VisualConfigEditor({
         })),
         [t],
     )
+    const checkIntervalLabelId                      = useId()
+    const checkIntervalHintId                       = `${checkIntervalLabelId}-hint`
     const routingStrategyLabelId                    = useId()
     const routingStrategyHintId                     = `${routingStrategyLabelId}-hint`
+    const disableImageGenerationLabelId             = useId()
+    const disableImageGenerationHintId              = `${disableImageGenerationLabelId}-hint`
+    const timezoneLabelId                           = useId()
+    const timezoneHintId                            = `${timezoneLabelId}-hint`
+    const logsMaxSizeInputId                         = useId()
+    const logsMaxSizeHintId                          = `${logsMaxSizeInputId}-hint`
+    const logsMaxSizeErrorId                         = `${logsMaxSizeInputId}-error`
+    const imageArtifactCacheMaxSizeInputId           = useId()
+    const imageArtifactCacheMaxSizeHintId            = `${imageArtifactCacheMaxSizeInputId}-hint`
+    const imageArtifactCacheMaxSizeErrorId           = `${imageArtifactCacheMaxSizeInputId}-error`
+    const usageDbSizeInputId                         = useId()
+    const usageDbSizeHintId                          = `${usageDbSizeInputId}-hint`
+    const usageDbSizeErrorId                         = `${usageDbSizeInputId}-error`
     const keepaliveInputId                          = useId()
     const keepaliveHintId                           = `${keepaliveInputId}-hint`
     const keepaliveErrorId                          = `${keepaliveInputId}-error`
@@ -435,7 +459,7 @@ export function VisualConfigEditor({
     )
 
     const handleApiKeysTextChange             = useCallback(
-        (apiKeysText: string) => onChange({ apiKeysText }),
+        (apiKeysText: string, apiKeyAliasesText: string) => onChange({ apiKeysText, apiKeyAliasesText }),
         [onChange],
     )
     const handleTrustedProxiesChange          = useCallback(
@@ -496,7 +520,7 @@ export function VisualConfigEditor({
                 title: sectionT('connectivity.title'),
                 description: sectionT('connectivity.description'),
                 icon: IconKey,
-                errorCount: countErrors(['port', 'tlsHttpRedirectPort']),
+                errorCount: countErrors(['port', 'tlsHttpRedirectPort', 'rmCheckInterval']),
             },
             {
                 id: 'network',
@@ -508,6 +532,7 @@ export function VisualConfigEditor({
                                             'maxRetryCredentials',
                                             'maxRetryInterval',
                                             'authAutoRefreshWorkers',
+                                            'videoResultAuthCacheTTL',
                                         ]),
             },
             {
@@ -533,7 +558,7 @@ export function VisualConfigEditor({
                 title: sectionT('quota.title'),
                 description: sectionT('quota.description'),
                 icon: IconTimer,
-                errorCount: countErrors(['quotaRefreshInterval', 'quotaRefreshMaxInterval']),
+                errorCount: countErrors(['quotaRefreshInterval', 'quotaRefreshMaxInterval', 'transientErrorCooldownSeconds']),
             },
             {
                 id: 'streaming',
@@ -551,7 +576,15 @@ export function VisualConfigEditor({
                 title: sectionT('advanced.title'),
                 description: sectionT('advanced.description'),
                 icon: IconShield,
-                errorCount: 0,
+                errorCount: countErrors([
+                                            'antigravityConnectionPoolIdleTimeout',
+                                            'antigravityConnectionPoolMaxIdleConnsPerHost',
+                                            'codexLiveMediaRelayMaxSessions',
+                                            'codexLiveMediaRelayPublicIP',
+                                            'codexLiveMediaRelayUDPPortMin',
+                                            'codexLiveMediaRelayUDPPortMax',
+                                            'codexLiveMediaRelayICEServers',
+                                        ]),
             },
             {
                 id: 'payload',
@@ -791,7 +824,9 @@ export function VisualConfigEditor({
         <FieldAnchor fieldId='apiKeys'>
             <div className={styles.subsection}>
                 <ApiKeysCardEditor
+                    key={apiClient.getAuthGeneration()}
                     value={values.apiKeysText}
+                    aliasesText={values.apiKeyAliasesText}
                     modelRules={values.apiKeyRules}
                     disabled={disabled}
                     onChange={handleApiKeysTextChange}
@@ -1269,14 +1304,19 @@ export function VisualConfigEditor({
                                              label={sectionT('remote.check_interval', {
                                                  defaultValue: 'Check interval',
                                              })}
+                                             labelId={checkIntervalLabelId}
                                              hint={sectionT('remote.check_interval_hint', {
                                                  defaultValue:
                                                      'How often the backend polls for new versions. ' +
                                                      '"Off" disables background checks ' +
                                                      '(manual refresh still works).',
                                              })}
+                                             hintId={checkIntervalHintId}
                                          >
                                              <Select
+                                                 id={`${checkIntervalLabelId}-select`}
+                                                 ariaLabelledBy={checkIntervalLabelId}
+                                                 ariaDescribedBy={checkIntervalHintId}
                                                  value={values.rmAutoCheckUpdate ?
                                                         values.rmCheckInterval || '180' :
                                                         '0'}
@@ -1446,6 +1486,17 @@ export function VisualConfigEditor({
                                              )}
                                          />
                                      </FieldAnchor>
+                                     <FieldAnchor fieldId='videoResultAuthCacheTTL'>
+                                         <Input
+                                             label={sectionT('network.video_result_auth_cache_ttl')}
+                                             placeholder='3h'
+                                             value={values.videoResultAuthCacheTTL}
+                                             onChange={(e) => onChange({ videoResultAuthCacheTTL: e.target.value })}
+                                             disabled={disabled}
+                                             hint={sectionT('network.video_result_auth_cache_ttl_hint')}
+                                             error={getValidationMessage(t, validationErrors?.videoResultAuthCacheTTL)}
+                                         />
+                                     </FieldAnchor>
                                      <FieldAnchor fieldId='corsAllowedOrigins'>
                                          <Input
                                              label={sectionT('network.cors_allowed_origins')}
@@ -1546,10 +1597,15 @@ export function VisualConfigEditor({
                                          <FieldShell
                                              label={sectionT(
                                                  'network.disable_image_generation')}
+                                             labelId={disableImageGenerationLabelId}
                                              hint={sectionT(
                                                  'network.disable_image_generation_hint')}
+                                             hintId={disableImageGenerationHintId}
                                          >
                                              <Select
+                                                 id={`${disableImageGenerationLabelId}-select`}
+                                                 ariaLabelledBy={disableImageGenerationLabelId}
+                                                 ariaDescribedBy={disableImageGenerationHintId}
                                                  value={values.disableImageGeneration}
                                                  options={[
                                                      {
@@ -1599,6 +1655,16 @@ export function VisualConfigEditor({
                                              checked={values.routingSessionAffinity}
                                              disabled={disabled}
                                              onChange={(routingSessionAffinity) => onChange({ routingSessionAffinity })}
+                                         />
+                                     </FieldAnchor>
+                                     <FieldAnchor fieldId='routingSessionAffinitySubagents'>
+                                         <ToggleRow
+                                             title={sectionT('network.session_affinity_subagents')}
+                                             description={sectionT('network.session_affinity_subagents_desc')}
+                                             checked={values.routingSessionAffinitySubagents}
+                                             disabled={disabled}
+                                             onChange={(routingSessionAffinitySubagents) =>
+                                                 onChange({ routingSessionAffinitySubagents })}
                                          />
                                      </FieldAnchor>
                                      <FieldAnchor fieldId='wsAuth'>
@@ -1689,11 +1755,16 @@ export function VisualConfigEditor({
                                  <div className={styles.systemFieldGrid}>
                                      <FieldShell
                                          label={t('system_info.timezone_title', { defaultValue: '显示时区' })}
+                                         labelId={timezoneLabelId}
                                          hint={sectionT('system.timezone_hint', {
                                              defaultValue: 'Only affects timestamps displayed in the management panel.',
                                          })}
+                                         hintId={timezoneHintId}
                                      >
                                          <Select
+                                             id={`${timezoneLabelId}-select`}
+                                             ariaLabelledBy={timezoneLabelId}
+                                             ariaDescribedBy={timezoneHintId}
                                              value={timezone}
                                              onChange={setTimezone}
                                              options={timezoneOptions}
@@ -1704,11 +1775,17 @@ export function VisualConfigEditor({
                                      <FieldAnchor fieldId='logsMaxTotalSizeMb'>
                                          <FieldShell
                                              label={sectionT('system.logs_max_size')}
+                                             htmlFor={logsMaxSizeInputId}
                                              hint={sectionT('system.logs_max_size_hint')}
+                                             hintId={logsMaxSizeHintId}
                                              error={logsMaxSizeError}
+                                             errorId={logsMaxSizeErrorId}
                                              meta={logSizeMeta}
                                          >
                                              <input
+                                                 id={logsMaxSizeInputId}
+                                                 aria-describedby={logsMaxSizeError ? `${logsMaxSizeHintId} ${logsMaxSizeErrorId}` : logsMaxSizeHintId}
+                                                 aria-invalid={logsMaxSizeError ? true : undefined}
                                                  className='input'
                                                  type='number'
                                                  placeholder='0'
@@ -1723,13 +1800,19 @@ export function VisualConfigEditor({
                                              label={sectionT(
                                                  'system.image_artifact_cache_max_size',
                                              )}
+                                             htmlFor={imageArtifactCacheMaxSizeInputId}
                                              hint={sectionT(
                                                  'system.image_artifact_cache_max_size_hint',
                                              )}
+                                             hintId={imageArtifactCacheMaxSizeHintId}
                                              error={imageArtifactCacheMaxSizeError}
+                                             errorId={imageArtifactCacheMaxSizeErrorId}
                                              meta={imageArtifactCacheSizeMeta}
                                          >
                                              <input
+                                                 id={imageArtifactCacheMaxSizeInputId}
+                                                 aria-describedby={imageArtifactCacheMaxSizeError ? `${imageArtifactCacheMaxSizeHintId} ${imageArtifactCacheMaxSizeErrorId}` : imageArtifactCacheMaxSizeHintId}
+                                                 aria-invalid={imageArtifactCacheMaxSizeError ? true : undefined}
                                                  className='input'
                                                  type='number'
                                                  placeholder='10240'
@@ -1779,6 +1862,8 @@ export function VisualConfigEditor({
                                      <Input
                                          label={sectionT('system.redis_usage_retention')}
                                          type='number'
+                                         min={1}
+                                         max={3600}
                                          placeholder='60'
                                          value={values.redisUsageQueueRetentionSeconds}
                                          onChange={(e) => onChange({ redisUsageQueueRetentionSeconds: e.target.value })}
@@ -1826,12 +1911,18 @@ export function VisualConfigEditor({
                                      />
                                      <FieldShell
                                          label={sectionT('system.usage_retention_max_db_size')}
+                                         htmlFor={usageDbSizeInputId}
                                          hint={sectionT(
                                              'system.usage_retention_max_db_size_hint')}
+                                         hintId={usageDbSizeHintId}
                                          error={usageRetentionMaxDbSizeMbError}
+                                         errorId={usageDbSizeErrorId}
                                          meta={usageDbSizeMeta}
                                      >
                                          <input
+                                             id={usageDbSizeInputId}
+                                             aria-describedby={usageRetentionMaxDbSizeMbError ? `${usageDbSizeHintId} ${usageDbSizeErrorId}` : usageDbSizeHintId}
+                                             aria-invalid={usageRetentionMaxDbSizeMbError ? true : undefined}
                                              className='input'
                                              type='number'
                                              placeholder='0'
@@ -1908,21 +1999,8 @@ export function VisualConfigEditor({
                          >
                              <SectionStack>
                                  <SectionGrid>
-                                     <ToggleRow
-                                         title={sectionT('quota.switch_project')}
-                                         description={sectionT('quota.switch_project_desc')}
-                                         checked={values.quotaSwitchProject}
-                                         disabled={disabled}
-                                         onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
-                                     />
-                                     <ToggleRow
-                                         title={sectionT('quota.switch_preview_model')}
-                                         description={sectionT(
-                                             'quota.switch_preview_model_desc')}
-                                         checked={values.quotaSwitchPreviewModel}
-                                         disabled={disabled}
-                                         onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
-                                     />
+                                     {quotaSwitchProjectToggle}
+                                     {quotaSwitchPreviewModelToggle}
                                      <FieldAnchor fieldId='quotaAntigravityCredits'>
                                          <ToggleRow
                                              title={sectionT('quota.antigravity_credits')}
@@ -1954,7 +2032,29 @@ export function VisualConfigEditor({
                                              onChange={(disableCooling) => onChange({ disableCooling })}
                                          />
                                      </FieldAnchor>
+                                     <FieldAnchor fieldId='saveCooldownStatus'>
+                                         <ToggleRow
+                                             title={sectionT('quota.save_cooldown_status')}
+                                             description={sectionT('quota.save_cooldown_status_desc')}
+                                             checked={values.saveCooldownStatus}
+                                             disabled={disabled}
+                                             onChange={(saveCooldownStatus) => onChange({ saveCooldownStatus })}
+                                         />
+                                     </FieldAnchor>
                                  </SectionGrid>
+                                 <FieldAnchor fieldId='transientErrorCooldownSeconds'>
+                                     <Input
+                                         label={sectionT('quota.transient_error_cooldown_seconds')}
+                                         type='number'
+                                         step='1'
+                                         placeholder='60'
+                                         value={values.transientErrorCooldownSeconds}
+                                         onChange={(e) => onChange({transientErrorCooldownSeconds: e.target.value})}
+                                         disabled={disabled}
+                                         hint={sectionT('quota.transient_error_cooldown_seconds_hint')}
+                                         error={getValidationMessage(t, validationErrors?.transientErrorCooldownSeconds)}
+                                     />
+                                 </FieldAnchor>
                                  <SectionSubsection
                                      title={sectionT('quota.refresh_title')}
                                      description={sectionT('quota.refresh_desc')}
@@ -2038,6 +2138,8 @@ export function VisualConfigEditor({
                                              <div className={styles.fieldControl}>
                                                  <input
                                                      id={keepaliveInputId}
+                                                     aria-describedby={keepaliveError ? `${keepaliveHintId} ${keepaliveErrorId}` : keepaliveHintId}
+                                                     aria-invalid={keepaliveError ? true : undefined}
                                                      className='input'
                                                      type='number'
                                                      placeholder='0'
@@ -2096,6 +2198,8 @@ export function VisualConfigEditor({
                                              <div className={styles.fieldControl}>
                                                  <input
                                                      id={nonstreamKeepaliveInputId}
+                                                     aria-describedby={nonstreamKeepaliveError ? `${nonstreamKeepaliveHintId} ${nonstreamKeepaliveErrorId}` : nonstreamKeepaliveHintId}
+                                                     aria-invalid={nonstreamKeepaliveError ? true : undefined}
                                                      className='input'
                                                      type='number'
                                                      placeholder='0'
@@ -2339,6 +2443,125 @@ export function VisualConfigEditor({
                                              </FieldShell>
                                          </SectionSubsection>
                                      </FieldAnchor>
+                                     <FieldAnchor fieldId='antigravityConnectionPoolEnabled'>
+                                         <ToggleRow title={sectionT('advanced.pool_enabled')}
+                                                    description={sectionT('advanced.pool_enabled_hint')}
+                                                    checked={values.antigravityConnectionPoolEnabled}
+                                                    disabled={disabled}
+                                                    onChange={(antigravityConnectionPoolEnabled) =>
+                                                        onChange({ antigravityConnectionPoolEnabled })} />
+                                     </FieldAnchor>
+                                     <FieldAnchor fieldId='antigravityConnectionPoolIdleTimeout'>
+                                         <Input label={sectionT('advanced.pool_idle_timeout')}
+                                                aria-label={sectionT('advanced.pool_idle_timeout')}
+                                                placeholder='30s'
+                                                value={values.antigravityConnectionPoolIdleTimeout}
+                                                disabled={disabled}
+                                                onChange={(event) => onChange({
+                                                    antigravityConnectionPoolIdleTimeout: event.target.value,
+                                                })}
+                                                hint={sectionT('advanced.pool_idle_timeout_hint')}
+                                                error={getValidationMessage(t,
+                                                    validationErrors?.antigravityConnectionPoolIdleTimeout)} />
+                                     </FieldAnchor>
+                                     <FieldAnchor fieldId='antigravityConnectionPoolMaxIdleConnsPerHost'>
+                                         <Input label={sectionT('advanced.pool_max_idle_conns')}
+                                                aria-label={sectionT('advanced.pool_max_idle_conns')}
+                                                placeholder='2'
+                                                value={values.antigravityConnectionPoolMaxIdleConnsPerHost}
+                                                disabled={disabled}
+                                                onChange={(event) => onChange({
+                                                    antigravityConnectionPoolMaxIdleConnsPerHost: event.target.value,
+                                                })}
+                                                hint={sectionT('advanced.pool_max_idle_conns_hint')}
+                                                error={getValidationMessage(t,
+                                                    validationErrors?.antigravityConnectionPoolMaxIdleConnsPerHost)} />
+                                     </FieldAnchor>
+                                 </Collapsible>
+
+                                 <Collapsible
+                                     label={sectionT('advanced.relay_title')}
+                                     defaultOpen={Boolean(validationErrors?.codexLiveMediaRelayICEServers)}
+                                 >
+                                     <SectionStack>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayEnabled'>
+                                             <ToggleRow title={sectionT('advanced.relay_enabled')}
+                                                        description={sectionT('advanced.relay_enabled_hint')}
+                                                        checked={values.codexLiveMediaRelayEnabled}
+                                                        disabled={disabled}
+                                                        onChange={(codexLiveMediaRelayEnabled) =>
+                                                            onChange({ codexLiveMediaRelayEnabled })} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayMaxSessions'>
+                                             <Input label={sectionT('advanced.relay_max_sessions')}
+                                                    aria-label={sectionT('advanced.relay_max_sessions')}
+                                                    placeholder='32'
+                                                    value={values.codexLiveMediaRelayMaxSessions}
+                                                    disabled={disabled}
+                                                    onChange={(event) => onChange({
+                                                        codexLiveMediaRelayMaxSessions: event.target.value,
+                                                    })}
+                                                    hint={sectionT('advanced.relay_max_sessions_hint')}
+                                                    error={getValidationMessage(t,
+                                                        validationErrors?.codexLiveMediaRelayMaxSessions)} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayDisablePrivateRemoteIPs'>
+                                             <ToggleRow title={sectionT('advanced.relay_block_private_ips')}
+                                                        description={sectionT('advanced.relay_block_private_ips_hint')}
+                                                        checked={values.codexLiveMediaRelayDisablePrivateRemoteIPs}
+                                                        disabled={disabled}
+                                                        onChange={(codexLiveMediaRelayDisablePrivateRemoteIPs) =>
+                                                            onChange({ codexLiveMediaRelayDisablePrivateRemoteIPs })} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayPublicIP'>
+                                             <Input label={sectionT('advanced.relay_public_ip')}
+                                                    aria-label={sectionT('advanced.relay_public_ip')}
+                                                    placeholder='203.0.113.10'
+                                                    value={values.codexLiveMediaRelayPublicIP}
+                                                    disabled={disabled}
+                                                    onChange={(event) => onChange({
+                                                        codexLiveMediaRelayPublicIP: event.target.value,
+                                                    })}
+                                                    hint={sectionT('advanced.relay_public_ip_hint')}
+                                                    error={getValidationMessage(t,
+                                                        validationErrors?.codexLiveMediaRelayPublicIP)} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayUDPPortMin'>
+                                             <Input label={sectionT('advanced.relay_udp_min')}
+                                                    aria-label={sectionT('advanced.relay_udp_min')}
+                                                    placeholder='40000'
+                                                    value={values.codexLiveMediaRelayUDPPortMin}
+                                                    disabled={disabled}
+                                                    onChange={(event) => onChange({
+                                                        codexLiveMediaRelayUDPPortMin: event.target.value,
+                                                    })}
+                                                    hint={sectionT('advanced.relay_udp_hint')}
+                                                    error={getValidationMessage(t,
+                                                        validationErrors?.codexLiveMediaRelayUDPPortMin)} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayUDPPortMax'>
+                                             <Input label={sectionT('advanced.relay_udp_max')}
+                                                    aria-label={sectionT('advanced.relay_udp_max')}
+                                                    placeholder='40127'
+                                                    value={values.codexLiveMediaRelayUDPPortMax}
+                                                    disabled={disabled}
+                                                    onChange={(event) => onChange({
+                                                        codexLiveMediaRelayUDPPortMax: event.target.value,
+                                                    })}
+                                                    error={getValidationMessage(t,
+                                                        validationErrors?.codexLiveMediaRelayUDPPortMax)} />
+                                         </FieldAnchor>
+                                         <FieldAnchor fieldId='codexLiveMediaRelayICEServers'>
+                                             <CodexLiveICEServersEditor
+                                                 value={values.codexLiveMediaRelayICEServers}
+                                                 disabled={disabled}
+                                                 error={getValidationMessage(t,
+                                                     validationErrors?.codexLiveMediaRelayICEServers)}
+                                                 onChange={(codexLiveMediaRelayICEServers) =>
+                                                     onChange({ codexLiveMediaRelayICEServers })}
+                                             />
+                                         </FieldAnchor>
+                                     </SectionStack>
                                  </Collapsible>
 
                                  <Collapsible
@@ -2396,6 +2619,72 @@ export function VisualConfigEditor({
                                                  tone='warning'
                                                  onChange={(codexIdentityConfuse) => onChange({ codexIdentityConfuse })}
                                              />
+                                             <FieldAnchor fieldId='codexOptimizeMultiAgentV2'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.codex_optimize_multi_agent_v2')}
+                                                     description={sectionT('network.codex_optimize_multi_agent_v2_desc')}
+                                                     checked={values.codexOptimizeMultiAgentV2}
+                                                     disabled={disabled}
+                                                     onChange={(codexOptimizeMultiAgentV2) =>
+                                                         onChange({ codexOptimizeMultiAgentV2 })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='codexDisableCloaking'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.codex_disable_cloaking')}
+                                                     description={sectionT('network.codex_disable_cloaking_desc')}
+                                                     checked={values.codexDisableCloaking}
+                                                     disabled={disabled}
+                                                     onChange={(codexDisableCloaking) => onChange({ codexDisableCloaking })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='codexOrphanDelegationCompatibility'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.codex_orphan_delegation_compatibility')}
+                                                     description={sectionT('network.codex_orphan_delegation_compatibility_desc')}
+                                                     checked={values.codexOrphanDelegationCompatibility}
+                                                     disabled={disabled}
+                                                     onChange={(codexOrphanDelegationCompatibility) =>
+                                                         onChange({ codexOrphanDelegationCompatibility })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='claudeDisableCloakMode'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.claude_disable_cloak_mode')}
+                                                     description={sectionT('network.claude_disable_cloak_mode_desc')}
+                                                     checked={values.claudeDisableCloakMode}
+                                                     disabled={disabled}
+                                                     onChange={(claudeDisableCloakMode) => onChange({ claudeDisableCloakMode })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='claudeCodeDisableCloakingModelList'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.claude_code_disable_cloaking_model_list')}
+                                                     description={sectionT('network.claude_code_disable_cloaking_model_list_desc')}
+                                                     checked={values.claudeCodeDisableCloakingModelList}
+                                                     disabled={disabled}
+                                                     onChange={(claudeCodeDisableCloakingModelList) =>
+                                                         onChange({ claudeCodeDisableCloakingModelList })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='claudeModelLevelCooling'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.claude_model_level_cooling')}
+                                                     description={sectionT('network.claude_model_level_cooling_desc')}
+                                                     checked={values.claudeModelLevelCooling}
+                                                     disabled={disabled}
+                                                     onChange={(claudeModelLevelCooling) => onChange({ claudeModelLevelCooling })}
+                                                 />
+                                             </FieldAnchor>
+                                             <FieldAnchor fieldId='xaiInjectXSearch'>
+                                                 <ToggleRow
+                                                     title={sectionT('network.xai_inject_x_search')}
+                                                     description={sectionT('network.xai_inject_x_search_desc')}
+                                                     checked={values.xaiInjectXSearch}
+                                                     disabled={disabled}
+                                                     onChange={(xaiInjectXSearch) => onChange({ xaiInjectXSearch })}
+                                                 />
+                                             </FieldAnchor>
                                              <FieldAnchor fieldId='codexHeaderDefaults'>
                                                  <TextAreaField
                                                      label={sectionT(
