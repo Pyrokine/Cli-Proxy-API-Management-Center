@@ -310,15 +310,15 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         [currentParsed],
     )
 
-    /** Returns 'upgrade' | 'downgrade' | null */
+    /** 开发构建可安装正式版本，不据此判断版本高低 */
     const getUpdateDirection = useCallback(
-        (tag: string): 'upgrade' | 'downgrade' | null => {
-            if (!currentParsed) {
-                return null
-            }
+        (tag: string): 'upgrade' | 'downgrade' | 'install' | null => {
             const parsed = parseVersion(tag)
             if (!parsed) {
                 return null
+            }
+            if (!currentParsed) {
+                return currentVersion.trim().toLowerCase() === 'dev' ? 'install' : null
             }
             const cmp = compareSemver(currentParsed, parsed)
             if (cmp < 0) {
@@ -329,7 +329,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             }
             return null
         },
-        [currentParsed],
+        [currentParsed, currentVersion],
     )
 
     const isNonOfficial = useMemo(() => {
@@ -501,18 +501,23 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     ]),
             ]
 
-            const confirmTitle = t(isDowngrade
-                                   ? 'version_history.confirm_downgrade_target'
-                                   : 'version_history.confirm_upgrade_target', {
-                                       version: tag,
-                                       target: targetLabel,
-                                   })
+            const confirmTitle = t(`version_history.confirm_${direction}_target`, {
+                version: tag,
+                target: targetLabel,
+            })
 
             showConfirmation({
-                                 title: t(isDowngrade ? 'version_history.downgrade' : 'version_history.upgrade'),
+                                 title: t(`version_history.${direction}`),
                                  message: (
                                      <div className={styles.updateConfirm}>
                                          <p className={styles.confirmIntro}>{confirmTitle}</p>
+                                         {direction === 'install' && (
+                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                                 {t('version_history.confirm_development_version', {
+                                                     version: currentVersion,
+                                                 })}
+                                             </div>
+                                         )}
                                          <div className={styles.confirmRows}>
                                              {rows.map((row) => (
                                                  <div key={row.label} className={styles.confirmRow}>
@@ -570,9 +575,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                  ),
                                  variant: isDowngrade ? 'danger' : 'primary',
                                  confirmDisabled,
-                                 confirmText: t(isDowngrade
-                                                ? 'version_history.confirm_downgrade_to'
-                                                : 'version_history.confirm_upgrade_to', { version: tag }),
+                                 confirmText: t(`version_history.confirm_${direction}_to`, {version: tag}),
                                  onConfirm: async () => {
                                      setUpdatingVersion(tag)
                                      setPollingReady(false)
@@ -828,11 +831,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                                 onClick={() => handleUpdate(release.tag_name)}
                                             >
                                                 <IconDownload size={13} />
-                                                {t(
-                                                    direction === 'downgrade'
-                                                    ? 'version_history.downgrade'
-                                                    : 'version_history.upgrade',
-                                                )}
+                                                {t(`version_history.${direction}`)}
                                             </Button>
                                         )}
                                     </div>

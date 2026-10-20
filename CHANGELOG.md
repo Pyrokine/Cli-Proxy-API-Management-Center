@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.26.0-aug.3 - 2026-10-20
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.26.0-aug.2
+- Paired release: CLIProxyAPI v8.0.23-aug.2
+
+### Changes
+
+- Let development builds install a selected release from version history without assigning them a semantic version
+- Show an installation confirmation in all four languages and retain compatibility checks, restart warnings and update progress
+
+### Compatibility
+
+The minimum backend version remains `8.0.23-aug.1`
+
+### 中文
+
+#### 版本依据
+
+- 上游版本：v1.26.0（`c9e2f7cb0b065c13211285d9525bcc8761f17837`）
+- 分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.26.0-aug.2
+- 配套版本：CLIProxyAPI v8.0.23-aug.2
+
+#### 更新内容
+
+- 开发构建可从版本历史安装所选正式版本，保留实际版本标识
+- 四种语言均展示安装确认，保留兼容性检查、重启提示和更新进度
+
+#### 兼容性
+
+最低后端版本保持 `8.0.23-aug.1`
+
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.26.0-aug.2...v1.26.0-aug.3
+
 ## v1.26.0-aug.2 - 2026-10-20
 
 ### Release basis
