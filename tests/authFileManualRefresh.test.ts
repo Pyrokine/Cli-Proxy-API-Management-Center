@@ -565,7 +565,7 @@ for (const kind of ['single', 'all'] as const) {
                 'components/credentials/hooks/useCredentialsData.ts', 'completeMutation', {
                     requestTrackerRef: {current: createLatestCredentialsRequestTracker()},
                     authFilesRef: {current: files}, authFileMutationQuotaKeys, authFileMutationNames,
-                    applyAuthFileMutation, invalidateAuthFileDerivedCaches, loadAll,
+                    applyAuthFileMutation, invalidateAuthFileDerivedCaches, useQuotaStore, loadAll,
                     setAuthFiles: mock(), setSummaryCount: mock(), setLoading: mock(), setRefreshing: mock(),
                 },
             )

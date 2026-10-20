@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.26.0-aug.1 - 2026-10-19
+## v1.26.0-aug.2 - 2026-10-20
 
 ### Release basis
 
@@ -66,7 +66,7 @@ Model availability and image-generation access depend on the connected backend, 
 
 模型可用性和生图权限取决于连接的后端、Provider 与账号
 
-Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.23.1-aug.1...v1.26.0-aug.1
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.23.1-aug.1...v1.26.0-aug.2
 
 ## v1.23.1-aug.1 - 2026-09-25
 

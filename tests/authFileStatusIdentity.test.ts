@@ -150,7 +150,8 @@ describe('credential status request identity', () => {
                 'components/credentials/hooks/useVendorActions.ts', 'toggleAuthFile',
                 {authFilesApi, apiClient, completeMutation, showNotification, t: (key: string) => key},
             )({name: 'shared.json', authIndex: 'a'}, false)
-            expect(completeMutation).not.toHaveBeenCalled()
+            expect(completeMutation).toHaveBeenCalledTimes(1)
+            expect(completeMutation).toHaveBeenCalledWith([])
             expect(showNotification).toHaveBeenCalledTimes(1)
             expect(showNotification).toHaveBeenCalledWith(expect.any(String), 'error')
             expect(useAuthFileStatusStore.getState().requests.size).toBe(0)
@@ -211,7 +212,10 @@ describe('credential status request identity', () => {
                 {name: 'shared.json', disabled: false, auth_index: 'a'},
                 {name: 'shared.json', disabled: false, auth_index: 'b'},
             ])
-            expect(completeMutation).toHaveBeenCalledWith({kind: 'reload', names: ['shared.json', 'shared.json']})
+            expect(completeMutation).toHaveBeenCalledTimes(1)
+            expect(completeMutation).toHaveBeenCalledWith([
+                {kind: 'status', names: ['shared.json'], authIndex: 'a', disabled: false},
+            ])
             expect(markRefreshed).toHaveBeenCalledTimes(1)
             expect(t).toHaveBeenCalledWith('credentials.batch_status_partial', {
                 success: 1, total: 2, details: expect.stringContaining('shared.json (b)'),
