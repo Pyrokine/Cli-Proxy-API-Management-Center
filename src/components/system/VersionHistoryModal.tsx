@@ -1,6 +1,7 @@
 import {Button} from '@/components/ui/Button'
 import {IconChevronLeft, IconDownload, IconExternalLink} from '@/components/ui/icons'
 import {Modal} from '@/components/ui/Modal'
+import {apiClient} from '@/services/api/client'
 import type {Release, ReleasesTarget} from '@/services/api/releases'
 import {releasesApi} from '@/services/api/releases'
 import type {UpdateCompatibility, UpdateStatus} from '@/services/api/update'
@@ -8,7 +9,7 @@ import {updateApi} from '@/services/api/update'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import {formatDateTime} from '@/utils/format'
 import {safeExternalUrl} from '@/utils/validation'
-import {useCallback, useEffect, useMemo, useState} from 'react'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VersionHistoryModal.module.scss'
 
@@ -19,6 +20,15 @@ const OFFICIAL_REPOSITORIES: Record<ReleasesTarget, string> = {
     panel: 'Pyrokine/Cli-Proxy-API-Management-Center',
 }
 const BREAKING_PATTERN                                      = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
+const NON_BREAKING_PATTERN                                  = new RegExp(
+    String.raw`\b(?:non[- ]breaking|(?:no|without)\s+(?:a\s+)?(?:(?:schema|database|data)\s+)?` +
+    String.raw`(?:migrations?(?!\s+(?:path|support))|breaking\s+changes?|incompatibility|incompatibilities)|` +
+    String.raw`(?:does\s+not|doesn't)\s+(?:add|require|introduce)\s+(?:a\s+)?` +
+    String.raw`(?:(?:schema|database|data)\s+)?migration|` +
+    String.raw`(?:(?:schema|database|data)\s+)?migration\s+(?:is\s+)?not\s+(?:required|needed)|` +
+    String.raw`not\s+incompatible)\b`,
+    'gi',
+)
 const COMPATIBILITY_PATTERN                                 = new RegExp(
     String.raw`\b(?:required|requires|compatible|compatibility|` +
     String.raw`incompatible|incompatibility|breaking|migration|migrate)\b|` +
@@ -26,7 +36,7 @@ const COMPATIBILITY_PATTERN                                 = new RegExp(
     'i',
 )
 const UPDATE_POLL_INTERVAL                                  = 2000
-const UPDATE_POLL_FAILURE_LIMIT                             = 3
+const UPDATE_POLL_RECONNECT_TIMEOUT                         = 120000
 const PAGE_SIZE                                             = 10
 
 /* ---------- types ---------- */
@@ -77,7 +87,7 @@ function extractBreakingHints(body: string): string[] {
         return []
     }
     const lines = body.split('\n')
-    return lines.filter((line) => BREAKING_PATTERN.test(line)).map((l) => l.trim())
+    return lines.filter((line) => BREAKING_PATTERN.test(line.replace(NON_BREAKING_PATTERN, ''))).map((l) => l.trim())
 }
 
 /** Classify a release body line into features / fixes / other for side-by-side display. */
@@ -221,6 +231,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     const { showConfirmation, showNotification } = useNotificationStore()
     const serverVersion                          = useAuthStore((state) => state.serverVersion)
     const refreshServerVersion                   = useAuthStore((state) => state.refreshServerVersion)
+    const authGeneration                         = apiClient.getAuthGeneration()
 
     const [releases, setReleases]   = useState<Release[]>([])
     const [loading, setLoading]     = useState(false)
@@ -232,16 +243,23 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     const [updatingVersion, setUpdatingVersion] = useState<string | null>(null)
     const [checkingVersion, setCheckingVersion] = useState<string | null>(null)
     const [pollingReady, setPollingReady]       = useState(false)
+    const [pollError, setPollError]             = useState<string | null>(null)
 
     // Fetch releases when modal opens
-    const [prevOpen, setPrevOpen] = useState(false)
-    if (open && !prevOpen) {
-        setPrevOpen(true)
-        setLoading(true)
-        setError(null)
-    }
-    if (!open && prevOpen) {
-        setPrevOpen(false)
+    const viewGeneration = useRef(0)
+    const [previousView, setPreviousView] = useState({open: false, target, authGeneration})
+    if (open !== previousView.open || target !== previousView.target || authGeneration !== previousView.authGeneration) {
+        viewGeneration.current += 1
+        setPreviousView({open, target, authGeneration})
+        setCheckingVersion(null)
+        setUpdateStatus(null)
+        setUpdatingVersion(null)
+        setPollError(null)
+        setPollingReady(open && target === 'cpa')
+        if (open) {
+            setLoading(true)
+            setError(null)
+        }
     }
 
     useEffect(() => {
@@ -253,20 +271,20 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         releasesApi
             .list(1, 100, target)
             .then((res) => {
-                if (cancelled) {
+                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
                     return
                 }
                 setReleases(res.releases ?? [])
                 setPageIndex(0)
             })
             .catch((err) => {
-                if (cancelled) {
+                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
                     return
                 }
                 setError(err instanceof Error ? err.message : String(err))
             })
             .finally(() => {
-                if (!cancelled) {
+                if (!cancelled && authGeneration === apiClient.getAuthGeneration()) {
                     setLoading(false)
                 }
             })
@@ -274,7 +292,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         return () => {
             cancelled = true
         }
-    }, [open, target])
+    }, [authGeneration, open, target])
 
     // Flat sorted list of all non-draft releases (newest first)
     const sortedReleases = useMemo(() => {
@@ -347,55 +365,84 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     const isUpdating =
               updateStatus?.status === 'downloading' ||
               updateStatus?.status === 'verifying' ||
+              updateStatus?.status === 'draining' ||
               updateStatus?.status === 'replacing'
 
     useEffect(() => {
-        if (!open || target !== 'cpa' || !pollingReady || !isUpdating) {
+        if (!open || target !== 'cpa' || !pollingReady) {
             return
         }
 
-        const controller                                = new AbortController()
+        const controller = new AbortController()
+        const expectedAttemptID = updateStatus?.attempt_id
+        const expectedVersion = updateStatus?.target_version ?? updatingVersion
         let timer: ReturnType<typeof setTimeout> | null = null
-        let active                                      = true
-        let failureCount                                = 0
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+        let active = true
 
         const poll = async () => {
+            if (authGeneration !== apiClient.getAuthGeneration()) {
+                return
+            }
             try {
-                const status = await updateApi.status({ signal: controller.signal })
-                if (!active || controller.signal.aborted) {
+                const status = await updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})
+                if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
                     return
                 }
-                failureCount = 0
+                if (expectedAttemptID && (status.attempt_id !== expectedAttemptID ||
+                    status.target_version !== expectedVersion || status.status === 'idle' || status.state_available === false)) {
+                    throw new Error(t('version_history.status_attempt_unconfirmed'))
+                }
+                if (reconnectTimer !== null) {
+                    clearTimeout(reconnectTimer)
+                    reconnectTimer = null
+                }
+                setPollError(null)
                 setUpdateStatus(status)
+                if (status.status === 'done') {
+                    try {
+                        await refreshServerVersion()
+                    } catch (err) {
+                        if (active && !controller.signal.aborted && authGeneration === apiClient.getAuthGeneration()) {
+                            showNotification(t('version_history.status_version_refresh_failed', {
+                                error: err instanceof Error ? err.message : String(err),
+                            }), 'error')
+                        }
+                    }
+                    if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                        return
+                    }
+                }
                 if (status.status === 'done' || status.status === 'error' || status.status === 'idle') {
                     setPollingReady(false)
                     setUpdatingVersion(null)
-                    if (status.status === 'done') {
+                    if (updatingVersion && status.status === 'done') {
                         showNotification(status.message, 'success')
-                    } else if (status.status === 'error') {
+                    } else if (updatingVersion && status.status === 'error') {
                         showNotification(status.message, 'error')
                     }
                     return
                 }
             } catch (err: unknown) {
-                if (!active || controller.signal.aborted) {
+                if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
                     return
                 }
-                ++failureCount
-                if (failureCount >= UPDATE_POLL_FAILURE_LIMIT) {
-                    const detail  = err instanceof Error ? err.message : String(err)
-                    const message = `${t('version_history.status_poll_failed')}${detail ? `: ${detail}` : ''}`
-                    setUpdateStatus((current) => ({
-                        status: 'error',
-                        message,
-                        target_version: current?.target_version ?? updatingVersion ?? '',
-                        percent: current?.percent ?? 0,
-                        current_version: current?.current_version ?? currentVersion,
-                    }))
+                setPollError(err instanceof Error ? err.message : String(err))
+                if (err instanceof Error && 'status' in err && (err.status === 401 || err.status === 403)) {
                     setPollingReady(false)
-                    setUpdatingVersion(null)
-                    showNotification(message, 'error')
                     return
+                }
+                if (reconnectTimer === null) {
+                    reconnectTimer = setTimeout(() => {
+                        if (!active || authGeneration !== apiClient.getAuthGeneration()) {
+                            return
+                        }
+                        setPollingReady(false)
+                        controller.abort()
+                        if (timer !== null) {
+                            clearTimeout(timer)
+                        }
+                    }, UPDATE_POLL_RECONNECT_TIMEOUT)
                 }
             }
             timer = setTimeout(() => {
@@ -410,15 +457,20 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         return () => {
             active = false
             controller.abort()
-            if (timer) {
+            if (timer !== null) {
                 clearTimeout(timer)
             }
+            if (reconnectTimer !== null) {
+                clearTimeout(reconnectTimer)
+            }
         }
-    }, [currentVersion, isUpdating, open, pollingReady, showNotification, t, target, updatingVersion])
+    }, [authGeneration, open, pollingReady, refreshServerVersion, showNotification, t, target, updateStatus?.attempt_id, updateStatus?.target_version, updatingVersion])
 
     const handleUpdate = async (tag: string) => {
+        const submittedView = viewGeneration.current
+        const isCurrent = () => open && submittedView === viewGeneration.current && authGeneration === apiClient.getAuthGeneration()
         const direction = getUpdateDirection(tag)
-        if (!direction || checkingVersion) {
+        if (!direction || checkingVersion || isUpdating || pollingReady || pollError || !isCurrent()) {
             return
         }
 
@@ -464,6 +516,10 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                         compatibilityMessages.push(t('version_history.confirm_compatibility_unknown'))
                     }
                 }
+            }
+
+            if (!isCurrent()) {
+                return
             }
 
             const rows = [
@@ -577,18 +633,27 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                  confirmDisabled,
                                  confirmText: t(`version_history.confirm_${direction}_to`, {version: tag}),
                                  onConfirm: async () => {
+                                     if (!isCurrent()) {
+                                         return
+                                     }
+                                     const attemptID = crypto.randomUUID().replace(/-/g, '')
                                      setUpdatingVersion(tag)
                                      setPollingReady(false)
+                                     setPollError(null)
                                      setUpdateStatus({
                                                          status: 'downloading',
                                                          message: '',
                                                          target_version: tag,
                                                          percent: 0,
                                                          current_version: currentVersion,
+                                                         attempt_id: attemptID,
                                                      })
                                      try {
                                          if (target === 'panel') {
                                              await updateApi.panelUpdate(tag)
+                                             if (!isCurrent()) {
+                                                 return
+                                             }
                                              setUpdatingVersion(null)
                                              setUpdateStatus({
                                                                  status: 'done',
@@ -606,10 +671,27 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                              )
                                              return
                                          }
-                                         await updateApi.trigger(tag)
+                                         const result = await updateApi.trigger(tag, attemptID)
+                                         if (!isCurrent()) {
+                                             return
+                                         }
+                                         if (result.attempt_id !== attemptID || result.target_version !== tag) {
+                                             throw new Error(t('version_history.status_attempt_unconfirmed'))
+                                         }
                                          setPollingReady(true)
                                      } catch (err) {
+                                         if (!isCurrent()) {
+                                             return
+                                         }
                                          const msg = err instanceof Error ? err.message : String(err)
+                                         const status = err instanceof Error && 'status' in err ? err.status : undefined
+                                         const explicitlyRejected = typeof status === 'number' && status >= 400 && status < 500 &&
+                                                                    ![408, 425, 429].includes(status)
+                                         if (target === 'cpa' && !explicitlyRejected) {
+                                             setPollError(msg)
+                                             setPollingReady(true)
+                                             return
+                                         }
                                          setPollingReady(false)
                                          setUpdatingVersion(null)
                                          setUpdateStatus({
@@ -624,10 +706,14 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                  },
                              })
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            showNotification(msg, 'error')
+            if (isCurrent()) {
+                const msg = err instanceof Error ? err.message : String(err)
+                showNotification(msg, 'error')
+            }
         } finally {
-            setCheckingVersion(null)
+            if (isCurrent()) {
+                setCheckingVersion(null)
+            }
         }
     }
 
@@ -653,23 +739,37 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             )}
 
             {/* Update progress bar */}
-            {updateStatus && updateStatus.status !== 'idle' && (
+            {((updateStatus && updateStatus.status !== 'idle') || pollError) && (
                 <div
+                    role='status'
                     className={`${styles.updateBanner} ${
-                        updateStatus.status === 'error'
+                        updateStatus?.status === 'error'
                         ? styles.updateError
-                        : updateStatus.status === 'done'
+                        : updateStatus?.status === 'done'
                           ? styles.updateDone
                           : ''
                     }`}
                 >
                     <div className={styles.updateInfo}>
-                        <span className={styles.updateLabel}>{t(`version_history.status_${updateStatus.status}`)}</span>
-                        {updateStatus.message && <span className={styles.updateMessage}>{updateStatus.message}</span>}
+                        <span className={styles.updateLabel}>
+                            {pollError
+                             ? t(pollingReady ? 'version_history.status_reconnecting' : 'version_history.status_unconfirmed')
+                             : t(`version_history.status_${updateStatus?.status}`)}
+                        </span>
+                        {pollError
+                         ? <span className={styles.updateMessage}>
+                             {t(pollingReady ? 'version_history.status_poll_reconnecting' : 'version_history.status_poll_failed')}: {pollError}
+                         </span>
+                         : updateStatus?.message && <span className={styles.updateMessage}>{updateStatus.message}</span>}
+                        {pollError && !pollingReady && (
+                            <Button variant='secondary' size='sm' onClick={() => setPollingReady(true)}>
+                                {t('version_history.status_poll_retry')}
+                            </Button>
+                        )}
                     </div>
-                    {isUpdating && (
+                    {isUpdating && !pollError && (
                         <div className={styles.progressBar}>
-                            <div className={styles.progressFill} style={{ width: `${updateStatus.percent}%` }} />
+                            <div className={styles.progressFill} style={{ width: `${updateStatus?.percent}%` }} />
                         </div>
                     )}
                 </div>
@@ -826,7 +926,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                             <Button
                                                 variant={direction === 'downgrade' ? 'danger' : 'primary'}
                                                 size='sm'
-                                                disabled={isUpdating || Boolean(checkingVersion)}
+                                                disabled={isUpdating || pollingReady || Boolean(pollError) || Boolean(checkingVersion)}
                                                 loading={isThisUpdating || isChecking}
                                                 onClick={() => handleUpdate(release.tag_name)}
                                             >

@@ -5,11 +5,15 @@
 import {apiClient} from './client'
 
 export interface UpdateStatus {
-    status: 'idle' | 'downloading' | 'verifying' | 'replacing' | 'done' | 'error'
+    status: 'idle' | 'downloading' | 'verifying' | 'draining' | 'replacing' | 'done' | 'error'
     message: string
     target_version: string
     percent: number
     current_version: string
+    attempt_id?: string
+    guard_phase?: string
+    result_code?: string
+    state_available?: boolean
 }
 
 export interface UpdateCompatibilityUsage {
@@ -35,13 +39,17 @@ export interface UpdateCompatibility {
 }
 
 export const updateApi = {
-    trigger: (version: string) =>
-        apiClient.post<{ status: string; target_version: string; compatibility?: UpdateCompatibility }>('/update', {
+    trigger: (version: string, attemptID: string) =>
+        apiClient.post<{ status: string; target_version: string; attempt_id: string; compatibility?: UpdateCompatibility }>('/update', {
             version,
+            attempt_id: attemptID,
         }),
 
-    status: (options?: { signal?: AbortSignal }) =>
-        apiClient.get<UpdateStatus>('/update-status', { signal: options?.signal }),
+    status: (options?: { signal?: AbortSignal; attemptID?: string }) =>
+        apiClient.get<UpdateStatus>('/update-status', {
+            signal: options?.signal,
+            params: options?.attemptID ? {attempt_id: options.attemptID} : undefined,
+        }),
 
     compatibility: (version: string) =>
         apiClient.get<UpdateCompatibility>(`/update-compatibility?version=${encodeURIComponent(version)}`),

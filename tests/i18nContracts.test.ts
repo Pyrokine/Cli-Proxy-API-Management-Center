@@ -151,7 +151,7 @@ const dynamicKeyManifest = [
         (suffix) => `credentials.provider_health_status_${suffix}`,
     ),
     ...['panel', 'cpa'].map((suffix) => `version_history.target_${suffix}`),
-    ...['downloading', 'verifying', 'replacing', 'done', 'error', 'poll_failed'].map(
+    ...['downloading', 'verifying', 'replacing', 'done', 'error', 'poll_failed', 'reconnecting', 'unconfirmed'].map(
         (suffix) => `version_history.status_${suffix}`,
     ),
     ...[

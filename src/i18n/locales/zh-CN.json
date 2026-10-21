@@ -2593,10 +2593,17 @@
         "downgrade_risk": "当前版本与目标版本之间存在以下不兼容变更：",
         "status_downloading": "正在下载...",
         "status_verifying": "正在校验...",
+        "status_draining": "正在等待现有推理结束...",
         "status_replacing": "正在替换...",
         "status_done": "更新完成",
         "status_error": "更新失败",
-        "status_poll_failed": "连续 3 次查询更新状态失败"
+        "status_poll_failed": "暂时无法确认更新结果，请重新查询",
+        "status_reconnecting": "正在恢复连接",
+        "status_unconfirmed": "更新结果待确认",
+        "status_attempt_unconfirmed": "尚未获取本次更新的对应结果",
+        "status_poll_reconnecting": "连接暂时中断，正在重新查询更新结果",
+        "status_poll_retry": "重新查询",
+        "status_version_refresh_failed": "未能刷新服务端版本信息：{{error}}"
     },
     "notification": {
         "debug_updated": "调试设置已更新",

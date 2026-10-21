@@ -157,6 +157,12 @@ checking, ESLint, tests, and the build, then publishes `dist/management.html`
 
 Local augmented releases use `v<upstream>-aug.N`; the first release based on a new upstream version uses `aug.1`
 
+If the initial update response is lost or the connection is interrupted during installation, the panel queries the same attempt and target version
+After two minutes without confirmation, the panel shows an unconfirmed result; checking again only reads status and does not reinstall
+Reopening backend release history reads the persisted result and refreshes the server version after success
+The panel shows progress while active inference finishes; an older attempt or another connection cannot confirm the current installation
+Negated statements such as “no schema migration” do not mark a release as breaking; explicit migration requirements and warnings remain visible
+
 Codex cards show subscription query failures separately while retaining available quota data and the partial-update state
 Credential-recorded and live subscription dates keep distinct source labels
 “Owned resets” means reset credits held by the account; incomplete or outdated quota results show why the reset action is unavailable, and consumption still requires separate confirmation

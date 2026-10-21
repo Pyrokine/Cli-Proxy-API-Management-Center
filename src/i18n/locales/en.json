@@ -2593,10 +2593,17 @@
         "downgrade_risk": "The following breaking changes exist between current and target version:",
         "status_downloading": "Downloading...",
         "status_verifying": "Verifying checksum...",
+        "status_draining": "Waiting for active inference to finish...",
         "status_replacing": "Replacing binary...",
         "status_done": "Update complete",
         "status_error": "Update failed",
-        "status_poll_failed": "Update status check failed after 3 attempts"
+        "status_poll_failed": "The update result is not confirmed yet. Check again",
+        "status_reconnecting": "Reconnecting",
+        "status_unconfirmed": "Update result unconfirmed",
+        "status_attempt_unconfirmed": "The response does not confirm this update attempt",
+        "status_poll_reconnecting": "The connection was interrupted. Checking the update result again",
+        "status_poll_retry": "Check again",
+        "status_version_refresh_failed": "Could not refresh the server version: {{error}}"
     },
     "notification": {
         "debug_updated": "Debug settings updated",

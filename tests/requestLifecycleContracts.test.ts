@@ -162,7 +162,9 @@ describe('request cancellation contracts', () => {
     test('keeps component request lifetimes abortable and polling serial', () => {
         expect(logsPageSource).toContain('requests.logs.invalidate()')
         expect(versionModalSource).not.toContain('setInterval(async')
-        expect(versionModalSource).toContain('UPDATE_POLL_FAILURE_LIMIT')
+        expect(versionModalSource).toContain('UPDATE_POLL_RECONNECT_TIMEOUT')
+        expect(versionModalSource).toContain('clearTimeout(reconnectTimer)')
+        expect(versionModalSource).toContain('updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})')
         expect(eventsCardSource).toContain('.getEvents(eventsParams, { signal: controller.signal })')
         expect(eventsCardSource).toContain('document.visibilityState === \'visible\'')
         expect(eventsCardSource).toContain('Boolean(eventsRequestControllerRef.current)')

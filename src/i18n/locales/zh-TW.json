@@ -2701,10 +2701,17 @@
         "downgrade_risk": "目前版本與目標版本之間存在以下不兼容變更：",
         "status_downloading": "正在下載...",
         "status_verifying": "正在校驗...",
+        "status_draining": "正在等待現有推理結束...",
         "status_replacing": "正在替換...",
         "status_done": "更新完成",
         "status_error": "更新失敗",
-        "status_poll_failed": "連續 3 次查詢更新狀態失敗"
+        "status_poll_failed": "暫時無法確認更新結果，請重新查詢",
+        "status_reconnecting": "正在恢復連線",
+        "status_unconfirmed": "更新結果待確認",
+        "status_attempt_unconfirmed": "尚未取得本次更新的對應結果",
+        "status_poll_reconnecting": "連線暫時中斷，正在重新查詢更新結果",
+        "status_poll_retry": "重新查詢",
+        "status_version_refresh_failed": "未能刷新服務端版本資訊：{{error}}"
     },
     "not_found": {
         "title": "頁面不存在",

@@ -3,13 +3,14 @@ import {readFileSync} from 'node:fs'
 import type {ReactElement, ReactNode} from 'react'
 import {Children, createElement, Fragment} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
+import type {UpdateStatus} from '../src/services/api/update'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const file = 'components/system/VersionHistoryModal.tsx'
 const helpers: Record<string, unknown> = {}
 for (const name of [
-    'OFFICIAL_REPOSITORIES', 'BREAKING_PATTERN', 'COMPATIBILITY_PATTERN', 'FEATURE_SECTION_PATTERN',
-    'FIX_SECTION_PATTERN', 'PAGE_SIZE', 'UPDATE_POLL_INTERVAL', 'UPDATE_POLL_FAILURE_LIMIT',
+    'OFFICIAL_REPOSITORIES', 'BREAKING_PATTERN', 'NON_BREAKING_PATTERN', 'COMPATIBILITY_PATTERN', 'FEATURE_SECTION_PATTERN',
+    'FIX_SECTION_PATTERN', 'PAGE_SIZE', 'UPDATE_POLL_INTERVAL', 'UPDATE_POLL_RECONNECT_TIMEOUT',
 ]) {
     helpers[name] = sourceInitializer(file, name, helpers)
 }
@@ -48,7 +49,21 @@ function harness({
     serverVersion = 'v8.0.23-aug.2',
     checkingVersion = false,
     locale = 'zh-CN',
+    updateStatus = null,
+    pollError = null,
+    pollingReady = false,
+    releaseBody,
+    open = true,
+    previousView = {open, target},
+    authGeneration = 0,
 }: {
+    authGeneration?: number
+    open?: boolean
+    previousView?: {open: boolean; target: 'cpa' | 'panel'; authGeneration?: number}
+    updateStatus?: UpdateStatus | null
+    pollError?: string | null
+    pollingReady?: boolean
+    releaseBody?: string
     currentVersion?: string
     target?: 'cpa' | 'panel'
     compatible?: boolean
@@ -66,9 +81,12 @@ function harness({
     }
     const buttons: ButtonProps[] = []
     const confirmations: Confirmation[] = []
-    const body = target === 'panel' ? 'Required server: CLIProxyAPI 8.0.23-aug.1' : ''
+    const body = releaseBody ?? (target === 'panel' ? 'Required server: CLIProxyAPI 8.0.23-aug.1' : '')
     const releases = [{tag_name: targetVersion, body, published_at: '2026-10-20T05:44:38Z', draft: false}]
-    const states: unknown[] = [releases, false, null, 0, null, null, checkingVersion ? targetVersion : null, false, true]
+    let generation = authGeneration
+    const states: unknown[] = [releases, false, null, 0, updateStatus, null, checkingVersion ? targetVersion : null, pollingReady, pollError, {authGeneration: 0, ...previousView}]
+    let stateIndex = 0
+    const viewGeneration = {current: 0}
     const compatibility = mock(async () => {
         if (compatibilityError) {
             throw new Error('compatibility unavailable')
@@ -78,7 +96,7 @@ function harness({
             min_panel_version: '1.15.3-aug.1', warnings: [],
         }
     })
-    const trigger = mock(async () => undefined)
+    const trigger = mock(async (version: string, attemptID: string) => ({attempt_id: attemptID, target_version: version}))
     const panelUpdate = mock(async () => undefined)
     const showNotification = mock(() => undefined)
     const auth = {serverVersion, refreshServerVersion: async () => undefined}
@@ -88,13 +106,20 @@ function harness({
     const component = sourceCallback<(props: Record<string, unknown>) => ReactElement>(file, 'VersionHistoryModal', {
         ...helpers,
         React: {createElement, Fragment},
-        useState: () => [states.shift(), () => undefined],
+        useState: () => {
+            const index = stateIndex++
+            return [states[index], (next: unknown) => {
+                states[index] = typeof next === 'function' ? next(states[index]) : next
+            }]
+        },
+        useRef: () => viewGeneration,
         useMemo: (callback: () => unknown) => callback(),
         useCallback: (callback: unknown) => callback,
         useEffect: () => undefined,
         useTranslation: () => ({t, i18n: {language: locale}}),
         useNotificationStore: () => ({showNotification, showConfirmation: (value: Confirmation) => confirmations.push(value)}),
         useAuthStore,
+        apiClient: {getAuthGeneration: () => generation},
         updateApi: {compatibility, trigger, panelUpdate},
         releasesApi: {list: mock(async () => ({releases}))},
         formatDate: (value: string) => value,
@@ -110,9 +135,10 @@ function harness({
         IconChevronLeft: () => null,
         __APP_VERSION__: 'v1.26.0-aug.2',
     })
-    const markup = renderToStaticMarkup(component({open: true, onClose: () => undefined, currentVersion, target}))
+    const markup = renderToStaticMarkup(component({open, onClose: () => undefined, currentVersion, target}))
     const action = (label: string) => buttons.find((button) => Children.toArray(button.children).includes(label))
-    return {markup, action, confirmations, compatibility, trigger, panelUpdate, showNotification, targetVersion}
+    return {markup, action, confirmations, compatibility, trigger, panelUpdate, showNotification, targetVersion, states,
+        changeConnection: () => { ++generation }, closeView: () => { ++viewGeneration.current }}
 }
 
 async function openInstall(view: ReturnType<typeof harness>, label = '安装') {
@@ -144,8 +170,84 @@ describe('development build release installation', () => {
         expect(view.trigger).not.toHaveBeenCalled()
         await confirmation.onConfirm()
         expect(view.trigger).toHaveBeenCalledTimes(1)
-        expect(view.trigger).toHaveBeenCalledWith(view.targetVersion)
+        expect(view.trigger).toHaveBeenCalledWith(view.targetVersion, expect.stringMatching(/^[a-f0-9]{32}$/))
         expect(view.panelUpdate).not.toHaveBeenCalled()
+    })
+
+    test.each(['cpa', 'panel'] as const)('does not submit an old %s confirmation after the connection changes', async (target) => {
+        const view = harness({target})
+        const confirmation = await openInstall(view)
+        view.changeConnection()
+        await confirmation.onConfirm()
+        expect(view.trigger).not.toHaveBeenCalled()
+        expect(view.panelUpdate).not.toHaveBeenCalled()
+    })
+
+    test('does not start polling from an installation response belonging to an old connection', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        let resolve!: (value: {attempt_id: string; target_version: string}) => void
+        const pending = new Promise<{attempt_id: string; target_version: string}>((complete) => { resolve = complete })
+        view.trigger.mockImplementationOnce(() => pending)
+        const submission = confirmation.onConfirm()
+        view.changeConnection()
+        resolve({attempt_id: 'previous-connection', target_version: view.targetVersion})
+        await submission
+        expect(view.states[7]).toBe(false)
+        expect(view.showNotification).not.toHaveBeenCalled()
+    })
+
+    test.each([new Error('Connection closed'), Object.assign(new Error('HTTP 502'), {status: 502})])(
+        'queries an uncertain initial submission without resubmitting it: %s', async (error) => {
+            const view = harness()
+            const confirmation = await openInstall(view)
+            view.trigger.mockRejectedValueOnce(error)
+            await confirmation.onConfirm()
+            expect(view.trigger).toHaveBeenCalledTimes(1)
+            expect(view.states[4]).toMatchObject({status: 'downloading', attempt_id: expect.stringMatching(/^[a-f0-9]{32}$/)})
+            expect(view.states[5]).toBe(view.targetVersion)
+            expect(view.states[7]).toBe(true)
+            expect(view.states[8]).toBe(error.message)
+            expect(view.showNotification).not.toHaveBeenCalled()
+        },
+    )
+
+    test('keeps a mismatched acknowledgement unconfirmed and queries only its requested attempt', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        view.trigger.mockResolvedValueOnce({attempt_id: 'another-attempt', target_version: view.targetVersion})
+        await confirmation.onConfirm()
+        expect(view.states[4]).toMatchObject({status: 'downloading', attempt_id: expect.stringMatching(/^[a-f0-9]{32}$/)})
+        expect(view.states[7]).toBe(true)
+        expect(view.states[8]).toBeTruthy()
+        expect(view.showNotification).not.toHaveBeenCalled()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('reports an explicit rejection without querying or repeating the installation', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        view.trigger.mockRejectedValueOnce(Object.assign(new Error('Incompatible'), {status: 409}))
+        await confirmation.onConfirm()
+        expect(view.states[4]).toMatchObject({status: 'error', message: 'Incompatible'})
+        expect(view.states[7]).toBe(false)
+        expect(view.states[5]).toBeNull()
+        expect(view.showNotification).toHaveBeenCalledWith('Incompatible', 'error')
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('ignores a late installation rejection after its view has closed', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        let reject!: (error: Error) => void
+        view.trigger.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+        const submitting = confirmation.onConfirm()
+        view.closeView()
+        reject(Object.assign(new Error('Late rejection'), {status: 409}))
+        await submitting
+        expect(view.states[4]).toMatchObject({status: 'downloading'})
+        expect(view.showNotification).not.toHaveBeenCalled()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
     })
 
     test('keeps an incompatible backend installation disabled', async () => {
@@ -216,5 +318,87 @@ describe('development build release installation', () => {
         expect(view.action('安装')).toBeUndefined()
         expect(view.action('升级')).toBeUndefined()
         expect(view.action('降级')).toBeUndefined()
+    })
+
+    test('retries an unconfirmed result by reading status without submitting an installation', async () => {
+        const view = harness({pollError: 'HTTP 502'})
+        expect(view.markup).toContain('更新结果待确认')
+        expect(view.markup).not.toContain('更新失败')
+        expect(view.action('安装')?.disabled).toBe(true)
+        await view.action('重新查询')?.onClick?.()
+        expect(view.states[7]).toBe(true)
+        expect(view.trigger).not.toHaveBeenCalled()
+        expect(view.panelUpdate).not.toHaveBeenCalled()
+    })
+
+    test('shows reconnection instead of an installation failure during a temporary outage', () => {
+        const view = harness({pollError: 'HTTP 502', pollingReady: true})
+        expect(view.markup).toContain('正在恢复连接')
+        expect(view.markup).not.toContain('更新失败')
+        expect(view.action('重新查询')).toBeUndefined()
+        expect(view.action('安装')?.disabled).toBe(true)
+    })
+
+    test.each([
+        {open: true, target: 'cpa', previousView: {open: true, target: 'cpa', authGeneration: 0}, authGeneration: 1, ready: true},
+        {open: false, target: 'cpa', previousView: {open: true, target: 'cpa'}, ready: false},
+        {open: true, target: 'cpa', previousView: {open: false, target: 'cpa'}, ready: true},
+        {open: true, target: 'cpa', previousView: {open: true, target: 'panel'}, ready: true},
+        {open: true, target: 'panel', previousView: {open: true, target: 'cpa'}, ready: false},
+    ] as const)('resets the visible update state for %j', ({ready, ...options}) => {
+        const view = harness({...options, pollError: 'HTTP 502', updateStatus: {
+            status: 'replacing', message: 'Restarting', target_version: 'v8.0.23-aug.3',
+            current_version: 'dev', percent: 80,
+        }})
+        expect(view.states[4]).toBeNull()
+        expect(view.states[5]).toBeNull()
+        expect(view.states[7]).toBe(ready)
+        expect(view.states[8]).toBeNull()
+        expect(view.trigger).not.toHaveBeenCalled()
+    })
+})
+
+describe('release compatibility statements', () => {
+    const extractBreakingHints = helpers.extractBreakingHints as (body: string) => string[]
+    const collectBreakingBetween = helpers.collectBreakingBetween as (releases: unknown[], current: string, target: string) => string[]
+
+    test.each([
+        'Database schemas remain management 4 and usage 9; this patch adds no schema migration',
+        'No migration required',
+        'No breaking changes',
+        'This release works without a migration',
+        'This release works without database migration',
+        'This patch does not require a schema migration',
+        "This patch doesn't introduce a database migration",
+        'Schema migration is not required',
+        'Migration not needed',
+        'Non-breaking fixes',
+        'The API is not incompatible',
+        'No incompatibilities',
+    ])('does not mark a negated statement as breaking: %s', (body) => {
+        expect(extractBreakingHints(body)).toEqual([])
+        expect(harness({releaseBody: body}).markup).not.toContain('不兼容变更')
+    })
+
+    test.each([
+        'Breaking change: the old API was removed',
+        'A schema migration is required',
+        'No migration path from the old database is available',
+        'No migration support is provided for the legacy format',
+        'Migrate the configuration before upgrading',
+        'This version is incompatible with the old client',
+        'No schema migration, but the API is incompatible',
+        'No breaking changes to storage; migrate the legacy configuration manually',
+        '⚠ Review the upgrade requirements',
+    ])('retains an affirmative warning: %s', (body) => {
+        expect(extractBreakingHints(body)).toEqual([body])
+        expect(harness({releaseBody: body}).markup).toContain('不兼容变更')
+    })
+
+    test('uses the same classification for downgrade warnings and preserves the original lines', () => {
+        const body = 'No schema migration\nBreaking change: legacy API removed'
+        const releases = [{tag_name: 'v8.0.23-aug.3', body}]
+        expect(collectBreakingBetween(releases, 'v8.0.23-aug.3', 'v8.0.23-aug.2')).toEqual(['Breaking change: legacy API removed'])
+        expect(collectBreakingBetween(releases, 'v8.0.23-aug.2', 'v8.0.23-aug.3')).toEqual([])
     })
 })
