@@ -169,6 +169,7 @@ export interface CodexQuotaState {
     windows: CodexQuotaWindow[]
     planType?: string | null
     subscriptionActiveUntil?: string | number | null
+    subscriptionError?: string
     creditBalance?: string | null
     creditsUnlimited?: boolean
     rateLimitResetCreditsAvailableCount?: CodexResetCreditCountState

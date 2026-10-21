@@ -133,6 +133,7 @@ interface CredentialCardProps {
     quotaSummary?: CredentialField[]
     /** Quota fetch error message */
     quotaError?: string
+    quotaSubscriptionError?: string
     /** Quota is currently loading */
     quotaLoading?: boolean
     /** Freshness of the last accepted backend quota snapshot */
@@ -455,6 +456,7 @@ export function CredentialCard({
                                    quotaItems,
                                    quotaSummary,
                                    quotaError,
+                                   quotaSubscriptionError,
                                    quotaLoading,
                                    quotaFreshness,
                                    quotaObservationWarning,
@@ -468,8 +470,20 @@ export function CredentialCard({
     const { t, i18n }                     = useTranslation()
     const [editingAlias, setEditingAlias] = useState(false)
     const [aliasInput, setAliasInput]     = useState('')
-    const quotaErrorText                  = quotaError ? formatQuotaErrorMessage(quotaError, t) : ''
-    const freshnessLabel                  = quotaFreshnessLabel(quotaFreshness, t)
+    const subscriptionOnlyError           = quotaFreshness === 'partial' && Boolean(quotaSubscriptionError?.trim()) &&
+                                            quotaError?.trim() === quotaSubscriptionError?.trim()
+    const quotaErrorText                  = !subscriptionOnlyError && quotaError ? formatQuotaErrorMessage(quotaError, t) : ''
+    const freshnessLabel                  = subscriptionOnlyError ? t('credentials.quota_subscription_partial') :
+                                            quotaFreshnessLabel(quotaFreshness, t)
+    const displayFields: CredentialField[] | undefined = quotaSubscriptionError ? [
+        ...(fields ?? []),
+        {
+            id: 'subscription-query-status',
+            label: t('credentials.subscription_query_status'),
+            value: quotaSubscriptionError,
+            wrap: true,
+        },
+    ] : fields
     const refreshResultLabel              = refreshStatusLabel(
         refreshState?.isRefreshing || quotaLoading ? 'loading' :
             quotaError && quotaFreshness !== 'partial' && refreshState?.status !== 'banned' &&
@@ -647,9 +661,9 @@ export function CredentialCard({
             </div>
 
             {/* Metadata fields */}
-            {fields && fields.length > 0 && (
+            {displayFields && displayFields.length > 0 && (
                 <div className={styles.fields}>
-                    {fields.map((field) => {
+                    {displayFields.map((field) => {
                         const expiry = buildResetDisplay(null, field.expiresAtMs, sharedNowMs, i18n.resolvedLanguage)
                         return (
                             <div

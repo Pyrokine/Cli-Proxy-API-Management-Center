@@ -858,8 +858,10 @@ function mapCodex(data: unknown): CodexQuotaState {
                                              { defaultValue: 'Invalid manual reset expiry response' },
                                          ) :
                                          '')
+    const subscriptionErrorRaw        = d.subscription_error
+    const subscriptionError           = typeof subscriptionErrorRaw === 'string' ? subscriptionErrorRaw.trim() : ''
     const subscriptionActiveUntil     =
-              d.subscription_active_until_source === 'codex_subscriptions' &&
+              !subscriptionError && d.subscription_active_until_source === 'codex_subscriptions' &&
               typeof d.subscription_active_until === 'string' ?
               d.subscription_active_until : null
 
@@ -1046,6 +1048,7 @@ function mapCodex(data: unknown): CodexQuotaState {
         windows,
         planType,
         subscriptionActiveUntil: subscriptionActiveUntil as string | number | null,
+        subscriptionError,
         creditBalance: accountCredits.balance,
         creditsUnlimited: accountCredits.unlimited,
         rateLimitResetCreditsAvailableCount: resetCredits.availableCount,

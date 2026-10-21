@@ -157,6 +157,10 @@ checking, ESLint, tests, and the build, then publishes `dist/management.html`
 
 Local augmented releases use `v<upstream>-aug.N`; the first release based on a new upstream version uses `aug.1`
 
+Codex cards show subscription query failures separately while retaining available quota data and the partial-update state
+Credential-recorded and live subscription dates keep distinct source labels
+“Owned resets” means reset credits held by the account; incomplete or outdated quota results show why the reset action is unavailable, and consumption still requires separate confirmation
+
 ## Security
 
 Sensitive browser storage uses `enc::v2::` values protected with AES-256-GCM and a random 12-byte IV. The non-exportable

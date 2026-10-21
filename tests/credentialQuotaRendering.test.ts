@@ -56,6 +56,7 @@ describe('credential quota query results', () => {
         const html = render({
             quotaFreshness: 'partial',
             quotaError: 'base quota: status 403; reset credit details: status 502; subscription: status 403',
+            quotaSubscriptionError: 'subscription: status 403',
         })
         expect(html).toContain(i18n.t('credentials.refresh_status_partial'))
         expect(html).not.toContain(i18n.t('credentials.refresh_status_success'))
@@ -375,7 +376,7 @@ describe('credential quota reset rendering contract', () => {
             const state = sourceInitializer<{isResetting: boolean; onReset: () => void; disabled: boolean; title: string}>(
                 'components/credentials/VendorSection.tsx', 'quotaResetState', {
                     ...scope, tokenRefreshBusy, quotaResetting, handleResetQuota: () => {}, t: i18n.getFixedT('en'),
-                    resetAvailability: 'available', codexResetCreditAvailabilityMessage: () => null,
+                    resetAvailability: 'available', effectiveQuotaFreshness: 'fresh', codexResetCreditAvailabilityMessage: () => null,
                 },
             )
             expect(state.disabled).toBe(true)

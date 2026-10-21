@@ -268,6 +268,7 @@ interface CredentialQuotaResult {
     metaSubscriptionActive?: boolean | null
     premium?: boolean | null
     subscriptionActiveUntil?: string | number | null
+    subscriptionError?: string
     creditBalance?: string | null
     creditsUnlimited?: boolean
     claudeResetGrants?: ClaudeResetGrants
@@ -334,6 +335,7 @@ export function useCredentialQuota(
                 items: fromUsedQuotaWindows(codex),
                 planType: codex.planType,
                 subscriptionActiveUntil: codex.subscriptionActiveUntil,
+                subscriptionError: codex.subscriptionError,
                 creditBalance: codex.creditBalance,
                 creditsUnlimited: codex.creditsUnlimited,
                 manualResetCount: codex.rateLimitResetCreditsAvailableCount,

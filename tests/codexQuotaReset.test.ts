@@ -242,7 +242,7 @@ describe('explicit Codex quota reset', () => {
         const state = sourceInitializer<{isResetting: boolean; onReset: () => void; disabled: boolean; title: string}>(
             'components/credentials/VendorSection.tsx', 'quotaResetState', {
                 quotaResetting: false, handleResetQuota: mock(), authIndex: 'fixture-index', file: {disabled: false},
-                tokenRefreshBusy: false, resetAvailability: 'available', codexResetCreditAvailabilityMessage: availabilityMessage, t,
+                tokenRefreshBusy: false, resetAvailability: 'available', effectiveQuotaFreshness: 'fresh', codexResetCreditAvailabilityMessage: availabilityMessage, t,
             },
         )
         const html = renderToStaticMarkup(createElement(CredentialCard, {

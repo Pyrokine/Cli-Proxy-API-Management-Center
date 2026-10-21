@@ -1361,6 +1361,7 @@ function AuthFileCardWithQuota({
               metaSubscriptionActive,
               premium: quotaPremium,
               subscriptionActiveUntil: quotaSubscriptionActiveUntil,
+              subscriptionError: quotaSubscriptionError,
               creditBalance: quotaCreditBalance,
               creditsUnlimited: quotaCreditsUnlimited,
               claudeResetGrants: quotaClaudeResetGrants,
@@ -1661,6 +1662,7 @@ function AuthFileCardWithQuota({
         onReset: handleResetQuota,
         disabled: !authIndex || file.disabled || tokenRefreshBusy || resetAvailability !== 'available',
         title: !authIndex ? t('auth_files.quota_reset_manual_missing_auth_index') :
+               effectiveQuotaFreshness !== 'fresh' ? t('codex_quota.reset_credits_refresh_required') :
                codexResetCreditAvailabilityMessage(resetAvailability, t) ?? t('auth_files.quota_reset_codex_hint'),
     }
 
@@ -1728,6 +1730,13 @@ function AuthFileCardWithQuota({
                         label: t('codex_quota.reset_credits_label'),
                         value: formatCodexResetCreditCount(quotaManualResetCount, t),
                     })
+        if (quotaManualResetCount?.state === 'known' && quotaManualResetCount.value > 0 &&
+            effectiveQuotaFreshness !== 'fresh') {
+            fields.push({
+                id: 'reset-credits-status', label: t('codex_quota.reset_action_label'),
+                value: t('codex_quota.reset_credits_refresh_required'), wrap: true,
+            })
+        }
         quotaResetCreditExpiries?.forEach((credit, index) => {
             const creditLabel    = t('codex_quota.reset_credit_number', {
                 index: index + 1,
@@ -1885,6 +1894,7 @@ function AuthFileCardWithQuota({
             quotaItems={isPluginQuota ? currentPluginQuota?.data?.items : quotaItems}
             quotaSummary={isPluginQuota ? pluginQuotaSummary : undefined}
             quotaError={isPluginQuota ? currentPluginQuota?.error : quotaError}
+            quotaSubscriptionError={isPluginQuota ? undefined : quotaSubscriptionError}
             quotaLoading={isPluginQuota ? currentPluginQuota?.loading : quotaLoading}
             quotaFreshness={isPluginQuota ? currentPluginQuota?.error && currentPluginQuota.data ? 'stale' : undefined :
                             effectiveQuotaFreshness}

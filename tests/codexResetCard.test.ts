@@ -7,7 +7,7 @@ import {apiClient} from '@/services/api/client'
 import {useAuthFileRefreshStore} from '@/stores/useAuthFileRefreshStore'
 import {authFileStatusRequestKey, useAuthFileStatusStore} from '@/stores/useAuthFileStatusStore'
 import {useNotificationStore} from '@/stores/useNotificationStore'
-import {useQuotaStore} from '@/stores/useQuotaStore'
+import {captureQuotaRequestClaim, commitQuotaSnapshot, useQuotaStore} from '@/stores/useQuotaStore'
 import type {CodexQuotaState, QuotaFreshness} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
@@ -18,7 +18,7 @@ import {normalizeCodexAccountCredits, normalizePlanType} from '@/utils/quota/par
 import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
 import {resolveCodexPlanType, resolveCodexSubscriptionActiveUntil} from '@/utils/quota/resolvers'
 import {calculateStatusBarDataFromRecentRequests} from '@/utils/usage'
-import {describe, expect, test} from 'bun:test'
+import {describe, expect, spyOn, test} from 'bun:test'
 import React, {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {useTranslation} from 'react-i18next'
@@ -68,6 +68,7 @@ function renderCard(
     freshness: QuotaFreshness = 'fresh',
     disabled = false,
     detailAvailable = available,
+    observation: {payload?: Record<string, unknown>; lastError?: string} = {},
 ): string {
     const quota = mapCodex({
         plan_type: 'pro',
@@ -82,6 +83,7 @@ function renderCard(
                 id: 'synthetic-credit', reset_type: 'codex_rate_limits', status: 'available', expires_at: expiresAt,
             }] : [],
         },
+        ...observation.payload,
     })
     const serverState = useQuotaStore.getInitialState()
     const originalServerState = {...serverState}
@@ -92,6 +94,7 @@ function renderCard(
     const quotaMetadata = {[key]: {
         fileName: 'reset-fixture.json', type: 'codex', status: 'success' as const,
         freshness, backendGeneration: 1, backendStateRevision: 1, successfulEmpty: false,
+        lastError: observation.lastError,
     }}
     try {
         // SSR reads the initial store snapshot; all quota values come from the production mapper.
@@ -99,7 +102,7 @@ function renderCard(
         useQuotaStore.setState({codexQuota, quotaMetadata})
         refreshServerState.request = null
         return renderToStaticMarkup(createElement(AuthFileCardWithQuota, {
-            file: {name: 'reset-fixture.json', type: 'codex', authIndex: 'reset-fixture-index', disabled},
+            file: {name: 'reset-fixture.json', type: 'codex', authIndex: 'reset-fixture-index', disabled, status: 'active'},
             position: 1, scheduler, disableControls: false, onRefresh: async () => {},
             onToggle: async () => {}, onEdit: () => {}, onDelete: () => {}, onDownload: async () => {},
         }))
@@ -163,5 +166,96 @@ describe('Codex reset credits in the actual vendor card', () => {
             values: 'usage: 1, details: 2',
         }))
         expect(resetButton(html)).toContain('disabled=""')
+    })
+
+    test('scopes a subscription 403 while retaining the active account, weekly quota, and owned reset', () => {
+        const error = 'codex subscription returned status 403'
+        const post = spyOn(apiClient, 'post').mockRejectedValue(new Error('Unexpected mutation'))
+        try {
+            const html = renderCard(1, 0, 'partial', false, 1, {
+                lastError: error,
+                payload: {
+                    rate_limit: {secondary_window: {used_percent: 95, limit_window_seconds: 604800}},
+                    subscription_error: error,
+                    subscription_active_until: expiresAt,
+                    subscription_active_until_source: 'codex_subscriptions',
+                },
+            })
+            expect(html).toContain('5%')
+            expect(html).toContain(i18n.t('credentials.inspection_status_normal'))
+            expect(html).toContain(i18n.t('credentials.quota_subscription_partial'))
+            expect(html).toContain('data-field-id="subscription-query-status"')
+            expect(html).toContain(error)
+            expect(html).toContain(i18n.t('credentials.refresh_status_partial'))
+            expect(html).toContain(i18n.t('credentials.auto_refresh_off'))
+            expect(html).toContain('data-field-id="reset-credits-status"')
+            expect(html).toContain(i18n.t('codex_quota.reset_credits_refresh_required'))
+            expect(html).not.toContain(i18n.t('credentials.quota_freshness_partial'))
+            expect(html).not.toContain(i18n.t('credentials.quota_status_banned'))
+            expect(html).not.toContain(i18n.t('credentials.quota_status_exceeded'))
+            expect(html).not.toContain('data-field-id="subscription-active-until"')
+            expect(countField(html)).toContain('>1</span>')
+            expect(html).toContain(formatDateTime(expiresAt, i18n.language))
+            expect(resetButton(html)).toContain('disabled=""')
+            expect(post).not.toHaveBeenCalled()
+        } finally {
+            post.mockRestore()
+        }
+    })
+
+    test('keeps reset-credit failures visible beside a separate subscription failure', () => {
+        const subscriptionError = 'codex subscription returned status 403'
+        const resetError = 'codex reset credits returned status 502'
+        const html = renderCard(1, 0, 'partial', false, 1, {
+            lastError: `${resetError}; ${subscriptionError}`,
+            payload: {subscription_error: subscriptionError, rate_limit_reset_credits_error: resetError},
+        })
+        expect(html).toContain(i18n.t('credentials.quota_freshness_partial'))
+        expect(html).not.toContain(i18n.t('credentials.quota_subscription_partial'))
+        expect(html).toContain('codex reset credits returned')
+        expect(html).toContain('502')
+        expect(html).toContain(subscriptionError)
+        expect(html).toContain('data-field-id="reset-credit-expiry-details"')
+        expect(resetButton(html)).toContain('disabled=""')
+    })
+
+    test('a successful subscription snapshot replaces the previous error in the production store', () => {
+        const original = useQuotaStore.getState()
+        const generation = apiClient.getAuthGeneration()
+        const error = 'codex subscription returned status 403'
+        try {
+            useQuotaStore.setState({subjectVersions: {}, codexQuota: {}, quotaMetadata: {}})
+            const claim = captureQuotaRequestClaim(generation)
+            for (const [revision, subscriptionError] of [[1, error], [2, '']] as const) {
+                const value = mapCodex({
+                    plan_type: 'pro', subscription_error: subscriptionError,
+                    subscription_active_until: expiresAt,
+                    subscription_active_until_source: 'codex_subscriptions',
+                })
+                expect(commitQuotaSnapshot(claim, generation, {
+                    key,
+                    payload: {provider: 'codex', value},
+                    metadata: {
+                        fileName: 'reset-fixture.json', type: 'codex', status: 'success',
+                        freshness: subscriptionError ? 'partial' : 'fresh',
+                        backendGeneration: 1, backendStateRevision: revision, successfulEmpty: false,
+                        lastError: error,
+                    },
+                })).toBe('committed')
+                const current = useQuotaStore.getState().codexQuota[key]!
+                expect(current.subscriptionError).toBe(subscriptionError)
+                expect(current.subscriptionActiveUntil).toBe(subscriptionError ? null : expiresAt)
+            }
+            const html = renderCard(1, 0, 'fresh', false, 1, {
+                lastError: error,
+                payload: {subscription_active_until: expiresAt, subscription_active_until_source: 'codex_subscriptions'},
+            })
+            expect(html).not.toContain('data-field-id="subscription-query-status"')
+            expect(html).not.toContain(error)
+            expect(html).toContain('data-field-id="subscription-active-until"')
+            expect(html).toContain(i18n.t('credentials.refresh_status_success'))
+        } finally {
+            useQuotaStore.setState(original, true)
+        }
     })
 })

@@ -396,7 +396,7 @@ describe('global i18n contract', () => {
     test('names the single reset count and requires explicit consumption confirmation in every locale', () => {
         expect(Object.fromEntries(localeNames.map((locale) => [locale,
             flatLocales[locale]['codex_quota.reset_credits_label']]))).toEqual({
-            en: 'Available resets', ru: 'Доступные сбросы', 'zh-CN': '可用重置次数', 'zh-TW': '可用重置次數',
+            en: 'Owned resets', ru: 'Имеющиеся сбросы', 'zh-CN': '持有重置次数', 'zh-TW': '持有重置次數',
         })
         localeNames.forEach((locale) => {
             expect(flatLocales[locale]['codex_quota.reset_credits_applicable_label']).toBeUndefined()
