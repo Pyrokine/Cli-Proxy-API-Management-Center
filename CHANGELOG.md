@@ -1,5 +1,59 @@
 # Changelog
 
+## v1.26.0-aug.4 - 2026-10-21
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.26.0-aug.3
+- Paired release: CLIProxyAPI v8.0.23-aug.4
+
+### Fixes
+
+- Display Codex subscription query errors separately from runtime status and available quota data
+- Label reset credits as owned resets and explain why incomplete or outdated quota results block consumption
+- Reconcile interrupted installations by update attempt and target version without repeating the installation request
+- Use a validated acknowledgement from older backends to track their server-generated attempt ID; keep strict client-ID matching for backends that declare support
+- Retain the current connection's update association when closing and reopening version history, including late acknowledgements
+- Show inference-draining progress and distinguish statements such as "no schema migration" from actual migration requirements
+- Keep confirmations, reset protections and explanations consistent in all four languages
+
+### Compatibility
+
+- The minimum backend version remains `8.0.23-aug.1`
+- Update the panel before upgrading an older backend
+- A lost initial acknowledgement from an older backend leaves that installation unconfirmed; checking again reads status without resubmitting
+- Subscription query failures remain visible; this release does not change upstream subscription access
+
+### 中文
+
+### 版本依据
+
+- 上游版本：v1.26.0（`c9e2f7cb0b065c13211285d9525bcc8761f17837`）
+- 分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.26.0-aug.3
+- 配套版本：CLIProxyAPI v8.0.23-aug.4
+
+### 修复
+
+- Codex 订阅查询错误独立显示，保留运行状态和已取得的额度数据
+- 重置额度标注为持有次数，配额结果不完整或已失效时显示消费被禁用的原因
+- 安装期间断连时按更新 attempt 与目标版本核实结果，保持一次安装请求
+- 旧后端通过本次有效响应关联服务器生成的 attempt ID，声明支持客户端 ID 的后端继续严格匹配
+- 同一连接关闭再打开版本历史时保留更新关联，期间返回的有效安装响应仍可继续跟踪
+- 显示等待推理结束的进度，区分“无需迁移”等否定表述与真实迁移要求
+- 四种语言的确认、重置保护和说明保持一致
+
+### 兼容性
+
+- 最低后端版本保持 `8.0.23-aug.1`
+- 升级旧后端前先更新管理面板
+- 旧后端首次安装响应丢失时保留待确认状态，重新查询只读取状态，不会再次提交安装
+- 订阅查询失败继续可见，本版本不改变上游订阅接口权限
+
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.26.0-aug.3...v1.26.0-aug.4
+
 ## v1.26.0-aug.3 - 2026-10-20
 
 ### Release basis
