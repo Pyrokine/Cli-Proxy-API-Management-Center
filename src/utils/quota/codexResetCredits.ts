@@ -15,6 +15,7 @@ interface CodexResetCreditsSummary {
     credits: CodexRateLimitResetCredit[]
     payloadState: CodexResetCreditPayloadState
     detailsState: Exclude<CodexResetCreditDetailsState, 'error'>
+    creditAvailability?: 'invalid' | 'conflict'
 }
 
 interface ResolvedCodexResetCredits {
@@ -22,6 +23,12 @@ interface ResolvedCodexResetCredits {
     applicableAvailableCount: CodexResetCreditCountState
     credits: CodexRateLimitResetCredit[]
     detailsState: CodexResetCreditDetailsState
+    availability: CodexResetCreditAvailability
+}
+
+export interface CodexResetCreditProbe extends ResolvedCodexResetCredits {
+    generation: number
+    checkedAt: string
 }
 
 const missingCount = (source: CodexResetCreditCountSource): CodexResetCreditCountState => ({
@@ -109,6 +116,7 @@ const countState = (
 type NormalizedCredit = {
     credit: CodexRateLimitResetCredit | null
     invalidEntry: boolean
+    unavailable?: boolean
 }
 
 const normalizeCredit = (value: unknown, index: number, nowMs: number): NormalizedCredit => {
@@ -141,7 +149,7 @@ const normalizeCredit = (value: unknown, index: number, nowMs: number): Normaliz
         return { credit: null, invalidEntry: true }
     }
     if (status !== 'available') {
-        return { credit: null, invalidEntry: false }
+        return { credit: null, invalidEntry: false, unavailable: true }
     }
 
     const expiryValues: unknown[] = []
@@ -216,12 +224,19 @@ export function normalizeCodexResetCreditsPayload(
     const hasNoFields                          = Object.keys(record).length === 0
     let invalidCreditEntries                   = own(record, 'credits') && !Array.isArray(record.credits)
     const credits: CodexRateLimitResetCredit[] = []
+    let hasAvailableCredit = false
+    let hasUnavailableCredit = false
+    let hasInvalidExpiry = false
     if (Array.isArray(record.credits)) {
         record.credits.forEach((item, index) => {
             const normalized = normalizeCredit(item, index, nowMs)
             invalidCreditEntries ||= normalized.invalidEntry
+            hasUnavailableCredit ||= normalized.unavailable === true
             if (normalized.credit) {
                 credits.push(normalized.credit)
+                hasInvalidExpiry ||= normalized.credit.expiryState === 'invalid'
+                hasUnavailableCredit ||= normalized.credit.expiryState === 'expired'
+                hasAvailableCredit ||= normalized.credit.expiryState === 'valid' || normalized.credit.expiryState === 'missing'
             }
         })
     }
@@ -236,6 +251,7 @@ export function normalizeCodexResetCreditsPayload(
         ),
         credits,
         payloadState: (hasExpectedShape || hasNoFields) && !invalidCreditEntries ? 'valid' : 'invalid',
+        creditAvailability: hasInvalidExpiry ? 'invalid' : hasUnavailableCredit && !hasAvailableCredit ? 'conflict' : undefined,
         detailsState: !own(record, 'credits')
                       ? 'missing'
                       : invalidCreditEntries
@@ -314,10 +330,10 @@ export const canUseCodexResetCredit = (
 ): boolean => codexResetCreditAvailability(availableCount) === 'available'
 
 export async function runCodexResetCreditAction(
-    readAvailableCount: () => CodexResetCreditCountState | null | undefined,
+    readAvailableCount: () => CodexResetCreditCountState | null | undefined | Promise<CodexResetCreditCountState | null | undefined>,
     action: () => Promise<void>,
 ): Promise<CodexResetCreditAvailability> {
-    const availability = codexResetCreditAvailability(readAvailableCount())
+    const availability = codexResetCreditAvailability(await readAvailableCount())
     if (availability !== 'available') {
         return availability
     }
@@ -350,10 +366,38 @@ export function resolveCodexResetCredits(
     const detailsApplicableCount =
               details.payloadState === 'invalid' ? invalidCount('details') : details.applicableAvailableCount
 
+    const availableCount = mergeCountStates(usageAvailableCount, detailsAvailableCount)
+    let availability = codexResetCreditAvailability(availableCount)
+    if (availability === 'available') {
+        availability = usage.creditAvailability === 'invalid' || details.creditAvailability === 'invalid'
+            ? 'invalid'
+            : usage.creditAvailability ?? details.creditAvailability ?? availability
+    }
     return {
-        availableCount: mergeCountStates(usageAvailableCount, detailsAvailableCount),
+        availableCount,
         applicableAvailableCount: mergeCountStates(usageApplicableCount, detailsApplicableCount),
         credits: details.credits,
         detailsState,
+        availability,
     }
+}
+
+export function parseCodexResetCreditProbe(payload: unknown, authIndex: string): CodexResetCreditProbe | null {
+    const response = asRecord(payload)
+    const data = asRecord(response?.data)
+    if (!response || !data || response.purpose !== 'codex_reset_credit' || response.auth_index !== authIndex ||
+        typeof response.generation !== 'number' || !Number.isSafeInteger(response.generation) || response.generation < 1 ||
+        typeof response.checked_at !== 'string' || !Number.isFinite(Date.parse(response.checked_at)) ||
+        (typeof data.rate_limit_reset_credits_error === 'string' && data.rate_limit_reset_credits_error.trim())) {
+        return null
+    }
+    const resolved = resolveCodexResetCredits(
+        data.rate_limit_reset_credits ?? data.rateLimitResetCredits,
+        data.rate_limit_reset_credits_details ?? data.rateLimitResetCreditsDetails,
+        Date.parse(response.checked_at),
+    )
+    if (response.availability !== resolved.availability) {
+        return null
+    }
+    return {...resolved, generation: response.generation, checkedAt: response.checked_at}
 }

@@ -31,9 +31,10 @@ import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime, maskApiKey} from '@/utils/format'
 import {isModelScopedProviderError, parseProviderError} from '@/utils/providerError'
 import {
-    codexResetCreditAvailability,
+    parseCodexResetCreditProbe,
     runCodexResetCreditAction,
     type CodexResetCreditAvailability,
+    type CodexResetCreditProbe,
 } from '@/utils/quota/codexResetCredits'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {normalizePlanType} from '@/utils/quota/parsers'
@@ -1318,6 +1319,9 @@ function AuthFileCardWithQuota({
     const showNotification                    = useNotificationStore((s) => s.showNotification)
     const showConfirmation                    = useNotificationStore((s) => s.showConfirmation)
     const [quotaResetGeneration, setQuotaResetGeneration] = useState<number | null>(null)
+    const codexResetController = useRef<AbortController | null>(null)
+    const [codexResetProbe, setCodexResetProbe] = useState<{identity: string; probe: CodexResetCreditProbe} | null>(null)
+    const resetControlsDisabledRef = useRef(false)
     const tokenRefreshRequest                  = useAuthFileRefreshStore((state) => state.request)
     const [pluginQuota, setPluginQuota]         = useState<PluginQuotaResult | null>(null)
     const pluginQuotaController                 = useRef<AbortController | null>(null)
@@ -1349,6 +1353,8 @@ function AuthFileCardWithQuota({
         } : null
     }, [cachedPluginQuota, i18n.language, pluginQuota, pluginQuotaIdentity])
     useEffect(() => () => pluginQuotaController.current?.abort(), [pluginQuotaIdentity])
+    useEffect(() => () => codexResetController.current?.abort(), [pluginQuotaIdentity, disableControls, tokenRefreshBusy, statusChanging])
+    resetControlsDisabledRef.current = disableControls || file.disabled === true || tokenRefreshBusy || statusChanging
     const {
               items: quotaItems,
               lastError: quotaError,
@@ -1365,10 +1371,10 @@ function AuthFileCardWithQuota({
               creditBalance: quotaCreditBalance,
               creditsUnlimited: quotaCreditsUnlimited,
               claudeResetGrants: quotaClaudeResetGrants,
-              manualResetCount: quotaManualResetCount,
-              resetCreditExpiries: quotaResetCreditExpiries,
-              resetCreditDetailsState: quotaResetCreditDetailsState,
-              resetCreditExpiriesError: quotaResetCreditExpiriesError,
+              manualResetCount: cachedQuotaManualResetCount,
+              resetCreditExpiries: cachedQuotaResetCreditExpiries,
+              resetCreditDetailsState: cachedQuotaResetCreditDetailsState,
+              resetCreditExpiriesError: cachedQuotaResetCreditExpiriesError,
           }                         = useCredentialQuota(quotaProvider, file.name, authIndex)
     const recentStatusBar           = useMemo(
         () => calculateStatusBarDataFromRecentRequests(file.recentRequests ?? []),
@@ -1395,6 +1401,13 @@ function AuthFileCardWithQuota({
     const runtimeObservedAt                    = providerError?.observedAt ?? dateLikeToISOString(file.updatedAt)
     const runtimeObservedAtMs                  = parseDateLike(runtimeObservedAt)?.getTime()
     const quotaObservedAtMs                    = parseDateLike(quotaObservedAt)?.getTime()
+    const currentCodexResetProbe = codexResetProbe?.identity === pluginQuotaIdentity &&
+        Date.parse(codexResetProbe.probe.checkedAt) >= (quotaObservedAtMs ?? -Infinity)
+        ? codexResetProbe.probe : null
+    const quotaManualResetCount = currentCodexResetProbe?.availableCount ?? cachedQuotaManualResetCount
+    const quotaResetCreditExpiries = currentCodexResetProbe?.credits ?? cachedQuotaResetCreditExpiries
+    const quotaResetCreditDetailsState = currentCodexResetProbe?.detailsState ?? cachedQuotaResetCreditDetailsState
+    const quotaResetCreditExpiriesError = currentCodexResetProbe ? undefined : cachedQuotaResetCreditExpiriesError
     const quotaPredatesRuntimeError            =
               isModelScopedProviderError(providerError) &&
               runtimeObservedAtMs !== undefined &&
@@ -1511,68 +1524,134 @@ function AuthFileCardWithQuota({
     }, [authGeneration, authIndex, currentPluginQuota, file.disabled, file.quotaProvider, i18n.language,
         pluginQuotaIdentity, quotaKey, t])
 
-    const handleResetQuota = useCallback(() => {
-        if (!isCodexProvider || isPluginQuota || disableControls || file.disabled || tokenRefreshBusy || quotaResetting) {
-            return
-        }
-        const claim = captureQuotaRequestClaim(authGeneration)
-        const isCurrent = () => areQuotaSubjectsCurrent(claim, apiClient.getAuthGeneration(), [quotaKey])
-        if (!isCurrent()) {
+    const handleResetQuota = useCallback(async () => {
+        if (!isCodexProvider || isPluginQuota || resetControlsDisabledRef.current || quotaResetting ||
+            codexResetController.current) {
             return
         }
         if (!authIndex) {
             showNotification(t('auth_files.quota_reset_manual_missing_auth_index'), 'error')
             return
         }
-        const readAvailableCount = () => useQuotaStore.getState().quotaMetadata[quotaKey]?.freshness === 'fresh'
-            ? useQuotaStore.getState().codexQuota[quotaKey]?.rateLimitResetCreditsAvailableCount : undefined
-        const unavailable = codexResetCreditAvailabilityMessage(codexResetCreditAvailability(readAvailableCount()), t)
-        if (unavailable) {
-            showNotification(unavailable, 'error')
-            return
+        const claim = captureQuotaRequestClaim(authGeneration)
+        const backendGeneration = useQuotaStore.getState().subjectVersions[quotaKey]?.backendGeneration ?? 0
+        const controller = new AbortController()
+        codexResetController.current = controller
+        const confirmationBeforeCheck = useNotificationStore.getState().confirmation.options
+        let confirmAction: (() => Promise<void>) | undefined
+        const isCurrent = () => !controller.signal.aborted && codexResetController.current === controller &&
+            (confirmAction !== undefined || useNotificationStore.getState().confirmation.options === confirmationBeforeCheck) &&
+            !resetControlsDisabledRef.current && pluginQuotaIdentityRef.current === pluginQuotaIdentity &&
+            useAuthFileRefreshStore.getState().request?.generation !== authGeneration &&
+            !useAuthFileStatusStore.getState().requests.has(authFileStatusRequestKey(authGeneration, file.name, authIndex)) &&
+            (useQuotaStore.getState().subjectVersions[quotaKey]?.backendGeneration ?? 0) === backendGeneration &&
+            areQuotaSubjectsCurrent(claim, apiClient.getAuthGeneration(), [quotaKey])
+        let checkedGeneration: number | undefined
+        let confirming = false
+        let submitted = false
+        let unsubscribe: (() => void) | undefined
+        const finish = () => {
+            unsubscribe?.()
+            unsubscribe = undefined
+            if (controller.signal.aborted && confirmAction &&
+                useNotificationStore.getState().confirmation.options?.onConfirm === confirmAction) {
+                useNotificationStore.getState().hideConfirmation()
+            }
+            if (codexResetController.current === controller) {
+                codexResetController.current = null
+                setQuotaResetGeneration((previous) => previous === authGeneration ? null : previous)
+            }
+        }
+        controller.signal.addEventListener('abort', finish, {once: true})
+        const readAvailableCount = async () => {
+            if (!isCurrent()) {
+                throw new Error(t('common.connection_changed'))
+            }
+            const payload = await quotaApi.fetchCredential(authIndex, 'codex', {
+                purpose: 'codex_reset_credit', signal: controller.signal,
+            })
+            if (!isCurrent()) {
+                throw new Error(t('common.connection_changed'))
+            }
+            const probe = parseCodexResetCreditProbe(payload, authIndex)
+            if (!probe) {
+                throw new Error(t('auth_files.quota_reset_codex_check_invalid'))
+            }
+            if ((backendGeneration > 0 && probe.generation !== backendGeneration) ||
+                (checkedGeneration !== undefined && probe.generation !== checkedGeneration)) {
+                throw new Error(t('common.connection_changed'))
+            }
+            checkedGeneration = probe.generation
+            setCodexResetProbe({identity: pluginQuotaIdentity, probe})
+            const reason = codexResetCreditAvailabilityMessage(probe.availability, t)
+            if (reason) {
+                throw new Error(reason)
+            }
+            return probe.availableCount
         }
         const name = formatAuthFileDisplayName(file.name)
-        showConfirmation({
-            title: t('auth_files.quota_reset_codex_title'),
-            message: t('auth_files.quota_reset_codex_confirm', {name}),
-            confirmText: t('auth_files.quota_reset_codex_confirm_button'),
-            cancelText: t('common.cancel'),
-            onConfirm: async () => {
+        setQuotaResetGeneration(authGeneration)
+        try {
+            await readAvailableCount()
+            if (!isCurrent()) {
+                finish()
+                return
+            }
+            setQuotaResetGeneration(null)
+            confirmAction = async () => {
+                if (submitted || confirming) {
+                    throw new Error(t('auth_files.quota_reset_codex_already_submitted'))
+                }
                 if (!isCurrent()) {
                     throw new Error(t('common.connection_changed'))
                 }
-                if (useAuthFileRefreshStore.getState().request?.generation === authGeneration) {
-                    throw new Error(t('credentials.manual_token_refresh_in_progress'))
-                }
+                confirming = true
                 setQuotaResetGeneration(authGeneration)
                 try {
                     const availability = await runCodexResetCreditAction(readAvailableCount, async () => {
-                        useQuotaStore.setState((state) => {
-                            const current = state.codexQuota[quotaKey]
-                            return current ? {codexQuota: {...state.codexQuota, [quotaKey]: {
-                                ...current,
-                                rateLimitResetCreditsAvailableCount: undefined,
-                                rateLimitResetCreditsApplicableAvailableCount: undefined,
-                            }}} : {}
-                        })
-                        await quotaApi.reset(authIndex)
+                        if (!isCurrent()) {
+                            throw new Error(t('common.connection_changed'))
+                        }
+                        submitted = true
+                        await quotaApi.reset(authIndex, {signal: controller.signal})
                     })
                     const reason = codexResetCreditAvailabilityMessage(availability, t)
                     if (reason) {
                         throw new Error(reason)
                     }
+                    if (!isCurrent()) {
+                        throw new Error(t('common.connection_changed'))
+                    }
+                    setCodexResetProbe(null)
+                    useQuotaStore.setState((state) => {
+                        const current = state.codexQuota[quotaKey]
+                        return current ? {codexQuota: {...state.codexQuota, [quotaKey]: {
+                            ...current,
+                            rateLimitResetCreditsAvailableCount: undefined,
+                            rateLimitResetCreditsApplicableAvailableCount: undefined,
+                            rateLimitResetCredits: undefined,
+                            rateLimitResetCreditDetailsState: 'missing',
+                            rateLimitResetCreditsError: undefined,
+                        }}} : {}
+                    })
                 } catch (error) {
                     if (isCurrent()) {
                         const message = error instanceof Error ? error.message : String(error)
-                        showNotification(t('auth_files.quota_reset_codex_failed', {name, message}), 'error')
+                        showNotification(t(submitted ? 'auth_files.quota_reset_codex_failed' :
+                            'auth_files.quota_reset_codex_check_failed', {name, message}), 'error')
+                        if (useNotificationStore.getState().confirmation.options?.onConfirm === confirmAction) {
+                            useNotificationStore.setState((state) => ({confirmation: {
+                                ...state.confirmation,
+                                options: {...state.confirmation.options!, confirmDisabled: true},
+                            }}))
+                        }
                     }
-                    setQuotaResetGeneration((previous) => previous === authGeneration ? null : previous)
+                    finish()
                     throw error
+                } finally {
+                    confirming = false
                 }
                 try {
-                    if (!isCurrent()) {
-                        return
-                    }
                     showNotification(t('auth_files.quota_reset_codex_success', {name}), 'success')
                     await scheduler.refreshNow(quotaKey)
                     if (isCurrent()) {
@@ -1584,12 +1663,35 @@ function AuthFileCardWithQuota({
                         showNotification(t('auth_files.quota_reset_codex_refresh_failed', {message}), 'warning')
                     }
                 } finally {
-                    setQuotaResetGeneration((previous) => previous === authGeneration ? null : previous)
+                    finish()
                 }
-            },
-        })
-    }, [authGeneration, authIndex, disableControls, file.disabled, file.name, isCodexProvider, isPluginQuota,
-        onRefresh, quotaKey, quotaResetting, scheduler, showConfirmation, showNotification, t, tokenRefreshBusy])
+                const currentConfirmation = useNotificationStore.getState().confirmation
+                if (currentConfirmation.isOpen && currentConfirmation.options?.onConfirm !== confirmAction) {
+                    throw new Error(t('common.connection_changed'))
+                }
+            }
+            showConfirmation({
+                title: t('auth_files.quota_reset_codex_title'),
+                message: t('auth_files.quota_reset_codex_confirm', {name}),
+                confirmText: t('auth_files.quota_reset_codex_confirm_button'),
+                cancelText: t('common.cancel'),
+                onConfirm: confirmAction,
+                onCancel: () => controller.abort(),
+            })
+            unsubscribe = useNotificationStore.subscribe((state) => {
+                if (state.confirmation.options?.onConfirm !== confirmAction) {
+                    controller.abort()
+                }
+            })
+        } catch (error) {
+            if (isCurrent()) {
+                const message = error instanceof Error ? error.message : String(error)
+                showNotification(t('auth_files.quota_reset_codex_check_failed', {name, message}), 'error')
+            }
+            finish()
+        }
+    }, [authGeneration, authIndex, file.name, isCodexProvider, isPluginQuota, onRefresh,
+        pluginQuotaIdentity, quotaKey, quotaResetting, scheduler, showConfirmation, showNotification, t])
 
     const handleClearCooldown = useCallback(() => {
         const isCurrent = () => apiClient.getAuthGeneration() === authGeneration
@@ -1654,16 +1756,12 @@ function AuthFileCardWithQuota({
         ...currentPluginQuota.data.summary,
     ] : undefined
     const displayedQuotaPlanType = isPluginQuota ? currentPluginQuota?.data?.plan ?? null : quotaPlanType
-    const resetAvailability = codexResetCreditAvailability(
-        effectiveQuotaFreshness === 'fresh' ? quotaManualResetCount : undefined,
-    )
     const quotaResetState = {
         isResetting: quotaResetting,
-        onReset: handleResetQuota,
-        disabled: !authIndex || file.disabled || tokenRefreshBusy || resetAvailability !== 'available',
+        onReset: () => void handleResetQuota(),
+        disabled: !authIndex || file.disabled || tokenRefreshBusy || statusChanging || quotaResetting,
         title: !authIndex ? t('auth_files.quota_reset_manual_missing_auth_index') :
-               effectiveQuotaFreshness !== 'fresh' ? t('codex_quota.reset_credits_refresh_required') :
-               codexResetCreditAvailabilityMessage(resetAvailability, t) ?? t('auth_files.quota_reset_codex_hint'),
+               t('auth_files.quota_reset_codex_hint'),
     }
 
     const identity                      = deriveAuthFileIdentity(file)

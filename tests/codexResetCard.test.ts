@@ -12,7 +12,7 @@ import type {CodexQuotaState, QuotaFreshness} from '@/types'
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import {isModelScopedProviderError, parseProviderError} from '@/utils/providerError'
-import {codexResetCreditAvailability, resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
+import {parseCodexResetCreditProbe, resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {normalizeCodexAccountCredits, normalizePlanType} from '@/utils/quota/parsers'
 import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
@@ -44,7 +44,7 @@ const cardScope: Record<string, unknown> = {
     React, ...React, useTranslation, CredentialCard, apiClient, useAuthFileRefreshStore,
     useAuthFileStatusStore, authFileStatusRequestKey, useNotificationStore, useQuotaStore, useCredentialQuota,
     formatAuthFileDisplayName, formatModified, inferProviderFromAuthFileName, deriveAuthFileIdentity,
-    formatDateTime, isModelScopedProviderError, parseProviderError, codexResetCreditAvailability,
+    formatDateTime, isModelScopedProviderError, parseProviderError, parseCodexResetCreditProbe,
     quotaCredentialKey, normalizePlanType, resolveCodexPlanType, resolveCodexSubscriptionActiveUntil,
     calculateStatusBarDataFromRecentRequests,
 }
@@ -142,20 +142,20 @@ describe('Codex reset credits in the actual vendor card', () => {
         expect(resetButton(available)).not.toContain('disabled=""')
         const empty = renderCard(0, 1)
         expect(countField(empty)).toContain('>0</span>')
-        expect(resetButton(empty)).toContain('disabled=""')
+        expect(resetButton(empty)).not.toContain('disabled=""')
     })
 
     test('keeps an unknown owned count unknown even when the applicable count is positive', () => {
         const html = renderCard(undefined, 1)
         expect(countField(html)).toContain(i18n.t('codex_quota.reset_credits_count_missing'))
-        expect(resetButton(html)).toContain('disabled=""')
+        expect(resetButton(html)).not.toContain('disabled=""')
     })
 
-    test('preserves snapshot freshness and disabled-account protection', () => {
+    test('allows old snapshots to start a read-only check while preserving disabled-account protection', () => {
         for (const freshness of ['stale', 'partial', 'outdated'] as const) {
             const html = renderCard(1, 0, freshness)
             expect(countField(html)).toContain('>1</span>')
-            expect(resetButton(html)).toContain('disabled=""')
+            expect(resetButton(html)).not.toContain('disabled=""')
         }
         expect(resetButton(renderCard(1, 0, 'fresh', true))).toContain('disabled=""')
     })
@@ -165,7 +165,7 @@ describe('Codex reset credits in the actual vendor card', () => {
         expect(countField(html)).toContain(i18n.t('codex_quota.reset_credits_count_conflict', {
             values: 'usage: 1, details: 2',
         }))
-        expect(resetButton(html)).toContain('disabled=""')
+        expect(resetButton(html)).not.toContain('disabled=""')
     })
 
     test('scopes a subscription 403 while retaining the active account, weekly quota, and owned reset', () => {
@@ -196,7 +196,7 @@ describe('Codex reset credits in the actual vendor card', () => {
             expect(html).not.toContain('data-field-id="subscription-active-until"')
             expect(countField(html)).toContain('>1</span>')
             expect(html).toContain(formatDateTime(expiresAt, i18n.language))
-            expect(resetButton(html)).toContain('disabled=""')
+            expect(resetButton(html)).not.toContain('disabled=""')
             expect(post).not.toHaveBeenCalled()
         } finally {
             post.mockRestore()
@@ -231,7 +231,7 @@ describe('Codex reset credits in the actual vendor card', () => {
             expect(html).toContain(i18n.t('codex_quota.reset_credits_refresh_required'))
             expect(countField(html)).toContain('>1</span>')
             expect(html).toContain(formatDateTime(expiresAt, i18n.language))
-            expect(resetButton(html)).toContain('disabled=""')
+            expect(resetButton(html)).not.toContain('disabled=""')
             expect(post).not.toHaveBeenCalled()
         } finally {
             post.mockRestore()
@@ -251,7 +251,7 @@ describe('Codex reset credits in the actual vendor card', () => {
         expect(html).toContain('502')
         expect(html).toContain(subscriptionError)
         expect(html).toContain('data-field-id="reset-credit-expiry-details"')
-        expect(resetButton(html)).toContain('disabled=""')
+        expect(resetButton(html)).not.toContain('disabled=""')
     })
 
     test('a successful subscription snapshot replaces the previous error in the production store', () => {

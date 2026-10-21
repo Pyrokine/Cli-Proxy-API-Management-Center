@@ -126,16 +126,21 @@ type QuotaRequestOptions = {
     signal?: AbortSignal
 }
 
+type QuotaFetchOptions = QuotaRequestOptions & {
+    purpose?: 'codex_reset_credit'
+}
+
 const quotaRefreshTaskPath = (taskId: string): string =>
     `/quota/refresh-tasks/${encodeURIComponent(taskId)}`
 
 export const quotaApi = {
     getStatus: () => apiClient.get<QuotaStatusResponse>('/quota/status'),
 
-    fetchCredential: (authIndex: string, provider?: string, options?: QuotaRequestOptions) =>
+    fetchCredential: (authIndex: string, provider?: string, options?: QuotaFetchOptions) =>
         apiClient.post<unknown>('/quota/fetch', {
             auth_index: authIndex,
             ...(provider ? {provider} : {}),
+            ...(options?.purpose ? {purpose: options.purpose} : {}),
         }, {signal: options?.signal}),
 
     refresh: (credentials?: string[], options?: QuotaRequestOptions) =>
@@ -163,14 +168,14 @@ export const quotaApi = {
             signal: options?.signal,
         }),
 
-    reset: async (authIndex: string): Promise<void> => {
+    reset: async (authIndex: string, options?: QuotaRequestOptions): Promise<void> => {
         const identity = authIndex.trim()
         if (!identity) {
             throw new Error(i18n.t('auth_files.quota_reset_manual_missing_auth_index'))
         }
         const result = await apiClient.post<{status: string; auth_index: string}>('/reset-quota', {
             auth_index: identity,
-        })
+        }, {signal: options?.signal})
         if (result?.status !== 'ok' || result.auth_index !== identity) {
             throw new Error(i18n.t('auth_files.quota_reset_invalid_response'))
         }

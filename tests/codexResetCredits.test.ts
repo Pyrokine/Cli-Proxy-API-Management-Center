@@ -2,13 +2,53 @@ import {
     canUseCodexResetCredit,
     codexResetCreditAvailability,
     normalizeCodexResetCreditsPayload,
+    parseCodexResetCreditProbe,
     resolveCodexResetCredits,
     runCodexResetCreditAction,
 } from '@/utils/quota/codexResetCredits'
 import {normalizeCodexAccountCredits} from '@/utils/quota/parsers'
 import {describe, expect, test} from 'bun:test'
+import sharedCases from './fixtures/codex-reset-credit-cases.json'
 
 describe('Codex reset credits', () => {
+    for (const item of sharedCases.cases) {
+        test(`matches the backend eligibility contract: ${item.name}`, () => {
+            const probe = parseCodexResetCreditProbe({
+                purpose: 'codex_reset_credit', auth_index: 'synthetic-index', generation: 1,
+                checked_at: sharedCases.checked_at, availability: item.expected, data: item.data,
+            }, 'synthetic-index')
+            if (item.expected === 'error') {
+                expect(probe).toBeNull()
+            } else {
+                expect(String(probe?.availability)).toBe(item.expected)
+            }
+        })
+    }
+
+    test('recomputes expiration at each current check rather than retaining yesterday\'s expiry state', () => {
+        const details = {available_count: 1, credits: [{id: 'synthetic-expiring', reset_type: 'codex_rate_limits',
+            status: 'available', expires_at: '2026-10-21T12:00:00Z', expiryState: 'valid'}]}
+        const yesterday = resolveCodexResetCredits(null, details, Date.parse('2026-10-20T12:00:00Z'))
+        const today = resolveCodexResetCredits(null, details, Date.parse('2026-10-21T12:00:00Z'))
+        expect(yesterday.credits[0]?.expiryState).toBe('valid')
+        expect(yesterday.availability).toBe('available')
+        expect(today.availableCount).toMatchObject({state: 'known', value: 1})
+        expect(today.credits[0]?.expiryState).toBe('expired')
+        expect(today.availability).toBe('conflict')
+    })
+
+    test('awaits a current count query before dispatching a consuming action', async () => {
+        let queries = 0
+        let consumes = 0
+        const availability = await runCodexResetCreditAction(async () => {
+            queries += 1
+            return resolveCodexResetCredits({available_count: 0}, null).availableCount
+        }, async () => { consumes += 1 })
+        expect(availability).toBe('none')
+        expect(queries).toBe(1)
+        expect(consumes).toBe(0)
+    })
+
     test('keeps owned credits available when the applicable count is zero', () => {
         const resolved = resolveCodexResetCredits({
                                                       available_count: 1,

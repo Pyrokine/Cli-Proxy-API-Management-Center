@@ -167,7 +167,9 @@ Negated statements such as “no schema migration” do not mark a release as br
 
 Codex cards show subscription query failures separately while retaining available quota data and the partial-update state
 Credential-recorded and live subscription dates keep distinct source labels
-“Owned resets” means reset credits held by the account; incomplete or outdated quota results show why the reset action is unavailable, and consumption still requires separate confirmation
+The v1.26.0-aug.5 reset flow checks current owned credits before opening confirmation, checks again on confirmation, and requires the backend to check before consumption. At least one currently valid owned credit is required; an applicable count of zero does not replace the owned count
+Old, unknown, and partial quota snapshots can start a read-only eligibility check. A subscription error does not disable that check. Expired or consumed credits do not establish eligibility; missing, invalid, or conflicting current counts block consumption. A query from yesterday never substitutes for a current check
+Cancellation, changed credentials or connections, and repeated confirmation callbacks do not replay consumption. Counts are invalidated only after a confirmed reset and then refreshed. An older backend without the native read-only check cannot authorize a reset through this panel
 
 ## Security
 
