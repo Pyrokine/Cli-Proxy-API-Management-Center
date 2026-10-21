@@ -68,7 +68,7 @@ function renderCard(
     freshness: QuotaFreshness = 'fresh',
     disabled = false,
     detailAvailable = available,
-    observation: {payload?: Record<string, unknown>; lastError?: string} = {},
+    observation: {payload?: Record<string, unknown>; lastError?: string; file?: Partial<AuthFileItem>} = {},
 ): string {
     const quota = mapCodex({
         plan_type: 'pro',
@@ -102,7 +102,7 @@ function renderCard(
         useQuotaStore.setState({codexQuota, quotaMetadata})
         refreshServerState.request = null
         return renderToStaticMarkup(createElement(AuthFileCardWithQuota, {
-            file: {name: 'reset-fixture.json', type: 'codex', authIndex: 'reset-fixture-index', disabled, status: 'active'},
+            file: {name: 'reset-fixture.json', type: 'codex', authIndex: 'reset-fixture-index', disabled, status: 'active', ...observation.file},
             position: 1, scheduler, disableControls: false, onRefresh: async () => {},
             onToggle: async () => {}, onEdit: () => {}, onDelete: () => {}, onDownload: async () => {},
         }))
@@ -194,6 +194,41 @@ describe('Codex reset credits in the actual vendor card', () => {
             expect(html).not.toContain(i18n.t('credentials.quota_status_banned'))
             expect(html).not.toContain(i18n.t('credentials.quota_status_exceeded'))
             expect(html).not.toContain('data-field-id="subscription-active-until"')
+            expect(countField(html)).toContain('>1</span>')
+            expect(html).toContain(formatDateTime(expiresAt, i18n.language))
+            expect(resetButton(html)).toContain('disabled=""')
+            expect(post).not.toHaveBeenCalled()
+        } finally {
+            post.mockRestore()
+        }
+    })
+
+    test('separates an exhausted 429 runtime from the owned reset and subscription 403', () => {
+        const error = 'codex subscription returned status 403'
+        const retryAt = new Date(Date.now() + 3_600_000).toISOString()
+        const post = spyOn(apiClient, 'post').mockRejectedValue(new Error('Unexpected mutation'))
+        try {
+            const html = renderCard(1, 0, 'partial', false, 1, {
+                lastError: error,
+                payload: {
+                    rate_limit: {secondary_window: {used_percent: 100, limit_window_seconds: 604800}},
+                    subscription_error: error,
+                },
+                file: {
+                    status: 'unavailable', unavailable: true,
+                    runtimeError: {code: 'usage_limit_reached', message: 'usage_limit_reached', httpStatus: 429,
+                        model: 'gpt-5.5', effectScope: 'model', effectKey: 'gpt-5.5', nextRetryAfter: retryAt},
+                    cooldownSnapshot: {receivedAtMs: Date.now(), records: [{scope: 'model', modelKey: 'gpt-5.5',
+                        retryAt, remainingSeconds: 3600, reason: 'usage_limit_reached', httpStatus: 429}]},
+                },
+            })
+            expect(html).toContain('0%')
+            expect(html).toContain('usage_limit_reached')
+            expect(html).toContain('429')
+            expect(html).toContain('data-field-id="subscription-query-status"')
+            expect(html).toContain(error)
+            expect(html).toContain(i18n.t('credentials.auto_refresh_off'))
+            expect(html).toContain(i18n.t('codex_quota.reset_credits_refresh_required'))
             expect(countField(html)).toContain('>1</span>')
             expect(html).toContain(formatDateTime(expiresAt, i18n.language))
             expect(resetButton(html)).toContain('disabled=""')
