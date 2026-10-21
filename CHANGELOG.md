@@ -1,5 +1,57 @@
 # Changelog
 
+## v1.26.0-aug.5 - 2026-10-22
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.26.0-aug.4
+- Paired release: CLIProxyAPI v8.0.23-aug.5
+
+### Fixes
+
+- Check current Codex reset credits before opening confirmation and again before submitting a reset
+- Allow old, unknown and partial quota snapshots to start a read-only eligibility check, with subscription failures shown separately
+- Require at least one currently valid owned credit, preserving the owned-one/applicable-zero case and checking supplied expiration details
+- Keep yesterday's query separate from current reset eligibility
+- Cancel obsolete checks after credential or connection changes and prevent repeated confirmation from replaying consumption
+- Retain counts until reset success is confirmed, and keep uncertain results or subsequent refresh failures from triggering another consumption
+- Keep reset guidance and failure messages consistent in all four languages
+
+### Compatibility
+
+- The minimum backend version for the management panel remains `8.0.23-aug.1`
+- Codex reset eligibility checks require the paired CPA `v8.0.23-aug.5`; older backends receive an explicit update-required message for this action
+- Current eligibility checks preserve existing quota cooldown until consumption is explicitly confirmed
+
+### 中文
+
+### 版本依据
+
+- 上游版本：v1.26.0（`c9e2f7cb0b065c13211285d9525bcc8761f17837`）
+- 分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.26.0-aug.4
+- 配套版本：CLIProxyAPI v8.0.23-aug.5
+
+### 修复
+
+- 打开 Codex 重置确认框前核查当前次数，确认提交时再次只读核查
+- 旧、未知或部分更新的配额快照可以开始只读资格核查，订阅失败单独显示
+- 当前至少持有一次有效机会才允许消费，保留持有 1／适用 0 的情况，并检查已提供的期限明细
+- 昨天的查询只用于展示，当前重置资格以本次核查为准
+- 凭证或连接变化时取消旧核查，重复确认保持单次消费
+- 确认重置成功后才失效旧次数字段，消费结果未知或后续刷新失败均不自动重复消费
+- 四种语言的重置说明与失败提示保持一致
+
+### 兼容性
+
+- 管理面板的最低后端版本保持 `8.0.23-aug.1`
+- Codex 重置资格核查要求配套 CPA `v8.0.23-aug.5`，旧后端使用此操作时显示明确的更新提示
+- 当前资格核查保留已有额度冷却，上游明确确认消费后才清理
+
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.26.0-aug.4...v1.26.0-aug.5
+
 ## v1.26.0-aug.4 - 2026-10-21
 
 ### Release basis
