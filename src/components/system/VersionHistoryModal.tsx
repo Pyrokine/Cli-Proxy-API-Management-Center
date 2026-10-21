@@ -247,15 +247,34 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
 
     // Fetch releases when modal opens
     const viewGeneration = useRef(0)
+    const submittedUpdate = useRef<{
+        authGeneration: number
+        visible: boolean
+        status: UpdateStatus
+        pollError: string | null
+        pollingReady: boolean
+    } | null>(null)
+    if (submittedUpdate.current) {
+        if (submittedUpdate.current.authGeneration !== authGeneration) {
+            submittedUpdate.current = null
+        } else {
+            submittedUpdate.current.visible = open && target === 'cpa'
+        }
+    }
+    useEffect(() => () => {
+        viewGeneration.current += 1
+        submittedUpdate.current = null
+    }, [])
     const [previousView, setPreviousView] = useState({open: false, target, authGeneration})
     if (open !== previousView.open || target !== previousView.target || authGeneration !== previousView.authGeneration) {
         viewGeneration.current += 1
         setPreviousView({open, target, authGeneration})
+        const retained = open && target === 'cpa' ? submittedUpdate.current : null
         setCheckingVersion(null)
-        setUpdateStatus(null)
-        setUpdatingVersion(null)
-        setPollError(null)
-        setPollingReady(open && target === 'cpa')
+        setUpdateStatus(retained?.status ?? null)
+        setUpdatingVersion(retained && !['done', 'error', 'idle'].includes(retained.status.status) ? retained.status.target_version : null)
+        setPollError(retained?.pollError ?? null)
+        setPollingReady(open && target === 'cpa' && (retained?.pollingReady ?? true))
         if (open) {
             setLoading(true)
             setError(null)
@@ -376,17 +395,23 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         const controller = new AbortController()
         const expectedAttemptID = updateStatus?.attempt_id
         const expectedVersion = updateStatus?.target_version ?? updatingVersion
+        const attempt = submittedUpdate.current
+        if (attempt) {
+            attempt.pollingReady = true
+        }
         let timer: ReturnType<typeof setTimeout> | null = null
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null
         let active = true
+        const isCurrent = () => active && !controller.signal.aborted && authGeneration === apiClient.getAuthGeneration() &&
+                                submittedUpdate.current === attempt
 
         const poll = async () => {
-            if (authGeneration !== apiClient.getAuthGeneration()) {
+            if (!isCurrent()) {
                 return
             }
             try {
                 const status = await updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})
-                if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                if (!isCurrent()) {
                     return
                 }
                 if (expectedAttemptID && (status.attempt_id !== expectedAttemptID ||
@@ -397,19 +422,24 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     clearTimeout(reconnectTimer)
                     reconnectTimer = null
                 }
+                if (attempt) {
+                    attempt.status = status
+                    attempt.pollError = null
+                    attempt.pollingReady = !['done', 'error', 'idle'].includes(status.status)
+                }
                 setPollError(null)
                 setUpdateStatus(status)
                 if (status.status === 'done') {
                     try {
                         await refreshServerVersion()
                     } catch (err) {
-                        if (active && !controller.signal.aborted && authGeneration === apiClient.getAuthGeneration()) {
+                        if (isCurrent()) {
                             showNotification(t('version_history.status_version_refresh_failed', {
                                 error: err instanceof Error ? err.message : String(err),
                             }), 'error')
                         }
                     }
-                    if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                    if (!isCurrent()) {
                         return
                     }
                 }
@@ -424,18 +454,28 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     return
                 }
             } catch (err: unknown) {
-                if (!active || controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
+                if (!isCurrent()) {
                     return
                 }
-                setPollError(err instanceof Error ? err.message : String(err))
+                const message = err instanceof Error ? err.message : String(err)
+                if (attempt) {
+                    attempt.pollError = message
+                }
+                setPollError(message)
                 if (err instanceof Error && 'status' in err && (err.status === 401 || err.status === 403)) {
+                    if (attempt) {
+                        attempt.pollingReady = false
+                    }
                     setPollingReady(false)
                     return
                 }
                 if (reconnectTimer === null) {
                     reconnectTimer = setTimeout(() => {
-                        if (!active || authGeneration !== apiClient.getAuthGeneration()) {
+                        if (!isCurrent()) {
                             return
+                        }
+                        if (attempt) {
+                            attempt.pollingReady = false
                         }
                         setPollingReady(false)
                         controller.abort()
@@ -636,18 +676,24 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                      if (!isCurrent()) {
                                          return
                                      }
+                                     if (target === 'cpa' && submittedUpdate.current &&
+                                         !['done', 'error', 'idle'].includes(submittedUpdate.current.status.status)) {
+                                         return
+                                     }
                                      const attemptID = crypto.randomUUID().replace(/-/g, '')
+                                     const status: UpdateStatus = {
+                                         status: 'downloading', message: '', target_version: tag, percent: 0,
+                                         current_version: currentVersion, attempt_id: attemptID,
+                                     }
+                                     const attempt = {authGeneration, visible: true, status, pollError: null as string | null, pollingReady: false}
+                                     if (target === 'cpa') {
+                                         submittedUpdate.current = attempt
+                                     }
+                                     const ownsAttempt = () => submittedUpdate.current === attempt && authGeneration === apiClient.getAuthGeneration()
                                      setUpdatingVersion(tag)
                                      setPollingReady(false)
                                      setPollError(null)
-                                     setUpdateStatus({
-                                                         status: 'downloading',
-                                                         message: '',
-                                                         target_version: tag,
-                                                         percent: 0,
-                                                         current_version: currentVersion,
-                                                         attempt_id: attemptID,
-                                                     })
+                                     setUpdateStatus(status)
                                      try {
                                          if (target === 'panel') {
                                              await updateApi.panelUpdate(tag)
@@ -672,36 +718,41 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                              return
                                          }
                                          const result = await updateApi.trigger(tag, attemptID)
-                                         if (!isCurrent()) {
+                                         if (!ownsAttempt()) {
                                              return
                                          }
-                                         if (result.attempt_id !== attemptID || result.target_version !== tag) {
+                                         if (result.target_version !== tag || !/^[a-f0-9]{32}$/.test(result.attempt_id) ||
+                                             (compatibility?.supports_client_attempt_id === true && result.attempt_id !== attemptID)) {
                                              throw new Error(t('version_history.status_attempt_unconfirmed'))
                                          }
-                                         setPollingReady(true)
+                                         attempt.status = {...status, attempt_id: result.attempt_id}
+                                         attempt.pollingReady = true
                                      } catch (err) {
-                                         if (!isCurrent()) {
+                                         if (target === 'cpa' ? !ownsAttempt() : !isCurrent()) {
                                              return
                                          }
                                          const msg = err instanceof Error ? err.message : String(err)
-                                         const status = err instanceof Error && 'status' in err ? err.status : undefined
-                                         const explicitlyRejected = typeof status === 'number' && status >= 400 && status < 500 &&
-                                                                    ![408, 425, 429].includes(status)
+                                         const responseStatus = err instanceof Error && 'status' in err ? err.status : undefined
+                                         const explicitlyRejected = typeof responseStatus === 'number' && responseStatus >= 400 && responseStatus < 500 &&
+                                                                    ![408, 425, 429].includes(responseStatus)
                                          if (target === 'cpa' && !explicitlyRejected) {
-                                             setPollError(msg)
-                                             setPollingReady(true)
-                                             return
+                                             attempt.pollError = msg
+                                             attempt.pollingReady = true
+                                         } else {
+                                             attempt.status = {...status, status: 'error', message: msg}
                                          }
-                                         setPollingReady(false)
+                                     }
+                                     if (target === 'cpa' ? !ownsAttempt() || !attempt.visible : !isCurrent()) {
+                                         return
+                                     }
+                                     setUpdateStatus(attempt.status)
+                                     setPollError(attempt.pollError)
+                                     setPollingReady(attempt.pollingReady)
+                                     if (attempt.status.status === 'error') {
                                          setUpdatingVersion(null)
-                                         setUpdateStatus({
-                                                             status: 'error',
-                                                             message: msg,
-                                                             target_version: tag,
-                                                             percent: 0,
-                                                             current_version: currentVersion,
-                                                         })
-                                         showNotification(msg, 'error')
+                                         showNotification(attempt.status.message, 'error')
+                                     } else {
+                                         setUpdatingVersion(tag)
                                      }
                                  },
                              })

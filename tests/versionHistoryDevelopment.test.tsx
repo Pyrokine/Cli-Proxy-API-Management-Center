@@ -56,7 +56,9 @@ function harness({
     open = true,
     previousView = {open, target},
     authGeneration = 0,
+    supportsClientAttemptID = true,
 }: {
+    supportsClientAttemptID?: boolean | null
     authGeneration?: number
     open?: boolean
     previousView?: {open: boolean; target: 'cpa' | 'panel'; authGeneration?: number}
@@ -86,7 +88,9 @@ function harness({
     let generation = authGeneration
     const states: unknown[] = [releases, false, null, 0, updateStatus, null, checkingVersion ? targetVersion : null, pollingReady, pollError, {authGeneration: 0, ...previousView}]
     let stateIndex = 0
-    const viewGeneration = {current: 0}
+    let refIndex = 0
+    const refs: {current: unknown}[] = []
+    let unmountCleanup: (() => void) | undefined
     const compatibility = mock(async () => {
         if (compatibilityError) {
             throw new Error('compatibility unavailable')
@@ -94,6 +98,7 @@ function harness({
         return {
             compatible, requires_restart: true, current_version: currentVersion,
             min_panel_version: '1.15.3-aug.1', warnings: [],
+            ...(supportsClientAttemptID === null ? {} : {supports_client_attempt_id: supportsClientAttemptID}),
         }
     })
     const trigger = mock(async (version: string, attemptID: string) => ({attempt_id: attemptID, target_version: version}))
@@ -112,10 +117,14 @@ function harness({
                 states[index] = typeof next === 'function' ? next(states[index]) : next
             }]
         },
-        useRef: () => viewGeneration,
+        useRef: (value: unknown) => refs[refIndex++] ?? (refs[refIndex - 1] = {current: value}),
         useMemo: (callback: () => unknown) => callback(),
         useCallback: (callback: unknown) => callback,
-        useEffect: () => undefined,
+        useEffect: (callback: () => (() => void) | void, dependencies: unknown[]) => {
+            if (dependencies.length === 0) {
+                unmountCleanup = callback() ?? undefined
+            }
+        },
         useTranslation: () => ({t, i18n: {language: locale}}),
         useNotificationStore: () => ({showNotification, showConfirmation: (value: Confirmation) => confirmations.push(value)}),
         useAuthStore,
@@ -135,10 +144,21 @@ function harness({
         IconChevronLeft: () => null,
         __APP_VERSION__: 'v1.26.0-aug.2',
     })
-    const markup = renderToStaticMarkup(component({open, onClose: () => undefined, currentVersion, target}))
+    const props = {open, onClose: () => undefined, currentVersion, target}
+    const render = (next: Partial<typeof props> = {}) => {
+        Object.assign(props, next)
+        buttons.length = 0
+        stateIndex = 0
+        refIndex = 0
+        component(props)
+        stateIndex = 0
+        refIndex = 0
+        return renderToStaticMarkup(component(props))
+    }
+    const markup = render()
     const action = (label: string) => buttons.find((button) => Children.toArray(button.children).includes(label))
-    return {markup, action, confirmations, compatibility, trigger, panelUpdate, showNotification, targetVersion, states,
-        changeConnection: () => { ++generation }, closeView: () => { ++viewGeneration.current }}
+    return {markup, action, confirmations, compatibility, trigger, panelUpdate, showNotification, targetVersion, states, render,
+        changeConnection: () => { ++generation }, closeView: () => { render({open: false}) }, unmount: () => unmountCleanup?.()}
 }
 
 async function openInstall(view: ReturnType<typeof harness>, label = '安装') {
@@ -212,10 +232,42 @@ describe('development build release installation', () => {
         },
     )
 
+    test.each([null, false])('binds a valid acknowledgement from an old server with capability %s', async (supportsClientAttemptID) => {
+        const view = harness({supportsClientAttemptID})
+        const confirmation = await openInstall(view)
+        const serverAttempt = 'f'.repeat(32)
+        view.trigger.mockResolvedValueOnce({attempt_id: serverAttempt, target_version: view.targetVersion})
+        await confirmation.onConfirm()
+        expect(view.states[4]).toMatchObject({attempt_id: serverAttempt, target_version: view.targetVersion})
+        expect(view.states[7]).toBe(true)
+        expect(view.states[8]).toBeNull()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test.each(['', 'invalid', 'A'.repeat(32), undefined])('does not bind an invalid old-server attempt %s', async (attemptID) => {
+        const view = harness({supportsClientAttemptID: null})
+        const confirmation = await openInstall(view)
+        view.trigger.mockResolvedValueOnce({attempt_id: attemptID as string, target_version: view.targetVersion})
+        await confirmation.onConfirm()
+        expect(view.states[4]).toMatchObject({attempt_id: expect.stringMatching(/^[a-f0-9]{32}$/)})
+        expect((view.states[4] as UpdateStatus).attempt_id).not.toBe(attemptID)
+        expect(view.states[8]).toBeTruthy()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('does not bind an old-server acknowledgement for another version', async () => {
+        const view = harness({supportsClientAttemptID: null})
+        const confirmation = await openInstall(view)
+        view.trigger.mockResolvedValueOnce({attempt_id: 'f'.repeat(32), target_version: 'v8.0.23-aug.1'})
+        await confirmation.onConfirm()
+        expect((view.states[4] as UpdateStatus).attempt_id).not.toBe('f'.repeat(32))
+        expect(view.states[8]).toBeTruthy()
+    })
+
     test('keeps a mismatched acknowledgement unconfirmed and queries only its requested attempt', async () => {
         const view = harness()
         const confirmation = await openInstall(view)
-        view.trigger.mockResolvedValueOnce({attempt_id: 'another-attempt', target_version: view.targetVersion})
+        view.trigger.mockResolvedValueOnce({attempt_id: 'f'.repeat(32), target_version: view.targetVersion})
         await confirmation.onConfirm()
         expect(view.states[4]).toMatchObject({status: 'downloading', attempt_id: expect.stringMatching(/^[a-f0-9]{32}$/)})
         expect(view.states[7]).toBe(true)
@@ -245,9 +297,102 @@ describe('development build release installation', () => {
         view.closeView()
         reject(Object.assign(new Error('Late rejection'), {status: 409}))
         await submitting
+        expect(view.states[4]).toBeNull()
+        expect(view.showNotification).not.toHaveBeenCalled()
+        view.render({open: true})
+        expect(view.states[4]).toMatchObject({status: 'error', message: 'Late rejection'})
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test.each([null, true])('keeps a lost acknowledgement associated across close and reopen with capability %s', async (supportsClientAttemptID) => {
+        const view = harness({supportsClientAttemptID})
+        const confirmation = await openInstall(view)
+        view.trigger.mockRejectedValueOnce(new Error('Connection closed'))
+        await confirmation.onConfirm()
+        const pending = {...view.states[4] as UpdateStatus}
+        view.closeView()
+        view.render({open: true})
+        expect(view.states[4]).toEqual(pending)
+        expect(view.states[5]).toBe(view.targetVersion)
+        expect(view.states[7]).toBe(true)
+        expect(view.states[8]).toBe('Connection closed')
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test.each([false, true])('adopts a late old-server acknowledgement when reopened first: %s', async (reopenBeforeAck) => {
+        const view = harness({supportsClientAttemptID: null})
+        const confirmation = await openInstall(view)
+        let resolve!: (value: {attempt_id: string; target_version: string}) => void
+        view.trigger.mockImplementationOnce(() => new Promise((complete) => { resolve = complete }))
+        const submitting = confirmation.onConfirm()
+        view.closeView()
+        if (reopenBeforeAck) {
+            view.render({open: true})
+        }
+        resolve({attempt_id: 'f'.repeat(32), target_version: view.targetVersion})
+        await submitting
+        view.render({open: true})
+        expect(view.states[4]).toMatchObject({attempt_id: 'f'.repeat(32), target_version: view.targetVersion})
+        expect(view.states[7]).toBe(true)
+        expect(view.states[8]).toBeNull()
+        expect(view.showNotification).not.toHaveBeenCalled()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('retains the backend attempt while another version history is visible', async () => {
+        const view = harness({supportsClientAttemptID: null})
+        const confirmation = await openInstall(view)
+        let resolve!: (value: {attempt_id: string; target_version: string}) => void
+        view.trigger.mockImplementationOnce(() => new Promise((complete) => { resolve = complete }))
+        const submitting = confirmation.onConfirm()
+        view.render({target: 'panel'})
+        resolve({attempt_id: 'f'.repeat(32), target_version: view.targetVersion})
+        await submitting
+        expect(view.states[4]).toBeNull()
+        expect(view.states[7]).toBe(false)
+        view.render({target: 'cpa'})
+        expect(view.states[4]).toMatchObject({attempt_id: 'f'.repeat(32)})
+        expect(view.states[7]).toBe(true)
+    })
+
+    test('ignores an installation rejection after the component unmounts', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        let reject!: (error: Error) => void
+        view.trigger.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+        const submitting = confirmation.onConfirm()
+        view.unmount()
+        reject(Object.assign(new Error('Late rejection'), {status: 409}))
+        await submitting
         expect(view.states[4]).toMatchObject({status: 'downloading'})
         expect(view.showNotification).not.toHaveBeenCalled()
         expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('clears retained attempt identity when the connection changes', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        await confirmation.onConfirm()
+        view.closeView()
+        view.changeConnection()
+        view.render({open: true})
+        expect(view.states[4]).toBeNull()
+        expect(view.states[5]).toBeNull()
+        expect(view.states[8]).toBeNull()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+    })
+
+    test('submits at most one installation while its acknowledgement is pending', async () => {
+        const view = harness()
+        const confirmation = await openInstall(view)
+        let resolve!: (value: {attempt_id: string; target_version: string}) => void
+        view.trigger.mockImplementationOnce(() => new Promise((complete) => { resolve = complete }))
+        const submitting = confirmation.onConfirm()
+        await confirmation.onConfirm()
+        expect(view.trigger).toHaveBeenCalledTimes(1)
+        const [version, attemptID] = view.trigger.mock.calls[0]!
+        resolve({attempt_id: attemptID, target_version: version})
+        await submitting
     })
 
     test('keeps an incompatible backend installation disabled', async () => {

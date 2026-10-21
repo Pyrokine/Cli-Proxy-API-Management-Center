@@ -34,6 +34,7 @@ export interface UpdateCompatibility {
     min_panel_version: string
     requires_restart: boolean
     compatible: boolean
+    supports_client_attempt_id?: boolean
     warnings?: string[]
     usage: UpdateCompatibilityUsage
 }
@@ -43,7 +44,7 @@ export const updateApi = {
         apiClient.post<{ status: string; target_version: string; attempt_id: string; compatibility?: UpdateCompatibility }>('/update', {
             version,
             attempt_id: attemptID,
-        }),
+        }, {validateStatus: (status) => status === 202}),
 
     status: (options?: { signal?: AbortSignal; attemptID?: string }) =>
         apiClient.get<UpdateStatus>('/update-status', {

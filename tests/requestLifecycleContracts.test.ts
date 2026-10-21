@@ -37,6 +37,31 @@ const apiClientSource    = readFileSync(
 )
 
 describe('request cancellation contracts', () => {
+    test('requires an accepted installation acknowledgement without retrying the POST', async () => {
+        const originalPost = apiClient.post
+        const calls: {url: string; data: unknown; validateStatus?: ((status: number) => boolean) | null}[] = []
+        apiClient.post = (async (url: string, data?: unknown, options?: {validateStatus?: ((status: number) => boolean) | null}) => {
+            calls.push({url, data, validateStatus: options?.validateStatus})
+            return {status: 'downloading', attempt_id: 'f'.repeat(32), target_version: 'v8.0.23-aug.4'}
+        }) as typeof apiClient.post
+        try {
+            const attemptID = 'a'.repeat(32)
+            const result = await updateApi.trigger('v8.0.23-aug.4', attemptID)
+            expect(calls).toHaveLength(1)
+            expect(calls[0]?.url).toBe('/update')
+            expect(calls[0]?.data).toEqual({version: 'v8.0.23-aug.4', attempt_id: attemptID})
+            const validateStatus = calls[0]?.validateStatus
+            expect(typeof validateStatus).toBe('function')
+            expect(validateStatus?.(202)).toBe(true)
+            for (const status of [200, 201, 204, 400, 409, 429, 500]) {
+                expect(validateStatus?.(status)).toBe(false)
+            }
+            expect(result.attempt_id).toBe('f'.repeat(32))
+        } finally {
+            apiClient.post = originalPost
+        }
+    })
+
     test('propagates AbortSignal through logs, update polling, and usage events APIs', async () => {
         const originalGet = apiClient.get
         const seenSignals = new Map<string, AbortSignal | undefined>()

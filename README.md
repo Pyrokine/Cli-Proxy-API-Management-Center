@@ -157,9 +157,11 @@ checking, ESLint, tests, and the build, then publishes `dist/management.html`
 
 Local augmented releases use `v<upstream>-aug.N`; the first release based on a new upstream version uses `aug.1`
 
-If the initial update response is lost or the connection is interrupted during installation, the panel queries the same attempt and target version
+The panel tracks installation by attempt ID and target version, using the running backend's declared capabilities
+Older backends supply their attempt ID in a validated installation acknowledgement; a lost initial acknowledgement leaves that update unconfirmed
 After two minutes without confirmation, the panel shows an unconfirmed result; checking again only reads status and does not reinstall
-Reopening backend release history reads the persisted result and refreshes the server version after success
+Closing and reopening version history in the same connection retains the submitted attempt, including a late acknowledgement; changing connections clears that association
+A full page reload reads the server's persisted result without reconstructing the previous submission, and a successful result refreshes the server version
 The panel shows progress while active inference finishes; an older attempt or another connection cannot confirm the current installation
 Negated statements such as “no schema migration” do not mark a release as breaking; explicit migration requirements and warnings remain visible
 

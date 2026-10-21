@@ -28,6 +28,9 @@ function harness(replies: StatusReply[], {
     let timerID = 0
     const timers = new Map<number, {at: number; callback: () => void}>()
     const state = {status: initialStatus, pollError: null as string | null, pollingReady: true, updatingVersion}
+    const submittedUpdate = {current: initialStatus ? {
+        authGeneration: generation, visible: true, status: initialStatus, pollError: null as string | null, pollingReady: true,
+    } : null}
     const signals: AbortSignal[] = []
     const status = mock(async ({signal}: {signal: AbortSignal}) => {
         signals.push(signal)
@@ -53,7 +56,7 @@ function harness(replies: StatusReply[], {
         currentVersion: replacing.current_version, updatingVersion,
         UPDATE_POLL_INTERVAL: interval, UPDATE_POLL_RECONNECT_TIMEOUT: reconnectTimeout,
         AbortController, refreshServerVersion,
-        authGeneration: generation, apiClient: {getAuthGeneration: () => generation},
+        authGeneration: generation, apiClient: {getAuthGeneration: () => generation}, submittedUpdate,
         updateApi: {status, trigger, panelUpdate}, showNotification,
         t: (key: string, values?: {error?: string}) => values?.error ? `${key}: ${values.error}` : key,
         setUpdateStatus: (value: UpdateStatus | null) => { state.status = value },
@@ -84,7 +87,7 @@ function harness(replies: StatusReply[], {
         }
         now = end
     }
-    return {state, status, signals, timers, trigger, panelUpdate, showNotification, refreshServerVersion, advance, cleanup,
+    return {state, status, signals, timers, trigger, panelUpdate, showNotification, refreshServerVersion, advance, cleanup, submittedUpdate,
         changeConnection: () => { ++generation }}
 }
 
@@ -131,6 +134,35 @@ describe('backend update status recovery', () => {
         for (const [options] of view.status.mock.calls) {
             expect(options).toMatchObject({attemptID})
         }
+        expect(view.trigger).not.toHaveBeenCalled()
+        view.cleanup?.()
+    })
+
+    test('retains an acknowledged old-server ID and its terminal result for reopening', async () => {
+        const attemptID = 'f'.repeat(32)
+        const pending = {...replacing, attempt_id: attemptID}
+        const completed = {...done, attempt_id: attemptID}
+        const view = harness([new Error('HTTP 502'), completed], {initialStatus: pending})
+        await view.advance(interval)
+        expect(view.submittedUpdate.current).toMatchObject({status: pending, pollError: 'HTTP 502', pollingReady: true})
+        await view.advance(interval)
+        expect(view.submittedUpdate.current).toMatchObject({status: completed, pollError: null, pollingReady: false})
+        for (const [options] of view.status.mock.calls) {
+            expect(options).toMatchObject({attemptID})
+        }
+        expect(view.trigger).not.toHaveBeenCalled()
+        view.cleanup?.()
+    })
+
+    test('rejects a same-version old-server success without the lost acknowledgement', async () => {
+        const pending = {...replacing, attempt_id: 'a'.repeat(32)}
+        const view = harness([{...done, attempt_id: 'b'.repeat(32)}], {initialStatus: pending})
+        await view.advance(interval)
+        expect(view.state.status).toEqual(pending)
+        expect(view.submittedUpdate.current?.status).toEqual(pending)
+        expect(view.state.pollError).toBe('version_history.status_attempt_unconfirmed')
+        expect(view.refreshServerVersion).not.toHaveBeenCalled()
+        expect(view.showNotification).not.toHaveBeenCalled()
         expect(view.trigger).not.toHaveBeenCalled()
         view.cleanup?.()
     })
