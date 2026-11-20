@@ -1,8 +1,9 @@
 import {Button} from '@/components/ui/Button'
 import {Input} from '@/components/ui/Input'
+import {apiClient} from '@/services/api/client'
 import {oauthApi} from '@/services/api/oauth'
 import {useNotificationStore} from '@/stores'
-import {type ChangeEvent, useCallback, useState} from 'react'
+import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './VendorSection.module.scss'
 
@@ -17,26 +18,54 @@ export function CookieAuthFlow({ disableControls, onSuccess, onCancel }: CookieA
     const showNotification      = useNotificationStore((s) => s.showNotification)
     const [cookie, setCookie]   = useState('')
     const [loading, setLoading] = useState(false)
+    const requestRef            = useRef<object | null>(null)
+    const mountedRef            = useRef(true)
+    useEffect(() => {
+        mountedRef.current = true
+        return () => {
+            mountedRef.current = false;
+            requestRef.current = null
+        }
+    }, [])
 
     const handleSubmit = useCallback(async () => {
-        if (!cookie.trim()) {
+        if (disableControls || requestRef.current || !cookie.trim()) {
             return
         }
+        const request      = {}
+        const generation   = apiClient.getAuthGeneration()
+        requestRef.current = request
+        const isCurrent    = () => mountedRef.current &&
+                                   requestRef.current ===
+                                   request &&
+                                   generation ===
+                                   apiClient.getAuthGeneration()
         setLoading(true)
         try {
             const result = await oauthApi.iflowCookieAuth(cookie.trim())
+            if (!isCurrent()) {
+                return
+            }
             if (result.status === 'ok') {
                 showNotification(t('common.success'), 'success')
                 await onSuccess()
             } else {
                 showNotification(result.error || t('common.error'), 'error')
             }
-        } catch {
-            showNotification(t('common.error'), 'error')
+        } catch (error: unknown) {
+            if (isCurrent()) {
+                showNotification(error instanceof Error ? error.message : t('common.error'), 'error')
+            }
         } finally {
-            setLoading(false)
+            const current = isCurrent()
+            if (requestRef.current === request) {
+                requestRef.current = null
+            }
+            if (current) {
+                setLoading(false)
+            }
         }
-    }, [cookie, onSuccess, showNotification, t])
+    }, [cookie, disableControls, onSuccess, showNotification, t])
 
     return (
         <div className={styles.flowArea}>
@@ -48,7 +77,8 @@ export function CookieAuthFlow({ disableControls, onSuccess, onCancel }: CookieA
                 secret
             />
             <div className={styles.flowButtons}>
-                <Button variant='primary' size='xs' onClick={handleSubmit} loading={loading} disabled={!cookie.trim()}>
+                <Button variant='primary' size='xs' onClick={handleSubmit} loading={loading}
+                        disabled={disableControls || loading || !cookie.trim()}>
                     {t('credentials.oauth_callback_submit')}
                 </Button>
                 <Button variant='secondary' size='xs' onClick={onCancel}>

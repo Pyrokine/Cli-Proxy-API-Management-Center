@@ -7,7 +7,7 @@ import {
     createLatestCredentialsRequestTracker,
 } from '@/components/credentials/credentialsDataLifecycle'
 import {invalidateAuthFileDerivedCaches} from '@/features/authFiles/cacheInvalidation'
-import {inferProviderFromAuthFileName} from '@/features/authFiles/constants'
+import {inferProviderFromAuthFileName, normalizeAuthFileProvider} from '@/features/authFiles/constants'
 import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {useConfigStore} from '@/stores'
@@ -45,26 +45,25 @@ const createEmptyVendorData = (): VendorData => ({
     authFiles: [],
 })
 
-const authFileSupplierTokens = (file: AuthFileItem): string[] =>
-    [file.provider, file.type, inferProviderFromAuthFileName(file.name)]
-        .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-        .map((item) => item.trim().toLowerCase())
+const authFileSupplierTokens = (file: AuthFileItem): string[] => {
+    const provider = [file.provider, file.type, inferProviderFromAuthFileName(file.name)]
+        .find((item): item is string => typeof item === 'string' && item.trim() !== '')
+    return provider ? [normalizeAuthFileProvider(provider)] : []
+}
 
 const authFileBelongsToVendor = (file: AuthFileItem, vendor: VendorDefinition): boolean => {
     const vendorTypes = new Set([...vendor.authFileTypes, ...vendor.oauthProviders].map((item) => item.toLowerCase()))
     return authFileSupplierTokens(file).some((token) => vendorTypes.has(token))
 }
 
-export function groupVendorAuthFiles(vendors: VendorDefinition[], authFiles: AuthFileItem[]): Map<string, AuthFileItem[]> {
-    const groups = new Map<string, AuthFileItem[]>()
-    for (const vendor of vendors) {
-        if (vendor.id !== 'other') {
-            groups.set(vendor.id, authFiles.filter((file) => authFileBelongsToVendor(file, vendor)))
-        }
-    }
-    if (vendors.some((vendor) => vendor.id === 'other')) {
-        groups.set('other', authFiles.filter((file) =>
-            !vendors.some((vendor) => vendor.id !== 'other' && authFileBelongsToVendor(file, vendor))))
+export function groupVendorAuthFiles(
+    vendors: VendorDefinition[],
+    authFiles: AuthFileItem[],
+): Map<string, AuthFileItem[]> {
+    const groups = new Map<string, AuthFileItem[]>(vendors.map((vendor) => [vendor.id, []]))
+    for (const file of authFiles) {
+        const vendor = vendors.find((item) => item.id !== 'other' && authFileBelongsToVendor(file, item))
+        groups.get(vendor?.id ?? 'other')?.push(file)
     }
     return groups
 }
@@ -139,14 +138,14 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
             return
         }
         requestTrackerRef.current.invalidate()
-        let nextFiles = authFilesRef.current
+        let nextFiles         = authFilesRef.current
         const statusQuotaKeys = new Set<string>()
         for (const item of mutations) {
             if (item.kind === 'status') {
                 authFileStatusQuotaKeys(nextFiles, item).forEach((key) => statusQuotaKeys.add(key))
             }
             const quotaKeys = authFileMutationQuotaKeys(nextFiles, item)
-            nextFiles = applyAuthFileMutation(nextFiles, item)
+            nextFiles       = applyAuthFileMutation(nextFiles, item)
             invalidateAuthFileDerivedCaches(authFileMutationNames(item), quotaKeys)
         }
         useQuotaStore.getState().advanceQuotaSubjects(Array.from(statusQuotaKeys))
@@ -159,7 +158,7 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
     }, [loadAll, setSummaryCount])
 
     useEffect(() => {
-        let cancelled = false
+        let cancelled        = false
         const requestTracker = requestTrackerRef.current
         queueMicrotask(() => {
             if (!cancelled) {
@@ -173,7 +172,7 @@ export function useCredentialsData(vendors: VendorDefinition[]): UseCredentialsD
     }, [loadAll])
 
     const vendorData = useMemo(() => {
-        const map = new Map<string, VendorData>()
+        const map          = new Map<string, VendorData>()
         const groupedFiles = groupVendorAuthFiles(vendors, authFiles)
 
         for (const vendor of vendors) {

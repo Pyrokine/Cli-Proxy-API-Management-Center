@@ -1,8 +1,8 @@
 import {inferProviderFromAuthFileName} from '@/features/authFiles/constants'
 import type {AuthFileFieldsPatch} from '@/services/api/authFiles'
 import type {AuthFileItem} from '@/types/authFile'
-import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
+import {quotaCredentialKey} from '@/utils/quota/credentialKey'
 
 export type AuthFileMutation =
     | { kind: 'upload'; names: string[] }
@@ -48,7 +48,7 @@ export const selectedPhysicalFileNames = (
     selectedKeys: ReadonlySet<string>,
 ): string[] | null => {
     const names = new Set(files.filter((file) => selectedKeys.has(authFileSelectionKey(file)))
-        .map((file) => file.name))
+                               .map((file) => file.name))
     return files.some((file) => names.has(file.name) && !selectedKeys.has(authFileSelectionKey(file)))
            ? null
            : Array.from(names)
@@ -142,7 +142,7 @@ const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): Auth
         if (fields.model_aliases.length === 0) {
             delete next.model_aliases
         } else {
-            next.model_aliases = fields.model_aliases.map((row) => ({...row}))
+            next.model_aliases = fields.model_aliases.map((row) => ({ ...row }))
         }
     }
     if (fields.request_scoped_errors !== undefined) {
@@ -150,7 +150,7 @@ const applyFieldsPatch = (file: AuthFileItem, fields: AuthFileFieldsPatch): Auth
         if (fields.request_scoped_errors.length === 0) {
             delete next.request_scoped_errors
         } else {
-            next.request_scoped_errors = fields.request_scoped_errors.map((row) => ({...row}))
+            next.request_scoped_errors = fields.request_scoped_errors.map((row) => ({ ...row }))
         }
     }
     return next
@@ -205,14 +205,18 @@ export function authFileRefreshIdentifiers(
     files: AuthFileItem[],
     selectedKeys: ReadonlySet<string>,
 ): { identifiers: string[]; skippedDisabled: number; skippedUnsupported: number; skippedAmbiguous: number } {
-    const identifiers = new Set<string>()
+    const identifiers         = new Set<string>()
     const unselectedQuotaKeys = new Set(files.filter((file) => !selectedKeys.has(authFileSelectionKey(file)))
-        .map((file) => quotaCredentialKey(quotaProviderForAuthFile(file), file.name, file.authIndex)))
+                                             .map((file) => quotaCredentialKey(
+                                                 quotaProviderForAuthFile(file),
+                                                 file.name,
+                                                 file.authIndex,
+                                             )))
     const unselectedFileNames = new Set(files.filter((file) => !selectedKeys.has(authFileSelectionKey(file)))
-        .map((file) => file.name))
-    let skippedDisabled = 0
-    let skippedUnsupported = 0
-    let skippedAmbiguous = 0
+                                             .map((file) => file.name))
+    let skippedDisabled       = 0
+    let skippedUnsupported    = 0
+    let skippedAmbiguous      = 0
     for (const file of files) {
         if (!selectedKeys.has(authFileSelectionKey(file))) {
             continue
@@ -233,17 +237,17 @@ export function authFileRefreshIdentifiers(
         }
         identifiers.add(provider ? key : file.name)
     }
-    return {identifiers: Array.from(identifiers), skippedDisabled, skippedUnsupported, skippedAmbiguous}
+    return { identifiers: Array.from(identifiers), skippedDisabled, skippedUnsupported, skippedAmbiguous }
 }
 
 export const authFileStatusQuotaKeys = (
     files: AuthFileItem[],
-    mutation: Extract<AuthFileMutation, {kind: 'status'}>,
+    mutation: Extract<AuthFileMutation, { kind: 'status' }>,
 ): string[] => {
-    const names = new Set(normalizedNames(mutation.names))
+    const names     = new Set(normalizedNames(mutation.names))
     const authIndex = normalizeAuthIndex(mutation.authIndex)
     return Array.from(new Set(files.filter((file) =>
-        names.has(file.name) && normalizeAuthIndex(file.authIndex) === authIndex,
+                                               names.has(file.name) && normalizeAuthIndex(file.authIndex) === authIndex,
     ).map((file) => quotaCredentialKey(quotaProviderForAuthFile(file), file.name, file.authIndex))))
 }
 

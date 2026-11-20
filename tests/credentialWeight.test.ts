@@ -1,5 +1,3 @@
-import {describe, expect, test} from 'bun:test'
-
 import {
     MAX_CREDENTIAL_WEIGHT,
     parseCredentialWeightText,
@@ -7,6 +5,7 @@ import {
     validateCredentialWeight,
     validateCredentialWeightText,
 } from '@/utils/credentialWeight'
+import {describe, expect, test} from 'bun:test'
 
 describe('credential weight validation', () => {
     test('accepts defaults and non-positive scheduling exclusions', () => {

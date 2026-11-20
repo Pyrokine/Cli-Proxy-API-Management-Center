@@ -1,8 +1,4 @@
 // cspell:ignore Vjcm Yjnbab
-import {describe, expect, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-
-import {expectSourceToContain} from './sourceContractAssertions'
 import {
     apiKeyMatchesStatus,
     buildManualKeyCardItems,
@@ -31,6 +27,10 @@ import {
 import {getChangedHeaderNames} from '@/utils/headers'
 import {buildProviderAutoFetchSignature, canApplyDiscoveredModels} from '@/utils/providerModels'
 import {calculateStatusBarDataFromSummaryPoints} from '@/utils/usage'
+import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
+
+import {expectSourceToContain} from './sourceContractAssertions'
 
 const icon          = () => null
 const registryIcons = {
@@ -120,437 +120,485 @@ const flattenKeys = (value: unknown, prefix = ''): string[] => {
     return Object.entries(value).flatMap(([key, item]) => flattenKeys(item, prefix ? `${prefix}.${key}` : key))
 }
 
-describe('provider identity and status UX', () => {
-    test('labels Claude and OpenAI entries as compatibility protocols', () => {
-        const vendors = createVendorRegistry(registryIcons)
-        expect(vendors.find((vendor) => vendor.id === 'claude')).toMatchObject({
-                                                                                   label: 'Claude Compatible',
-                                                                                   labelKey: 'credentials.vendor_claude_compatible',
-                                                                               })
-        expect(vendors.find((vendor) => vendor.id === 'openai')).toMatchObject({
-                                                                                   label: 'OpenAI Compatible',
-                                                                                   labelKey: 'credentials.vendor_openai_compatible',
-                                                                               })
-        expect(vendors.find((vendor) => vendor.id === 'xai')).toMatchObject({
-                                                                                editRoute: '/credentials/xai',
-                                                                                createRoute: '/credentials/xai/new',
-                                                                            })
-        expect(vendors.find((vendor) => vendor.id === 'meta')).toMatchObject({
-                                                                                 oauthProviders: ['meta'],
-                                                                                 authFileTypes: ['meta', 'muse'],
-                                                                                 editRoute: '/credentials/meta',
-                                                                                 createRoute: '/credentials/meta/new',
-                                                                             })
-        expect(vendors.find((vendor) => vendor.id === 'kimi')?.oauthProviders).toEqual(['kimi', 'kimi-ai'])
-    })
+describe(
+    'provider identity and status UX',
+    () => {
+        test(
+            'labels Claude and OpenAI entries as compatibility protocols',
+            () => {
+                const vendors = createVendorRegistry(registryIcons)
+                expect(vendors.find((vendor) => vendor.id === 'claude')).toMatchObject(
+                    {
+                        label: 'Claude Compatible',
+                        labelKey:
+                            'credentials.vendor_claude_compatible',
+                    })
+                expect(vendors.find((vendor) => vendor.id === 'openai')).toMatchObject(
+                    {
+                        label: 'OpenAI Compatible',
+                        labelKey:
+                            'credentials.vendor_openai_compatible',
+                    })
+                expect(vendors.find((vendor) => vendor.id === 'xai')).toMatchObject(
+                    {
+                        editRoute: '/credentials/xai',
+                        createRoute: '/credentials/xai/new',
+                    },
+                )
+                expect(vendors.find((vendor) => vendor.id === 'meta')).toMatchObject(
+                    {
+                        oauthProviders: ['meta'],
+                        authFileTypes: [
+                            'meta',
+                            'muse',
+                        ],
+                        editRoute: '/credentials/meta',
+                        createRoute: '/credentials/meta/new',
+                    },
+                )
+                expect(vendors.find((vendor) => vendor.id === 'kimi')?.oauthProviders).toEqual(['kimi', 'kimi-ai'])
+            },
+        )
 
-    test('keeps active API keys in available and disabled providers in disabled', () => {
-        const values = [{ name: 'active' }, { name: 'disabled', disabled: true }]
-        expect(filterApiKeysByStatus(values, 'available')).toEqual([{ name: 'active' }])
-        expect(filterApiKeysByStatus(values, 'disabled')).toEqual([{ name: 'disabled', disabled: true }])
-        expect(filterApiKeysByStatus(values, 'error')).toEqual([])
-        expect(filterApiKeysByStatus(values, 'exhausted')).toEqual([])
-    })
+        test('keeps active API keys in available and disabled providers in disabled', () => {
+            const values = [{ name: 'active' }, { name: 'disabled', disabled: true }]
+            expect(filterApiKeysByStatus(values, 'available')).toEqual([{ name: 'active' }])
+            expect(filterApiKeysByStatus(values, 'disabled')).toEqual([{ name: 'disabled', disabled: true }])
+            expect(filterApiKeysByStatus(values, 'error')).toEqual([])
+            expect(filterApiKeysByStatus(values, 'exhausted')).toEqual([])
+        })
 
-    test('expands each OpenAI-compatible API key without losing its provider edit index', () => {
-        const providers = [
-            {
-                name: 'multi-key',
-                baseUrl: 'https://example.com/v1',
-                apiKeyEntries: [
-                    { apiKey: 'masked-a', authIndex: 'openai:a' },
-                    { apiKey: 'masked-b', authIndex: 'openai:b' },
+        test('expands each OpenAI-compatible API key without losing its provider edit index', () => {
+            const providers = [
+                {
+                    name: 'multi-key',
+                    baseUrl: 'https://example.com/v1',
+                    apiKeyEntries: [
+                        { apiKey: 'masked-a', authIndex: 'openai:a' },
+                        { apiKey: 'masked-b', authIndex: 'openai:b' },
+                    ],
+                },
+                {
+                    name: 'empty-provider',
+                    baseUrl: 'https://empty.example.com/v1',
+                    apiKeyEntries: [],
+                    authIndex: 'openai:fallback',
+                    disabled: true,
+                },
+            ]
+
+            expect(buildManualKeyCardItems('openai', providers)).toMatchObject([
+                                                                                   {
+                                                                                       configIndex: 0,
+                                                                                       entryIndex: 0,
+                                                                                       apiKey: 'masked-a',
+                                                                                       authIndex: 'openai:a',
+                                                                                       disabled: false,
+                                                                                   },
+                                                                                   {
+                                                                                       configIndex: 0,
+                                                                                       entryIndex: 1,
+                                                                                       apiKey: 'masked-b',
+                                                                                       authIndex: 'openai:b',
+                                                                                       disabled: false,
+                                                                                   },
+                                                                                   {
+                                                                                       configIndex: 1,
+                                                                                       apiKey: '',
+                                                                                       authIndex: 'openai:fallback',
+                                                                                       disabled: true,
+                                                                                   },
+                                                                               ])
+        })
+
+        test('does not assign one provider identity to OpenAI entries missing their own identity', () => {
+            const providers = [
+                {
+                    name: 'legacy',
+                    baseUrl: 'https://example.com/v1',
+                    authIndex: 'openai:provider',
+                    apiKeyEntries: [{ apiKey: 'masked-a' }, { apiKey: 'masked-b' }],
+                },
+            ]
+            expect(buildManualKeyCardItems('openai', providers).map((item) => item.authIndex)).toEqual([
+                                                                                                           undefined,
+                                                                                                           undefined,
+                                                                                                       ])
+        })
+
+        test('applies runtime health to credential status filters', () => {
+            expect(apiKeyMatchesStatus({}, 'exhausted', {
+                status: 'unavailable',
+                reason: 'quota_exceeded',
+            })).toBe(true)
+            expect(apiKeyMatchesStatus({}, 'error', {
+                status: 'unavailable',
+                reason: 'provider_error',
+            })).toBe(true)
+            expect(apiKeyMatchesStatus({}, 'available', {
+                status: 'unavailable',
+                reason: 'provider_error',
+            })).toBe(false)
+            expect(apiKeyMatchesStatus({ disabled: true }, 'disabled', { status: 'normal' })).toBe(true)
+        })
+
+        test('keeps the manual OAuth callback available when polling fails for a current attempt', () => {
+            expect(oauthLoginActionSource).toContain('attemptsRef.current.get(provider)?.isCurrent()')
+            expect(oauthLoginActionSource).toContain('if (status === \'error\' && !canContinueAfterError)')
+            expect(oauthLoginActionSource).toContain('if (status === \'waiting\' || canContinueAfterError)')
+            expect(oauthLoginActionSource).toContain('onClick={resumePolling}')
+            expectSourceToContain(
+                oauthLoginActionSource,
+                'disabled={!callbackUrl.trim() || (!plugin && provider === \'devin\' && canContinueAfterError)}',
+            )
+        })
+
+        test('waits for the OAuth session terminal state after submitting a callback', () => {
+            const submitStart = oauthLoginActionSource.indexOf('const submitCallback')
+            const submitEnd   = oauthLoginActionSource.indexOf('const handleCancel', submitStart)
+            const submitBody  = oauthLoginActionSource.slice(submitStart, submitEnd)
+
+            expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal, plugin)')
+            expect(submitBody).toContain('if (attempt.isCurrent())')
+            expect(submitBody).toContain('setCallbackAccepted(true)')
+            expect(submitBody).not.toContain('setStatus(\'success\')')
+            expect(submitBody).not.toContain('onSuccess()')
+            expect(oauthLoginActionSource).toContain('if (result.status === \'ok\')')
+            expect(oauthLoginActionSource).toContain('attempt.invalidate()')
+            expect(oauthLoginActionSource).toContain('\'credentials.oauth_callback_processing\'')
+        })
+
+        test('builds 24 fixed ten-minute status blocks from auth-index summary points', () => {
+            const tenMinutes = 10 * 60 * 1000
+            const start      = Date.parse('2026-08-30T08:00:00Z')
+            const tokens     = {
+                input: 10,
+                output: 5,
+                cached: 0,
+                reasoning: 0,
+                total: 15,
+            }
+            const status     = calculateStatusBarDataFromSummaryPoints(
+                [
+                    {
+                        time: '2026-08-30T08:00:00Z',
+                        requests: 2,
+                        success: 1,
+                        failure: 1,
+                        tokens,
+                        cost: 0,
+                        has_cost: false,
+                    },
+                    {
+                        time: '2026-08-30T10:00:00Z',
+                        requests: 3,
+                        success: 3,
+                        failure: 0,
+                        tokens: { ...tokens, total: 45 },
+                        cost: 0,
+                        has_cost: false,
+                    },
                 ],
-            },
-            {
-                name: 'empty-provider',
-                baseUrl: 'https://empty.example.com/v1',
-                apiKeyEntries: [],
-                authIndex: 'openai:fallback',
-                disabled: true,
-            },
-        ]
+                start,
+                tenMinutes,
+                24,
+            )
 
-        expect(buildManualKeyCardItems('openai', providers)).toMatchObject([
-                                                                               {
-                                                                                   configIndex: 0,
-                                                                                   entryIndex: 0,
-                                                                                   apiKey: 'masked-a',
-                                                                                   authIndex: 'openai:a',
-                                                                                   disabled: false,
-                                                                               },
-                                                                               {
-                                                                                   configIndex: 0,
-                                                                                   entryIndex: 1,
-                                                                                   apiKey: 'masked-b',
-                                                                                   authIndex: 'openai:b',
-                                                                                   disabled: false,
-                                                                               },
-                                                                               {
-                                                                                   configIndex: 1,
-                                                                                   apiKey: '',
-                                                                                   authIndex: 'openai:fallback',
-                                                                                   disabled: true,
-                                                                               },
-                                                                           ])
-    })
+            expect(status.blocks).toHaveLength(24)
+            expect(status.blocks[0]).toBe('mixed')
+            expect(status.blocks[12]).toBe('success')
+            expect(status.blocks[23]).toBe('idle')
+            expect(status.blockDetails[0]?.totalTokens).toBe(15)
+            expect(status.blockDetails[12]?.totalTokens).toBe(45)
+            expect(status.totalSuccess).toBe(4)
+            expect(status.totalFailure).toBe(1)
+            expect(status.successRate).toBe(80)
+        })
 
-    test('does not assign one provider identity to OpenAI entries missing their own identity', () => {
-        const providers = [
-            {
-                name: 'legacy',
-                baseUrl: 'https://example.com/v1',
-                authIndex: 'openai:provider',
-                apiKeyEntries: [{ apiKey: 'masked-a' }, { apiKey: 'masked-b' }],
-            },
-        ]
-        expect(buildManualKeyCardItems('openai', providers).map((item) => item.authIndex)).toEqual([
-                                                                                                       undefined,
-                                                                                                       undefined,
-                                                                                                   ])
-    })
+        test('requests only auth-index groups at ten-minute granularity', async () => {
+            const originalGet = apiClient.get
+            let requestedUrl  = ''
+            apiClient.get     = (async (url: string) => {
+                requestedUrl = url
+                return {}
+            }) as typeof apiClient.get
+            try {
+                await usageApi.getSummary({
+                                              from: '2026-08-30T08:00:00Z',
+                                              to: '2026-08-30T12:00:00Z',
+                                              granularity: 'hourly',
+                                              groups: 'none',
+                                              auth_index_groups: true,
+                                              auth_index_granularity: '10m',
+                                          })
+            } finally {
+                apiClient.get = originalGet
+            }
 
-    test('applies runtime health to credential status filters', () => {
-        expect(apiKeyMatchesStatus({}, 'exhausted', {
-            status: 'unavailable',
-            reason: 'quota_exceeded',
-        })).toBe(true)
-        expect(apiKeyMatchesStatus({}, 'error', {
-            status: 'unavailable',
-            reason: 'provider_error',
-        })).toBe(true)
-        expect(apiKeyMatchesStatus({}, 'available', {
-            status: 'unavailable',
-            reason: 'provider_error',
-        })).toBe(false)
-        expect(apiKeyMatchesStatus({ disabled: true }, 'disabled', { status: 'normal' })).toBe(true)
-    })
+            const query = new URLSearchParams(requestedUrl.split('?')[1] ?? '')
+            expect(query.get('groups')).toBe('none')
+            expect(query.get('auth_index_groups')).toBe('true')
+            expect(query.get('auth_index_granularity')).toBe('10m')
+        })
 
-    test('keeps the manual OAuth callback available when polling fails for a current attempt', () => {
-        expect(oauthLoginActionSource).toContain('attemptsRef.current.get(provider)?.isCurrent()')
-        expect(oauthLoginActionSource).toContain("if (status === 'error' && !canContinueAfterError)")
-        expect(oauthLoginActionSource).toContain("if (status === 'waiting' || canContinueAfterError)")
-        expect(oauthLoginActionSource).toContain('onClick={resumePolling}')
-        expect(oauthLoginActionSource).toContain("disabled={!callbackUrl.trim() || (!plugin && provider === 'devin' && canContinueAfterError)}")
-    })
+        test('refreshes credential cards and auth-index insights as one operation', () => {
+            expect(credentialsPageSource).toContain('createLatestCredentialsRequestTracker()')
+            expect(credentialsPageSource).toContain('await Promise.all([refresh(), refreshCredentialInsights()])')
+            expectSourceToContain(credentialsPageSource, 'useAutoRefresh(\n        refreshAllCredentials,')
+            expect(credentialsPageSource).toContain('useHeaderRefresh(handleRefresh)')
+            expect(credentialsPageSource).not.toContain('useAutoRefresh(refresh, autoRefreshMs)')
+            expect(credentialsPageSource).toContain(
+                'const createCredentialUsageWindow = (nowMs = Date.now())',
+            )
+            expectSourceToContain(
+                credentialsPageSource,
+                'const usageEnd = Date.now()\n        const usageWindow = createCredentialUsageWindow(usageEnd)',
+            )
+            expectSourceToContain(credentialsPageSource, 'API_KEY_STATUS_BUCKET_MS = 10 * 60 * 1000')
+            expectSourceToContain(credentialsPageSource, 'API_KEY_STATUS_BUCKET_COUNT = 24')
+            expect(credentialsPageSource).toContain('groups: \'none\'')
+            expect(credentialsPageSource).toContain('auth_index_granularity: \'10m\'')
+            expect(credentialsPageSource).toContain(
+                'usageStatisticsEnabled={config?.usageStatisticsEnabled}',
+            )
+            expect(vendorSectionSource).toContain('t(\'credentials.usage_collection_disabled\'')
+            expect(vendorSectionSource).toContain(
+                '((usageStatisticsEnabled && !authIndexUsageLoadFailed) || series !== undefined)',
+            )
+            expect(
+                vendorSectionSource.match(/disabled=\{runtimeState\.status === 'disabled'}/g),
+            ).toHaveLength(1)
+            expect(vendorSectionSource).toContain(
+                'disabled={entry ? Boolean(entry.disabled) : runtimeState.status === \'disabled\'}')
+        })
 
-    test('waits for the OAuth session terminal state after submitting a callback', () => {
-        const submitStart = oauthLoginActionSource.indexOf('const submitCallback')
-        const submitEnd   = oauthLoginActionSource.indexOf('const handleCancel', submitStart)
-        const submitBody  = oauthLoginActionSource.slice(submitStart, submitEnd)
+        test('keeps quota refresh and sign-in renewal separate from explicit quota reset', () => {
+            expect(vendorSectionSource).toMatch(
+                /await scheduler\.refreshNow\(quotaKey\)\s+if \(isCurrent\(\)\) \{\s+await onRefresh\(\)/,
+            )
+            expect(vendorSectionSource).not.toContain('authFilesApi.requestManualRefresh')
+            expect(vendorSectionSource).toContain(
+                'quotaResetState={isCodexProvider && !isPluginQuota ? quotaResetState : undefined}',
+            )
+            expect(vendorSectionSource).toContain('await authFilesApi.clearLocalCooldown(authIndex)')
+            expect(vendorSectionSource).toContain('onClearCooldown={authIndex ? handleClearCooldown : undefined}')
+            expect(credentialCardSource).toContain('onClear={disabled ? undefined : onClearCooldown}')
+            expect(authFilesApiSource).toContain('\'/routing/cooldown/reset\'')
+            expectSourceToContain(
+                vendorSectionSource,
+                (
+                    'refreshState={isPluginQuota ? pluginRefreshState : ' +
+                    'isMetaProvider || isKimiAIProvider ? undefined : refreshState}'
+                ),
+            )
+            expect(credentialCardSource).toContain('quotaResetState?: QuotaResetState')
+            expect(credentialCardSource).toContain('t(\'auth_files.quota_refresh_hint\'')
+            expect(credentialCardSource).toContain('t(\'auth_files.quota_reset_codex_title\'')
+            expect(credentialCardSource).not.toContain('manualTokenRefreshState')
+            expect(credentialCardSource).toContain('refreshState?.isRefreshing')
+            expectSourceToContain(authFilesApiSource, '{all: true}')
+            expectSourceToContain(
+                authFilesApiSource,
+                '}, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)',
+            )
+            expectSourceToContain(
+                authFilesApiSource,
+                'refreshAuthFileTokens({all: true}, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS)',
+            )
+            expect(accountInspectionPanelSource).toContain('authFilesApi.requestManualRefreshAll()')
+            expect(accountInspectionPanelSource).toContain('busyAction === \'refresh-all-tokens\'')
+            expect(accountInspectionPanelSource).toContain('if (result.results.length === 0)')
+            expect(accountInspectionPanelSource).toContain('t(\'credentials.manual_token_refresh_all_none\'')
+            expect(accountInspectionPanelSource).toContain(
+                'failed === 0 ? \'success\' : succeeded === 0 ? \'error\' : \'warning\'')
+            expect(quotaApiSource).toContain('apiClient.post<QuotaRefreshTask>(')
+            expect(quotaApiSource).toContain('const quotaRefreshTaskPath')
+            expect(quotaApiSource).toContain('quotaRefreshTaskPath(taskId)')
+            for (const source of [authFilesApiSource, accountInspectionPanelSource]) {
+                expect(source).not.toContain('/reset-quota')
+            }
+            for (const source of
+                [authFilesApiSource, quotaApiSource, vendorSectionSource, accountInspectionPanelSource]) {
+                expect(source).not.toContain('rate-limit-reset-credits/consume')
+                expect(source).not.toContain('banked reset')
+            }
+            expectSourceToContain(quotaApiSource, '(\'/reset-quota\', {')
+            expectSourceToContain(vendorSectionSource, 'await quotaApi.reset(authIndex, {signal: controller.signal})')
+            expectSourceToContain(vendorSectionSource, 'await authFilesApi.clearLocalCooldown(authIndex)')
+            expectSourceToContain(vendorSectionSource, 'purpose: \'codex_reset_credit\', signal: controller.signal')
+            expect(vendorSectionSource).toContain('await runCodexResetCreditAction(readAvailableCount, async () => {')
+            expectSourceToContain(
+                vendorSectionSource,
+                (
+                    'message: t(recovering ? \'auth_files.quota_reset_codex_cleanup_' +
+                    'confirm\' : \'auth_files.quota_reset_codex_confirm\', {name})'
+                ),
+            )
+            expect(vendorSectionSource).not.toContain('reset-credits-applicable')
+            expectSourceToContain(vendorSectionSource, 'manualResetCount: cachedQuotaManualResetCount')
+            expectSourceToContain(
+                vendorSectionSource,
+                'currentCodexResetProbe?.availableCount ?? cachedQuotaManualResetCount',
+            )
+            expect(vendorSectionSource).toContain('value: formatCodexResetCreditCount(quotaManualResetCount, t)')
+            expect(vendorSectionSource).not.toContain('applicableManualResetCount:')
+            expect(backendQuotaHookSource).toContain('waitForQuotaRefreshTask(initialTask')
+            expect(backendQuotaHookSource).toContain('applyQuotaRefreshTaskToMeta')
+            expectSourceToContain(backendQuotaHookSource, 'const { i18n: translation } = useTranslation()')
+            expect(backendQuotaHookSource).toContain(
+                '[authFiles, cacheGeneration, quotaLanguage, pollLatest]',
+            )
+            expect(backendQuotaHookSource).not.toContain('currentLastRefreshMs')
+            expect(backendQuotaHookSource).not.toContain('RefreshBaseline')
+            expect(accountInspectionPanelSource).toContain('value: \'quota\'')
+            expect(accountInspectionPanelSource).toContain('quotaApi.pauseTask(latestQuotaTask.id)')
+            expect(accountInspectionPanelSource).toContain('quotaApi.resumeTask(latestQuotaTask.id)')
+            expect(accountInspectionPanelSource).toContain('quotaApi.cancelTask(latestQuotaTask.id)')
+            expect(accountInspectionPanelSource).toContain('latestQuotaTask?.targets ?? []')
+        })
 
-        expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal, plugin)')
-        expect(submitBody).toContain('if (attempt.isCurrent())')
-        expect(submitBody).toContain('setCallbackAccepted(true)')
-        expect(submitBody).not.toContain('setStatus(\'success\')')
-        expect(submitBody).not.toContain('onSuccess()')
-        expect(oauthLoginActionSource).toContain('if (result.status === \'ok\')')
-        expect(oauthLoginActionSource).toContain('attempt.invalidate()')
-        expect(oauthLoginActionSource).toContain('\'credentials.oauth_callback_processing\'')
-    })
+        test('shows provider-safe probe outcomes with immutable credential binding', () => {
+            expect(accountInspectionApiSource).toContain(
+                'export type AccountProbeStatus = \'passed\' | \'failed\' | \'inconclusive\' | \'outdated\'',
+            )
+            expect(accountInspectionApiSource).toContain('auth_generation: number')
+            expect(accountInspectionApiSource).toContain('credential_digest?: string')
+            expect(accountInspectionApiSource).toContain('probe_revision: string')
+            expect(accountInspectionPanelSource).toContain('row.probe_status')
+            expect(accountInspectionPanelSource).toContain('row.auth_generation')
+            expect(accountInspectionPanelSource).toContain('row.credential_digest')
+            expect(accountInspectionPanelSource).toContain('row.probe_revision')
+            const actionsStart   = accountInspectionPanelSource.indexOf('const renderRowActions')
+            const outdatedGuard  = accountInspectionPanelSource.indexOf(
+                'result.probe_status === \'outdated\'',
+                actionsStart,
+            )
+            const disabledAction = accountInspectionPanelSource.indexOf(
+                'result.status === \'disabled\'',
+                actionsStart,
+            )
+            expect(outdatedGuard).toBeGreaterThan(actionsStart)
+            expect(disabledAction).toBeGreaterThan(outdatedGuard)
+        })
 
-    test('builds 24 fixed ten-minute status blocks from auth-index summary points', () => {
-        const tenMinutes = 10 * 60 * 1000
-        const start      = Date.parse('2026-08-30T08:00:00Z')
-        const tokens     = {
-            input: 10,
-            output: 5,
-            cached: 0,
-            reasoning: 0,
-            total: 15,
-        }
-        const status     = calculateStatusBarDataFromSummaryPoints(
-            [
+        test('uses ephemeral route state for list-originated provider modals', () => {
+            const backgroundLocation = {
+                pathname: '/credentials',
+                search: '',
+                hash: '',
+                state: null,
+                key: 'credentials-list',
+            }
+            const state              = createProviderEditModalState(backgroundLocation, 'edit-trigger')
+
+            expect(resolveProviderEditModalState(state, '/credentials/openai/2')).toMatchObject(
                 {
-                    time: '2026-08-30T08:00:00Z',
-                    requests: 2,
-                    success: 1,
-                    failure: 1,
-                    tokens,
-                    cost: 0,
-                    has_cost: false,
-                },
+                    presentation: 'modal',
+                    returnFocusId: 'edit-trigger',
+                    backgroundLocation,
+                })
+            const childState = withProviderEditReturnFocus(state, 'model-discovery-trigger')
+            expect(resolveProviderEditModalState(childState, '/credentials/openai/2/models')).toMatchObject(
                 {
-                    time: '2026-08-30T10:00:00Z',
-                    requests: 3,
-                    success: 3,
-                    failure: 0,
-                    tokens: { ...tokens, total: 45 },
-                    cost: 0,
-                    has_cost: false,
-                },
-            ],
-            start,
-            tenMinutes,
-            24,
-        )
+                    returnFocusId: 'edit-trigger',
+                    childReturnFocusId: 'model-discovery-trigger',
+                })
+            expect(resolveProviderEditModalState(state, '/credentials/xai/1')).not.toBeNull()
+            expect(resolveProviderEditModalState(state, '/credentials')).toBeNull()
+            expect(resolveProviderEditModalState({
+                                                     ...state,
+                                                     presentationToken: 'stale-after-refresh',
+                                                 }, '/credentials/openai/2')).toBeNull()
+            expect(resolveProviderEditModalState(undefined, '/credentials/openai/2')).toBeNull()
+        })
 
-        expect(status.blocks).toHaveLength(24)
-        expect(status.blocks[0]).toBe('mixed')
-        expect(status.blocks[12]).toBe('success')
-        expect(status.blocks[23]).toBe('idle')
-        expect(status.blockDetails[0]?.totalTokens).toBe(15)
-        expect(status.blockDetails[12]?.totalTokens).toBe(45)
-        expect(status.totalSuccess).toBe(4)
-        expect(status.totalFailure).toBe(1)
-        expect(status.successRate).toBe(80)
-    })
+        test('preserves list focus across auth-index refreshes and model subroutes', () => {
+            expectSourceToContain(
+                vendorSectionSource,
+                'const cardIdentity = [\n            item.configIndex,\n            item.entryIndex ?? \'root\',',
+            )
+            expect(vendorSectionSource).not.toContain('authIndex || \'config\'')
+            expect(providerEditShellSource).toContain('initialFocusId={presentation?.childReturnFocusId}')
+            expect(providerEditShellSource).toContain('returnFocusId={returnFocusId ?? presentation.returnFocusId}')
+            expect(providerModelsPageSource).toContain('returnFocusId={presentation?.childReturnFocusId}')
+            expectSourceToContain(providerModelsPageSource, 'navigate(\'..\', { replace: true })')
+            expect(modalSource).toContain('dialog.contains(explicitTarget)')
+            expectSourceToContain(modalSource, 'const returnFocusIdRef = useRef(returnFocusId)')
+            expect(modalSource).toContain('const currentReturnFocusId = returnFocusIdRef.current')
+            expect(modalSource).not.toContain(
+                '    }, [returnFocusId])\n\n    useEffect(() => {\n        return () => {',
+            )
+        })
 
-    test('requests only auth-index groups at ten-minute granularity', async () => {
-        const originalGet = apiClient.get
-        let requestedUrl  = ''
-        apiClient.get     = (async (url: string) => {
-            requestedUrl = url
-            return {}
-        }) as typeof apiClient.get
-        try {
-            await usageApi.getSummary({
-                                          from: '2026-08-30T08:00:00Z',
-                                          to: '2026-08-30T12:00:00Z',
-                                          granularity: 'hourly',
-                                          groups: 'none',
-                                          auth_index_groups: true,
-                                          auth_index_granularity: '10m',
-                                      })
-        } finally {
-            apiClient.get = originalGet
-        }
+        test('exposes Vertex and xAI manual configuration through the shared editor shell', () => {
+            expect(vertexEditSource).toContain('<ProviderConnectionFields')
+            expect(xaiEditSource).toContain('configKey: \'xai-api-key\'')
+            expect(xaiEditSource).toContain('<ProviderEditShell')
+            expect(xaiEditSource).toContain('<ProviderConnectionFields')
+            expect(providerFormFieldsSource).toContain('<PriorityField form={form}')
+            expect(providerFormFieldsSource).toContain('<WeightField form={form}')
+            expect(providerFormFieldsSource).toContain('<CredentialOverrideFields')
+            expect(xaiEditSource).not.toContain('Boolean(form.disableCooling)')
+            expect(credentialsPageSource).toContain('t(\'credentials.routing_order_hint\')')
+        })
 
-        const query = new URLSearchParams(requestedUrl.split('?')[1] ?? '')
-        expect(query.get('groups')).toBe('none')
-        expect(query.get('auth_index_groups')).toBe('true')
-        expect(query.get('auth_index_granularity')).toBe('10m')
-    })
+        test('presents runtime-only auth fields as read-only details', () => {
+            expect(authFileEditorSource).toContain('editor.readOnly')
+            expect(authFileEditorSource).toContain('t(\'auth_files.runtime_only_readonly_hint\')')
+            expect(authFileEditorSource).toContain('t(readOnly ? \'common.close\' : \'common.cancel\')')
+        })
 
-    test('refreshes credential cards and auth-index insights as one operation', () => {
-        expect(credentialsPageSource).toContain('createLatestCredentialsRequestTracker()')
-        expect(credentialsPageSource).toContain('await Promise.all([refresh(), refreshCredentialInsights()])')
-        expectSourceToContain(credentialsPageSource, 'useAutoRefresh(\n        refreshAllCredentials,')
-        expect(credentialsPageSource).toContain('useHeaderRefresh(handleRefresh)')
-        expect(credentialsPageSource).not.toContain('useAutoRefresh(refresh, autoRefreshMs)')
-        expect(credentialsPageSource).toContain(
-            'const createCredentialUsageWindow = (nowMs = Date.now())',
-        )
-        expectSourceToContain(
-            credentialsPageSource,
-            'const usageEnd = Date.now()\n        const usageWindow = createCredentialUsageWindow(usageEnd)',
-        )
-        expectSourceToContain(credentialsPageSource, 'API_KEY_STATUS_BUCKET_MS = 10 * 60 * 1000')
-        expectSourceToContain(credentialsPageSource, 'API_KEY_STATUS_BUCKET_COUNT = 24')
-        expect(credentialsPageSource).toContain('groups: \'none\'')
-        expect(credentialsPageSource).toContain('auth_index_granularity: \'10m\'')
-        expect(credentialsPageSource).toContain(
-            'usageStatisticsEnabled={config?.usageStatisticsEnabled}',
-        )
-        expect(vendorSectionSource).toContain('t(\'credentials.usage_collection_disabled\'')
-        expect(vendorSectionSource).toContain(
-            '((usageStatisticsEnabled && !authIndexUsageLoadFailed) || series !== undefined)',
-        )
-        expect(
-            vendorSectionSource.match(/disabled=\{runtimeState\.status === 'disabled'}/g),
-        ).toHaveLength(2)
-    })
+        test('resolves edited provider entries by stable auth identity after reordering', () => {
+            const configs = [
+                { apiKey: 'masked-b', authIndex: 'claude:b' },
+                { apiKey: 'masked-a', authIndex: 'claude:a' },
+            ]
+            expect(findProviderConfigIndexByAuthIndex(configs, 'claude:a')).toBe(1)
+            expect(findProviderConfigIndexByAuthIndex(configs, 'claude:missing')).toBe(-1)
+        })
 
-    test('keeps quota refresh and sign-in renewal separate from explicit quota reset', () => {
-        expect(vendorSectionSource).toMatch(
-            /await scheduler\.refreshNow\(quotaKey\)\s+if \(isCurrent\(\)\) \{\s+await onRefresh\(\)/,
-        )
-        expect(vendorSectionSource).not.toContain('authFilesApi.requestManualRefresh')
-        expect(vendorSectionSource).toContain(
-            'quotaResetState={isCodexProvider && !isPluginQuota ? quotaResetState : undefined}',
-        )
-        expect(vendorSectionSource).toContain('await authFilesApi.clearLocalCooldown(authIndex)')
-        expect(vendorSectionSource).toContain('onClearCooldown={authIndex ? handleClearCooldown : undefined}')
-        expect(credentialCardSource).toContain('onClear={disabled ? undefined : onClearCooldown}')
-        expect(authFilesApiSource).toContain("'/routing/cooldown/reset'")
-        expect(vendorSectionSource).toContain(
-            'refreshState={isPluginQuota ? pluginRefreshState : isMetaProvider || isKimiAIProvider ? undefined : refreshState}',
-        )
-        expect(credentialCardSource).toContain('quotaResetState?: QuotaResetState')
-        expect(credentialCardSource).toContain("t('auth_files.quota_refresh_hint'")
-        expect(credentialCardSource).toContain("t('auth_files.quota_reset_codex_title'")
-        expect(credentialCardSource).not.toContain('manualTokenRefreshState')
-        expect(credentialCardSource).toContain('refreshState?.isRefreshing')
-        expect(authFilesApiSource).toContain('{all: true}')
-        expect(authFilesApiSource).toContain('}, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)')
-        expect(authFilesApiSource).toContain('refreshAuthFileTokens({all: true}, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS)')
-        expect(accountInspectionPanelSource).toContain('authFilesApi.requestManualRefreshAll()')
-        expect(accountInspectionPanelSource).toContain("busyAction === 'refresh-all-tokens'")
-        expect(accountInspectionPanelSource).toContain('if (result.results.length === 0)')
-        expect(accountInspectionPanelSource).toContain("t('credentials.manual_token_refresh_all_none'")
-        expect(accountInspectionPanelSource).toContain("failed === 0 ? 'success' : succeeded === 0 ? 'error' : 'warning'")
-        expect(quotaApiSource).toContain('apiClient.post<QuotaRefreshTask>(')
-        expect(quotaApiSource).toContain('const quotaRefreshTaskPath')
-        expect(quotaApiSource).toContain('quotaRefreshTaskPath(taskId)')
-        for (const source of [authFilesApiSource, accountInspectionPanelSource]) {
-            expect(source).not.toContain('/reset-quota')
-        }
-        for (const source of [authFilesApiSource, quotaApiSource, vendorSectionSource, accountInspectionPanelSource]) {
-            expect(source).not.toContain('rate-limit-reset-credits/consume')
-            expect(source).not.toContain('banked reset')
-        }
-        expect(quotaApiSource).toContain("('/reset-quota', {")
-        expectSourceToContain(vendorSectionSource, 'await quotaApi.reset(authIndex, {signal: controller.signal})')
-        expectSourceToContain(vendorSectionSource, "purpose: 'codex_reset_credit', signal: controller.signal")
-        expect(vendorSectionSource).toContain('await runCodexResetCreditAction(readAvailableCount, async () => {')
-        expect(vendorSectionSource).toContain("message: t('auth_files.quota_reset_codex_confirm', {name})")
-        expect(vendorSectionSource).not.toContain('reset-credits-applicable')
-        expectSourceToContain(vendorSectionSource, 'manualResetCount: cachedQuotaManualResetCount')
-        expectSourceToContain(vendorSectionSource, 'currentCodexResetProbe?.availableCount ?? cachedQuotaManualResetCount')
-        expect(vendorSectionSource).toContain('value: formatCodexResetCreditCount(quotaManualResetCount, t)')
-        expect(vendorSectionSource).not.toContain('applicableManualResetCount:')
-        expect(backendQuotaHookSource).toContain('waitForQuotaRefreshTask(initialTask')
-        expect(backendQuotaHookSource).toContain('applyQuotaRefreshTaskToMeta')
-        expectSourceToContain(backendQuotaHookSource, 'const { i18n: translation } = useTranslation()')
-        expect(backendQuotaHookSource).toContain(
-            '[authFiles, cacheGeneration, quotaLanguage, pollLatest]',
-        )
-        expect(backendQuotaHookSource).not.toContain('currentLastRefreshMs')
-        expect(backendQuotaHookSource).not.toContain('RefreshBaseline')
-        expect(accountInspectionPanelSource).toContain('value: \'quota\'')
-        expect(accountInspectionPanelSource).toContain('quotaApi.pauseTask(latestQuotaTask.id)')
-        expect(accountInspectionPanelSource).toContain('quotaApi.resumeTask(latestQuotaTask.id)')
-        expect(accountInspectionPanelSource).toContain('quotaApi.cancelTask(latestQuotaTask.id)')
-        expect(accountInspectionPanelSource).toContain('latestQuotaTask?.targets ?? []')
-    })
+        test('does not mark an unchanged credential header as edited when another row is removed', () => {
+            const previous = [
+                { key: 'X-Foo', value: 'one' },
+                { key: 'Authorization', value: 'Bearer key...tail' },
+            ]
+            const next     = [{ key: 'Authorization', value: 'Bearer key...tail' }]
+            expect(getChangedHeaderNames(previous, next)).toEqual(['x-foo'])
+        })
 
-    test('shows provider-safe probe outcomes with immutable credential binding', () => {
-        expect(accountInspectionApiSource).toContain(
-            'export type AccountProbeStatus = \'passed\' | \'failed\' | \'inconclusive\' | \'outdated\'',
-        )
-        expect(accountInspectionApiSource).toContain('auth_generation: number')
-        expect(accountInspectionApiSource).toContain('credential_digest?: string')
-        expect(accountInspectionApiSource).toContain('probe_revision: string')
-        expect(accountInspectionPanelSource).toContain('row.probe_status')
-        expect(accountInspectionPanelSource).toContain('row.auth_generation')
-        expect(accountInspectionPanelSource).toContain('row.credential_digest')
-        expect(accountInspectionPanelSource).toContain('row.probe_revision')
-        const actionsStart   = accountInspectionPanelSource.indexOf('const renderRowActions')
-        const outdatedGuard  = accountInspectionPanelSource.indexOf(
-            'result.probe_status === \'outdated\'',
-            actionsStart,
-        )
-        const disabledAction = accountInspectionPanelSource.indexOf(
-            'result.status === \'disabled\'',
-            actionsStart,
-        )
-        expect(outdatedGuard).toBeGreaterThan(actionsStart)
-        expect(disabledAction).toBeGreaterThan(outdatedGuard)
-    })
-
-    test('uses ephemeral route state for list-originated provider modals', () => {
-        const backgroundLocation = {
-            pathname: '/credentials',
-            search: '',
-            hash: '',
-            state: null,
-            key: 'credentials-list',
-        }
-        const state              = createProviderEditModalState(backgroundLocation, 'edit-trigger')
-
-        expect(resolveProviderEditModalState(state, '/credentials/openai/2')).toMatchObject({
-                                                                                                presentation: 'modal',
-                                                                                                returnFocusId: 'edit-trigger',
-                                                                                                backgroundLocation,
-                                                                                            })
-        const childState = withProviderEditReturnFocus(state, 'model-discovery-trigger')
-        expect(resolveProviderEditModalState(childState, '/credentials/openai/2/models')).toMatchObject({
-                                                                                                            returnFocusId: 'edit-trigger',
-                                                                                                            childReturnFocusId: 'model-discovery-trigger',
-                                                                                                        })
-        expect(resolveProviderEditModalState(state, '/credentials/xai/1')).not.toBeNull()
-        expect(resolveProviderEditModalState(state, '/credentials')).toBeNull()
-        expect(resolveProviderEditModalState({
-                                                 ...state,
-                                                 presentationToken: 'stale-after-refresh',
-                                             }, '/credentials/openai/2')).toBeNull()
-        expect(resolveProviderEditModalState(undefined, '/credentials/openai/2')).toBeNull()
-    })
-
-    test('preserves list focus across auth-index refreshes and model subroutes', () => {
-        expect(vendorSectionSource).toContain(
-            'const cardIdentity = [\n            item.configIndex,\n            item.entryIndex ?? \'root\',',
-        )
-        expect(vendorSectionSource).not.toContain('authIndex || \'config\'')
-        expect(providerEditShellSource).toContain('initialFocusId={presentation?.childReturnFocusId}')
-        expect(providerEditShellSource).toContain('returnFocusId={returnFocusId ?? presentation.returnFocusId}')
-        expect(providerModelsPageSource).toContain('returnFocusId={presentation?.childReturnFocusId}')
-        expectSourceToContain(providerModelsPageSource, 'navigate(\'..\', { replace: true })')
-        expect(modalSource).toContain('dialog.contains(explicitTarget)')
-        expectSourceToContain(modalSource, 'const returnFocusIdRef = useRef(returnFocusId)')
-        expect(modalSource).toContain('const currentReturnFocusId = returnFocusIdRef.current')
-        expect(modalSource).not.toContain(
-            '    }, [returnFocusId])\n\n    useEffect(() => {\n        return () => {',
-        )
-    })
-
-    test('exposes Vertex and xAI manual configuration through the shared editor shell', () => {
-        expect(vertexEditSource).toContain('<ProviderConnectionFields')
-        expect(xaiEditSource).toContain('configKey: \'xai-api-key\'')
-        expect(xaiEditSource).toContain('<ProviderEditShell')
-        expect(xaiEditSource).toContain('<ProviderConnectionFields')
-        expect(providerFormFieldsSource).toContain('<PriorityField form={form}')
-        expect(providerFormFieldsSource).toContain('<WeightField form={form}')
-        expect(providerFormFieldsSource).toContain('<CredentialOverrideFields')
-        expect(xaiEditSource).not.toContain('Boolean(form.disableCooling)')
-        expect(credentialsPageSource).toContain('t(\'credentials.routing_order_hint\')')
-    })
-
-    test('presents runtime-only auth fields as read-only details', () => {
-        expect(authFileEditorSource).toContain('editor.readOnly')
-        expect(authFileEditorSource).toContain('t(\'auth_files.runtime_only_readonly_hint\')')
-        expect(authFileEditorSource).toContain('t(readOnly ? \'common.close\' : \'common.cancel\')')
-    })
-
-    test('resolves edited provider entries by stable auth identity after reordering', () => {
-        const configs = [
-            { apiKey: 'masked-b', authIndex: 'claude:b' },
-            { apiKey: 'masked-a', authIndex: 'claude:a' },
-        ]
-        expect(findProviderConfigIndexByAuthIndex(configs, 'claude:a')).toBe(1)
-        expect(findProviderConfigIndexByAuthIndex(configs, 'claude:missing')).toBe(-1)
-    })
-
-    test('does not mark an unchanged credential header as edited when another row is removed', () => {
-        const previous = [
-            { key: 'X-Foo', value: 'one' },
-            { key: 'Authorization', value: 'Bearer key...tail' },
-        ]
-        const next     = [{ key: 'Authorization', value: 'Bearer key...tail' }]
-        expect(getChangedHeaderNames(previous, next)).toEqual(['x-foo'])
-    })
-
-    test('offers the verified DeepSeek Claude-compatible endpoint without inventing a model alias', () => {
-        const preset = CLAUDE_QUICK_FILL_PRESETS.find((item) => item.id === 'deepseek-claude')
-        expect(preset).toEqual({
-                                   id: 'deepseek-claude',
-                                   label: 'DeepSeek',
-                                   baseUrl: 'https://api.deepseek.com/anthropic',
-                                   discovery: {
-                                       providerLabel: 'DeepSeek',
-                                       endpoint: 'https://api.deepseek.com/models',
-                                       authMode: 'bearer',
-                                       addAnthropicVersion: false,
-                                   },
-                               })
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/')).toEqual(preset?.discovery)
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/v1')).toEqual(preset?.discovery)
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/v1/messages')).toEqual(preset?.discovery)
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com:443/anthropic')).toEqual(preset?.discovery)
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/?source=manual#models')).toEqual(
-            preset?.discovery,
-        )
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/ANTHROPIC')).toBeUndefined()
-        expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/V1/MESSAGES')).toBeUndefined()
-        expect(modelsApi.buildClaudeModelsEndpoint(preset?.baseUrl ?? '', preset?.discovery)).toBe(
-            'https://api.deepseek.com/models',
-        )
-        expect(modelsApi.buildClaudeModelsEndpoint('https://api.example.com')).toBe(
-            'https://api.example.com/v1/models',
-        )
-        expect(JSON.stringify(preset)).not.toContain('flash')
-    })
-})
+        test('offers the verified DeepSeek Claude-compatible endpoint without inventing a model alias', () => {
+            const preset = CLAUDE_QUICK_FILL_PRESETS.find((item) => item.id === 'deepseek-claude')
+            expect(preset).toEqual({
+                                       id: 'deepseek-claude',
+                                       label: 'DeepSeek',
+                                       baseUrl: 'https://api.deepseek.com/anthropic',
+                                       discovery: {
+                                           providerLabel: 'DeepSeek',
+                                           endpoint: 'https://api.deepseek.com/models',
+                                           authMode: 'bearer',
+                                           addAnthropicVersion: false,
+                                       },
+                                   })
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/')).toEqual(preset?.discovery)
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/v1')).toEqual(preset?.discovery)
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/v1/messages'))
+                .toEqual(preset?.discovery)
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com:443/anthropic')).toEqual(preset?.discovery)
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/?source=manual#models')).toEqual(
+                preset?.discovery,
+            )
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/ANTHROPIC')).toBeUndefined()
+            expect(resolveClaudeModelDiscovery('https://api.deepseek.com/anthropic/V1/MESSAGES')).toBeUndefined()
+            expect(modelsApi.buildClaudeModelsEndpoint(preset?.baseUrl ?? '', preset?.discovery)).toBe(
+                'https://api.deepseek.com/models',
+            )
+            expect(modelsApi.buildClaudeModelsEndpoint('https://api.example.com')).toBe(
+                'https://api.example.com/v1/models',
+            )
+            expect(JSON.stringify(preset)).not.toContain('flash')
+        })
+    },
+)
 
 describe('Claude Code client configuration', () => {
     test('prefers the canonical DeepSeek V4.1 Flash model', () => {
@@ -602,25 +650,34 @@ describe('provider request and discovery contracts', () => {
         expect(modelDiscoveryHookSource).toContain('requestControllerRef.current?.abort()')
         expectSourceToContain(modelDiscoveryHookSource, 'const requestId = (requestIdRef.current += 1)')
         expect(modelDiscoveryHookSource).toContain('controller.signal,')
-        expectSourceToContain(modelDiscoveryHookSource,
-            'if (authGeneration !== apiClient.getAuthGeneration() || requestIdRef.current !== requestId || controller.signal.aborted)',
+        expectSourceToContain(
+            modelDiscoveryHookSource,
+            (
+                'if (authGeneration !== apiClient.getAuthGeneration() || ' +
+                'requestIdRef.current !== requestId || controller.signal.aborted)'
+            ),
         )
         expect(providerModelsPageSource).toContain('requestControllerRef.current?.abort()')
         expectSourceToContain(providerModelsPageSource, 'const generation = ++requestGenerationRef.current')
         expect(providerModelsPageSource).toContain('fetchModels(controller.signal)')
-        expectSourceToContain(providerModelsPageSource,
-            'if (authGeneration !== apiClient.getAuthGeneration() || requestGenerationRef.current !== generation || controller.signal.aborted)',
+        expectSourceToContain(
+            providerModelsPageSource,
+            (
+                'if (authGeneration !== apiClient.getAuthGeneration() || ' +
+                'requestGenerationRef.current !== generation || controller.' +
+                'signal.aborted)'
+            ),
         )
         expect(claudeModelsPageSource).toContain('const fetchModels = useCallback(async (signal: AbortSignal)')
         expect(claudeModelsPageSource).toMatch(/maskedCredentialHeaderNames,\s+signal,\s+\)/)
     })
 
     test('keeps proxy and abort signal without reusing authentication on OpenAI discovery fallback', async () => {
-        const proxyUrl = 'socks5://proxy.example.test:1080'
-        const controller = new AbortController()
-        const request = apiCallApi.request
+        const proxyUrl                                                            = 'socks5://proxy.example.test:1080'
+        const controller                                                          = new AbortController()
+        const request                                                             = apiCallApi.request
         const calls: Array<{ payload: unknown; signal: AbortSignal | undefined }> = []
-        apiCallApi.request = async (payload, config) => {
+        apiCallApi.request                                                        = async (payload, config) => {
             calls.push({ payload, signal: config?.signal as AbortSignal | undefined })
             return { statusCode: 200, header: {}, bodyText: '{"data":[]}', body: { data: [] } }
         }
@@ -632,28 +689,34 @@ describe('provider request and discovery contracts', () => {
                 'https://api.example.test', undefined, undefined, proxyUrl, undefined, controller.signal,
             )
             expect(calls).toEqual([
-                {
-                    payload: {
-                        method: 'GET', url: 'https://api.example.test/v1/models',
-                        header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
-                    },
-                    signal: controller.signal,
-                },
-                {
-                    payload: {
-                        method: 'GET', url: 'https://api.example.test/models',
-                        header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
-                    },
-                    signal: controller.signal,
-                },
-            ])
+                                      {
+                                          payload: {
+                                              method: 'GET', url: 'https://api.example.test/v1/models',
+                                              header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
+                                          },
+                                          signal: controller.signal,
+                                      },
+                                      {
+                                          payload: {
+                                              method: 'GET', url: 'https://api.example.test/models',
+                                              header: undefined, proxyUrl, authIndex: undefined, draftToken: undefined,
+                                          },
+                                          signal: controller.signal,
+                                      },
+                                  ])
         } finally {
             apiCallApi.request = request
         }
 
-        const unauthenticatedCall = /modelsApi\.fetch(?:V1)?ModelsViaApiCall\(\s*trimmedBaseUrl,\s*undefined,\s*undefined,\s*keyEntry\?\.proxyUrl,\s*undefined,\s*signal,\s*\)/g
-        expect([...openAIModelsPageSource.matchAll(unauthenticatedCall)]).toHaveLength(2)
-        expect(openAIModelsPageSource.match(/if \(signal\.aborted \|\| authGeneration !== apiClient\.getAuthGeneration\(\)\) \{/g)).toHaveLength(3)
+        const unauthenticatedCall = new RegExp(
+            'modelsApi\\.fetch(?:V1)?ModelsViaApiCall\\(\\s*trimmedBaseUrl,\\' +
+            's*undefined,\\s*undefined,\\s*keyEntry\\?\\.proxyUrl,\\s*' +
+            'undefined,\\s*signal,\\s*\\)',
+            'g',
+        )
+        expect([...openAIModelsPageSource.matchAll(unauthenticatedCall)]).toHaveLength(0)
+        expect(openAIModelsPageSource.match(
+            /if \(signal\.aborted \|\| authGeneration !== apiClient\.getAuthGeneration\(\)\) \{/g)).toHaveLength(2)
     })
 
     test('uses the DeepSeek root model endpoint with bearer authentication', async () => {

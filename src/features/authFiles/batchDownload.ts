@@ -52,7 +52,8 @@ const saveAuthFileBlob = (name: string, blob: Blob): void => {
 export async function downloadAuthFilesBatch(
     names: string[],
     download: AuthFileDownloader,
-    save: BlobSaver = saveAuthFileBlob,
+    save: BlobSaver          = saveAuthFileBlob,
+    isCurrent: () => boolean = () => true,
 ): Promise<AuthFileBatchDownloadResult> {
     const uniqueNames          = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)))
     const downloaded: string[] = []
@@ -60,8 +61,16 @@ export async function downloadAuthFilesBatch(
     const usedDownloadNames    = new Set<string>()
 
     for (const [index, name] of uniqueNames.entries()) {
+        if (!isCurrent()) {
+            failed.push(...uniqueNames.slice(index))
+            break
+        }
         try {
-            const blob     = await download(name)
+            const blob = await download(name)
+            if (!isCurrent()) {
+                failed.push(...uniqueNames.slice(index))
+                break
+            }
             const safeName = stableAuthFileDownloadName(name, index)
             save(uniqueDownloadName(safeName, usedDownloadNames), blob)
             downloaded.push(name)

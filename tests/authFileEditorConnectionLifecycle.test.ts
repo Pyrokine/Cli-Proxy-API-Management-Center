@@ -1,85 +1,121 @@
+import type {PrefixProxyEditorState} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 import {describe, expect, mock, spyOn, test} from 'bun:test'
 import * as React from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
-import type {PrefixProxyEditorState} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
 
 const storage = {
     getItem: () => null, setItem: () => undefined, removeItem: () => undefined,
     clear: () => undefined, key: () => null, length: 0,
 } satisfies Storage
-Object.defineProperty(globalThis, 'localStorage', {value: storage, configurable: true})
-Object.defineProperty(globalThis, 'sessionStorage', {value: storage, configurable: true})
+Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
+Object.defineProperty(globalThis, 'sessionStorage', { value: storage, configurable: true })
 
-const {useAuthFilesPrefixProxyEditor} = await import('@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor')
-const {authFilesApi} = await import('@/services/api/authFiles')
-const {apiClient} = await import('@/services/api/client')
-const {useNotificationStore} = await import('@/stores')
+const { useAuthFilesPrefixProxyEditor } = await import('@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor')
+const { authFilesApi }                  = await import('@/services/api/authFiles')
+const { apiClient }                     = await import('@/services/api/client')
+const { useNotificationStore }          = await import('@/stores')
 
 function deferred<T>() {
     let resolve!: (value: T) => void
     let reject!: (reason: unknown) => void
-    const promise = new Promise<T>((accept, decline) => {resolve = accept; reject = decline})
-    return {promise, resolve, reject}
+    const promise = new Promise<T>((accept, decline) => {
+        resolve = accept;
+        reject  = decline
+    })
+    return { promise, resolve, reject }
 }
 
 function createEditor() {
     let state: PrefixProxyEditorState | null = null
+
     let hook!: ReturnType<typeof useAuthFilesPrefixProxyEditor>
-    const editorRef: React.RefObject<{authGeneration: number} | null> = {current: {authGeneration: 1}}
+
+    const editorRef: React.RefObject<{ authGeneration: number } | null> = { current: { authGeneration: 1 } }
+
     const originalUseState = React.useState
+
     const originalUseRef = React.useRef
+
     const effects: React.EffectCallback[] = []
+
     const setState = (value: React.SetStateAction<PrefixProxyEditorState | null>) => {
         state = typeof value === 'function' ? value(state) : value
     }
-    const useState = spyOn(React, 'useState').mockImplementation(((initial: unknown) =>
-        initial === null ? [state, setState] : originalUseState(initial)
-    ) as typeof React.useState)
-    const useRef = spyOn(React, 'useRef').mockImplementation(((initial: unknown) =>
-        initial && typeof initial === 'object' && 'authGeneration' in initial
-            ? editorRef : originalUseRef(initial)
-    ) as typeof React.useRef)
-    const useEffect = spyOn(React, 'useEffect').mockImplementation((effect, deps) => {
-        if (deps?.length === 0) {
-            effects.push(effect)
-        }
-    })
-    const generation = spyOn(apiClient, 'getAuthGeneration').mockReturnValue(1)
+
+    const useState = spyOn(React, 'useState')
+        .mockImplementation(((initial: unknown) =>
+                initial === null ? [state, setState] : originalUseState(initial)
+                            ) as typeof React.useState)
+
+    const useRef = spyOn(React, 'useRef')
+        .mockImplementation(((initial: unknown) =>
+                initial && typeof initial === 'object' && 'authGeneration' in initial
+                ? editorRef : originalUseRef(initial)
+                            ) as typeof React.useRef)
+
+    const useEffect = spyOn(React, 'useEffect')
+        .mockImplementation((effect, deps) => {
+            if (deps?.length === 0) {
+                effects.push(effect)
+            }
+        })
+
+    const generation = spyOn(apiClient, 'getAuthGeneration')
+        .mockReturnValue(1)
+
     const downloads: ReturnType<typeof deferred<string>>[] = []
+
     const writes: ReturnType<typeof deferred<unknown>>[] = []
-    const download = spyOn(authFilesApi, 'downloadText').mockImplementation(() => {
-        const work = deferred<string>()
-        downloads.push(work)
-        return work.promise
+
+    const download = spyOn(authFilesApi, 'downloadText')
+        .mockImplementation(() => {
+            const work = deferred<string>()
+            downloads.push(work)
+            return work.promise
+        })
+
+    const request = spyOn(apiClient, 'patch')
+        .mockImplementation(<T>() => {
+            const work = deferred<unknown>()
+            writes.push(work)
+            return work.promise as Promise<T>
+        })
+
+    const completeMutation = mock(async () => {
     })
-    const request = spyOn(apiClient, 'patch').mockImplementation(<T>() => {
-        const work = deferred<unknown>()
-        writes.push(work)
-        return work.promise as Promise<T>
+
+    const notification = spyOn(
+        useNotificationStore.getInitialState(),
+        'showNotification',
+    ).mockImplementation(() => {
     })
-    const completeMutation = mock(async () => {})
-    const notification = spyOn(useNotificationStore.getInitialState(), 'showNotification').mockImplementation(() => {})
+
     const Probe = () => {
-        hook = useAuthFilesPrefixProxyEditor({disableControls: false, completeMutation})
+        hook = useAuthFilesPrefixProxyEditor({ disableControls: false, completeMutation })
         return null
     }
+
     const render = () => {
         renderToStaticMarkup(React.createElement(Probe))
         return hook
     }
     render()
-    const cleanups = effects.map((effect) => effect()).filter((cleanup) => typeof cleanup === 'function')
-    const file = {name: 'shared.json', authIndex: 'shared-auth', type: 'codex'}
-    const open = () => hook.openPrefixProxyEditor(file)
+    const cleanups     = effects.map((effect) => effect()).filter((cleanup) => typeof cleanup === 'function')
+    const file         = { name: 'shared.json', authIndex: 'shared-auth', type: 'codex' }
+    const open         = () => hook.openPrefixProxyEditor(file)
     const prepareDraft = async () => {
         const pending = open()
-        downloads[downloads.length - 1]!.resolve(JSON.stringify({prefix: 'original'}))
+        downloads[downloads.length - 1]!.resolve(JSON.stringify({ prefix: 'original' }))
         await pending
         render().handlePrefixProxyChange('prefix', 'draft')
         render()
     }
     return {
-        get hook() {return hook}, get state() {return state},
+        get hook() {
+            return hook
+        }, get state() {
+            return state
+        },
         render, open, prepareDraft, downloads, writes, request, notification, generation, completeMutation,
         unmount: () => cleanups.forEach((cleanup) => cleanup()),
         restore: () => {
@@ -120,6 +156,7 @@ describe('auth-file editor request ownership', () => {
                         }
                         editor.render()
                     }
+                    // noinspection ES6MissingAwait
                     const newer = boundary === 'unmount' || boundary === 'connection-only' ? null : editor.open()
                     editor.render()
                     const expected = editor.state
@@ -128,10 +165,18 @@ describe('auth-file editor request ownership', () => {
                     expect(editor.state).toBe(expected)
                     expect(editor.notification).not.toHaveBeenCalled()
                     if (newer) {
-                        expect(editor.render().prefixProxyEditor).toMatchObject({loading: true, prefix: '', error: null})
+                        expect(editor.render().prefixProxyEditor).toMatchObject({
+                                                                                    loading: true,
+                                                                                    prefix: '',
+                                                                                    error: null,
+                                                                                })
                         editor.downloads[1]!.resolve('{"prefix":"new"}')
                         await newer
-                        expect(editor.render().prefixProxyEditor).toMatchObject({loading: false, prefix: 'new', error: null})
+                        expect(editor.render().prefixProxyEditor).toMatchObject({
+                                                                                    loading: false,
+                                                                                    prefix: 'new',
+                                                                                    error: null,
+                                                                                })
                     }
                 } finally {
                     editor.restore()
@@ -144,14 +189,14 @@ describe('auth-file editor request ownership', () => {
         const editor = createEditor()
         try {
             await editor.prepareDraft()
-            const old = editor.hook
+            const old      = editor.hook
             const expected = editor.state
             editor.generation.mockReturnValue(3)
             expect(editor.render().prefixProxyEditor).toBeNull()
             expect(editor.hook.prefixProxyDirty).toBe(false)
             old.handlePrefixProxyChange('prefix', 'changed')
             old.handlePrefixProxyBooleanChange('websockets', true)
-            old.handlePrefixProxyOverridesChange({requestRetry: 5})
+            old.handlePrefixProxyOverridesChange({ requestRetry: 5 })
             await old.handlePrefixProxySave()
             await editor.hook.handlePrefixProxySave()
             expect(editor.state).toBe(expected)
@@ -166,17 +211,20 @@ describe('auth-file editor request ownership', () => {
     for (const phase of ['patch', 'reload'] as const) {
         for (const outcome of ['success', 'failure'] as const) {
             test(`ignores an old save ${outcome} when the connection changes during ${phase}`, async () => {
-                const editor = createEditor()
-                const reload = deferred<void>()
+                const editor  = createEditor()
+                const reload  = deferred<void>()
                 const started = deferred<void>()
                 try {
                     await editor.prepareDraft()
                     if (phase === 'reload') {
-                        editor.completeMutation.mockImplementation(() => {started.resolve(); return reload.promise})
+                        editor.completeMutation.mockImplementation(() => {
+                            started.resolve();
+                            return reload.promise
+                        })
                     }
                     const pending = editor.hook.handlePrefixProxySave()
                     if (phase === 'reload') {
-                        editor.writes[0]!.resolve({status: 'ok'})
+                        editor.writes[0]!.resolve({ status: 'ok' })
                         await started.promise
                     }
                     editor.generation.mockReturnValue(3)
@@ -187,7 +235,7 @@ describe('auth-file editor request ownership', () => {
                     await newer
                     editor.render()
                     const expected = editor.state
-                    const work = phase === 'patch' ? editor.writes[0]! : reload
+                    const work     = phase === 'patch' ? editor.writes[0]! : reload
                     if (outcome === 'failure') {
                         work.reject(new Error('synthetic old save failed'))
                     } else {
@@ -210,7 +258,7 @@ describe('auth-file editor request ownership', () => {
                 const editor = createEditor()
                 try {
                     await editor.prepareDraft()
-                    const old = editor.hook
+                    const old     = editor.hook
                     const pending = old.handlePrefixProxySave()
                     if (boundary === 'unmount') {
                         editor.unmount()
@@ -228,7 +276,7 @@ describe('auth-file editor request ownership', () => {
                     if (outcome === 'failure') {
                         editor.writes[0]!.reject(new Error('synthetic old save failed'))
                     } else {
-                        editor.writes[0]!.resolve({status: 'ok'})
+                        editor.writes[0]!.resolve({ status: 'ok' })
                     }
                     await pending
                     expect(editor.state).toBe(expected)
@@ -247,14 +295,18 @@ describe('auth-file editor request ownership', () => {
             const pending = editor.open()
             editor.downloads[0]!.reject(new Error('synthetic current download failed'))
             await pending
-            expect(editor.render().prefixProxyEditor).toMatchObject({loading: false, error: 'synthetic current download failed'})
-            expect(editor.notification).toHaveBeenCalledWith(expect.stringContaining('synthetic current download failed'), 'error')
+            expect(editor.render().prefixProxyEditor).toMatchObject({
+                                                                        loading: false,
+                                                                        error: 'synthetic current download failed',
+                                                                    })
+            expect(editor.notification)
+                .toHaveBeenCalledWith(expect.stringContaining('synthetic current download failed'), 'error')
             editor.hook.closePrefixProxyEditor()
             editor.render()
             const retry = editor.open()
             editor.downloads[1]!.resolve('{"prefix":"current"}')
             await retry
-            expect(editor.render().prefixProxyEditor).toMatchObject({loading: false, error: null, prefix: 'current'})
+            expect(editor.render().prefixProxyEditor).toMatchObject({ loading: false, error: null, prefix: 'current' })
         } finally {
             editor.restore()
         }
@@ -264,17 +316,20 @@ describe('auth-file editor request ownership', () => {
         const editor = createEditor()
         try {
             await editor.prepareDraft()
-            const first = editor.hook.handlePrefixProxySave()
+            const first  = editor.hook.handlePrefixProxySave()
             const second = editor.hook.handlePrefixProxySave()
             expect(editor.request).toHaveBeenCalledTimes(1)
             await second
             editor.writes[0]!.reject(new Error('synthetic current failure'))
             await first
-            expect(editor.render().prefixProxyEditor).toMatchObject({prefix: 'draft', saving: false})
+            expect(editor.render().prefixProxyEditor).toMatchObject({ prefix: 'draft', saving: false })
             expect(editor.notification).toHaveBeenCalledTimes(1)
-            expect(editor.notification).toHaveBeenCalledWith(expect.stringContaining('synthetic current failure'), 'error')
+            expect(editor.notification).toHaveBeenCalledWith(
+                expect.stringContaining('synthetic current failure'),
+                'error',
+            )
             const retry = editor.hook.handlePrefixProxySave()
-            editor.writes[1]!.resolve({status: 'ok'})
+            editor.writes[1]!.resolve({ status: 'ok' })
             await retry
             expect(editor.completeMutation).toHaveBeenCalledTimes(1)
             expect(editor.notification).toHaveBeenCalledTimes(2)

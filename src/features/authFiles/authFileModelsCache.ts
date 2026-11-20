@@ -44,7 +44,7 @@ const normalizeModelItems = (value: unknown): AuthFileModelItem[] => {
         if (typeof entry.owned_by === 'string' && entry.owned_by.trim()) {
             normalized.owned_by = entry.owned_by.trim()
         }
-        const key = id.toLowerCase()
+        const key = id
         if (!byId.has(key)) {
             byId.set(key, normalized)
         }

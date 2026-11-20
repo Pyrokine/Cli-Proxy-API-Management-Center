@@ -1,6 +1,6 @@
-import {describe, expect, test} from 'bun:test'
 import {validateDevinCallback} from '@/components/credentials/devinOAuth'
 import {shouldFinalizeOAuthAttempt} from '@/components/credentials/oauthAttempts'
+import {describe, expect, test} from 'bun:test'
 
 describe('Devin OAuth callback validation', () => {
     test('accepts only the complete callback for the current attempt', () => {
@@ -33,9 +33,9 @@ describe('Devin OAuth callback validation', () => {
     })
 
     test('keeps retryable errors active and only releases explicit terminal states', () => {
-        expect(shouldFinalizeOAuthAttempt({status: 'wait', phase: 'saving'})).toBe(false)
-        expect(shouldFinalizeOAuthAttempt({status: 'error', phase: 'error', error: 'save failed'})).toBe(false)
-        expect(shouldFinalizeOAuthAttempt({status: 'error', phase: 'expired', error: 'expired'})).toBe(true)
-        expect(shouldFinalizeOAuthAttempt({status: 'ok', phase: 'success'})).toBe(true)
+        expect(shouldFinalizeOAuthAttempt({ status: 'wait', phase: 'saving' })).toBe(false)
+        expect(shouldFinalizeOAuthAttempt({ status: 'error', phase: 'error', error: 'save failed' })).toBe(false)
+        expect(shouldFinalizeOAuthAttempt({ status: 'error', phase: 'expired', error: 'expired' })).toBe(true)
+        expect(shouldFinalizeOAuthAttempt({ status: 'ok', phase: 'success' })).toBe(true)
     })
 })

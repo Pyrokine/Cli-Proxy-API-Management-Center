@@ -1,6 +1,5 @@
-import {describe, expect, spyOn, test} from 'bun:test'
-
 import type {PrefixProxyEditorState} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
+import {describe, expect, spyOn, test} from 'bun:test'
 
 const storage = {
     getItem: () => null,
@@ -82,7 +81,7 @@ describe('auth-file credential weight patch', () => {
                 name: 'credential.json',
                 priority: 20,
                 weight: 3,
-            })
+            }, { mutationReadback: expect.any(Function) })
         } finally {
             patch.mockRestore()
         }
@@ -99,4 +98,24 @@ describe('auth-file credential weight patch', () => {
         expect(buildAuthFileFieldsPatch(readOnlyEditor, (key) => key)).toEqual({})
         expect(readOnlyEditor).toMatchObject({ priority: '9', weight: '8' })
     })
+})
+
+test('auth-file exclusion edits preserve comma-bearing rules in the actual fields PATCH', async () => {
+    const editor = {
+        ...makeEditor({ excluded_models: ['a,b', 'keep'] }, ''),
+        excludedModelsText: 'a,b\nkeep\nnew-*', excludedModelsTouched: true,
+    }
+    const fields = buildAuthFileFieldsPatch(editor, (key) => key)
+    expect(fields).toEqual({ excluded_models: ['a,b', 'keep', 'new-*'] })
+    const patch = spyOn(apiClient, 'patch').mockResolvedValue({ status: 'ok' })
+    try {
+        await authFilesApi.patchFields(editor.fileName, fields)
+        expect(patch).toHaveBeenCalledWith(
+            '/auth-files/fields',
+            { name: editor.fileName, excluded_models: ['a,b', 'keep', 'new-*'] },
+            { mutationReadback: expect.any(Function) },
+        )
+    } finally {
+        patch.mockRestore()
+    }
 })

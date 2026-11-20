@@ -36,7 +36,11 @@ type AuthFilePolicyErrorKey =
     | 'auth_files.policy_invalid_json'
     | 'auth_files.model_aliases_invalid'
     | 'auth_files.request_rules_invalid'
-type AuthFileEditorErrorKey = AuthFileHeadersErrorKey | AuthFileWeightErrorKey | AuthFilePolicyErrorKey | 'auth_files.request_retry_invalid'
+type AuthFileEditorErrorKey =
+    AuthFileHeadersErrorKey
+    | AuthFileWeightErrorKey
+    | AuthFilePolicyErrorKey
+    | 'auth_files.request_retry_invalid'
 type AuthFileContentErrorKey = 'auth_files.prefix_proxy_invalid_json' | 'auth_files.prefix_proxy_html_challenge'
 
 const credentialWeightErrorKey = (error: CredentialWeightError): AuthFileWeightErrorKey =>
@@ -159,37 +163,37 @@ const parseAuthFilePolicyRows = (text: string, field: AuthFilePolicyField, origi
     errorKey: AuthFilePolicyErrorKey | null
 } => {
     if (!text.trim()) {
-        return {value: [], errorKey: null}
+        return { value: [], errorKey: null }
     }
     const invalidKey = field === 'model_aliases'
-        ? 'auth_files.model_aliases_invalid' : 'auth_files.request_rules_invalid'
+                       ? 'auth_files.model_aliases_invalid' : 'auth_files.request_rules_invalid'
     let parsed: unknown
     try {
         parsed = JSON.parse(text) as unknown
     } catch {
-        return {value: null, errorKey: 'auth_files.policy_invalid_json'}
+        return { value: null, errorKey: 'auth_files.policy_invalid_json' }
     }
     if (!Array.isArray(parsed) || !parsed.every(isRecordObject)) {
-        return {value: null, errorKey: invalidKey}
+        return { value: null, errorKey: invalidKey }
     }
     const rows = parsed as Array<Record<string, unknown>>
     if (field === 'model_aliases') {
         const seen = new Set<string>()
         for (const row of rows) {
-            const name = typeof row.name === 'string' ? row.name.trim() : ''
+            const name  = typeof row.name === 'string' ? row.name.trim() : ''
             const alias = typeof row.alias === 'string' ? row.alias.trim() : ''
-            const key = alias.toLowerCase()
+            const key   = alias.toLowerCase()
             if (!name || !alias || name.toLowerCase() === key || seen.has(key) ||
                 (row.fork !== undefined && typeof row.fork !== 'boolean') ||
                 (row['force-mapping'] !== undefined && typeof row['force-mapping'] !== 'boolean') ||
                 (row['display-name'] !== undefined && typeof row['display-name'] !== 'string') ||
                 row.forceMapping !== undefined) {
-                return {value: null, errorKey: invalidKey}
+                return { value: null, errorKey: invalidKey }
             }
             seen.add(key)
         }
     } else {
-        const actions = new Set(['stop', 'stop-and-cooldown', 'continue', 'continue-and-cooldown'])
+        const actions   = new Set(['stop', 'stop-and-cooldown', 'continue', 'continue-and-cooldown'])
         const unchanged = Array.isArray(original) ? [...original] : []
         for (const row of rows) {
             const previousIndex = unchanged.findIndex((previous) => JSON.stringify(previous) === JSON.stringify(row))
@@ -206,21 +210,24 @@ const parseAuthFilePolicyRows = (text: string, field: AuthFilePolicyField, origi
                 row.matchRegex !== undefined ||
                 ![...(Array.isArray(match) ? match : []), ...(Array.isArray(regex) ? regex : [])]
                     .some((item) => item.length > 0)) {
-                return {value: null, errorKey: invalidKey}
+                return { value: null, errorKey: invalidKey }
             }
             if ([...(Array.isArray(match) ? match : []), ...(Array.isArray(regex) ? regex : [])]
                 .some((item) => item.length === 0)) {
                 const conditionIndex = unchanged.findIndex((previous) => isRecordObject(previous) &&
-                    JSON.stringify(previous.match ?? []) === JSON.stringify(match ?? []) &&
-                    JSON.stringify(previous['match-regexr'] ?? []) === JSON.stringify(regex ?? []))
+                                                                         JSON.stringify(previous.match ?? []) ===
+                                                                         JSON.stringify(match ?? []) &&
+                                                                         JSON.stringify(previous['match-regexr'] ??
+                                                                                            []) ===
+                                                                         JSON.stringify(regex ?? []))
                 if (conditionIndex < 0) {
-                    return {value: null, errorKey: invalidKey}
+                    return { value: null, errorKey: invalidKey }
                 }
                 unchanged.splice(conditionIndex, 1)
             }
         }
     }
-    return {value: rows, errorKey: null}
+    return { value: rows, errorKey: null }
 }
 
 const normalizeTextField = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -394,8 +401,8 @@ export const buildAuthFileFieldsPatch = (
             throw new Error(resolveHeadersError(errorKey))
         }
         const originalRequestRetry = readAuthFileRequestRetry(original)
-        const nextRequestRetry = editor.requestRetry !== undefined && editor.requestRetry >= 0
-            ? editor.requestRetry : undefined
+        const nextRequestRetry     = editor.requestRetry !== undefined && editor.requestRetry >= 0
+                                     ? editor.requestRetry : undefined
         if (nextRequestRetry !== originalRequestRetry) {
             patch.request_retry = nextRequestRetry ?? null
         }
@@ -432,8 +439,8 @@ export const buildAuthFileFieldsPatch = (
         if (!touched) {
             continue
         }
-        const originalRows = readAuthFilePolicyField(original, field)
-        const {value, errorKey} = parseAuthFilePolicyRows(text, field, originalRows)
+        const originalRows        = readAuthFilePolicyField(original, field)
+        const { value, errorKey } = parseAuthFilePolicyRows(text, field, originalRows)
         if (errorKey || !value) {
             throw new Error(resolveHeadersError(errorKey ?? 'auth_files.policy_invalid_json'))
         }
@@ -450,10 +457,10 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
     const { t }                                     = useTranslation()
     const showNotification                          = useNotificationStore((state) => state.showNotification)
     const [prefixProxyEditor, setPrefixProxyEditor] = useState<PrefixProxyEditorState | null>(null)
-    const authGeneration = useAuthStore(() => apiClient.getAuthGeneration())
-    const editorRequestRef = useRef<{authGeneration: number} | null>({authGeneration})
-    const editorRequest = editorRequestRef.current
-    const isCurrentEditor = (request = editorRequest) =>
+    const authGeneration                            = useAuthStore(() => apiClient.getAuthGeneration())
+    const editorRequestRef                          = useRef<{ authGeneration: number } | null>({ authGeneration })
+    const editorRequest                             = editorRequestRef.current
+    const isCurrentEditor                           = (request = editorRequest) =>
         request !== null && request === editorRequestRef.current &&
         request.authGeneration === apiClient.getAuthGeneration()
 
@@ -494,7 +501,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             closePrefixProxyEditor()
             return
         }
-        const request = {authGeneration}
+        const request            = { authGeneration }
         editorRequestRef.current = request
 
         const provider = file.provider || file.type || inferProviderFromAuthFileName(file.name)
@@ -758,14 +765,20 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             }
             if (field === 'modelAliasesText' || field === 'requestRulesText') {
                 const modelAliases = field === 'modelAliasesText'
-                const policyField = modelAliases ? 'model_aliases' : 'request_scoped_errors'
-                const {errorKey} = parseAuthFilePolicyRows(value, policyField,
-                    readAuthFilePolicyField(prev.json ?? {}, policyField))
+                const policyField  = modelAliases ? 'model_aliases' : 'request_scoped_errors'
+                const { errorKey } = parseAuthFilePolicyRows(
+                    value, policyField,
+                    readAuthFilePolicyField(prev.json ?? {}, policyField),
+                )
                 return modelAliases
-                    ? {...prev, modelAliasesText: value, modelAliasesTouched: true,
-                        modelAliasesError: errorKey ? t(errorKey) : null}
-                    : {...prev, requestRulesText: value, requestRulesTouched: true,
-                        requestRulesError: errorKey ? t(errorKey) : null}
+                       ? {
+                        ...prev, modelAliasesText: value, modelAliasesTouched: true,
+                        modelAliasesError: errorKey ? t(errorKey) : null,
+                    }
+                       : {
+                        ...prev, requestRulesText: value, requestRulesTouched: true,
+                        requestRulesError: errorKey ? t(errorKey) : null,
+                    }
             }
             const { errorKey } = parseHeadersText(value)
             return {
@@ -783,8 +796,8 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
                 return prev
             }
             return field === 'websockets'
-                ? { ...prev, websockets: value, websocketsTouched: true }
-                : { ...prev, usingApi: value, usingApiTouched: true }
+                   ? { ...prev, websockets: value, websocketsTouched: true }
+                   : { ...prev, usingApi: value, usingApiTouched: true }
         })
     }
 
@@ -804,8 +817,14 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
     }
 
     const handlePrefixProxySave = async () => {
-        if (disableControls || !isCurrentEditor() || !prefixProxyEditor?.json || prefixProxyEditor.readOnly || prefixProxyEditor.loading ||
-            prefixProxyEditor.saving || hasBlockingValidationError || !prefixProxyDirty) {
+        if (disableControls ||
+            !isCurrentEditor() ||
+            !prefixProxyEditor?.json ||
+            prefixProxyEditor.readOnly ||
+            prefixProxyEditor.loading ||
+            prefixProxyEditor.saving ||
+            hasBlockingValidationError ||
+            !prefixProxyDirty) {
             return
         }
         const name      = prefixProxyEditor.fileName
@@ -822,10 +841,10 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             return
         }
 
-        const request = {authGeneration}
+        const request            = { authGeneration }
         editorRequestRef.current = request
         setPrefixProxyEditor((prev) => (isCurrentEditor(request) && isEditorIdentity(prev, name, authIndex)
-            ? { ...prev, saving: true } : prev))
+                                        ? { ...prev, saving: true } : prev))
         try {
             await authFilesApi.patchFields(name, payload, authIndex)
             if (!isCurrentEditor(request)) {
@@ -845,7 +864,7 @@ export function useAuthFilesPrefixProxyEditor(options: UseAuthFilesPrefixProxyEd
             const errorMessage = err instanceof Error ? err.message : ''
             showNotification(`${t('notification.update_failed')}: ${errorMessage}`, 'error')
             setPrefixProxyEditor((prev) => (isCurrentEditor(request) && isEditorIdentity(prev, name, authIndex)
-                ? { ...prev, saving: false } : prev))
+                                            ? { ...prev, saving: false } : prev))
         }
     }
 

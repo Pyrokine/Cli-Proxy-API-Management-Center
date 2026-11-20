@@ -1,5 +1,5 @@
+import type {ManualKeyCardItem} from '@/components/credentials/apiKeyStatus'
 import type {AuthFileMutation} from '@/components/credentials/credentialsDataLifecycle'
-import type {AuthFileItem} from '@/types/authFile'
 import {downloadAuthFilesBatch} from '@/features/authFiles/batchDownload'
 import {
     isAuthFileUploadInFlight,
@@ -10,6 +10,8 @@ import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {providersApi} from '@/services/api/providers'
 import {useNotificationStore} from '@/stores'
+import type {OpenAIProviderConfig} from '@/types'
+import type {AuthFileItem} from '@/types/authFile'
 import {useCallback, useSyncExternalStore} from 'react'
 import {useTranslation} from 'react-i18next'
 
@@ -43,46 +45,86 @@ export function useVendorActions(
     onRefresh: () => Promise<void>,
     completeMutation: MutationCompleter,
 ) {
-    const { t }            = useTranslation()
+    const { t } = useTranslation()
     const showNotification = useNotificationStore((state) => state.showNotification)
     const showConfirmation = useNotificationStore((state) => state.showConfirmation)
-    const uploadInFlight   = useSyncExternalStore(
+    const uploadInFlight = useSyncExternalStore(
         subscribeAuthFileUploadLock,
         isAuthFileUploadInFlight,
         isAuthFileUploadInFlight,
     )
 
     const deleteApiKey = useCallback(
-        (identifier: string, baseUrl?: string) => {
+        (identifier: string, baseUrl?: string, item?: ManualKeyCardItem) => {
             const deleter = API_KEY_DELETERS[vendorId]
             if (!deleter) {
                 return
             }
-            const confirmKey = DELETE_CONFIRM_KEYS[vendorId] ?? 'api_keys.delete_confirm'
-            const generation = apiClient.getAuthGeneration()
-            showConfirmation({
-                                 title: t('common.delete'),
-                                 message: t(confirmKey),
-                                 variant: 'danger',
-                                 confirmText: t('common.delete'),
-                                 cancelText: t('common.cancel'),
-                                 onConfirm: async () => {
-                                     if (generation !== apiClient.getAuthGeneration()) {
-                                         throw new Error(t('common.connection_changed'))
-                                     }
-                                     await deleter(identifier, baseUrl)
-                                     if (generation !== apiClient.getAuthGeneration()) {
-                                         return
-                                     }
-                                     await onRefresh()
-                                     if (generation === apiClient.getAuthGeneration()) {
-                                         showNotification(t('common.success'), 'success')
-                                     }
-                                 },
-                             })
+            const deletingEntry = vendorId === 'openai' && item?.entryIndex !== undefined
+            const confirmKey    = deletingEntry ?
+                                  'ai_providers.openai_remove_key_confirm' :
+                                  DELETE_CONFIRM_KEYS[vendorId] ?? 'api_keys.delete_confirm'
+            const generation    = apiClient.getAuthGeneration()
+            showConfirmation(
+                {
+                    title: t('common.delete'),
+                    message: t(confirmKey),
+                    variant: 'danger',
+                    confirmText: t('common.delete'),
+                    cancelText: t('common.cancel'),
+                    onConfirm: async () => {
+                        if (generation !== apiClient.getAuthGeneration()) {
+                            throw new Error(t('common.connection_changed'))
+                        }
+                        if (deletingEntry && item) {
+                            const original = item.config as OpenAIProviderConfig
+                            const next     = {
+                                ...original,
+                                apiKeyEntries: original.apiKeyEntries.filter((_, index) => index !==
+                                                                                           item.entryIndex),
+                            }
+                            await providersApi.patchOpenAIProvider(item.configIndex, next, original)
+                        } else {
+                            await deleter(identifier, baseUrl)
+                        }
+                        if (generation !== apiClient.getAuthGeneration()) {
+                            return
+                        }
+                        await onRefresh()
+                        if (generation === apiClient.getAuthGeneration()) {
+                            showNotification(t('common.success'), 'success')
+                        }
+                    },
+                })
         },
         [vendorId, onRefresh, showNotification, showConfirmation, t],
     )
+
+    const toggleApiKey = useCallback(async (authIndex: string, disabled: boolean) => {
+        const generation = apiClient.getAuthGeneration()
+        let updated      = false
+        try {
+            await authFilesApi.setStatus('', disabled, authIndex)
+            updated = true
+        } catch (error: unknown) {
+            if (generation === apiClient.getAuthGeneration()) {
+                showNotification(error instanceof Error ? error.message : t('common.error'), 'error')
+            }
+        }
+        if (generation !== apiClient.getAuthGeneration()) {
+            return
+        }
+        try {
+            await onRefresh()
+            if (updated && generation === apiClient.getAuthGeneration()) {
+                showNotification(t('common.success'), 'success')
+            }
+        } catch (error: unknown) {
+            if (generation === apiClient.getAuthGeneration()) {
+                showNotification(error instanceof Error ? error.message : t('common.error'), 'error')
+            }
+        }
+    }, [onRefresh, showNotification, t])
 
     const toggleAuthFile = useCallback(
         async (file: AuthFileItem, disabled: boolean) => {
@@ -93,11 +135,11 @@ export function useVendorActions(
                     return
                 }
                 await completeMutation({
-                    kind: 'status',
-                    names: [file.name],
-                    authIndex: file.authIndex,
-                    disabled: result.disabled,
-                })
+                                           kind: 'status',
+                                           names: [file.name],
+                                           authIndex: file.authIndex,
+                                           disabled: result.disabled,
+                                       })
             } catch (error: unknown) {
                 if (generation === apiClient.getAuthGeneration()) {
                     showNotification(error instanceof Error ? error.message : t('common.error'), 'error')
@@ -142,7 +184,10 @@ export function useVendorActions(
     const downloadAuthFile = useCallback(
         async (name: string) => {
             const generation = apiClient.getAuthGeneration()
-            const result = await downloadAuthFilesBatch([name], authFilesApi.download)
+            const result     = await downloadAuthFilesBatch(
+                [name], authFilesApi.download, undefined,
+                () => generation === apiClient.getAuthGeneration(),
+            )
             if (generation === apiClient.getAuthGeneration() && result.failed.length > 0) {
                 showNotification(t('common.error'), 'error')
             }
@@ -189,6 +234,7 @@ export function useVendorActions(
 
     return {
         deleteApiKey,
+        toggleApiKey,
         toggleAuthFile,
         deleteAuthFile,
         downloadAuthFile,

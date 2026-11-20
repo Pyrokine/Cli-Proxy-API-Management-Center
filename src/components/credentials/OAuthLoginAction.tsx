@@ -10,7 +10,7 @@ import {safeExternalUrl} from '@/utils/validation'
 import {type ChangeEvent, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {validateDevinCallback} from './devinOAuth'
-import {createOAuthAttempts, shouldFinalizeOAuthAttempt, type OAuthAttempt} from './oauthAttempts'
+import {createOAuthAttempts, type OAuthAttempt, shouldFinalizeOAuthAttempt} from './oauthAttempts'
 import styles from './OAuthLoginAction.module.scss'
 
 const POLL_INTERVAL                       = 3000
@@ -36,8 +36,8 @@ function readQueryLikeCallbackInput(value: string): URLSearchParams | null {
     const trimmed    = value.trim()
     const queryStart = trimmed.indexOf('?')
     const hashStart  = trimmed.indexOf('#')
-    const start = queryStart >= 0 ? queryStart + 1 : hashStart >= 0 ? hashStart + 1 : 0
-    const params = new URLSearchParams(trimmed.slice(start))
+    const start      = queryStart >= 0 ? queryStart + 1 : hashStart >= 0 ? hashStart + 1 : 0
+    const params     = new URLSearchParams(trimmed.slice(start))
     return params.has('code') || params.has('state') || params.has('error') ? params : null
 }
 
@@ -107,9 +107,23 @@ interface OAuthLoginActionProps {
     onCancel: () => void
 }
 
-export function OAuthLoginAction({ provider, plugin = false, disableControls, onSuccess, onCancel }: OAuthLoginActionProps) {
+const oauthPhaseMessages: Record<string, string> = {
+    accepted: 'credentials.oauth_callback_accepted',
+    exchanging: 'credentials.oauth_token_exchange',
+    saving: 'credentials.oauth_publishing_file',
+    publishing_file: 'credentials.oauth_publishing_file',
+    publishing_auth: 'credentials.oauth_publishing_auth',
+}
+
+export function OAuthLoginAction({
+                                     provider,
+                                     plugin = false,
+                                     disableControls,
+                                     onSuccess,
+                                     onCancel,
+                                 }: OAuthLoginActionProps) {
     const { t }                                       = useTranslation()
-    const showNotification                           = useNotificationStore((state) => state.showNotification)
+    const showNotification                            = useNotificationStore((state) => state.showNotification)
     const [url, setUrl]                               = useState('')
     const [userCode, setUserCode]                     = useState('')
     const [status, setStatus]                         = useState<'idle' | 'starting' | 'waiting' | 'success' | 'error'>(
@@ -119,21 +133,33 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
     const [callbackUrl, setCallbackUrl]               = useState('')
     const [callbackSubmitting, setCallbackSubmitting] = useState(false)
     const [callbackAccepted, setCallbackAccepted]     = useState(false)
+    const [phase, setPhase]                           = useState('pending')
     const [oauthState, setOauthState]                 = useState('')
     const [cancelSubmitting, setCancelSubmitting]     = useState(false)
     const nonceRef                                    = useRef('')
-    const attemptsRef                                 = useRef(createOAuthAttempts({
-        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
-        clearTimeout: (timer) => window.clearTimeout(timer),
-        getGeneration: () => apiClient.getAuthGeneration(),
-    }))
+    const attemptsRef                                 = useRef(createOAuthAttempts(
+        {
+            setTimeout: (
+                callback,
+                delay,
+            ) => window.setTimeout(
+                callback,
+                delay,
+            ),
+            clearTimeout: (timer) => window.clearTimeout(
+                timer),
+            getGeneration: () => apiClient.getAuthGeneration(),
+        }))
 
-    const needsProjectId   = !plugin && provider === 'gemini-cli'
-    const supportsCallback = plugin || CALLBACK_SUPPORTED.includes(provider)
+    const needsProjectId     = !plugin && provider === 'gemini-cli'
+    const supportsCallback   = plugin || CALLBACK_SUPPORTED.includes(provider)
+    const devinSessionNotice = !plugin && provider === 'devin' ?
+                               <div className={styles.callbackHint}>{t('auth_login.devin_session_hint')}</div> :
+                               null
 
     const handleCopy = useCallback(async (value: string) => {
         const generation = apiClient.getAuthGeneration()
-        const copied = await copyToClipboard(value)
+        const copied     = await copyToClipboard(value)
         if (generation === apiClient.getAuthGeneration()) {
             showNotification(t(copied ? 'common.copied' : 'auth_login.copy_failed'), copied ? 'success' : 'error')
         }
@@ -176,6 +202,7 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
         attempt.poll(
             () => oauthApi.getAuthStatus(stateValue, nonce, attempt.signal),
             (result) => {
+                setPhase(result.phase ?? 'pending')
                 if (result.status === 'ok') {
                     attempt.invalidate()
                     nonceRef.current = ''
@@ -206,10 +233,11 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
     }, [onSuccess, t])
 
     const startAuth = useCallback(async () => {
-        const attempt  = attemptsRef.current.begin(provider)
-        const nonce    = generateNonce()
+        const attempt    = attemptsRef.current.begin(provider)
+        const nonce      = generateNonce()
         nonceRef.current = nonce
         setCallbackAccepted(false)
+        setPhase('pending')
         setCancelSubmitting(false)
         setOauthState('')
         setUserCode('')
@@ -217,7 +245,7 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
         setError('')
         try {
             const response = await oauthApi.startAuth(provider, {
-                ...(plugin ? {plugin: true} : {}),
+                ...(plugin ? { plugin: true } : {}),
                 ...(needsProjectId && projectId ? { projectId } : {}),
                 nonce,
                 signal: attempt.signal,
@@ -229,7 +257,7 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
             if (!authUrl) {
                 attempt.invalidate()
                 nonceRef.current = ''
-                setError('Invalid OAuth URL received from server')
+                setError(t('credentials.oauth_invalid_url'))
                 setStatus('error')
                 return
             }
@@ -265,7 +293,9 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
             return
         }
         if (!callbackUrl.trim()) {
-            setError(t(!plugin && provider === 'xai' ? 'auth_login.xai_callback_required' : 'auth_login.oauth_callback_required'))
+            setError(t(!plugin && provider === 'xai' ?
+                       'auth_login.xai_callback_required' :
+                       'auth_login.oauth_callback_required'))
             return
         }
         if (!plugin && provider === 'devin') {
@@ -277,7 +307,9 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
         }
         const redirectUrl = plugin ? callbackUrl.trim() : resolveCallbackUrl(provider, callbackUrl, oauthState)
         if (!redirectUrl) {
-            setError(t(!plugin && provider === 'xai' ? 'auth_login.xai_callback_state_missing' : 'auth_login.missing_state'))
+            setError(t(!plugin && provider === 'xai' ?
+                       'auth_login.xai_callback_state_missing' :
+                       'auth_login.missing_state'))
             return
         }
         setCallbackSubmitting(true)
@@ -356,7 +388,9 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
             if (!cancelAttempt.isCurrent()) {
                 return
             }
-            setError(err instanceof Error ? err.message : t(plugin ? 'common.unknown_error' : 'auth_login.devin_oauth_cancel_error'))
+            setError(err instanceof Error ?
+                     err.message :
+                     t(plugin ? 'common.unknown_error' : 'auth_login.devin_oauth_cancel_error'))
         }
         if (!cancelAttempt.isCurrent()) {
             return
@@ -367,7 +401,10 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
     }, [oauthState, onCancel, provider, plugin, startPolling, t])
 
     const canContinueAfterError = status === 'error' && Boolean(
-        url && oauthState && nonceRef.current && attemptsRef.current.get(provider)?.isCurrent(),
+                                  url &&
+                                  oauthState &&
+                                  nonceRef.current &&
+                                  attemptsRef.current.get(provider)?.isCurrent(),
     )
 
     if (status === 'success') {
@@ -434,6 +471,7 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
         return (
             <div className={styles.flow}>
                 <div className={styles.waitingArea}>
+                    {devinSessionNotice}
                     {canContinueAfterError ? (
                         <div className={styles.errorArea}>
                             <IconX size={16} />
@@ -443,15 +481,15 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
                             </Button>
                         </div>
                     ) : (
-                        <div className={styles.statusLine}>
-                            <span className='loading-spinner' aria-hidden='true' />
-                            <span>
-                                {t(callbackAccepted ?
-                                   'credentials.oauth_callback_processing' :
-                                   'credentials.oauth_waiting')}
+                         <div className={styles.statusLine}>
+                             <span className='loading-spinner' aria-hidden='true' />
+                             <span>
+                                {t(oauthPhaseMessages[phase] ?? (callbackAccepted ?
+                                                                 'credentials.oauth_callback_processing' :
+                                                                 'credentials.oauth_waiting'))}
                             </span>
-                        </div>
-                    )}
+                         </div>
+                     )}
 
                     {url && (
                         <div className={styles.urlArea}>
@@ -501,27 +539,30 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
                             <div className={styles.callbackInputRow}>
                                 <Input
                                     label={t(
-                                        !plugin && provider === 'xai'
-                                        ? 'auth_login.xai_callback_label'
-                                        : 'credentials.oauth_callback_hint',
+                     !plugin && provider === 'xai'
+                     ? 'auth_login.xai_callback_label'
+                     : 'credentials.oauth_callback_hint',
                                     )}
                                     placeholder={t(
-                                        !plugin && provider === 'xai'
-                                        ? 'auth_login.xai_callback_placeholder'
-                                        : !plugin && provider === 'devin'
-                                          ? 'auth_login.devin_callback_placeholder'
-                                          : 'auth_login.oauth_callback_placeholder',
+                     !plugin && provider === 'xai'
+                     ? 'auth_login.xai_callback_placeholder'
+                     : !plugin && provider === 'devin'
+                       ? 'auth_login.devin_callback_placeholder'
+                       : 'auth_login.oauth_callback_placeholder',
                                     )}
                                     value={callbackUrl}
                                     onChange={(e: ChangeEvent<HTMLInputElement>) => setCallbackUrl(e.target.value)}
-                                    disabled={callbackSubmitting || cancelSubmitting || (!plugin && provider === 'devin' && canContinueAfterError)}
+                                    disabled={callbackSubmitting ||
+                                              cancelSubmitting ||
+                                              (!plugin && provider === 'devin' && canContinueAfterError)}
                                 />
                                 <Button
                                     variant='primary'
                                     size='sm'
                                     onClick={submitCallback}
                                     loading={callbackSubmitting}
-                                    disabled={!callbackUrl.trim() || (!plugin && provider === 'devin' && canContinueAfterError)}
+                                    disabled={!callbackUrl.trim() ||
+                                              (!plugin && provider === 'devin' && canContinueAfterError)}
                                 >
                                     {t('credentials.oauth_callback_submit')}
                                 </Button>
@@ -554,6 +595,7 @@ export function OAuthLoginAction({ provider, plugin = false, disableControls, on
     return (
         <div className={styles.flow}>
             <div className={styles.startArea}>
+                {devinSessionNotice}
                 {needsProjectId && (
                     <Input
                         label={t('credentials.project_id')}

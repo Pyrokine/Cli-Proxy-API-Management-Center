@@ -1,5 +1,5 @@
-import {describe, expect, test} from 'bun:test'
 import type {PrefixProxyEditorState} from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor'
+import {describe, expect, test} from 'bun:test'
 
 const storage = {
     getItem: () => null,

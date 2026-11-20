@@ -1,6 +1,7 @@
 import type {DataStatusValue} from '@/components/common/DataStatusCard'
 import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {Button} from '@/components/ui/Button'
+import {Input} from '@/components/ui/Input'
 import {Pagination} from '@/components/ui/Pagination'
 import {Select} from '@/components/ui/Select'
 import {Tabs} from '@/components/ui/Tabs'
@@ -14,7 +15,7 @@ import type {
     AccountInspectionSummary,
 } from '@/services/api/accountInspection'
 import {accountInspectionApi} from '@/services/api/accountInspection'
-import {authFilesApi, type AuthFileRefreshBatchItem} from '@/services/api/authFiles'
+import {type AuthFileRefreshBatchItem, authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import type {QuotaConfig, QuotaRefreshTaskTarget, QuotaStatusResponse} from '@/services/api/quota'
 import {quotaApi} from '@/services/api/quota'
@@ -26,7 +27,6 @@ import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate} from 'react-router-dom'
 import styles from './AccountInspectionPanel.module.scss'
 import {isQuotaRefreshTaskTerminal} from './hooks/quotaRefreshTask'
 import {buildProviderHealthRows} from './providerHealth'
@@ -281,12 +281,8 @@ function formatInspectionLogMessage(
 
 export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspectionPanelProps) {
     const { t, i18n }                                             = useTranslation()
-    const navigate                                                = useNavigate()
     const showNotification                                        = useNotificationStore((s) => s.showNotification)
     const showConfirmation                                        = useNotificationStore((s) => s.showConfirmation)
-    const addPersistentNotification                               = useNotificationStore(
-        (state) => state.addPersistentNotification,
-    )
     const [initialUIState]                                        = useState(loadUIState)
     const [issuesOnly, setIssuesOnly]                             = useState(initialUIState.issuesOnly ?? true)
     const [includeDisabled, setIncludeDisabled]                   = useState(false)
@@ -303,19 +299,30 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const [authFiles, setAuthFiles]                               = useState<AuthFileItem[]>([])
     const [tokenRefreshResults, setTokenRefreshResults]           = useState<AuthFileRefreshBatchItem[] | null>(null)
     const [quotaConfigLoaded, setQuotaConfigLoaded]               = useState(false)
+    const [quotaDraft, setQuotaDraft]                             = useState({
+                                                                                 enabled: false,
+                                                                                 intervalMinutes: '10',
+                                                                                 maxIntervalMinutes: '30',
+                                                                             })
+    const quotaDraftStateRef                                      = useRef({ generation: -1, dirty: false })
     const [scheduleDraft, setScheduleDraft]                       = useState(() => scheduleDraftFrom(emptySchedule()))
     const [inspectionScheduleLoaded, setInspectionScheduleLoaded] = useState(false)
     const [results, setResults]                                   = useState<AccountInspectionResult[]>([])
     const [logs, setLogs]                                         = useState<AccountInspectionLogEntry[]>([])
     const [total, setTotal]                                       = useState(0)
     const [loading, setLoading]                                   = useState(false)
-    const [busyRequest, setBusyRequest]                           = useState<{action: string; generation: number} | null>(null)
+    const [busyRequest, setBusyRequest]                           = useState<{
+                                                                                 action: string;
+                                                                                 generation: number
+                                                                             } | null>(null)
     const busyRequestRef                                          = useRef<typeof busyRequest>(null)
     const tokenRefreshRequest                                     = useAuthFileRefreshStore((state) => state.request)
     const [dataGeneration, setDataGeneration]                     = useState<number | null>(null)
-    const authGeneration                                         = apiClient.getAuthGeneration()
+    const authGeneration                                          = apiClient.getAuthGeneration()
     const tokenRefreshBusy                                        = tokenRefreshRequest?.generation === authGeneration
-    const busyAction                                             = busyRequest?.generation === authGeneration ? busyRequest.action : ''
+    const busyAction                                              = busyRequest?.generation === authGeneration ?
+                                                                    busyRequest.action :
+                                                                    ''
     const [fetchError, setFetchError]                             = useState('')
     const [actionError, setActionError]                           = useState('')
     const latestQuotaTask                                         = status.refresh_queue.latest_task
@@ -334,6 +341,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             return
         }
         setLoading(true)
+        setQuotaConfigLoaded(false)
         try {
             const [
                       statusRes,
@@ -343,28 +351,43 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                       quotaStatusRes,
                       usageSummaryRes,
                       authFilesRes,
-                  ]               = await Promise.all([
-                                                          accountInspectionApi.getStatus(),
-                                                          accountInspectionApi.getResults(
-                                                              {
-                                                                  status: statusFilter,
-                                                                  issuesOnly,
-                                                                  includeDisabled,
-                                                                  page,
-                                                                  pageSize,
-                                                              }),
-                                                          accountInspectionApi.getLogs(),
-                                                          quotaApi.getConfig(),
-                                                          quotaApi.getStatus().catch(() => null),
-                                                          usageApi.getSummary({ groups: 'all' }).catch(() => null),
-                                                          authFilesApi.list().catch(() => ({ files: [] })),
-                                                      ])
+                  ] = await Promise.all([
+                                            accountInspectionApi.getStatus(),
+                                            accountInspectionApi.getResults(
+                                                {
+                                                    status: statusFilter,
+                                                    issuesOnly,
+                                                    includeDisabled,
+                                                    page,
+                                                    pageSize,
+                                                }),
+                                            accountInspectionApi.getLogs(),
+                                            quotaApi.getConfig(),
+                                            quotaApi.getStatus().catch(() => null),
+                                            usageApi.getSummary({ groups: 'all' }).catch(() => null),
+                                            authFilesApi.list().catch(() => ({ files: [] })),
+                                        ])
             if (!isCurrent()) {
                 return
             }
             setDataGeneration(authGeneration)
-            const nextStatus      = normalizeStatusResponse(statusRes)
-            const nextQuotaConfig = { ...emptyQuotaConfig(), ...quotaConfigRes }
+            const nextStatus = normalizeStatusResponse(statusRes)
+            if (typeof quotaConfigRes?.enabled !==
+                'boolean' ||
+                !Number.isSafeInteger(quotaConfigRes.interval) ||
+                !Number.isSafeInteger(quotaConfigRes['max-interval'])) {
+                // noinspection ExceptionCaughtLocallyJS
+                throw new Error(t('credentials.quota_config_invalid'))
+            }
+            const nextQuotaConfig = quotaConfigRes
+            if (quotaDraftStateRef.current.generation !== authGeneration || !quotaDraftStateRef.current.dirty) {
+                setQuotaDraft({
+                                  enabled: nextQuotaConfig.enabled,
+                                  intervalMinutes: String(nextQuotaConfig.interval / 60),
+                                  maxIntervalMinutes: String(nextQuotaConfig['max-interval'] / 60),
+                              })
+                quotaDraftStateRef.current = { generation: authGeneration, dirty: false }
+            }
             setStatus(nextStatus)
             setQuotaConfig(nextQuotaConfig)
             setQuotaStatus(quotaStatusRes)
@@ -480,7 +503,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             if (busyRequestRef.current?.generation === authGeneration) {
                 return
             }
-            const request = {action, generation: authGeneration}
+            const request          = { action, generation: authGeneration }
             busyRequestRef.current = request
             setBusyRequest(request)
             setActionError('')
@@ -505,6 +528,68 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         },
         [authGeneration, dataGeneration, fetchData, t],
     )
+
+    const updateQuotaDraft = (patch: Partial<typeof quotaDraft>) => {
+        quotaDraftStateRef.current = { generation: authGeneration, dirty: true }
+        setQuotaDraft((previous) => ({ ...previous, ...patch }))
+    }
+
+    const handleSaveQuotaConfig =
+              async () => {
+                  if (!quotaConfigLoaded ||
+                      dataGeneration !==
+                      authGeneration ||
+                      authGeneration !==
+                      apiClient.getAuthGeneration()) {
+                      return
+                  }
+                  const maximumSeconds = 9223372036
+                  const minutes        = [quotaDraft.intervalMinutes, quotaDraft.maxIntervalMinutes]
+                  if (minutes.some((value) => !value.trim() ||
+                                              !Number.isFinite(Number(value)) ||
+                                              Number(value) <
+                                              0 ||
+                                              Number(value) >
+                                              maximumSeconds /
+                                              60)) {
+                      setActionError(t('credentials.quota_config_invalid'));
+                      return
+                  }
+                  const interval = Math.round(Number(minutes[0]) * 60)
+                  const maximum  = Math.round(Number(minutes[1]) * 60)
+                  const enabled  = quotaDraft.enabled && interval > 0
+                  if ((enabled && (interval < 60 || maximum < 300)) || (maximum > 0 && maximum < interval)) {
+                      setActionError(t('credentials.quota_config_invalid'));
+                      return
+                  }
+                  const next    = { enabled, interval, 'max-interval': maximum }
+                  const changed =
+                            Object.fromEntries(
+                                Object.entries(next).filter(
+                                    ([key, value]) => value !==
+                                                      quotaConfig[key as keyof QuotaConfig]))
+                  if (Object.keys(changed).length === 0) {
+                      return
+                  }
+                  const apply = () => runAction('quota-config', async (isCurrent) => {
+                      await quotaApi.setConfig(changed)
+                      if (isCurrent()) {
+                          quotaDraftStateRef.current.dirty = false;
+                          showNotification(t('common.success'), 'success')
+                      }
+                  })
+                  if (enabled && !quotaConfig.enabled) {
+                      showConfirmation({
+                                           title: t('credentials.quota_auto_refresh'),
+                                           message: t('credentials.quota_enable_warning'),
+                                           confirmText: t('common.confirm'),
+                                           cancelText: t('common.cancel'),
+                                           onConfirm: apply,
+                                       })
+                  } else {
+                      await apply()
+                  }
+              }
 
     const handleRefreshAllTokens = useCallback(async () => {
         await runAction('refresh-all-tokens', async (isCurrent) => {
@@ -621,7 +706,16 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     </span>
                 )
             }
-            if (result.status === 'disabled') {
+            const hasBinding = Number.isSafeInteger(result.auth_generation) && result.auth_generation >= 0 &&
+                               Boolean(result.credential_digest && result.probe_revision) &&
+                               Number.isFinite(Date.parse(result.checked_at))
+            if (result.advice ===
+                'enable_when_needed' &&
+                result.status ===
+                'disabled' &&
+                result.probe_status ===
+                'passed' &&
+                hasBinding) {
                 return (
                     <Button
                         variant='secondary'
@@ -630,7 +724,48 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                         disabled={Boolean(busyAction) || tokenRefreshBusy}
                         onClick={() =>
                             void runAction(`enable-${key}`, async (isCurrent) => {
-                                await authFilesApi.setStatus(result.file_name, false, result.auth_index)
+                                const currentResults = await accountInspectionApi.getAllResults(
+                                    {
+                                        includeDisabled: true,
+                                    })
+                                if (!isCurrent()) {
+                                    return
+                                }
+                                const current = currentResults.find((candidate) => rowKey(candidate) ===
+                                                                                   key &&
+                                                                                   candidate.provider ===
+                                                                                   result.provider)
+                                if (!current ||
+                                    current.advice !==
+                                    'enable_when_needed' ||
+                                    current.status !==
+                                    'disabled' ||
+                                    current.probe_status !==
+                                    'passed' ||
+                                    current.auth_generation !==
+                                    result.auth_generation ||
+                                    current.credential_digest !==
+                                    result.credential_digest ||
+                                    current.probe_revision !==
+                                    result.probe_revision ||
+                                    current.checked_at !==
+                                    result.checked_at) {
+                                    throw new Error(t('credentials.inspection_result_outdated_retry'))
+                                }
+                                try {
+                                    await authFilesApi.setStatus(result.file_name, false, result.auth_index, {
+                                        auth_generation: result.auth_generation,
+                                        credential_digest: result.credential_digest,
+                                        probe_revision: result.probe_revision,
+                                        checked_at: result.checked_at,
+                                    })
+                                } catch (error) {
+                                    if (error instanceof Error && 'status' in error && error.status === 409) {
+                                        error.message =
+                                            `${t('credentials.inspection_result_outdated_retry')} ${error.message}`
+                                    }
+                                    throw error
+                                }
                                 if (!isCurrent()) {
                                     return
                                 }
@@ -678,7 +813,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     </Button>
                 )
             }
-            if (result.status === 'unknown' ||
+            if (result.status === 'unknown' || result.status === 'disabled' ||
                 ['provider_error', 'probe_failed', 'probe_inconclusive'].includes(result.reason)) {
                 return (
                     <Button
@@ -894,7 +1029,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             cell: (target) => <span className={styles.timeCell}>{formatTime(target.completed_at)}</span>,
         },
     ], [formatTime, t])
-    const tokenRefreshColumns = useMemo<SheetColumn<AuthFileRefreshBatchItem>[]>(() => [
+    const tokenRefreshColumns                   = useMemo<SheetColumn<AuthFileRefreshBatchItem>[]>(() => [
         {
             key: 'provider',
             header: t('credentials.quota_task_provider'),
@@ -915,7 +1050,9 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             header: t('credentials.quota_task_result'),
             cell: (item) => (
                 <span className={styles.rowActions}>
-                    <span className={`${styles.statusBadge} ${item.success ? styles.statusNormal : styles.statusUnavailable}`}>
+                    <span className={`${styles.statusBadge} ${item.success ?
+                                                              styles.statusNormal :
+                                                              styles.statusUnavailable}`}>
                         {t(item.success ? 'credentials.refresh_status_success' : 'credentials.refresh_status_error')}
                     </span>
                     <span className={styles.taskResult}>{item.error || item.status || '-'}</span>
@@ -944,27 +1081,6 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                   defaultValue: '{{count}} disabled accounts are hidden by the current filter',
               })
               : undefined
-
-    useEffect(() => {
-        providerHealthRows
-            .filter((row) => row.quotaError + row.quotaBanned + row.quotaExceeded > 0)
-            .forEach((row) => {
-                addPersistentNotification(
-                    t('notifications.quota_provider_issue_notice', {
-                        provider: row.provider,
-                        count: row.quotaError + row.quotaBanned + row.quotaExceeded,
-                        defaultValue: '{{provider}} 有 {{count}} 个 quota 轮询异常账号',
-                    }),
-                    'warning',
-                    'quota',
-                    {
-                        dedupeKey:
-                            `quota:provider:${row.provider}:` +
-                            `${row.quotaError}:${row.quotaBanned}:${row.quotaExceeded}`,
-                    },
-                )
-            })
-    }, [addPersistentNotification, providerHealthRows, t])
 
     return (
         <div className={styles.panel}>
@@ -1070,14 +1186,14 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             loading={busyAction === 'refresh-all-tokens'}
                             disabled={Boolean(busyAction) || tokenRefreshBusy || dataGeneration !== authGeneration}
                             onClick={() => showConfirmation({
-                                title: t('credentials.manual_token_refresh_all'),
-                                message: t('credentials.manual_token_refresh_confirm'),
-                                confirmText: t('credentials.manual_token_refresh_all'),
-                                cancelText: t('common.cancel'),
-                                onConfirm: handleRefreshAllTokens,
-                            })}
+                                                                title: t('credentials.manual_token_refresh_all'),
+                                                                message: t('credentials.manual_token_refresh_confirm'),
+                                                                confirmText: t('credentials.manual_token_refresh_all'),
+                                                                cancelText: t('common.cancel'),
+                                                                onConfirm: handleRefreshAllTokens,
+                                                            })}
                         >
-                            {t('credentials.manual_token_refresh_all', {defaultValue: 'Refresh all tokens'})}
+                            {t('credentials.manual_token_refresh_all', { defaultValue: 'Refresh all tokens' })}
                         </Button>
                         <Button variant='ghost' size='sm' onClick={() => void fetchData()} loading={loading}>
                             {t('common.refresh')}
@@ -1226,24 +1342,30 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                 </span>
                         </div>
                         <div className={styles.settingsFields}>
-                            <div className={styles.settingsField}>
-                                <span>{t('credentials.quota_poll_interval', { defaultValue: '配额轮询间隔' })}</span>
-                                <strong>{quotaConfigLoaded ? `${quotaConfig.interval}s` : '-'}</strong>
-                            </div>
-                            <div className={styles.settingsField}>
-                                <span>{t(
-                                    'credentials.quota_poll_max_interval',
-                                    { defaultValue: '最大轮询间隔' },
-                                )}</span>
-                                <strong>{quotaConfigLoaded ? `${quotaConfig['max-interval']}s` : '-'}</strong>
-                            </div>
-                            <Button
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => navigate('/config')}
-                            >
-                                {t('credentials.quota_open_config', { defaultValue: '到配置面板修改' })}
-                            </Button>
+                            <ToggleSwitch label={t('credentials.quota_auto_refresh')} checked={quotaDraft.enabled}
+                                          disabled={!quotaConfigLoaded ||
+                                                    dataGeneration !==
+                                                    authGeneration ||
+                                                    Boolean(busyAction)}
+                                          onChange={(enabled) => updateQuotaDraft({ enabled })} />
+                            <Input label={t('credentials.quota_interval_minutes')} type='number' min={0} step='any'
+                                   value={quotaDraft.intervalMinutes} disabled={!quotaConfigLoaded ||
+                                                                                dataGeneration !==
+                                                                                authGeneration ||
+                                                                                Boolean(busyAction)}
+                                   onChange={(event) => updateQuotaDraft({ intervalMinutes: event.target.value })} />
+                            <Input label={t('credentials.quota_max_interval_minutes')} type='number' min={0} step='any'
+                                   value={quotaDraft.maxIntervalMinutes} disabled={!quotaConfigLoaded ||
+                                                                                   dataGeneration !==
+                                                                                   authGeneration ||
+                                                                                   Boolean(busyAction)}
+                                   onChange={(event) => updateQuotaDraft({ maxIntervalMinutes: event.target.value })} />
+                            <Button type='button' variant='secondary' size='sm'
+                                    onClick={() => void handleSaveQuotaConfig()} disabled={!quotaConfigLoaded ||
+                                                                                           dataGeneration !==
+                                                                                           authGeneration ||
+                                                                                           Boolean(busyAction)}>{t(
+                                'common.save')}</Button>
                         </div>
                     </div>
                     <div className={styles.settingsCard}>
@@ -1436,7 +1558,8 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                                 )}
                                             </div>
                                             <span
-                                                className={`${styles.statusBadge} ${statusClass(latestQuotaTask.status)}`}>
+                                                className={`${styles.statusBadge} ${
+                                                    statusClass(latestQuotaTask.status)}`}>
                                                 {t(`credentials.quota_task_status_${latestQuotaTask.status}`, {
                                                     defaultValue: latestQuotaTask.status,
                                                 })}

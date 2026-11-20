@@ -39,8 +39,8 @@ import {formatDateTime} from '@/utils/format'
 import {buildClaudeQuotaWindows, buildKimiQuotaRows} from '@/utils/quota/builders'
 import {parseClaudeResetGrants} from '@/utils/quota/claudeResetGrants'
 import {resolveCodexResetCredits} from '@/utils/quota/codexResetCredits'
-import {parseDevinQuotaPayload} from '@/utils/quota/devin'
 import {quotaCredentialKey} from '@/utils/quota/credentialKey'
+import {parseDevinQuotaPayload} from '@/utils/quota/devin'
 import {parseMetaSubscriptionSnapshot} from '@/utils/quota/metaSubscription'
 import {normalizeCodexAccountCredits} from '@/utils/quota/parsers'
 import {parseOffsetSecondsToMs, resolveResetMs} from '@/utils/quota/resetInstants'
@@ -124,9 +124,11 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
     const [pollIntervalMs, setPollIntervalMs] = useState(0)
 
     const poll = useCallback((): Promise<void> => {
-        const claim          = captureQuotaRequestClaim(apiClient.getAuthGeneration())
+        const claim = captureQuotaRequestClaim(apiClient.getAuthGeneration())
+
         const claimSignature = quotaRequestClaimSignature(claim)
-        const inFlight       = pollPromiseRef.current
+
+        const inFlight = pollPromiseRef.current
         if (inFlight?.claimSignature === claimSignature) {
             return inFlight.promise
         }
@@ -166,7 +168,12 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                     } else if (hasData) {
                         try {
                             data    = typeof entry.data === 'string' ? JSON.parse(entry.data) : entry.data
-                            payload = mapQuotaPayload(entry.type, data)
+                            payload =
+                                mapQuotaPayload(
+                                    entry.type,
+                                    data,
+                                    entry.observed_at ?? entry.fetched_at ?? entry.last_refresh,
+                                )
                         } catch (e) {
                             parseErrorMessage = quotaParseErrorMessage(e)
                             console.warn('[QuotaScheduler] failed to parse entry data:', metaKey, e)
@@ -282,25 +289,30 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
     }, [meta])
 
     const refreshMany = useCallback(
-        async (names: string[]) => {
+        async (names: string[], allowRecovery = false) => {
             const uniqueNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)))
             if (uniqueNames.length === 0) {
                 return
             }
 
-            const claim                                               = captureQuotaRequestClaim(apiClient.getAuthGeneration())
-            const controller                                          = new AbortController()
-            const initialMetaKeys                                     = refreshMetaKeysForIdentifiers(
+            const claim = captureQuotaRequestClaim(apiClient.getAuthGeneration())
+
+            const controller = new AbortController()
+
+            const initialMetaKeys = refreshMetaKeysForIdentifiers(
                 uniqueNames,
                 metaRef.current,
             )
-            const claimedKeys                                         = new Set(initialMetaKeys)
-            const isUIClaimCurrent                                    = () =>
+
+            const claimedKeys = new Set(initialMetaKeys)
+
+            const isUIClaimCurrent = () =>
                 mounted.current && areQuotaSubjectsCurrent(
                                     claim,
                                     apiClient.getAuthGeneration(),
                                     claimedKeys,
                                 )
+
             const previousMeta: Record<string, EntryMeta | undefined> = {}
             for (const metaKey of initialMetaKeys) {
                 previousMeta[metaKey] = metaRef.current[metaKey]
@@ -312,10 +324,9 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                 return next
             })
 
-            let taskCreated = false
+            let initialTask: QuotaRefreshTask | undefined
             try {
-                const initialTask = await quotaApi.refresh(uniqueNames, { signal: controller.signal })
-                taskCreated       = true
+                initialTask = await quotaApi.refresh(uniqueNames, { signal: controller.signal, allowRecovery })
                 refreshControllersRef.current.delete(controller)
 
                 const taskMetaKeys = refreshMetaKeysForTask(initialTask, metaRef.current)
@@ -329,7 +340,7 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                     setMeta((prev) => {
                         const next      = applyQuotaRefreshTaskToMeta(
                             markQuotaMetaLoading(prev, taskMetaKeys, quotaEnabled),
-                            initialTask,
+                            initialTask!,
                             previousMeta,
                         )
                         metaRef.current = next
@@ -354,6 +365,21 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                 if (mounted.current) {
                     await pollLatest()
                 }
+                if (isUIClaimCurrent() && terminalTask.status !== 'cancelled') {
+                    const succeeded = terminalTask.status === 'succeeded'
+                    useNotificationStore.getState().addPersistentNotification(
+                        i18n.t(succeeded ?
+                               'notifications.quota_refresh_completed' :
+                               'notifications.quota_refresh_incomplete', {
+                                   succeeded: terminalTask.summary.succeeded,
+                                   failed: terminalTask.summary.failed,
+                                   total: terminalTask.summary.total,
+                               }),
+                        succeeded ? 'success' : 'error',
+                        'quota',
+                        { dedupeKey: `quota-refresh:${claim.connectionGeneration}:${terminalTask.id}` },
+                    )
+                }
                 if (isUIClaimCurrent() && terminalTask.status !== 'succeeded') {
                     const message = terminalTask.error || terminalTask.status
                     useNotificationStore.getState().showNotification(
@@ -366,7 +392,7 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                 }
             } catch (e) {
                 const canPublish = isUIClaimCurrent()
-                if (!taskCreated && (controller.signal.aborted || !canPublish)) {
+                if (!initialTask && (controller.signal.aborted || !canPublish)) {
                     if (mounted.current) {
                         await pollLatest()
                     }
@@ -374,7 +400,7 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                 }
 
                 console.warn('[useBackendQuotaRegistration] refresh failed for', uniqueNames, e)
-                if (taskCreated) {
+                if (initialTask) {
                     if (mounted.current) {
                         await pollLatest()
                     }
@@ -402,6 +428,14 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
                         }),
                         'error',
                     )
+                    useNotificationStore.getState().addPersistentNotification(
+                        i18n.t('notifications.quota_refresh_failed'),
+                        'error',
+                        'quota',
+                        initialTask ?
+                            { dedupeKey: `quota-refresh:${claim.connectionGeneration}:${initialTask.id}` } :
+                        undefined,
+                    )
                 }
             } finally {
                 refreshControllersRef.current.delete(controller)
@@ -420,7 +454,7 @@ export function useBackendQuotaRegistration(authFiles: AuthFileItem[]) {
         isRefreshing: (name: string) => metaForIdentifier(meta, name)?.status === 'loading',
         isAutoRefreshEnabled: () => quotaEnabled,
         refreshNow: async (name: string) => {
-            await refreshMany([name])
+            await refreshMany([name], true)
         },
         refreshMany,
     }
@@ -572,14 +606,16 @@ function applyQuotaRefreshTaskToMeta(
     return next
 }
 
-function mapQuotaPayload(type: string, data: unknown): QuotaCachePayload {
+function mapQuotaPayload(type: string, data: unknown, observedAt?: string | null): QuotaCachePayload {
+    const reference   = observedAt === undefined ? Date.now() : observedAt ? Date.parse(observedAt) : NaN
+    const referenceMs = Number.isFinite(reference) ? reference : null
     switch (type) {
         case 'antigravity':
             return { provider: type, value: mapAntigravity(data) }
         case 'claude':
             return { provider: type, value: mapClaude(data) }
         case 'codex':
-            return { provider: type, value: mapCodex(data) }
+            return { provider: type, value: mapCodex(data, referenceMs) }
         case 'devin': {
             const value = parseDevinQuotaPayload(data)
             if (!value) {
@@ -590,7 +626,7 @@ function mapQuotaPayload(type: string, data: unknown): QuotaCachePayload {
         case 'gemini-cli':
             return { provider: type, value: mapGemini(data) }
         case 'kimi':
-            return { provider: type, value: mapKimi(data) }
+            return { provider: type, value: mapKimi(data, referenceMs) }
         case 'meta':
             return { provider: type, value: mapMeta(data) }
         case 'xai':
@@ -751,7 +787,68 @@ function mapAntigravity(data: unknown): AntigravityQuotaState {
     const serverTimeOffsetMs = numberValue(
         dataRecord?.server_time_offset_ms ?? dataRecord?.serverTimeOffsetMs,
     )
-    const groups             = extractCloudCodeBuckets(data)
+    const quota              = asRecord(dataRecord?.quota)
+    const grouped            = Array.isArray(quota?.groups) ?
+                               quota.groups.flatMap((rawGroup, groupIndex) => {
+                                   const group      = asRecord(rawGroup)
+                                   const groupLabel = stringValueFromRecord(
+                                                          group,
+                                                          'displayName',
+                                                          'display_name',
+                                                          'description',
+                                                      ) ??
+                                                      String(groupIndex + 1)
+                                   if (!Array.isArray(group?.buckets)) {
+                                       return []
+                                   }
+                                   return group.buckets.flatMap((rawBucket, bucketIndex) => {
+                                       const bucket            = asRecord(rawBucket)
+                                       const remainingFraction = parseFraction(bucket?.remainingFraction ??
+                                                                               bucket?.remaining_fraction)
+                                       if (!bucket || remainingFraction === null) {
+                                           return []
+                                       }
+                                       const window      = stringValueFromRecord(bucket, 'window')?.toLowerCase() ?? ''
+                                       const periodHours = ['5h', 'five-hour', 'five_hour'].includes(window) ?
+                                                           5 :
+                                                           ['weekly', 'week'].includes(window) ? 168 : null
+                                       const bucketLabel = stringValueFromRecord(
+                                           bucket,
+                                           'displayName',
+                                           'display_name',
+                                       ) ?? window
+                                       const resetTime   = stringValueFromRecord(bucket, 'resetTime', 'reset_time') ??
+                                                           undefined
+                                       return [
+                                           {
+                                               id: `${groupLabel}:${stringValueFromRecord(
+                                                   bucket,
+                                                   'bucketId',
+                                                   'bucket_id',
+                                               ) ??
+                                                                    bucketIndex}:${window}`,
+                                               label: [
+                                                   ...new Set([
+                                                                  groupLabel,
+                                                                  bucketLabel,
+                                                              ].filter(Boolean)),
+                                               ].join(' · '),
+                                               models: [] as string[],
+                                               remainingFraction,
+                                               resetTime,
+                                               resetAtMs: resolveResetMs([resetTime]),
+                                               periodHours,
+                                               description: stringValueFromRecord(bucket, 'description') ??
+                                                            stringValueFromRecord(group, 'description') ??
+                                                            undefined,
+                                           },
+                                       ]
+                                   })
+                               }).sort((a, b) => (a.periodHours ?? Infinity) -
+                                                 (b.periodHours ?? Infinity) ||
+                                                 a.label.localeCompare(b.label)) :
+                               null
+    const groups             = grouped ?? extractCloudCodeBuckets(data)
         .filter((bucket) => bucket.remainingFraction !== null)
         .map((bucket) => ({
             id: bucket.id,
@@ -812,9 +909,9 @@ function mapClaude(data: unknown): ClaudeQuotaState {
     const profileRaw = typeof d.profile === 'string' ? JSON.parse(d.profile) : d.profile
     const planType   = resolveClaudePlanType(profileRaw)
 
-    const extraUsage = parseClaudeExtraUsage(usage.extra_usage)
+    const extraUsage  = parseClaudeExtraUsage(usage.extra_usage)
     const resetGrants = parseClaudeResetGrants(usage.cedar_ember)
-    if (windows.length === 0 && !planType && resetGrants.state !== 'present') {
+    if (windows.length === 0 && !extraUsage && !planType && resetGrants.state !== 'present') {
         throw invalidQuotaPayload('Claude')
     }
 
@@ -827,7 +924,7 @@ function mapClaude(data: unknown): ClaudeQuotaState {
     }
 }
 
-function mapCodex(data: unknown): CodexQuotaState {
+function mapCodex(data: unknown, referenceMs: number | null = Date.now()): CodexQuotaState {
     const d = asRecord(data)
     if (!d) {
         throw invalidQuotaPayload('Codex')
@@ -972,7 +1069,8 @@ function mapCodex(data: unknown): CodexQuotaState {
                 resetLabel = formatDateTime(new Date(resetAtMs))
             } else {
                 const resetAfterSeconds = numberValue(wRecord.reset_after_seconds ?? wRecord.resetAfterSeconds)
-                resetAtMs               = parseOffsetSecondsToMs(resetAfterSeconds, Date.now())
+                resetAtMs               =
+                    referenceMs === null ? null : parseOffsetSecondsToMs(resetAfterSeconds, referenceMs)
             }
             const span = numberValue(wRecord.limit_window_seconds ?? wRecord.limitWindowSeconds)
             windows.push({
@@ -1163,7 +1261,7 @@ function mapMeta(data: unknown): MetaQuotaState {
     if (!subscription) {
         throw invalidQuotaPayload('Meta')
     }
-    return {status: 'success', ...subscription}
+    return { status: 'success', ...subscription }
 }
 
 function mapXai(data: unknown): XaiQuotaState {
@@ -1182,8 +1280,8 @@ function mapXai(data: unknown): XaiQuotaState {
     }
 }
 
-function mapKimi(data: unknown): KimiQuotaState {
-    const rows = buildKimiQuotaRows(data)
+function mapKimi(data: unknown, referenceMs: number | null = Date.now()): KimiQuotaState {
+    const rows = buildKimiQuotaRows(data, referenceMs)
     if (rows.length === 0) {
         throw invalidQuotaPayload('Kimi')
     }

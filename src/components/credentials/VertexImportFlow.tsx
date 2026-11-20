@@ -19,19 +19,21 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
     const [file, setFile]         = useState<File | null>(null)
     const [location, setLocation] = useState('')
     const [loading, setLoading]   = useState(false)
-    const mounted = useRef(false)
-    const importing = useRef(false)
+    const mounted                 = useRef(false)
+    const importing               = useRef(false)
     useEffect(() => {
         mounted.current = true
-        return () => {mounted.current = false}
+        return () => {
+            mounted.current = false
+        }
     }, [])
 
     const handleImport = useCallback(async () => {
         if (!file || disableControls || !mounted.current || importing.current) {
             return
         }
-        const generation = apiClient.getAuthGeneration()
-        const isCurrent = () => mounted.current && apiClient.getAuthGeneration() === generation
+        const generation  = apiClient.getAuthGeneration()
+        const isCurrent   = () => mounted.current && apiClient.getAuthGeneration() === generation
         importing.current = true
         setLoading(true)
         try {
@@ -45,7 +47,7 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
                 ['result_location', result.location],
                 ['result_file', result['auth-file'] ?? result.auth_file],
             ].filter((row) => typeof row[1] === 'string' && row[1].trim())
-                .map(([label, value]) => `${t(`vertex_import.${label}`)}: ${value}`)
+             .map(([label, value]) => `${t(`vertex_import.${label}`)}: ${value}`)
             showNotification([t('vertex_import.success'), ...details].join(' · '), 'success')
             await onSuccess()
         } catch {
@@ -65,10 +67,10 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
             return
         }
         const generation = apiClient.getAuthGeneration()
-        const input    = document.createElement('input')
-        input.type     = 'file'
-        input.accept   = '.json,application/json'
-        input.onchange = () => {
+        const input      = document.createElement('input')
+        input.type       = 'file'
+        input.accept     = '.json,application/json'
+        input.onchange   = () => {
             if (!mounted.current || apiClient.getAuthGeneration() !== generation) {
                 return
             }
@@ -101,7 +103,8 @@ export function VertexImportFlow({ disableControls, onSuccess, onCancel }: Verte
                 disabled={disableControls || loading}
             />
             <div className={styles.flowButtons}>
-                <Button variant='primary' size='xs' onClick={handleImport} loading={loading} disabled={!file || disableControls || loading}>
+                <Button variant='primary' size='xs' onClick={handleImport} loading={loading}
+                        disabled={!file || disableControls || loading}>
                     {t('credentials.import_json')}
                 </Button>
                 <Button variant='secondary' size='xs' onClick={onCancel}>

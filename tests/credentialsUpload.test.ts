@@ -1,5 +1,5 @@
-import {describe, expect, test} from 'bun:test'
 import {isAuthFileUploadInFlight, withAuthFileUploadLock} from '@/features/authFiles/uploadLock'
+import {describe, expect, test} from 'bun:test'
 
 const deferred = <T>() => {
     let resolve!: (value: T) => void

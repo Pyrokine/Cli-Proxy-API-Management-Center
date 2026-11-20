@@ -1,5 +1,5 @@
-import {describe, expect, test} from 'bun:test'
 import {createOAuthAttempts} from '@/components/credentials/oauthAttempts'
+import {describe, expect, test} from 'bun:test'
 
 function deferred<T>() {
     let resolve!: (value: T) => void
@@ -8,24 +8,24 @@ function deferred<T>() {
         resolve = res
         reject  = rej
     })
-    return {promise, resolve, reject}
+    return { promise, resolve, reject }
 }
 
 function setup() {
     let nextId     = 0
     let generation = 1
-    const tasks    = new Map<number, {callback: () => void; delay: number}>()
+    const tasks    = new Map<number, { callback: () => void; delay: number }>()
     const attempts = createOAuthAttempts({
-        setTimeout: (callback, delay) => {
-            tasks.set(++nextId, {callback, delay})
-            return nextId
-        },
-        clearTimeout: (id) => {
-            tasks.delete(id)
-        },
-        getGeneration: () => generation,
-    })
-    const tick = () => {
+                                             setTimeout: (callback, delay) => {
+                                                 tasks.set(++nextId, { callback, delay })
+                                                 return nextId
+                                             },
+                                             clearTimeout: (id) => {
+                                                 tasks.delete(id)
+                                             },
+                                             getGeneration: () => generation,
+                                         })
+    const tick     = () => {
         const pending = [...tasks.entries()]
         for (const [id, task] of pending) {
             tasks.delete(id)
@@ -49,16 +49,17 @@ const flush = async () => {
 
 describe('OAuth attempt lifecycle', () => {
     test('waits for each request before scheduling the next poll', async () => {
-        const {attempts, tasks, tick} = setup()
-        const response = deferred<string>()
-        let requests = 0
+        const { attempts, tasks, tick } = setup()
+        const response                  = deferred<string>()
+        let requests                    = 0
         attempts.begin('devin').poll(
             () => {
                 requests++
                 return response.promise
             },
             (result) => result === 'wait',
-            () => {},
+            () => {
+            },
             3000,
         )
 
@@ -74,12 +75,12 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('a failed status request can resume the same attempt after an accepted callback', async () => {
-        const {attempts, tasks, tick} = setup()
-        const results: string[] = []
-        const attempt = attempts.begin('codex')
-        let requests = 0
-        let errors   = 0
-        const poll = () => attempt.poll(
+        const { attempts, tasks, tick } = setup()
+        const results: string[]         = []
+        const attempt                   = attempts.begin('codex')
+        let requests                    = 0
+        let errors                      = 0
+        const poll                      = () => attempt.poll(
             async () => {
                 requests++
                 if (requests === 1) {
@@ -120,23 +121,25 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('an invalidated OAuth attempt never restarts polling', () => {
-        const {attempts, tasks} = setup()
-        const old = attempts.begin('codex')
-        old.poll(async () => 'wait', () => true, () => {}, 3000)
+        const { attempts, tasks } = setup()
+        const old                 = attempts.begin('codex')
+        old.poll(async () => 'wait', () => true, () => {
+        }, 3000)
         expect(old.isPolling()).toBe(true)
         const next = attempts.begin('codex')
         expect(old.isPolling()).toBe(false)
-        old.poll(async () => 'wait', () => true, () => {}, 3000)
+        old.poll(async () => 'wait', () => true, () => {
+        }, 3000)
         expect(tasks.size).toBe(0)
         expect(next.isPolling()).toBe(false)
     })
 
     test('a new attempt makes late poll and callback results inert', async () => {
-        const {attempts, tasks, tick} = setup()
-        const poll = deferred<string>()
-        const callback = deferred<void>()
-        let effects = 0
-        const login = attempts.begin('devin')
+        const { attempts, tasks, tick } = setup()
+        const poll                      = deferred<string>()
+        const callback                  = deferred<void>()
+        let effects                     = 0
+        const login                     = attempts.begin('devin')
         login.poll(
             () => poll.promise,
             () => {
@@ -166,11 +169,11 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('provider flow disposal makes old poll and callback results inert', async () => {
-        const {attempts, tasks, tick} = setup()
-        const poll = deferred<string>()
-        const callback = deferred<void>()
-        let effects = 0
-        const devin = attempts.begin('devin')
+        const { attempts, tasks, tick } = setup()
+        const poll                      = deferred<string>()
+        const callback                  = deferred<void>()
+        let effects                     = 0
+        const devin                     = attempts.begin('devin')
         devin.poll(
             () => poll.promise,
             () => {
@@ -201,10 +204,10 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('cleanup aborts requests and clears every timer', async () => {
-        const {attempts, tasks, tick} = setup()
-        const response = deferred<string>()
-        let effects = 0
-        const devin = attempts.begin('devin')
+        const { attempts, tasks, tick } = setup()
+        const response                  = deferred<string>()
+        let effects                     = 0
+        const devin                     = attempts.begin('devin')
         devin.poll(() => response.promise, () => {
             effects++
             return true
@@ -221,10 +224,10 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('an authentication generation change makes scheduled and in-flight work inert', async () => {
-        const {attempts, tasks, tick, setGeneration} = setup()
-        const response = deferred<string>()
-        let effects = 0
-        const attempt = attempts.begin('devin')
+        const { attempts, tasks, tick, setGeneration } = setup()
+        const response                                 = deferred<string>()
+        let effects                                    = 0
+        const attempt                                  = attempts.begin('devin')
         attempt.poll(
             () => response.promise,
             () => {
@@ -247,8 +250,8 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('a new generation can claim the same owner without the old attempt deleting it', () => {
-        const {attempts, setGeneration} = setup()
-        const oldAttempt = attempts.begin('devin')
+        const { attempts, setGeneration } = setup()
+        const oldAttempt                  = attempts.begin('devin')
         setGeneration(2)
         const currentAttempt = attempts.begin('devin')
 
@@ -261,10 +264,10 @@ describe('OAuth attempt lifecycle', () => {
     })
 
     test('separate OAuth action owners remain independent for the same provider', () => {
-        const firstOwner = setup().attempts
+        const firstOwner  = setup().attempts
         const secondOwner = setup().attempts
-        const first = firstOwner.begin('devin')
-        const second = secondOwner.begin('devin')
+        const first       = firstOwner.begin('devin')
+        const second      = secondOwner.begin('devin')
         const replacement = firstOwner.begin('devin')
 
         expect(first.isCurrent()).toBe(false)

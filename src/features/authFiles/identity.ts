@@ -1,5 +1,5 @@
-import type {AuthFileItem} from '@/types/authFile'
 import {readAuthFileDisableCooling, readAuthFileRequestRetry} from '@/features/authFiles/constants'
+import type {AuthFileItem} from '@/types/authFile'
 
 type AuthFileIdentityKind = 'email' | 'projectId' | 'fileName'
 
@@ -50,7 +50,15 @@ export const deriveAuthFileIdentity = (file: AuthFileItem): AuthFileIdentity => 
 }
 
 export const authFileIdentitySearchTokens = (file: AuthFileItem): string[] =>
-    [sanitizeAuthFileName(file.name), file.type, file.provider, file.email, file.projectId, file.note, file.statusMessage]
+    [
+        sanitizeAuthFileName(file.name),
+        file.type,
+        file.provider,
+        file.email,
+        file.projectId,
+        file.note,
+        file.statusMessage,
+    ]
         .filter((value): value is string => typeof value === 'string')
         .map((value) => value.trim())
         .filter(Boolean)
@@ -82,9 +90,11 @@ export const buildSafeAuthFileDisplayInfo = (file: AuthFileItem): Record<string,
     Object.fromEntries(
         SAFE_DISPLAY_FIELDS.flatMap((key) => {
             const value = key === 'name' ? sanitizeAuthFileName(file.name)
-                : key === 'disableCooling' ? readAuthFileDisableCooling(file)
-                : key === 'requestRetry' ? readAuthFileRequestRetry(file)
-                : file[key]
+                                         : key === 'disableCooling' ?
+                                           readAuthFileDisableCooling(file)
+                                                                    :
+                                           key === 'requestRetry' ? readAuthFileRequestRetry(file)
+                                                                  : file[key]
             return value === undefined ? [] : [[key, Array.isArray(value) ? [...value] : value]]
         }),
     )

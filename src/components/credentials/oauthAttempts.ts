@@ -34,10 +34,10 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
     const begin = (owner: string): OAuthAttempt => {
         attempts.get(owner)?.invalidate()
         let timer: number | undefined
-        let polling = false
-        const generation = scheduler.getGeneration()
-        const controller = new AbortController()
-        const ownsAttempt = () => attempts.get(owner) === attempt
+        let polling                 = false
+        const generation            = scheduler.getGeneration()
+        const controller            = new AbortController()
+        const ownsAttempt           = () => attempts.get(owner) === attempt
         const attempt: OAuthAttempt = {
             signal: controller.signal,
             isCurrent: () => ownsAttempt() && generation === scheduler.getGeneration(),
@@ -46,7 +46,7 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
                 if (timer !== undefined) {
                     scheduler.clearTimeout(timer)
                 }
-                timer = undefined
+                timer   = undefined
                 polling = false
                 if (ownsAttempt()) {
                     attempts.delete(owner)
@@ -71,7 +71,7 @@ export function createOAuthAttempts(scheduler: OAuthAttemptScheduler) {
                 if (!attempt.isCurrent() || polling) {
                     return
                 }
-                polling = true
+                polling    = true
                 const tick = async () => {
                     try {
                         const result = await request()

@@ -1,5 +1,6 @@
-import type {CredentialField, QuotaItem} from './CredentialCard'
+import type {AuthFileItem} from '@/types/authFile'
 import {resolveResetMs} from '@/utils/quota/resetInstants'
+import type {CredentialField, QuotaItem} from './CredentialCard'
 
 export interface PluginQuotaView {
     plan: string | null
@@ -13,6 +14,14 @@ export interface PluginQuotaResult {
     lastRefresh?: Date
     loading: boolean
     error?: string
+}
+
+export function buildPluginQuotaIdentity(file: AuthFileItem, authGeneration: number, quotaGeneration: string): string {
+    return JSON.stringify([
+                              authGeneration, quotaGeneration, file.name,
+                              String(file.authIndex ?? file['auth_index'] ?? '').trim(), file.updatedAt, file.modified,
+                              file.quotaProvider, file.disabled,
+                          ])
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -30,20 +39,23 @@ export function parsePluginQuota(value: unknown, language: string): PluginQuotaV
     if (payload.subscription != null && !subscription) {
         throw new Error('invalid plugin quota subscription')
     }
-    const plan = text(subscription?.tierName) || text(subscription?.plan) || text(subscription?.tierId) || null
+    const plan                       = text(subscription?.tierName) ||
+                                       text(subscription?.plan) ||
+                                       text(subscription?.tierId) ||
+                                       null
     const summary: CredentialField[] = []
     if (payload.summary != null && !Array.isArray(payload.summary)) {
         throw new Error('invalid plugin quota summary')
     }
     for (const [index, rawMetric] of (payload.summary ?? [] as unknown[]).entries()) {
         const metric = asRecord(rawMetric)
-        const key = text(metric?.key)
-        const label = text(metric?.label)
+        const key    = text(metric?.key)
+        const label  = text(metric?.label)
         const amount = metric?.value
         if (!metric || !key || !label || typeof amount !== 'number' || !Number.isFinite(amount)) {
             throw new Error('invalid plugin quota metric')
         }
-        const unit = text(metric?.unit)
+        const unit     = text(metric?.unit)
         const currency = text(metric?.currency)
         if (metric?.format !== undefined && metric.format !== 'number' && metric.format !== 'currency') {
             throw new Error('invalid plugin quota metric format')
@@ -52,9 +64,9 @@ export function parsePluginQuota(value: unknown, language: string): PluginQuotaV
             throw new Error('invalid plugin quota currency')
         }
         const formatted = metric.format === 'currency'
-                          ? new Intl.NumberFormat(language, {style: 'currency', currency}).format(amount)
-                          : new Intl.NumberFormat(language, {maximumFractionDigits: 2}).format(amount)
-        summary.push({id: `plugin-metric-${key}-${index}`, label, value: unit ? `${formatted} ${unit}` : formatted})
+                          ? new Intl.NumberFormat(language, { style: 'currency', currency }).format(amount)
+                          : new Intl.NumberFormat(language, { maximumFractionDigits: 2 }).format(amount)
+        summary.push({ id: `plugin-metric-${key}-${index}`, label, value: unit ? `${formatted} ${unit}` : formatted })
     }
 
     const items: QuotaItem[] = []
@@ -68,23 +80,23 @@ export function parsePluginQuota(value: unknown, language: string): PluginQuotaV
         }
         const groupName = text(group.displayName)
         for (const [bucketIndex, rawBucket] of (group.buckets ?? [] as unknown[]).entries()) {
-            const bucket = asRecord(rawBucket)
+            const bucket   = asRecord(rawBucket)
             const fraction = bucket?.remainingFraction
             if (typeof fraction !== 'number' || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
                 throw new Error('invalid plugin quota bucket')
             }
             const bucketName = text(bucket?.description) || text(bucket?.window) || text(bucket?.displayName)
-            const reset = text(bucket?.resetTime)
+            const reset      = text(bucket?.resetTime)
             items.push({
-                id: `plugin-${groupIndex}-${bucketIndex}`,
-                model: [groupName, bucketName].filter(Boolean).join(' · ') || 'Quota',
-                percent: Math.round(fraction * 100),
-                resetAtMs: reset ? resolveResetMs([reset]) : null,
-            })
+                           id: `plugin-${groupIndex}-${bucketIndex}`,
+                           model: [groupName, bucketName].filter(Boolean).join(' · ') || 'Quota',
+                           percent: Math.round(fraction * 100),
+                           resetAtMs: reset ? resolveResetMs([reset]) : null,
+                       })
         }
     }
     if (!plan && summary.length === 0 && items.length === 0) {
         throw new Error('empty plugin quota response')
     }
-    return {plan, summary, items}
+    return { plan, summary, items }
 }

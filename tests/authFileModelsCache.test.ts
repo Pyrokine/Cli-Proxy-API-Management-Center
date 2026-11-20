@@ -1,4 +1,3 @@
-import {beforeEach, describe, expect, test} from 'bun:test'
 import {
     clearAuthFileModelsCache,
     getCachedAuthFileModels,
@@ -6,6 +5,7 @@ import {
     loadAuthFileModels,
 } from '@/features/authFiles/authFileModelsCache'
 import {apiClient} from '@/services/api/client'
+import {beforeEach, describe, expect, test} from 'bun:test'
 
 const deferred = <T>() => {
     let resolve!: (value: T) => void
@@ -29,7 +29,7 @@ describe('auth-file model cache', () => {
                                                       loadAuthFileModels('a.json', loader),
                                                   ])
         expect(calls).toBe(1)
-        expect(first).toEqual([{ id: 'model-a' }, { id: 'Model-B' }])
+        expect(first).toEqual([{ id: 'model-a' }, { id: 'MODEL-A' }, { id: 'Model-B' }])
         expect(second).toEqual(first)
     })
 

@@ -144,12 +144,28 @@ export const accountInspectionApi = {
     getLogs: () => apiClient.get<AccountInspectionLogsResponse>('/account-inspection/logs'),
 
     updateSchedule: (schedule: AccountInspectionSchedule) =>
-        apiClient.put<AccountInspectionSchedule>('/account-inspection/schedule', schedule),
+        apiClient.put<AccountInspectionSchedule>(
+            '/account-inspection/schedule',
+            schedule,
+            { mutationReadback: () => accountInspectionApi.getStatus() },
+        ),
 
-    run: () => apiClient.post<AccountInspectionRun>('/account-inspection/run'),
+    run: () => apiClient.post<AccountInspectionRun>(
+        '/account-inspection/run',
+        undefined,
+        { mutationReadback: () => accountInspectionApi.getStatus() },
+    ),
 
     inspectOne: (target: { id?: string; file_name?: string; auth_index?: string }) =>
-        apiClient.post<AccountInspectionRun>('/account-inspection/inspect-one', target),
+        apiClient.post<AccountInspectionRun>(
+            '/account-inspection/inspect-one',
+            target,
+            { mutationReadback: () => accountInspectionApi.getStatus() },
+        ),
 
-    stop: () => apiClient.post<{ status: AccountInspectionStatus }>('/account-inspection/stop'),
+    stop: () => apiClient.post<{ status: AccountInspectionStatus }>(
+        '/account-inspection/stop',
+        undefined,
+        { mutationReadback: () => accountInspectionApi.getStatus() },
+    ),
 }

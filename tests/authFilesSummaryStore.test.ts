@@ -1,7 +1,7 @@
-import {beforeEach, describe, expect, test} from 'bun:test'
 import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {useAuthFilesSummaryStore} from '@/stores/useAuthFilesSummaryStore'
+import {beforeEach, describe, expect, test} from 'bun:test'
 
 const deferred = <T>() => {
     let resolve!: (value: T) => void

@@ -1,14 +1,15 @@
+import {CredentialCard} from '@/components/credentials/CredentialCard'
+import {IconBot} from '@/components/ui/icons'
+import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import i18n from '@/i18n'
+import type {AuthFileCooldownSnapshot} from '@/types/authFile'
+import {formatDateTime} from '@/utils/format'
+import {getCooldownRemainingSeconds} from '@/utils/time/durations'
 import {describe, expect, test} from 'bun:test'
 import type {ChangeEvent, ReactElement, ReactNode} from 'react'
 import {Children, createElement, isValidElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
-import {CredentialCard} from '@/components/credentials/CredentialCard'
-import {getCooldownRemainingSeconds} from '@/utils/time/durations'
-import {formatDateTime} from '@/utils/format'
-import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
-import type {AuthFileCooldownSnapshot} from '@/types/authFile'
-import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import i18n from '@/i18n'
 
 interface CheckboxInputProps {
     id?: string
@@ -18,8 +19,8 @@ interface CheckboxInputProps {
 }
 
 const findCheckboxInput = (tree: ReactElement): ReactElement<CheckboxInputProps> => {
-    const children = Children.toArray((tree.props as {children?: ReactNode}).children)
-    const input = children.find(
+    const children = Children.toArray((tree.props as { children?: ReactNode }).children)
+    const input    = children.find(
         (child): child is ReactElement<CheckboxInputProps> =>
             isValidElement<CheckboxInputProps>(child) && child.type === 'input',
     )
@@ -35,7 +36,7 @@ const renderCard = (controlLabel: string) =>
             category: 'auth-file',
             title: 'account-and-token-must-not-name-controls',
             controlLabel,
-            badge: {label: 'Devin'},
+            badge: { label: 'Devin' },
             selected: false,
             onSelect: () => undefined,
             disabled: false,
@@ -57,7 +58,7 @@ const renderCooldownCard = (
     snapshot: AuthFileCooldownSnapshot,
     onClearCooldown?: () => void,
     disableControls = false,
-    disabled = false,
+    disabled        = false,
 ) =>
     renderToStaticMarkup(
         createElement(CredentialCard, {
@@ -72,12 +73,12 @@ const renderCooldownCard = (
     )
 
 const readAriaLabels = (markup: string): string[] =>
-    Array.from(markup.matchAll(/aria-label="([^"]+)"/g), (match) => match[1] ?? '')
+    Array.from(markup.matchAll(/aria-label="(?<label>[^"]+)"/g), (match) => match[1] ?? '')
 
 describe('credential card accessibility', () => {
     test('renders credential-specific selection and status names in every locale', async () => {
         const originalLanguage = i18n.language
-        const expected = {
+        const expected         = {
             en: ['Select credential Devin devin:one', 'Enable or disable credential Devin devin:one'],
             ru: [
                 'Выбрать учётные данные Devin devin:one',
@@ -97,8 +98,37 @@ describe('credential card accessibility', () => {
         }
     })
 
+    test('renders the models action as a localized icon button and honors disabled controls', async () => {
+        const originalLanguage = i18n.language
+        const icon             = renderToStaticMarkup(createElement(IconBot, { size: 14 }))
+        try {
+            for (const language of ['en', 'ru', 'zh-CN', 'zh-TW']) {
+                await i18n.changeLanguage(language)
+                const label = i18n.t('auth_files.models_button')
+                for (const disableControls of [false, true]) {
+                    const markup = renderToStaticMarkup(createElement(CredentialCard, {
+                        category: 'auth-file',
+                        title: 'account-and-token-must-not-name-controls',
+                        controlLabel: 'Codex codex:one',
+                        onModels: () => undefined,
+                        disableControls,
+                    }))
+                    expect(markup).toContain('class="btn btn-secondary btn-sm"')
+                    expect(markup).toContain(`title="${label}"`)
+                    expect(markup).toContain(`aria-label="${label}: Codex codex:one"`)
+                    expect(markup).toContain(`<span class="btn-content">${icon}</span>`)
+                    expect(markup).not.toContain(`>${label}<`)
+                    expect(/<button[^>]*disabled=""/.test(markup)).toBe(disableControls)
+                }
+            }
+        } finally {
+            await i18n.changeLanguage(originalLanguage)
+        }
+        expect(renderCard('Codex codex:one')).not.toContain(icon)
+    })
+
     test('uses opaque runtime identity instead of account or token text', () => {
-        const first = readAriaLabels(renderCard('Devin devin:first'))
+        const first  = readAriaLabels(renderCard('Devin devin:first'))
         const second = readAriaLabels(renderCard('Devin devin:second'))
 
         expect(first).not.toEqual(second)
@@ -118,36 +148,46 @@ describe('credential card accessibility', () => {
     test('uses semantic details and escapes model cooldown keys', () => {
         const unknown = renderCooldownCard(cooldownSnapshot(null))
         const empty   = renderCooldownCard(cooldownSnapshot([]))
-        const active  = renderCooldownCard(cooldownSnapshot([{
-                                                                 scope: 'model',
-                                                                 modelKey: '<script>unsafe-as-text</script>',
-                                                                 retryAt: '2026-09-16T12:01:00.000Z',
-                                                                 remainingSeconds: 10,
-                                                                 reason: 'constructor',
-                                                             }]))
+        const active  = renderCooldownCard(cooldownSnapshot(
+            [
+                {
+                    scope: 'model',
+                    modelKey: /* language=TEXT */ '<script>unsafe-as-text</script>',
+                    retryAt: '2026-09-16T12:01:00.000Z',
+                    remainingSeconds: 10,
+                    reason: 'constructor',
+                },
+            ]))
 
         expect(unknown).toContain('<details')
         expect(unknown).toContain('<summary>')
         expect(empty).toContain('<details')
         expect(active).toContain('&lt;script&gt;unsafe-as-text&lt;/script&gt;')
-        expect(active).not.toContain('<script>unsafe-as-text</script>')
+        expect(active).not.toContain(/* language=TEXT */ '<script>unsafe-as-text</script>')
         expect(active).toContain(i18n.t('credentials.cooldown_reason_unknown'))
     })
 
     test('shows HTTP status, backoff, deadline and observation time in every locale', async () => {
         const originalLanguage = i18n.language
-        const retryAt = '2026-09-16T12:01:00.000Z'
-        const observedAt = '2026-09-16T12:00:00.000Z'
-        const snapshot = cooldownSnapshot([{
-            scope: 'model', modelKey: 'gpt-test', retryAt, remainingSeconds: 60,
-            reason: 'rate_limit', httpStatus: 429, backoffLevel: 2,
-        }])
+        const retryAt          = '2026-09-16T12:01:00.000Z'
+        const observedAt       = '2026-09-16T12:00:00.000Z'
+        const snapshot         = cooldownSnapshot([
+                                                      {
+                                                          scope: 'model',
+                                                          modelKey: 'gpt-test',
+                                                          retryAt,
+                                                          remainingSeconds: 60,
+                                                          reason: 'rate_limit',
+                                                          httpStatus: 429,
+                                                          backoffLevel: 2,
+                                                      },
+                                                  ])
         try {
             for (const language of ['en', 'ru', 'zh-CN', 'zh-TW']) {
                 await i18n.changeLanguage(language)
                 const markup = renderCooldownCard(snapshot)
-                expect(markup).toContain(i18n.t('credentials.cooldown_http_status', {status: 429}))
-                expect(markup).toContain(i18n.t('credentials.cooldown_backoff_level', {level: 2}))
+                expect(markup).toContain(i18n.t('credentials.cooldown_http_status', { status: 429 }))
+                expect(markup).toContain(i18n.t('credentials.cooldown_backoff_level', { level: 2 }))
                 expect(markup).toContain(i18n.t('credentials.cooldown_deadline', {
                     time: formatDateTime(retryAt, language),
                 }))
@@ -161,26 +201,31 @@ describe('credential card accessibility', () => {
         }
     })
 
-    test('stops rendering elapsed cooldowns without claiming credential recovery', () => {
-        const expired = renderCooldownCard(cooldownSnapshot([{
-                                                                 scope: 'credential',
-                                                                 retryAt: '2026-09-16T12:01:00.000Z',
-                                                                 remainingSeconds: 1,
-                                                                 reason: 'quota',
-                                                             }], 0))
+    test('retains elapsed cooldowns awaiting a refreshed snapshot without claiming credential recovery', () => {
+        const expired = renderCooldownCard(cooldownSnapshot([
+                                                                {
+                                                                    scope: 'credential',
+                                                                    retryAt: '2026-09-16T12:01:00.000Z',
+                                                                    remainingSeconds: 1,
+                                                                    reason: 'quota',
+                                                                },
+                                                            ], 0))
 
         expect(expired).not.toContain(i18n.t('credentials.cooldowns_empty'))
         expect(expired).not.toContain(i18n.t('credentials.inspection_status_normal'))
-        expect(expired).not.toContain('<details')
+        expect(expired).toContain('<details')
+        expect(expired).toContain(i18n.t('credentials.cooldown_waiting_refresh'))
     })
 
     test('offers local clearing only for active cooldowns with an action and honors disabled controls', () => {
-        const active = cooldownSnapshot([{
-                                              scope: 'credential',
-                                              retryAt: '2026-09-16T12:01:00.000Z',
-                                              remainingSeconds: 60,
-                                              reason: 'quota',
-                                          }])
+        const active  = cooldownSnapshot([
+                                             {
+                                                 scope: 'credential',
+                                                 retryAt: '2026-09-16T12:01:00.000Z',
+                                                 remainingSeconds: 60,
+                                                 reason: 'quota',
+                                             },
+                                         ])
         const onClear = () => undefined
         expect(renderCooldownCard(active)).not.toContain(i18n.t('credentials.cooldown_clear'))
         expect(renderCooldownCard(cooldownSnapshot(null), onClear)).not.toContain('<button')
@@ -189,27 +234,32 @@ describe('credential card accessibility', () => {
 
         const enabled = renderCooldownCard(active, onClear)
         expect(enabled).toContain(i18n.t('credentials.cooldown_clear'))
-        expect(enabled).toContain(i18n.t('credentials.cooldown_clear_aria', {name: 'Codex codex:one'}))
+        expect(enabled).toContain(i18n.t('credentials.cooldown_clear_aria', { name: 'Codex codex:one' }))
         expect(renderCooldownCard(active, onClear, true)).toMatch(/<button[^>]*disabled=""/)
-        expect(renderCooldownCard(active, onClear, false, true)).not.toContain(i18n.t('credentials.cooldown_clear_aria', {name: 'Codex codex:one'}))
+        expect(renderCooldownCard(active, onClear, false, true)).not.toContain(i18n.t(
+            'credentials.cooldown_clear_aria',
+            { name: 'Codex codex:one' },
+        ))
     })
 
     test('keeps native checkbox semantics and forwards checked state', () => {
         const changes: boolean[] = []
-        const selectionInput = findCheckboxInput(
-            SelectionCheckbox({checked: false, onChange: (checked) => changes.push(checked), ariaLabel: 'select'}),
+        const selectionInput     = findCheckboxInput(
+            SelectionCheckbox({ checked: false, onChange: (checked) => changes.push(checked), ariaLabel: 'select' }),
         )
-        const toggleInput = findCheckboxInput(
-            ToggleSwitch({checked: true, onChange: (checked) => changes.push(checked), id: 'toggle-input',
-                ariaLabel: 'toggle', ariaDescribedBy: 'toggle-description'}),
+        const toggleInput        = findCheckboxInput(
+            ToggleSwitch({
+                             checked: true, onChange: (checked) => changes.push(checked), id: 'toggle-input',
+                             ariaLabel: 'toggle', ariaDescribedBy: 'toggle-description',
+                         }),
         )
 
         expect(selectionInput.props.type).toBe('checkbox')
         expect(toggleInput.props.type).toBe('checkbox')
         expect(toggleInput.props.id).toBe('toggle-input')
         expect(toggleInput.props['aria-describedby']).toBe('toggle-description')
-        selectionInput.props.onChange?.({target: {checked: true}} as ChangeEvent<HTMLInputElement>)
-        toggleInput.props.onChange?.({target: {checked: false}} as ChangeEvent<HTMLInputElement>)
+        selectionInput.props.onChange?.({ target: { checked: true } } as ChangeEvent<HTMLInputElement>)
+        toggleInput.props.onChange?.({ target: { checked: false } } as ChangeEvent<HTMLInputElement>)
         expect(changes).toEqual([true, false])
     })
 })

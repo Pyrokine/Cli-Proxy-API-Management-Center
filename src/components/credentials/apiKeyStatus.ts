@@ -1,6 +1,6 @@
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 
-type ApiKeyStatusFilter = 'all' | 'available' | 'exhausted' | 'error' | 'disabled'
+type ApiKeyStatusFilter = 'all' | 'available' | 'exhausted' | 'error' | 'disabled' | 'problem' | 'disabled-problem'
 export type ManualKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig
 
 export interface ManualKeyCardItem {
@@ -50,7 +50,7 @@ export function buildManualKeyCardItems(vendorId: string, values: ManualKeyConfi
             entryIndex,
             apiKey: entry.apiKey,
             authIndex: entry.authIndex,
-            disabled: Boolean(provider.disabled),
+            disabled: Boolean(provider.disabled || entry.disabled),
         }))
     })
 }
@@ -68,6 +68,10 @@ export function apiKeyMatchesStatus(
         value && typeof value === 'object' && 'disabled' in value && (value as { disabled?: unknown }).disabled,
     )
     const disabled           = configuredDisabled || runtimeStatus?.status === 'disabled'
+    if (statusFilter === 'problem' || statusFilter === 'disabled-problem') {
+        const hasProblem = runtimeStatus?.status === 'unavailable' && Boolean(runtimeStatus.reason)
+        return hasProblem && (statusFilter !== 'disabled-problem' || disabled)
+    }
     if (statusFilter === 'disabled') {
         return disabled
     }

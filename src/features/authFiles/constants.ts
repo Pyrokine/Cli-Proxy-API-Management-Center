@@ -1,10 +1,11 @@
 import type {AuthFileItem} from '@/types'
 import {normalizeBooleanValue} from '@/utils/boolean'
 import {formatDateTime} from '@/utils/format'
+import {normalizeOAuthProviderKey} from '@/utils/providerKeys'
 
 const AUTH_FILE_PREFIX_REGEX = new RegExp(
-    '^(?<vendor>gemini-cli|claude|anthropic|antigravity|codex|' +
-    'gemini|aistudio|kimi-ai|kimi|meta|muse|qwen|x-ai|xai|grok|devin|cognition|vertex|iflow)' +
+    '^(?<vendor>gemini[-_]cli|claude|anthropic|antigravity|anti[-_]gravity|codex|' +
+    'gemini|aistudio|kimi[-_]ai|kimi|meta|muse|qwen|x[-_.]?ai|grok|devin|cognition|vertex|iflow)' +
     '-(?<rest>.+)$',
     'i',
 )
@@ -28,7 +29,7 @@ export function inferProviderFromAuthFileName(name: string): string {
     const nameWithoutExt = trimmed.replace(/\.[^/.]+$/, '')
     const base           = nameWithoutExt || trimmed
     const prefixMatch    = base.match(AUTH_FILE_PREFIX_REGEX)
-    return prefixMatch?.groups?.vendor?.toLowerCase() || ''
+    return normalizeAuthFileProvider(prefixMatch?.groups?.vendor)
 }
 
 export function formatAuthFileDisplayName(name: string): string {
@@ -81,14 +82,8 @@ const appendRemainderCandidates = (items: string[], value: string) => {
 }
 
 export const normalizeAuthFileProvider = (provider: unknown): string => {
-    const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
-    if (normalized === 'x-ai' || normalized === 'grok') {
-        return 'xai'
-    }
-    if (normalized === 'cognition') {
-        return 'devin'
-    }
-    return normalized === 'muse' ? 'meta' : normalized
+    const normalized = typeof provider === 'string' ? normalizeOAuthProviderKey(provider) : ''
+    return normalized === 'cognition' ? 'devin' : normalized
 }
 
 export const supportsAuthFileUsingApi = (provider: unknown): boolean =>

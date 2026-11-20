@@ -2,7 +2,7 @@
  * OAuth 与设备码登录相关 API
  */
 
-import {apiClient} from './client'
+import {apiClient, MUTATION_TARGET_REACHED} from './client'
 
 export type OAuthProvider = string
 
@@ -25,7 +25,8 @@ interface OAuthCancelResponse {
 
 export interface OAuthStatusResponse {
     status: 'ok' | 'wait' | 'error'
-    phase?: 'pending' | 'accepted' | 'saving' | 'success' | 'error' | 'expired'
+    phase?: 'pending' | 'accepted' | 'exchanging' | 'saving' | 'publishing_file' | 'publishing_auth' | 'success'
+            | 'error' | 'expired'
     error?: string
 }
 
@@ -72,6 +73,27 @@ export const oauthApi = {
         return apiClient.get<OAuthStartResponse>(`/${encodeURIComponent(provider)}-auth-url`, {
             params: Object.keys(params).length ? params : undefined,
             signal: options?.signal,
+            mutationReadback: async (data, receipt) => {
+                if (!receipt.metadata_present || options?.signal?.aborted ||
+                    receipt.authGeneration !== apiClient.getAuthGeneration()) {
+                    return
+                }
+                const state = (data as Partial<OAuthStartResponse> | null)?.state
+                if (typeof state !== 'string' || !state.trim()) {
+                    return
+                }
+                const observed = await oauthApi.getAuthStatus(state.trim(), options?.nonce, options?.signal)
+                if (options?.signal?.aborted || receipt.authGeneration !== apiClient.getAuthGeneration()) {
+                    return
+                }
+                if ((observed.status ===
+                     'wait' &&
+                     ['pending', 'accepted', 'exchanging', 'saving', 'publishing_file', 'publishing_auth'].includes(
+                         observed.phase ?? '')) ||
+                    (observed.status === 'ok' && observed.phase === 'success')) {
+                    return MUTATION_TARGET_REACHED
+                }
+            },
         })
     },
 
@@ -83,8 +105,10 @@ export const oauthApi = {
 
     cancelSession: (state: string, nonce?: string, signal?: AbortSignal) =>
         apiClient.delete<OAuthCancelResponse>('/oauth-session', {
-            params: nonce ? { state, nonce } : { state },
-            signal,
+            ...({
+                params: nonce ? { state, nonce } : { state },
+                signal,
+            }), mutationReadback: () => oauthApi.getAuthStatus(state, nonce),
         }),
 
     submitCallback: (provider: OAuthProvider, redirectUrl: string, signal?: AbortSignal, plugin = false) => {
@@ -92,9 +116,15 @@ export const oauthApi = {
         return apiClient.post<OAuthCallbackResponse>('/oauth-callback', {
             provider: callbackProvider,
             redirect_url: redirectUrl,
-        }, { signal })
+        }, { ...({ signal }), mutationReadback: () => apiClient.get('/auth-files') })
     },
 
     /** iFlow cookie 认证 */
-    iflowCookieAuth: (cookie: string) => apiClient.post<IFlowCookieAuthResponse>('/iflow-auth-url', { cookie }),
+    iflowCookieAuth: (cookie: string) => apiClient.post<IFlowCookieAuthResponse>(
+        '/iflow-auth-url',
+        { cookie },
+        {
+            mutationReadback: () => apiClient.get('/auth-files'),
+        },
+    ),
 }

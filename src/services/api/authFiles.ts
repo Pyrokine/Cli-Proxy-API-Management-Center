@@ -2,24 +2,30 @@
  * 认证文件与 OAuth 排除模型相关 API
  */
 
+import {
+    readAuthFileDisableCooling,
+    readAuthFileRequestRetry,
+    readAuthFileWebsockets,
+} from '@/features/authFiles/constants'
 import i18n from '@/i18n'
-import {useAuthFileRefreshStore, type AuthFileRefreshRequest} from '@/stores/useAuthFileRefreshStore'
+import {type AuthFileRefreshRequest, useAuthFileRefreshStore} from '@/stores/useAuthFileRefreshStore'
 import {authFileStatusRequestKey, useAuthFileStatusStore} from '@/stores/useAuthFileStatusStore'
 import type {OAuthModelAliasEntry} from '@/types'
-import {readAuthFileDisableCooling, readAuthFileRequestRetry, readAuthFileWebsockets} from '@/features/authFiles/constants'
+import type {ApiError, ManagementMutationReceipt} from '@/types/api'
 import type {
+    AuthFileCooldown,
+    AuthFileCooldownSnapshot,
     AuthFileItem,
     AuthFileModelItem,
     AuthFileRuntimeError,
-    AuthFileCooldown,
-    AuthFileCooldownSnapshot,
     AuthFilesResponse,
     RecentRequestBucket,
 } from '@/types/authFile'
 import {normalizeBooleanValue} from '@/utils/boolean'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {normalizeExcludedModelsValue} from '@/utils/excludedModels'
-import {apiClient} from './client'
+import type {AccountInspectionResult} from './accountInspection'
+import {apiClient, mutationReceiptError} from './client'
 
 type AuthFileStatusResponse = { status: string; disabled: boolean }
 export type AuthFileRefreshResult = {
@@ -133,7 +139,7 @@ const normalizeTimestamp = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
         return undefined
     }
-    const trimmed = value.trim()
+    const trimmed   = value.trim()
     const timestamp = Date.parse(trimmed)
     return trimmed && Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined
 }
@@ -171,12 +177,12 @@ const normalizeCooldown = (value: unknown): AuthFileCooldown | null => {
 
     return {
         scope,
-        ...(modelKey ? {modelKey} : {}),
+        ...(modelKey ? { modelKey } : {}),
         retryAt,
         remainingSeconds,
         reason,
-        ...(backoffLevel === undefined ? {} : {backoffLevel}),
-        ...(httpStatus === undefined ? {} : {httpStatus}),
+        ...(backoffLevel === undefined ? {} : { backoffLevel }),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
     }
 }
 
@@ -188,9 +194,9 @@ const normalizeCooldownSnapshot = (
     if (!Object.prototype.hasOwnProperty.call(entry, 'cooldowns')) {
         return undefined
     }
-    const snapshot = {observedAt, receivedAtMs}
+    const snapshot = { observedAt, receivedAtMs }
     if (!Array.isArray(entry.cooldowns)) {
-        return {...snapshot, records: null}
+        return { ...snapshot, records: null }
     }
 
     const records = entry.cooldowns.map(normalizeCooldown)
@@ -323,10 +329,12 @@ const mergeAuthFileItems = (left: AuthFileItem, right: AuthFileItem): AuthFileIt
         merged.cooldownSnapshot = secondary.cooldownSnapshot
     }
     Object.entries(secondary).forEach(([key, value]) => {
-        if (['disable_cooling', 'disable-cooling', 'disableCooling',
-             'request_retry', 'request-retry', 'requestRetry', 'websockets',
-             'model_aliases', 'model-aliases', 'request_scoped_errors', 'request-scoped-errors',
-             'cooldowns', 'cooldownSnapshot'].includes(key)) {
+        if ([
+            'disable_cooling', 'disable-cooling', 'disableCooling',
+            'request_retry', 'request-retry', 'requestRetry', 'websockets',
+            'model_aliases', 'model-aliases', 'request_scoped_errors', 'request-scoped-errors',
+            'cooldowns', 'cooldownSnapshot',
+        ].includes(key)) {
             return
         }
         if (!hasMeaningfulValue(merged[key]) && hasMeaningfulValue(value)) {
@@ -343,7 +351,7 @@ const mergeAuthFileRows = (rows: AuthFileItem[]): AuthFileItem | null =>
     )
 
 const mergeAuthFileNameGroup = (rows: AuthFileItem[]): AuthFileItem[] => {
-    const byAuthIndex = new Map<string, AuthFileItem[]>()
+    const byAuthIndex                = new Map<string, AuthFileItem[]>()
     const sharedRows: AuthFileItem[] = []
     for (const row of rows) {
         const authIndex = String(row.authIndex ?? '').trim()
@@ -388,7 +396,7 @@ export const normalizeAuthFilesResponse = (
     return {
         files,
         total: files.length,
-        ...(observedAt === undefined ? {} : {observedAt}),
+        ...(observedAt === undefined ? {} : { observedAt }),
         receivedAtMs,
     }
 }
@@ -665,13 +673,13 @@ const normalizeAuthFileRefreshBatchResult = (value: unknown): AuthFileRefreshBat
                 throw new Error('auth_files.refresh_invalid_response')
             }
             const error = normalizeString(entry.error)
-            return {...result, success, ...(error ? {error} : {})}
+            return { ...result, success, ...(error ? { error } : {}) }
         }),
     }
 }
 
-const OAUTH_MODEL_ALIAS_ENDPOINT  = '/oauth-model-alias'
-const AUTH_FILE_REFRESH_TIMEOUT_MS = 35_000
+const OAUTH_MODEL_ALIAS_ENDPOINT       = '/oauth-model-alias'
+const AUTH_FILE_REFRESH_TIMEOUT_MS     = 35_000
 const AUTH_FILE_REFRESH_ALL_TIMEOUT_MS = 300_000
 
 const refreshAuthFileTokens = async (
@@ -682,13 +690,17 @@ const refreshAuthFileTokens = async (
     if (useAuthFileRefreshStore.getState().request?.generation === generation) {
         throw new Error(i18n.t('credentials.manual_token_refresh_in_progress'))
     }
-    const request = {generation, target}
-    useAuthFileRefreshStore.setState({request})
+    const request = { generation, target }
+    useAuthFileRefreshStore.setState({ request })
     try {
-        return await apiClient.post<unknown>('/auth-files/refresh', target, {timeout})
+        return await apiClient.post<unknown>(
+            '/auth-files/refresh',
+            target,
+            { ...({ timeout }), mutationReadback: () => authFilesApi.list() },
+        )
     } finally {
         if (useAuthFileRefreshStore.getState().request === request) {
-            useAuthFileRefreshStore.setState({request: null})
+            useAuthFileRefreshStore.setState({ request: null })
         }
     }
 }
@@ -697,22 +709,51 @@ export const authFilesApi = {
     list: async (): Promise<AuthFilesResponse> =>
         normalizeAuthFilesResponse(await apiClient.get<unknown>('/auth-files')),
 
-    setStatus: async (name: string, disabled: boolean, authIndex?: string | number | null) => {
-        name = name.trim()
-        const identity = String(authIndex ?? '').trim()
+    setStatus: async (
+        name: string,
+        disabled: boolean,
+        authIndex?: string | number | null,
+        expectedProbe?: Pick<AccountInspectionResult,
+            'auth_generation' | 'credential_digest' | 'probe_revision' | 'checked_at'>,
+    ) => {
+        name             = name.trim()
+        const identity   = String(authIndex ?? '').trim()
         const generation = apiClient.getAuthGeneration()
-        const key = authFileStatusRequestKey(generation, name, identity)
+        const key        = authFileStatusRequestKey(generation, name, identity)
         if (useAuthFileStatusStore.getState().requests.has(key)) {
             throw new Error(i18n.t('credentials.status_update_in_progress'))
         }
-        const request = {generation, name, authIndex: identity}
-        useAuthFileStatusStore.setState((state) => ({requests: new Map(state.requests).set(key, request)}))
+        const request = { generation, name, authIndex: identity }
+        useAuthFileStatusStore.setState((state) => ({ requests: new Map(state.requests).set(key, request) }))
         try {
-            const result = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', {
-                name,
-                disabled,
-                ...(identity ? {auth_index: identity} : {}),
-            })
+            let receipt: ManagementMutationReceipt | undefined
+            let result: AuthFileStatusResponse
+            try {
+                result = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', {
+                    name,
+                    disabled,
+                    ...(identity ? { auth_index: identity } : {}),
+                    ...(expectedProbe ? { expected_probe: expectedProbe } : {}),
+                }, {
+                                                                           onMutationReceipt: (value) => {
+                                                                               receipt = value
+                                                                           },
+                                                                       })
+            } catch (error: unknown) {
+                const failure = error as ApiError
+                if (failure?.mutation) {
+                    failure.mutation  = await apiClient.reconcileMutation(failure.mutation)
+                    failure.requestId = failure.mutation.request_id
+                    failure.message   = `${failure.message} ${mutationReceiptError(failure.mutation).message}`
+                }
+                throw error
+            }
+            if (receipt?.metadata_present) {
+                receipt = await apiClient.reconcileMutation(receipt)
+                if (receipt.result?.outcome !== 'succeeded' || receipt.recovery) {
+                    throw mutationReceiptError(receipt)
+                }
+            }
             if (result?.status !== 'ok' || result.disabled !== disabled) {
                 throw new Error(i18n.t('credentials.batch_status_invalid_response'))
             }
@@ -724,7 +765,7 @@ export const authFilesApi = {
                 }
                 const requests = new Map(state.requests)
                 requests.delete(key)
-                return {requests}
+                return { requests }
             })
         }
     },
@@ -739,14 +780,14 @@ export const authFilesApi = {
             throw new Error('auth_files.refresh_identity_required')
         }
         return refreshAuthFileTokens({
-            name: normalizedName,
-            auth_index: identity,
-        }, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)
+                                         name: normalizedName,
+                                         auth_index: identity,
+                                     }, AUTH_FILE_REFRESH_TIMEOUT_MS).then(normalizeAuthFileRefreshResult)
     },
 
     requestManualRefreshAll: async (): Promise<AuthFileRefreshBatchResult> =>
         normalizeAuthFileRefreshBatchResult(
-            await refreshAuthFileTokens({all: true}, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS),
+            await refreshAuthFileTokens({ all: true }, AUTH_FILE_REFRESH_ALL_TIMEOUT_MS),
         ),
 
     clearLocalCooldown: async (authIndex: string): Promise<void> => {
@@ -754,8 +795,10 @@ export const authFilesApi = {
         if (!identity) {
             throw new Error('auth_files.cooldown_identity_required')
         }
-        const result = await apiClient.post<{status: string; auth_index: string}>(
-            '/routing/cooldown/reset', {auth_index: identity},
+        const result = await apiClient.post<{ status: string; auth_index: string }>(
+            '/routing/cooldown/reset',
+            { auth_index: identity },
+            { mutationReadback: () => authFilesApi.list() },
         )
         if (result?.status !== 'ok' || result.auth_index !== identity) {
             throw new Error('auth_files.cooldown_reset_invalid_response')
@@ -772,7 +815,7 @@ export const authFilesApi = {
             throw new Error(errorKey)
         }
         const identity = String(authIndex ?? '').trim()
-        const payload = {
+        const payload  = {
             name,
             ...(identity ? { 'auth-index': identity } : {}),
             ...fields,
@@ -780,19 +823,8 @@ export const authFilesApi = {
         if (typeof payload.request_retry === 'number' && payload.request_retry < 0) {
             payload.request_retry = null
         }
-        return apiClient.patch('/auth-files/fields', payload)
+        return apiClient.patch('/auth-files/fields', payload, { mutationReadback: () => authFilesApi.list() })
     },
-
-    /**
-     * Bulk enable a list of auth files. Sibling to setStatus but flips many files
-     * in one round trip so the credentials page can offer "enable selected".
-     * Returns {updated, failed} — failed is a map of name -> error message.
-     */
-    bulkEnable: (names: string[]) =>
-        apiClient.patch<{ updated: string[]; failed?: Record<string, string> }>('/auth-files/bulk-enable', { names }),
-
-    bulkDisable: (names: string[]) =>
-        apiClient.patch<{ updated: string[]; failed?: Record<string, string> }>('/auth-files/bulk-disable', { names }),
 
     uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {
         const requestedNames = files.map((file) => file.name)
@@ -804,7 +836,11 @@ export const authFilesApi = {
         files.forEach((file) => {
             formData.append('file', file, file.name)
         })
-        const payload = await apiClient.postForm<AuthFileBatchUploadResponse>('/auth-files', formData)
+        const payload = await apiClient.postForm<AuthFileBatchUploadResponse>(
+            '/auth-files',
+            formData,
+            { mutationReadback: () => authFilesApi.list() },
+        )
         return normalizeBatchUploadResponse(payload, requestedNames)
     },
 
@@ -817,7 +853,9 @@ export const authFilesApi = {
         }
 
         const payload = await apiClient.delete<AuthFileBatchDeleteResponse>('/auth-files', {
-            data: { names: requestedNames },
+            ...({
+                data: { names: requestedNames },
+            }), mutationReadback: () => authFilesApi.list(),
         })
         return normalizeBatchDeleteResponse(payload, requestedNames)
     },
