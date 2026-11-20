@@ -7,7 +7,7 @@ through its Management API
 
 - Example: https://remote.router-for.me/
 - Management API base path: `/v0/management`
-- Minimum compatible backend: CLIProxyAPI `v7.2.67-aug.2`
+- Minimum compatible backend: CLIProxyAPI `v8.0.23-aug.1`
 
 The panel manages the backend. It does not proxy model traffic
 
@@ -16,6 +16,8 @@ The panel manages the backend. It does not proxy model traffic
 ### Panel managed by CLI Proxy API
 
 CLI Proxy API serves the panel at:
+
+<!--suppress HttpUrlsUsage -->
 
 ```text
 http://<host>:<api_port>/management.html
@@ -73,6 +75,8 @@ Use `bun run preview` instead of opening the file through `file://`, where brows
 
 The panel accepts addresses such as:
 
+<!--suppress HttpUrlsUsage -->
+
 ```text
 localhost:8317
 http://192.168.1.10:8317
@@ -100,6 +104,18 @@ remote-management:
 See the [Management API documentation](https://help.router-for.me/management/api) for authentication rules and
 server-side limits
 
+## Logout and plugin resource sessions
+
+Logout clears local authentication and page caches immediately. It uses the previous connection to call
+`DELETE /v0/resource/plugins/session`, revoking the current browser's plugin resource cookie session while leaving other
+browsers' sessions active. A new login to the same hostname waits for an outstanding revocation to finish, including
+connections using a different scheme or port. Lock acquisition and revocation share a 30-second deadline. Browsers with
+Web Locks also coordinate tabs on the same origin
+
+A response other than 204 displays the previous server address and the failure reason. Local logout still completes.
+Older backends without this endpoint display that warning; server-side revocation requires backend support for the
+endpoint. Revoke a static management key by rotating it in the backend configuration
+
 ## Features
 
 - Dashboard: connection state, backend version and build time, quick totals, and model availability
@@ -116,8 +132,11 @@ server-side limits
   iFlow cookies
 - Quota Management: inspect provider quotas, refresh state through backend tasks, and view active-reset availability and
   expiration data supplied by the backend
+- Models: prices, aliases, enabled state, and channel-specific Standard, Fast, or Ultrafast selection for supported
+  models
 - Usage: request and token charts, API/model/credential breakdowns, RPM/TPM windows, service health, current catalog
-  prices, immutable request-time pricing receipts, and historical repricing status
+  prices, immutable request-time pricing receipts, and historical repricing status; request details show requested and
+  returned speed, the forwarded URL and model, and the upstream-reported model and provider
 - Config: edit and reload `/config.yaml` with YAML highlighting and search
 - Logs: incremental polling, refresh interval controls, filtering, raw log view, clear actions, and request-error file
   downloads
@@ -126,14 +145,13 @@ server-side limits
 
 ## Technology and toolchain
 
-- React 19.3
-- TypeScript native 7.0.2 for application code, tests, type checking, and builds
-- TypeScript 6 compatibility package for `typescript-eslint` only, retained until its supported compiler API includes
-  TypeScript 7
+- React 19.3.1
+- TypeScript native 7.0.2 for type checking application code, tests, and Vite configuration
+- TypeScript 6 wrapper for AST-based tests and the `typescript-eslint` JavaScript backend
 - Vite 8.3 with `vite-plugin-singlefile`
-- Bun 1.4.0 as the package manager and test runtime
-- ESLint 10, `typescript-eslint` 8.70, and Stylelint 17
-- Zustand, Axios, react-router-dom 7, Chart.js, CodeMirror 6, SCSS Modules, and i18next
+- Bun 1.4.4 as the package manager and test runtime
+- ESLint 10, `typescript-eslint` 8.73, and Stylelint 18
+- Zustand, Axios, React Router 8.5, Chart.js, CodeMirror 6, SCSS Modules, and i18next
 
 The root TypeScript project includes `src` and `tests`. `vite.config.ts` is checked separately through
 `tsconfig.node.json`
@@ -158,18 +176,31 @@ checking, ESLint, tests, and the build, then publishes `dist/management.html`
 Local augmented releases use `v<upstream>-aug.N`; the first release based on a new upstream version uses `aug.1`
 
 The panel tracks installation by attempt ID and target version, using the running backend's declared capabilities
-Older backends supply their attempt ID in a validated installation acknowledgement; a lost initial acknowledgement leaves that update unconfirmed
-After two minutes without confirmation, the panel shows an unconfirmed result; checking again only reads status and does not reinstall
-Closing and reopening version history in the same connection retains the submitted attempt, including a late acknowledgement; changing connections clears that association
-A full page reload reads the server's persisted result without reconstructing the previous submission, and a successful result refreshes the server version
-The panel shows progress while active inference finishes; an older attempt or another connection cannot confirm the current installation
-Negated statements such as “no schema migration” do not mark a release as breaking; explicit migration requirements and warnings remain visible
+Older backends supply their attempt ID in a validated installation acknowledgement; a lost initial acknowledgement
+leaves that update unconfirmed
+After two minutes without confirmation, the panel shows an unconfirmed result; checking again only reads status and does
+not reinstall
+Closing and reopening version history in the same connection retains the submitted attempt, including a late
+acknowledgement; changing connections clears that association
+A full page reload reads the server's persisted result without reconstructing the previous submission, and a successful
+result refreshes the server version
+The panel shows progress while active inference finishes; an older attempt or another connection cannot confirm the
+current installation
+Negated statements such as “no schema migration” do not mark a release as breaking; explicit migration requirements and
+warnings remain visible
 
-Codex cards show subscription query failures separately while retaining available quota data and the partial-update state
-Credential-recorded and live subscription dates keep distinct source labels
-The v1.26.0-aug.5 reset flow checks current owned credits before opening confirmation, checks again on confirmation, and requires the backend to check before consumption. At least one currently valid owned credit is required; an applicable count of zero does not replace the owned count
-Old, unknown, and partial quota snapshots can start a read-only eligibility check. A subscription error does not disable that check. Expired or consumed credits do not establish eligibility; missing, invalid, or conflicting current counts block consumption. A query from yesterday never substitutes for a current check
-Cancellation, changed credentials or connections, and repeated confirmation callbacks do not replay consumption. Counts are invalidated only after a confirmed reset and then refreshed. An older backend without the native read-only check cannot authorize a reset through this panel
+Codex cards show subscription query failures separately while retaining available quota data and the partial-update
+state.
+Credential-recorded and live subscription dates keep distinct source labels.
+The v1.26.0-aug.6 reset flow checks current owned credits before opening confirmation and again on confirmation.
+The backend must check before consumption. At least one currently valid owned credit is required; an applicable
+count of zero does not replace the owned count.
+Old, unknown, and partial quota snapshots can start a read-only eligibility check. A subscription error does not disable
+that check. Expired or consumed credits do not establish eligibility; missing, invalid, or conflicting current counts
+block consumption. A query from yesterday never substitutes for a current check
+Cancellation, changed credentials or connections, and repeated confirmation callbacks do not replay consumption. Counts
+are invalidated only after a confirmed reset and then refreshed. An older backend without the native read-only check
+cannot authorize a reset through this panel
 
 ## Security
 

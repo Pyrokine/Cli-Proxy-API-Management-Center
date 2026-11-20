@@ -1,78 +1,90 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+    push:
+        tags:
+            - 'v*'
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+    build-and-release:
+        runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+        permissions:
+            contents: write
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
+        steps:
+            -   name: Checkout code
+                # noinspection UndefinedAction
+                uses: actions/checkout@v7.0.1
+                with:
+                    # noinspection UndefinedParamsPresent
+                    fetch-depth: 0
+                    # noinspection UndefinedParamsPresent
+                    fetch-tags: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '26.7.0'
+            -   name: Setup Node.js
+                # noinspection UndefinedAction
+                uses: actions/setup-node@v7.1.0
+                with:
+                    # noinspection UndefinedParamsPresent
+                    node-version: '26.13.1'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.0'
+            -   name: Setup Bun
+                # noinspection UndefinedAction
+                uses: oven-sh/setup-bun@v2.2.0
+                with:
+                    # noinspection UndefinedParamsPresent
+                    bun-version: '1.4.4'
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+            -   name: Install dependencies
+                run: bun install --frozen-lockfile
 
-      - name: Type check
-        run: bun run type-check
+            -   name: Type check
+                run: bun run type-check
 
-      - name: Lint
-        run: bun run lint
+            -   name: Lint
+                run: bun run lint
 
-      - name: Run tests
-        run: bun test
+            -   name: Run tests
+                run: bun test
 
-      - name: Build all-in-one HTML
-        run: bun run build
-        env:
-          VERSION: ${{ github.ref_name }}
+            -   name: Build all-in-one HTML
+                run: bun run build
+                env:
+                    VERSION: ${{ github.ref_name }}
 
-      - name: Prepare release assets
-        run: |
-          cd dist
-          mv index.html management.html
-          ls -lh management.html
+            -   name: Prepare release assets
+                run: |
+                    cd dist
+                    mv index.html management.html
+                    ls -lh management.html
 
-      - name: Generate release notes
-        run: |
-          python3 <<'PY'
-          import os
-          import re
-          from pathlib import Path
+            -   name: Generate release notes
+                run: |
+                    python3 <<'PY'
+                    import os
+                    import re
+                    from pathlib import Path
 
-          tag = os.environ["GITHUB_REF_NAME"]
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          match = re.search(rf"^##\s+{re.escape(tag)}\b.*?(?=^##\s+v|\Z)", changelog, re.M | re.S)
-          if not match:
-              raise SystemExit(f"CHANGELOG.md has no entry for {tag}")
-          Path("release-notes.md").write_text(match.group(0).strip() + "\n", encoding="utf-8")
-          PY
+                    tag = os.environ["GITHUB_REF_NAME"]
+                    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+                    match = re.search(rf"^##\s+{re.escape(tag)}\b.*?(?=^##\s+v|\Z)", changelog, re.M | re.S)
+                    if not match:
+                        raise SystemExit(f"CHANGELOG.md has no entry for {tag}")
+                    Path("release-notes.md").write_text(match.group(0).strip() + "\n", encoding="utf-8")
+                    PY
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/management.html
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            -   name: Create Release
+                # noinspection UndefinedAction
+                uses: softprops/action-gh-release@v3.0.4
+                with:
+                    # noinspection UndefinedParamsPresent
+                    files: dist/management.html
+                    # noinspection UndefinedParamsPresent
+                    body_path: release-notes.md
+                    # noinspection UndefinedParamsPresent
+                    draft: false
+                    # noinspection UndefinedParamsPresent
+                    prerelease: false
+                env:
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

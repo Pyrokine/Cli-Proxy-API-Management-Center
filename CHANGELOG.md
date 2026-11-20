@@ -1,5 +1,109 @@
 # Changelog
 
+## v1.26.0-aug.6 - 2026-11-21
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous local release: v1.26.0-aug.5
+- Paired release: CLIProxyAPI v8.0.23-aug.6
+
+This release collects the cumulative changes in the Pyrokine fork since v1.26.0-aug.5 on the v1.26.0 upstream base
+
+### Features
+
+- Edit model enablement and channel-specific Standard, Fast, and Ultrafast settings using the options supplied by the
+  backend; retain existing model selections and explicit provider overrides
+- Maintain structured prices for input/output tokens, cache writes by TTL, context length, region, effective dates,
+  speed, modality, and independent media or tool charges
+- Show costs directly throughout model management and usage pages, removing estimate/reference labels and completeness
+  badges or selectors; keep rates, recorded usage, specific missing conditions, and request-time/current costs in the
+  existing explanations
+- Show requested and returned processing speed, initial and final forwarding addresses, selected and reported models
+  and providers, and cache-field presence in compact multiline request details
+- Preserve model and API-key aliases for display while retaining original identifiers, billing metadata, and pricing
+  receipts in usage exports
+- Display historical repricing and storage-upgrade progress, counts, errors, and maintenance times from the backend
+- Preserve quota observation times and credential generations; distinguish cached, outdated, partial, unknown, and
+  failed results, and show reset times, subscription details, and read-only grants from their own sources
+- Keep model discovery and provider connection tests bound to the current connection; support selecting or clearing
+  filtered models with an explicit application scope and retain unknown model metadata
+
+### Fixes
+
+- Isolate login, cached data, and late management responses by connection generation; preserve encrypted-storage
+  transactions and revoke the old plugin resource session on logout
+- Parse management-write receipts and read back affected resources so success, rejection, partial changes, and
+  uncertain results remain distinct
+- Preserve YAML comments, anchors, large integers, unknown fields, and concurrent-save checks across visual and YAML
+  drafts, OAuth aliases, conditional payload rules, and API-key names and policies
+- Preserve credential filters, pagination, and model dialogs through single and batch enable/disable, refresh, OAuth,
+  and Vertex import operations; ignore stale results and read back actual credential state
+- Save only changed plugin settings and wait for runtime completion; bind resource URLs, revocation, refresh, and
+  connection changes to the owning plugin session
+- Preserve log timestamps, history anchors, reading position, request filters, and expanded details across incremental
+  updates and connection changes
+- Keep version history paginated and display actual release or dev-build identity, backend compatibility, runtime
+  catalog information, and rate-limit status; reconcile interrupted updates by attempt without reinstalling
+- Keep menus above dialogs with wrapped labels, preserve keyboard focus and scroll behavior, and update notifications,
+  sidebar state, and shared interface text consistently across all four languages
+
+### Compatibility and builds
+
+- The minimum compatible backend remains `8.0.23-aug.1`; pair this panel with CPA v8.0.23-aug.6 for the new management,
+  pricing, and request-observation capabilities, using server capabilities and saved-state readback
+- Update the panel before upgrading an older backend; installation retains explicit compatibility warnings and the
+  status reported by that backend
+- Reset-credit consumption keeps the existing current-eligibility checks and explicit confirmation; a read-only check
+  leaves local quota cooldown unchanged
+- Refresh the React, Router, Bun, TypeScript-native, build, and static-check dependencies with their lockfiles
+- Keep `package.json` at `0.0.0`; release tags supply `VERSION` during the single-file build and the workflow extracts
+  release notes from the matching changelog entry
+
+### 中文
+
+#### 版本依据
+
+- 上游版本：v1.26.0（`c9e2f7cb0b065c13211285d9525bcc8761f17837`）
+- 分叉点：`ee784b579cc2278563d44789afed7c9c864570a7`
+- 上一个本地版本：v1.26.0-aug.5
+- 配套版本：CLIProxyAPI v8.0.23-aug.6
+
+本版本汇集 Pyrokine fork 自 v1.26.0-aug.5 以来的累计变更，上游基线保持 v1.26.0
+
+#### 功能
+
+- 根据后端提供的选项维护模型启用状态和各渠道的标准速度、Fast、Ultrafast，保留现有模型选择与显式 Provider 覆盖
+- 维护输入与输出 Token、不同 TTL 的缓存写入、上下文长度、地区、生效时间、处理速度和模态价格，以及独立媒体或工具收费
+- 模型管理与使用统计直接显示费用，移除估算、参考标签和完整性标记或选择，原有说明保留价格、已记录用量、具体缺项和请求时与当前费用
+- 请求详情以精简多行展示申请与返回速度、初始和最终转发地址、选用与上游自报的模型和渠道，以及缓存字段是否明确返回
+- 展示模型与 API Key 别名，使用量导出保留原始标识、计价元数据和计价凭据
+- 根据后端状态展示历史重算和存储升级的进度、数量、错误与维护时间
+- 配额保留观察时间与凭证代次，区分缓存、已失效、部分更新、未知和失败结果，恢复时间、订阅与只读 grant 分别标注来源
+- 模型发现与 Provider 连接测试绑定当前连接，支持选择或清除筛选结果并明确应用范围，保留未知模型元数据
+
+#### 修复
+
+- 登录、页面缓存和迟到的管理响应按连接代次隔离，保留加密存储事务，退出时撤销原插件资源会话
+- 解析管理写入回执并读回受影响资源，分别展示成功、拒绝、部分变更和结果待确认
+- 可视化与 YAML 草稿、OAuth 别名、条件 Payload 和 API Key 名称及策略保留注释、锚点、大整数、未知字段与并发保存检查
+- 凭证单项及批量启停、刷新、OAuth 和 Vertex 导入保留筛选、分页与模型弹窗，忽略旧结果并读回真实凭证状态
+- 插件设置只保存变更字段并等待运行完成，资源 URL、撤销、刷新和连接变化归属对应插件会话
+- 日志增量更新与连接变化期间保留时间、历史位置、阅读位置、请求筛选和展开详情
+- 版本历史支持分页，展示真实发布版本或开发构建身份、后端兼容性、运行模型目录与限流状态，更新断连后按同一次安装核实结果，保持一次安装请求
+- 菜单位于弹窗上方并支持标签换行，保留键盘焦点与滚动行为，通知、侧栏和共享界面文案在四种语言中保持一致
+
+#### 兼容性与构建
+
+- 最低兼容后端保持 `8.0.23-aug.1`，新增管理、计价和请求观察能力配合 CPA v8.0.23-aug.6 使用，按服务器能力与保存读回判断结果
+- 升级旧后端前先更新面板，安装保留明确的兼容提示和该后端返回的状态
+- 重置次数消费保留当前资格核查与明确确认，只读核查保持本地配额冷却不变
+- 更新 React、Router、Bun、TypeScript native、构建与静态检查依赖及锁文件
+- `package.json` 保持 `0.0.0`，单文件正式构建通过 tag 提供 `VERSION`，工作流从匹配的 changelog 章节提取发布说明
+
+Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/compare/v1.26.0-aug.5...v1.26.0-aug.6
+
 ## v1.26.0-aug.5 - 2026-10-22
 
 ### Release basis
@@ -12,17 +116,22 @@
 ### Fixes
 
 - Check current Codex reset credits before opening confirmation and again before submitting a reset
-- Allow old, unknown and partial quota snapshots to start a read-only eligibility check, with subscription failures shown separately
-- Require at least one currently valid owned credit, preserving the owned-one/applicable-zero case and checking supplied expiration details
+- Allow old, unknown and partial quota snapshots to start a read-only eligibility check, with subscription failures
+  shown separately
+- Require at least one currently valid owned credit, preserving the owned-one/applicable-zero case and checking supplied
+  expiration details
 - Keep yesterday's query separate from current reset eligibility
-- Cancel obsolete checks after credential or connection changes and prevent repeated confirmation from replaying consumption
-- Retain counts until reset success is confirmed, and keep uncertain results or subsequent refresh failures from triggering another consumption
+- Cancel obsolete checks after credential or connection changes and prevent repeated confirmation from replaying
+  consumption
+- Retain counts until reset success is confirmed, and keep uncertain results or subsequent refresh failures from
+  triggering another consumption
 - Keep reset guidance and failure messages consistent in all four languages
 
 ### Compatibility
 
 - The minimum backend version for the management panel remains `8.0.23-aug.1`
-- Codex reset eligibility checks require the paired CPA `v8.0.23-aug.5`; older backends receive an explicit update-required message for this action
+- Codex reset eligibility checks require the paired CPA `v8.0.23-aug.5`; older backends receive an explicit
+  update-required message for this action
 - Current eligibility checks preserve existing quota cooldown until consumption is explicitly confirmed
 
 ### 中文
@@ -66,16 +175,20 @@ Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/comp
 - Display Codex subscription query errors separately from runtime status and available quota data
 - Label reset credits as owned resets and explain why incomplete or outdated quota results block consumption
 - Reconcile interrupted installations by update attempt and target version without repeating the installation request
-- Use a validated acknowledgement from older backends to track their server-generated attempt ID; keep strict client-ID matching for backends that declare support
-- Retain the current connection's update association when closing and reopening version history, including late acknowledgements
-- Show inference-draining progress and distinguish statements such as "no schema migration" from actual migration requirements
+- Use a validated acknowledgement from older backends to track their server-generated attempt ID; keep strict client-ID
+  matching for backends that declare support
+- Retain the current connection's update association when closing and reopening version history, including late
+  acknowledgements
+- Show inference-draining progress and distinguish statements such as "no schema migration" from actual migration
+  requirements
 - Keep confirmations, reset protections and explanations consistent in all four languages
 
 ### Compatibility
 
 - The minimum backend version remains `8.0.23-aug.1`
 - Update the panel before upgrading an older backend
-- A lost initial acknowledgement from an older backend leaves that installation unconfirmed; checking again reads status without resubmitting
+- A lost initial acknowledgement from an older backend leaves that installation unconfirmed; checking again reads status
+  without resubmitting
 - Subscription query failures remain visible; this release does not change upstream subscription access
 
 ### 中文
@@ -118,7 +231,8 @@ Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/comp
 ### Changes
 
 - Let development builds install a selected release from version history without assigning them a semantic version
-- Show an installation confirmation in all four languages and retain compatibility checks, restart warnings and update progress
+- Show an installation confirmation in all four languages and retain compatibility checks, restart warnings and update
+  progress
 
 ### Compatibility
 
@@ -163,17 +277,22 @@ Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/comp
 
 - Make configuration search focus the exact quota switch in both simple and full modes
 
-- Update provider and Meta forms, model metadata editing, and discovery while retaining flat configuration and `/v0/management` requests
-- Preserve configuration drafts, comments, unknown fields, and concurrent-save checks; associate field errors with their labels and configuration sections
-- Keep credential login, refresh, mutation, and confirmation results bound to the active connection and credential identity
+- Update provider and Meta forms, model metadata editing, and discovery while retaining flat configuration and
+  `/v0/management` requests
+- Preserve configuration drafts, comments, unknown fields, and concurrent-save checks; associate field errors with their
+  labels and configuration sections
+- Keep credential login, refresh, mutation, and confirmation results bound to the active connection and credential
+  identity
 - Display subscription, native quota, and plugin quota states without presenting unavailable usage as a measured balance
-- Display owned Codex reset credits and allow confirmation when the applicable count is zero; recheck the owned balance and snapshot freshness before submitting
+- Display owned Codex reset credits and allow confirmation when the applicable count is zero; recheck the owned balance
+  and snapshot freshness before submitting
 - Preserve plugin OAuth and resource state across connection changes
 - Preserve log cursors, reading position, filtering, pagination, and fullscreen state across updates
 
 ### Compatibility
 
-The minimum backend version is `8.0.23-aug.1`; older versions produce a dismissible compatibility warning without blocking login or disabling the panel
+The minimum backend version is `8.0.23-aug.1`; older versions produce a dismissible compatibility warning without
+blocking login or disabling the panel
 
 Model availability and image-generation access depend on the connected backend, provider, and account
 
@@ -224,15 +343,21 @@ Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/comp
 
 ### What's Changed
 
-- feat (config): Preserve visual YAML edits and unknown fields through merges and concurrent revisions; add typed Provider settings, credential overrides and configuration navigation
-- feat (credentials): Add Devin OAuth and quota views, manual credential refresh and account inspection; keep refresh separate from active quota reset
-- fix (oauth): Bind login attempts to their current owner and cancel stale polling after account, source or session changes
-- fix (ui): Keep log previews, downloads and notifications scoped to the active request; refine navigation, accessibility and shared messages across four locales
-- feat (models): Read Dashboard and System inventory from current runtime data, display model capabilities and prices, and recognize sync dirty builds in version history
+- feat (config): Preserve visual YAML edits and unknown fields through merges and concurrent revisions; add typed
+  Provider settings, credential overrides and configuration navigation
+- feat (credentials): Add Devin OAuth and quota views, manual credential refresh and account inspection; keep refresh
+  separate from active quota reset
+- fix (oauth): Bind login attempts to their current owner and cancel stale polling after account, source or session
+  changes
+- fix (ui): Keep log previews, downloads and notifications scoped to the active request; refine navigation,
+  accessibility and shared messages across four locales
+- feat (models): Read Dashboard and System inventory from current runtime data, display model capabilities and prices,
+  and recognize sync dirty builds in version history
 
 ### Compatibility
 
-- This panel requires CLIProxyAPI v7.3.2-aug.1 or newer for the credential refresh endpoint; upgrade the server before installing this panel
+- This panel requires CLIProxyAPI v7.3.2-aug.1 or newer for the credential refresh endpoint; upgrade the server before
+  installing this panel
 - The release asset remains the single-file `management.html`
 - Real paid Provider inference and active quota reset were not part of the local release checks
 
@@ -280,7 +405,8 @@ Full changelog: https://github.com/Pyrokine/Cli-Proxy-API-Management-Center/comp
 - fix (quota): Distinguish the general active-reset credit pool from credits applicable to the current credential, keep
   reset disabled when the applicable count is zero, and show every expiration in the effective user timezone without
   truncation
-- fix (usage): Show complete request IDs from the first through last character with left-aligned wrapping and keep request
+- fix (usage): Show complete request IDs from the first through last character with left-aligned wrapping and keep
+  request
   log actions below the identifier in narrow layouts
 - fix (errors): Format provider and Management API failures as readable structured messages instead of exposing raw
   nested response payloads

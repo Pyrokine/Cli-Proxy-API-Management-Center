@@ -7,7 +7,7 @@
 
 - 示例地址：https://remote.router-for.me/
 - Management API 基础路径：`/v0/management`
-- 最低兼容后端：CLIProxyAPI `v7.2.67-aug.2`
+- 最低兼容后端：CLIProxyAPI `v8.0.23-aug.1`
 
 本仓库只提供管理面板，不转发模型流量
 
@@ -16,6 +16,8 @@
 ### 使用 CLI Proxy API 管理的面板
 
 CLI Proxy API 在以下地址提供面板：
+
+<!--suppress HttpUrlsUsage -->
 
 ```text
 http://<host>:<api_port>/management.html
@@ -70,6 +72,8 @@ bun run build
 
 面板接受以下地址格式：
 
+<!--suppress HttpUrlsUsage -->
+
 ```text
 localhost:8317
 http://192.168.1.10:8317
@@ -96,6 +100,14 @@ remote-management:
 
 完整认证规则和服务端限制见 [Management API 文档](https://help.router-for.me/cn/management/api)
 
+## 退出与插件资源会话
+
+退出立即清除本地认证与页面缓存，并使用退出前的连接请求 `DELETE /v0/resource/plugins/session`，撤销当前浏览器的插件资源
+cookie 会话，其他浏览器的会话保持有效；同一主机的新登录等待既有撤销结束后继续，包括协议或端口变化的连接，等待和撤销共用 30
+秒期限，支持 Web Locks 的浏览器同时协调同源标签页
+
+撤销未返回 204 时显示原服务地址与失败原因，本地退出仍完成；旧后端缺少该接口时会显示失败提示，完整撤销需要后端提供该接口，静态管理密钥通过后端配置轮换撤销
+
 ## 功能
 
 - 仪表盘：连接状态、后端版本与构建时间、数量概览和模型可用性
@@ -108,20 +120,22 @@ remote-management:
 - 认证文件：上传、下载、删除、筛选和搜索凭据，查看支持的模型与近期请求分桶，维护 OAuth 排除模型和模型别名
 - OAuth：发起受支持的浏览器或设备码流程，轮询状态，按需提交回调 URL，并导入 iFlow Cookie
 - 配额管理：查看各提供商配额，通过后端任务刷新状态，显示后端返回的主动重置可用次数与过期时间
-- 使用统计：请求与 Token 图表、API/模型/凭证明细、RPM/TPM 时间窗、服务健康状态、当前目录价格、请求时不可变价格凭据和历史重算状态
+- 模型管理：维护价格、别名和启用状态，按模型与渠道提供标准速度、Fast 或 Ultrafast 选择
+- 使用统计：请求与 Token 图表、API/模型/凭证明细、RPM/TPM
+  时间窗、服务健康状态、当前目录价格、请求时不可变价格凭据和历史重算状态；请求明细展示申请与返回速度、实际转发地址和模型，以及上游自报模型与渠道
 - 配置文件：使用 YAML 高亮和搜索编辑、重载 `/config.yaml`
 - 日志：增量轮询、刷新间隔、筛选、原始日志、清空操作和请求错误日志下载
 - 系统信息：运行时模型、模型目录来源与刷新元数据、图片 artifact cache、plugin release、后端版本和发布历史
 
 ## 技术栈与工具链
 
-- React 19.3
-- 应用代码、测试、类型检查和构建使用 TypeScript native 7.0.2
-- TypeScript 6 compatibility package 只供 `typescript-eslint` 使用，在其支持的 compiler API 覆盖 TypeScript 7 后再移除
+- React 19.3.1
+- TypeScript native 7.0.2 检查应用代码、测试和 Vite 配置的类型
+- TypeScript 6 wrapper 供基于 AST 的测试和 `typescript-eslint` JavaScript 后端使用
 - Vite 8.3 与 `vite-plugin-singlefile`
-- Bun 1.4.0，作为包管理器和测试运行时
-- ESLint 10、`typescript-eslint` 8.70 和 Stylelint 17
-- Zustand、Axios、react-router-dom 7、Chart.js、CodeMirror 6、SCSS Modules 和 i18next
+- Bun 1.4.4，作为包管理器和测试运行时
+- ESLint 10、`typescript-eslint` 8.73 和 Stylelint 18
+- Zustand、Axios、React Router 8.5、Chart.js、CodeMirror 6、SCSS Modules 和 i18next
 
 根 TypeScript project 包含 `src` 与 `tests`，`vite.config.ts` 由 `tsconfig.node.json` 单独检查
 
@@ -143,14 +157,16 @@ remote-management:
 
 本地增强版本使用 `v<upstream>-aug.N`，基于新上游版本的首个本地版本从 `aug.1` 开始
 
-面板依据当前后端声明的能力，按同一个 attempt 和目标版本查询安装结果；旧后端通过本次有效安装响应提供 attempt ID，首次响应丢失时保留待确认状态
+面板依据当前后端声明的能力，按同一个 attempt 和目标版本查询安装结果；旧后端通过本次有效安装响应提供 attempt
+ID，首次响应丢失时保留待确认状态
 连续两分钟无法确认时显示“更新结果待确认”，重新查询只读取状态，不会再次安装
 同一连接关闭再打开版本历史会保留提交关联，期间返回的有效安装响应仍可继续跟踪，连接改变时清除关联；整页刷新后只读取服务端保存的结果，不重建此前的提交关联，成功后刷新服务端版本
 等待现有推理结束时显示对应进度，旧任务或其他连接的结果不作为本次成功证据
 发行说明中“无需迁移”等否定表述不作为不兼容变更，明确的迁移要求与警告仍保留
 
 Codex 卡片把订阅查询错误单独显示，保留已取得的额度和部分更新状态，凭证记录的订阅日期与实时查询日期分别标注来源
-v1.26.0-aug.5 的重置流程在打开确认框前核查当前次数，确认时再次只读核查，后端在消费前重新检查；当前至少持有一次有效机会才允许消费，适用次数为 0 不替代持有次数
+v1.26.0-aug.6 的重置流程在打开确认框前核查当前次数，确认时再次只读核查，后端在消费前重新检查；当前至少持有一次有效机会才允许消费，适用次数为
+0 不替代持有次数
 旧、未知或部分更新的配额快照可以启动只读核查，订阅查询失败不阻止该核查；过期或已消费的机会不作为有效次数，当前次数缺失、非法或冲突时停止消费，昨天查询成功不代替本次检查
 取消、更换凭证或连接、重复确认均不自动重发消费，只有确认重置成功后才将旧次数字段标为未知并重新查询；缺少原生只读核查能力的旧后端不能通过新面板进入消费确认
 
