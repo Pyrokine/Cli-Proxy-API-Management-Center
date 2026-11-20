@@ -163,29 +163,33 @@
 
 .modelMatrix {
     width: 100%;
-    min-width: 1120px;
+    min-width: 1280px;
     table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
 
     .modelTreeCol {
-        width: 32%;
+        width: 28%;
     }
 
     .enabledCol {
-        width: 8%;
+        width: 7%;
     }
 
     .requestableCol {
-        width: 10%;
+        width: 9%;
+    }
+
+    .speedCol {
+        width: 12%;
     }
 
     .aliasCol {
-        width: 15%;
+        width: 12%;
     }
 
     .priceCol {
-        width: 24%;
+        width: 21%;
     }
 
     .actionsCol {
@@ -248,6 +252,13 @@
     width: 100%;
     min-height: 42px;
     min-width: 0;
+}
+
+.speedControl {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 150px;
 }
 
 .groupRow {
@@ -389,6 +400,10 @@
     );
 }
 
+.countBadge {
+    font-weight: $font-weight-medium;
+}
+
 .requestableBadge {
     min-width: 48px;
 }
@@ -481,14 +496,6 @@
 .priceStatus {
     width: fit-content;
     justify-self: end;
-}
-
-.priceStatusComplete {
-    color: var(--success-color);
-}
-
-.priceStatusPartial {
-    color: var(--warning-text);
 }
 
 .priceStatusUnpriced {
@@ -613,6 +620,90 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: $spacing-sm;
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.speedRateEditor {
+    display: grid;
+    gap: $spacing-sm;
+
+    h3,
+    p {
+        margin: 0;
+    }
+
+    h3 {
+        font-size: $font-size-sm;
+        font-weight: $font-weight-semibold;
+    }
+
+    > button {
+        justify-self: start;
+    }
+}
+
+.speedRateRule {
+    display: grid;
+    min-width: 0;
+    gap: $spacing-sm;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+
+    legend,
+    summary {
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+    }
+
+    summary {
+        margin-bottom: $spacing-sm;
+        cursor: pointer;
+    }
+
+    > button {
+        justify-self: end;
+    }
+}
+
+.priceRulesDisclosure {
+    min-width: 0;
+    padding: $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+
+    > summary {
+        color: var(--text-primary);
+        font-size: $font-size-sm;
+        font-weight: $font-weight-medium;
+        cursor: pointer;
+
+        &:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 3px;
+        }
+    }
+
+    &[open] > summary {
+        margin-bottom: $spacing-sm;
+    }
+}
+
+.priceBucketChoices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $spacing-sm;
+
+    label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+        font-size: $font-size-sm;
+    }
 
     @include mobile {
         grid-template-columns: minmax(0, 1fr);

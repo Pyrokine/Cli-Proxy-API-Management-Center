@@ -4,6 +4,7 @@ import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
+import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {CostRecalculationCard} from '@/components/usage/CostRecalculationCard'
 import {
@@ -12,16 +13,27 @@ import {
     type ModelCatalogMeta,
     type ModelCatalogPatchRequest,
     type ModelCatalogPrice,
-    type ModelCatalogPriceStatus,
     type ModelCatalogResponse,
     type ModelCatalogRow,
+    type ModelCatalogSpeedRate,
     modelsApi,
 } from '@/services/api/models'
+import {REQUEST_SPEEDS} from '@/services/api/usage'
 import {useNotificationStore} from '@/stores'
 import {buildModelTree, getModelMetadata, modelLeaves, type ModelTreeNode} from '@/utils/modelTree'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {useNavigate} from 'react-router'
 import styles from './ModelManagementPage.module.scss'
+import {
+    parsePriceRules,
+    priceBoundary,
+    type PriceRulesDraft,
+    priceRulesSignature,
+    priceRulesToInputs,
+    withPriceRules,
+} from './modelPriceRules'
+import {ModelPriceRulesEditor} from './ModelPriceRulesEditor'
 
 type ModelRow = {
     id: string
@@ -34,6 +46,8 @@ type ModelRow = {
     enabled: boolean
     requestable: boolean
     notRequestableReason: string
+    speed: string
+    speedOptions: string[]
     aliases: string[]
     price: ModelCatalogPrice | null
     userCreated: boolean
@@ -74,6 +88,10 @@ type EditDraft = {
     cacheWrite: string
     cacheWrite5m: string
     cacheWrite1h: string
+    cacheWrite30m: string
+    cacheWrite12h: string
+    priceRules: PriceRulesDraft
+    speedRates: SpeedRateDraft[]
     originalPrice: ModelCatalogPrice | null
     enabled: boolean
     originalEnabled: boolean
@@ -95,7 +113,28 @@ type AddDraft = {
     cacheWrite: string
     cacheWrite5m: string
     cacheWrite1h: string
+    cacheWrite30m: string
+    cacheWrite12h: string
+    priceRules: PriceRulesDraft
+    speedRates: SpeedRateDraft[]
 }
+
+type SpeedRateBucket = keyof NonNullable<ModelCatalogSpeedRate['multipliers']>
+type SpeedRateDraft = Omit<ModelCatalogSpeedRate, 'multiplier' | 'multipliers'> & {
+    multiplier: string
+    multipliers: Partial<Record<SpeedRateBucket, string>>
+}
+
+const SPEED_RATE_BUCKETS = [
+    ['prompt', 'prompt_price'],
+    ['completion', 'completion_price'],
+    ['cache_read', 'cache_read_price'],
+    ['cache_write', 'cache_write_price'],
+    ['cache_write_5m', 'cache_write_5m_price'],
+    ['cache_write_1h', 'cache_write_1h_price'],
+    ['cache_write_30m', 'cache_write_30m_price'],
+    ['cache_write_12h', 'cache_write_12h_price'],
+] as const
 
 type OptionalPriceParseResult =
     | { ok: true; price: ModelCatalogPrice | null }
@@ -155,6 +194,8 @@ function priceToInputs(price: ModelCatalogPrice | null) {
         cacheWrite: priceInput(price?.cache_write),
         cacheWrite5m: priceInput(price?.cache_write_5m),
         cacheWrite1h: priceInput(price?.cache_write_1h),
+        cacheWrite30m: priceInput(price?.cache_write_30m),
+        cacheWrite12h: priceInput(price?.cache_write_12h),
     }
 }
 
@@ -166,6 +207,8 @@ function parseOptionalPrice(
     cacheWrite5m: string,
     cacheWrite1h: string,
     original: ModelCatalogPrice | null = null,
+    cacheWrite30m: string              = priceInput(original?.cache_write_30m),
+    cacheWrite12h: string              = priceInput(original?.cache_write_12h),
 ): OptionalPriceParseResult {
     const inputs         = {
         prompt: prompt.trim(),
@@ -174,6 +217,8 @@ function parseOptionalPrice(
         cacheWrite: cacheWrite.trim(),
         cacheWrite5m: cacheWrite5m.trim(),
         cacheWrite1h: cacheWrite1h.trim(),
+        cacheWrite30m: cacheWrite30m.trim(),
+        cacheWrite12h: cacheWrite12h.trim(),
     }
     const originalInputs = priceToInputs(original)
     if (original && Object.entries(inputs).every(([key, value]) =>
@@ -184,19 +229,23 @@ function parseOptionalPrice(
         return { ok: true, price: null }
     }
 
-    const promptValue       = Number(inputs.prompt || 0)
-    const completionValue   = Number(inputs.completion || 0)
-    const cacheReadValue    = Number(inputs.cacheRead || inputs.prompt || 0)
-    const cacheWriteValue   = inputs.cacheWrite ? Number(inputs.cacheWrite) : undefined
-    const cacheWrite5mValue = inputs.cacheWrite5m ? Number(inputs.cacheWrite5m) : undefined
-    const cacheWrite1hValue = inputs.cacheWrite1h ? Number(inputs.cacheWrite1h) : undefined
-    const values            = [
+    const promptValue        = inputs.prompt ? Number(inputs.prompt) : undefined
+    const completionValue    = inputs.completion ? Number(inputs.completion) : undefined
+    const cacheReadValue     = inputs.cacheRead ? Number(inputs.cacheRead) : undefined
+    const cacheWriteValue    = inputs.cacheWrite ? Number(inputs.cacheWrite) : undefined
+    const cacheWrite5mValue  = inputs.cacheWrite5m ? Number(inputs.cacheWrite5m) : undefined
+    const cacheWrite1hValue  = inputs.cacheWrite1h ? Number(inputs.cacheWrite1h) : undefined
+    const cacheWrite30mValue = inputs.cacheWrite30m ? Number(inputs.cacheWrite30m) : undefined
+    const cacheWrite12hValue = inputs.cacheWrite12h ? Number(inputs.cacheWrite12h) : undefined
+    const values             = [
         promptValue,
         completionValue,
         cacheReadValue,
         cacheWriteValue,
         cacheWrite5mValue,
         cacheWrite1hValue,
+        cacheWrite30mValue,
+        cacheWrite12hValue,
     ].filter((value): value is number => value !== undefined)
     if (!values.every((value) => Number.isFinite(value) && value >= 0)) {
         return { ok: false }
@@ -210,22 +259,185 @@ function parseOptionalPrice(
     delete metadata.cache_write
     delete metadata.cache_write_5m
     delete metadata.cache_write_1h
+    delete metadata.cache_write_30m
+    delete metadata.cache_write_12h
     return {
         ok: true,
         price: {
             ...metadata,
-            prompt: promptValue,
-            completion: completionValue,
-            cache: cacheReadValue,
-            cache_read: cacheReadValue,
+            ...(promptValue === undefined ? {} : { prompt: promptValue }),
+            ...(completionValue === undefined ? {} : { completion: completionValue }),
+            ...(cacheReadValue === undefined ? {} : { cache: cacheReadValue, cache_read: cacheReadValue }),
             ...(cacheWriteValue === undefined ? {} : { cache_write: cacheWriteValue }),
             ...(cacheWrite5mValue === undefined ? {} : { cache_write_5m: cacheWrite5mValue }),
             ...(cacheWrite1hValue === undefined ? {} : { cache_write_1h: cacheWrite1hValue }),
+            ...(cacheWrite30mValue === undefined ? {} : { cache_write_30m: cacheWrite30mValue }),
+            ...(cacheWrite12hValue === undefined ? {} : { cache_write_12h: cacheWrite12hValue }),
             status: metadata.status ?? 'complete',
             auto_apply: metadata.auto_apply ?? true,
             currency: metadata.currency ?? 'USD',
         },
     }
+}
+
+function speedRatesToInputs(rules: ModelCatalogSpeedRate[] = []): SpeedRateDraft[] {
+    return rules.map((rule) => ({
+        ...rule,
+        multiplier: String(rule.multiplier),
+        multipliers: Object.fromEntries(Object.entries(rule.multipliers ?? {}).map(([key, value]) => [
+            key,
+            String(value),
+        ])),
+    }))
+}
+
+function speedRatesSignature(rules: ModelCatalogSpeedRate[] = []): string {
+    const boundary = (value: string | undefined, until: boolean) => {
+        const text   = value?.trim() || ''
+        const parsed = priceBoundary(text, until)
+        return parsed === null ? `invalid:${text}` : parsed?.toString() ?? ''
+    }
+    return JSON.stringify(rules.map((rule) => JSON.stringify([
+                                                                 rule.speed.trim().toLowerCase(),
+                                                                 rule.provider?.trim() || '',
+                                                                 rule.multiplier,
+                                                                 SPEED_RATE_BUCKETS.map(([bucket]) => rule.multipliers?.[bucket] ??
+                                                                                                      null),
+                                                                 boundary(rule.effective_from, false),
+                                                                 boundary(rule.effective_until, true),
+                                                                 rule.source?.trim() || '',
+                                                             ])).sort())
+}
+
+function parseSpeedRates(rules: SpeedRateDraft[]): ModelCatalogSpeedRate[] | null {
+    const result: ModelCatalogSpeedRate[] = []
+    for (const rule of rules) {
+        const multiplier     = Number(rule.multiplier)
+        const effectiveFrom  = rule.effective_from?.trim() || ''
+        const effectiveUntil = rule.effective_until?.trim() || ''
+        const from           = priceBoundary(effectiveFrom, false)
+        const until          = priceBoundary(effectiveUntil, true)
+        if (!REQUEST_SPEEDS.some((speed) => speed !== 'unknown' && speed === rule.speed) ||
+            !rule.multiplier.trim() || !Number.isFinite(multiplier) || multiplier <= 0 ||
+            from === null || until === null || (from !== undefined && until !== undefined && from >= until)) {
+            return null
+        }
+        const multipliers: NonNullable<ModelCatalogSpeedRate['multipliers']> = {}
+        for (const [bucket] of SPEED_RATE_BUCKETS) {
+            const input = rule.multipliers[bucket]?.trim()
+            if (input) {
+                const value = Number(input)
+                if (!Number.isFinite(value) || value < 0) {
+                    return null
+                }
+                multipliers[bucket] = value
+            }
+        }
+        result.push({
+                        ...rule,
+                        multiplier,
+                        provider: rule.provider?.trim() || undefined,
+                        multipliers: Object.keys(multipliers).length > 0 ? multipliers : undefined,
+                        effective_from: effectiveFrom || undefined,
+                        effective_until: effectiveUntil || undefined,
+                        source: rule.source?.trim() || undefined,
+                    })
+    }
+    return result
+}
+
+function SpeedRateEditor({ rules, onChange, disabled, t }: {
+    rules: SpeedRateDraft[]
+    onChange: (rules: SpeedRateDraft[]) => void
+    disabled: boolean
+    t: ReturnType<typeof useTranslation>['t']
+}) {
+    const update = (index: number, patch: Partial<SpeedRateDraft>) => {
+        onChange(rules.map((rule, position) => position === index ? { ...rule, ...patch } : rule))
+    }
+    return (
+        <section className={styles.speedRateEditor}>
+            <h3>{t('model_management.speed_rates')}</h3>
+            <p className={styles.muted}>{t('model_management.speed_rates_hint')}</p>
+            {rules.map((rule, index) => (
+                <fieldset className={styles.speedRateRule} key={index} disabled={disabled}>
+                    <legend>{t('model_management.speed_rate_rule', { number: index + 1 })}</legend>
+                    <div className={styles.formGrid}>
+                        <div>
+                            <span className={styles.muted}>{t('model_management.speed_rate_speed')}</span>
+                            <Select
+                                value={rule.speed}
+                                options={REQUEST_SPEEDS.filter((speed) => speed !== 'unknown').map((speed) => ({
+                                    value: speed, label: t(`usage_stats.request_events_speed_${speed}`),
+                                }))}
+                                ariaLabel={t('model_management.speed_rate_speed')}
+                                disabled={disabled}
+                                onChange={(speed) => update(index, { speed: speed as ModelCatalogSpeedRate['speed'] })}
+                            />
+                        </div>
+                        <Input
+                            label={t('model_management.speed_rate_multiplier')}
+                            value={rule.multiplier}
+                            type='number'
+                            min='0'
+                            step='any'
+                            onChange={(event) => update(index, { multiplier: event.target.value })}
+                        />
+                        <Input
+                            label={t('model_management.speed_rate_provider')}
+                            value={rule.provider ?? ''}
+                            placeholder={t('model_management.speed_rate_provider_placeholder')}
+                            onChange={(event) => update(index, { provider: event.target.value })}
+                        />
+                        <Input
+                            label={t('model_management.speed_rate_from')}
+                            value={rule.effective_from ?? ''}
+                            placeholder={t('model_management.speed_rate_date_placeholder')}
+                            onChange={(event) => update(index, { effective_from: event.target.value })}
+                        />
+                        <Input
+                            label={t('model_management.speed_rate_until')}
+                            value={rule.effective_until ?? ''}
+                            placeholder={t('model_management.speed_rate_date_placeholder')}
+                            onChange={(event) => update(index, { effective_until: event.target.value })}
+                        />
+                        <Input
+                            label={t('model_management.speed_rate_source')}
+                            value={rule.source ?? ''}
+                            onChange={(event) => update(index, { source: event.target.value })}
+                        />
+                    </div>
+                    <details>
+                        <summary>{t('model_management.speed_rate_bucket_multipliers')}</summary>
+                        <div className={styles.formGrid}>
+                            {SPEED_RATE_BUCKETS.map(([bucket, label]) => (
+                                <Input
+                                    key={bucket}
+                                    label={t(`model_management.${label}`)}
+                                    value={rule.multipliers[bucket] ?? ''}
+                                    type='number'
+                                    min='0'
+                                    step='any'
+                                    placeholder={t('model_management.speed_rate_inherit_multiplier')}
+                                    onChange={(event) => update(index, {
+                                        multipliers: { ...rule.multipliers, [bucket]: event.target.value },
+                                    })}
+                                />
+                            ))}
+                        </div>
+                    </details>
+                    <Button variant='ghost' size='sm' disabled={disabled}
+                            onClick={() => onChange(rules.filter((_, position) => position !== index))}>
+                        {t('model_management.speed_rate_remove')}
+                    </Button>
+                </fieldset>
+            ))}
+            <Button variant='secondary' size='sm' disabled={disabled}
+                    onClick={() => onChange([...rules, { speed: 'fast', multiplier: '', multipliers: {} }])}>
+                {t('model_management.speed_rate_add')}
+            </Button>
+        </section>
+    )
 }
 
 function parseAliases(value: string): string[] {
@@ -240,17 +452,6 @@ function catalogGroupLabel(row: ModelCatalogRow): string {
     return String(row.group || '').trim()
 }
 
-function effectivePriceStatus(price: ModelCatalogPrice): ModelCatalogPriceStatus {
-    return price.status === 'partial' || price.status === 'unpriced' ? price.status : 'complete'
-}
-
-function priceStatusLabel(
-    status: ModelCatalogPriceStatus,
-    t: ReturnType<typeof useTranslation>['t'],
-): string {
-    return t(`model_management.price_status_${status}`)
-}
-
 function priceSourceLabel(price: ModelCatalogPrice, t: ReturnType<typeof useTranslation>['t']): string {
     if (!price.source) {
         return ''
@@ -263,8 +464,10 @@ function priceSourceLabel(price: ModelCatalogPrice, t: ReturnType<typeof useTran
 }
 
 function priceTooltip(price: ModelCatalogPrice, t: ReturnType<typeof useTranslation>['t']): string {
-    const status = effectivePriceStatus(price)
-    const parts  = [priceStatusLabel(status, t)]
+    const parts: string[] = []
+    if (price.status === 'unpriced') {
+        parts.push(t('model_management.price_status_unpriced'))
+    }
     if (typeof price.prompt === 'number') {
         parts.push(`${t('model_management.prompt_price')}: $${price.prompt.toFixed(4)}`)
     }
@@ -283,6 +486,26 @@ function priceTooltip(price: ModelCatalogPrice, t: ReturnType<typeof useTranslat
     }
     if (typeof price.cache_write_1h === 'number') {
         parts.push(`${t('model_management.cache_write_1h_price')}: $${price.cache_write_1h.toFixed(4)}`)
+    }
+    for (const [bucket, key, fallback] of [
+        ['cache_write_30m', 'cache_write_30m_price', '30 分钟缓存写入'],
+        ['cache_write_12h', 'cache_write_12h_price', '12 小时缓存写入'],
+    ] as const) {
+        const value = price[bucket]
+        if (typeof value === 'number') {
+            parts.push(`${t(`model_management.${key}`, { defaultValue: fallback })}: $${value.toFixed(4)}`)
+        }
+    }
+    for (const rule of price.speed_rates ?? []) {
+        parts.push([
+                       t(`usage_stats.request_events_speed_${rule.speed}`),
+                       `×${rule.multiplier}`,
+                       rule.provider || t('model_management.speed_rate_provider_all'),
+                       [rule.effective_from, rule.effective_until].filter(Boolean).join(' → '),
+                       ...Object.entries(rule.multipliers ?? {})
+                                .map(([bucket, multiplier]) => `${bucket} ×${multiplier}`),
+                       rule.source,
+                   ].filter(Boolean).join(' · '))
     }
     if (price.region) {
         parts.push(`${t('model_management.price_region')}: ${price.region}`)
@@ -478,6 +701,7 @@ function secondaryActionForChange(change: ModelCatalogDefaultUpdateChange): Mode
 }
 
 export function ModelManagementPage() {
+    const navigate                               = useNavigate()
     const { t }                                  = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
 
@@ -575,6 +799,8 @@ export function ModelManagementPage() {
             enabled: catalogRow.enabled,
             requestable,
             notRequestableReason,
+            speed: catalogRow.speed || 'inherit',
+            speedOptions: catalogRow.speed_options ?? [],
             aliases: uniqueSorted(catalogRow.aliases ?? []),
             price: catalogRow.price ?? null,
             userCreated: catalogRow.user_created,
@@ -652,6 +878,20 @@ export function ModelManagementPage() {
         [applyCatalogResponse, showNotification, t],
     )
 
+    const handleSetModelSpeed = useCallback(async (row: ModelRow, speed: string) => {
+        setSavingModel(row.model)
+        try {
+            const catalog = await modelsApi.patchModelCatalogModel({ name: row.model, speed })
+            applyCatalogResponse(catalog)
+            showNotification(t('model_management.speed_saved'), 'success')
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : ''
+            showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
+        } finally {
+            setSavingModel(null)
+        }
+    }, [applyCatalogResponse, showNotification, t])
+
     const openEditModal = useCallback((row: ModelRow) => {
         const priceInputs = priceToInputs(row.price)
         setEditDraft({
@@ -664,6 +904,8 @@ export function ModelManagementPage() {
                          aliasesText: aliasesToText(row.aliases),
                          ...priceInputs,
                          originalPrice: row.price,
+                         speedRates: speedRatesToInputs(row.price?.speed_rates),
+                         priceRules: priceRulesToInputs(row.price, !row.price),
                          enabled: row.enabled,
                          originalEnabled: row.enabled,
                          userCreated: row.userCreated,
@@ -684,6 +926,8 @@ export function ModelManagementPage() {
             editDraft.cacheWrite5m,
             editDraft.cacheWrite1h,
             editDraft.originalPrice,
+            editDraft.cacheWrite30m,
+            editDraft.cacheWrite12h,
         )
         if (!parsedPrice.ok) {
             showNotification(
@@ -692,6 +936,24 @@ export function ModelManagementPage() {
             )
             return
         }
+        const speedRates = parseSpeedRates(editDraft.speedRates)
+        if (!speedRates) {
+            showNotification(t('model_management.speed_rates_invalid'), 'error')
+            return
+        }
+        const parsedRules = parsePriceRules(editDraft.priceRules)
+        if (!parsedRules.ok) {
+            showNotification(t(`model_management.${parsedRules.section}_invalid`), 'error')
+            return
+        }
+        const price = withPriceRules(parsedPrice.price, parsedRules.price, editDraft.originalPrice)
+        if (!price && speedRates.length > 0) {
+            showNotification(t('model_management.speed_rates_require_price'), 'error')
+            return
+        }
+        const priceRulesChanged = priceRulesSignature(price) !== priceRulesSignature(editDraft.originalPrice)
+        const speedRatesChanged = speedRatesSignature(speedRates) !==
+                                  speedRatesSignature(editDraft.originalPrice?.speed_rates)
         setSavingModel(editDraft.originalModel)
         try {
             const request: ModelCatalogPatchRequest = {
@@ -701,12 +963,23 @@ export function ModelManagementPage() {
                 group: editDraft.group.trim(),
                 display_name: editDraft.displayName.trim(),
                 aliases: parseAliases(editDraft.aliasesText),
-                ...(parsedPrice.price ? { price: parsedPrice.price } : { clear_price: true }),
+                ...(price ? { price: { ...price, speed_rates: speedRates } } : { clear_price: true }),
             }
             if (editDraft.enabled !== editDraft.originalEnabled) {
                 request.enabled = editDraft.enabled
             }
-            const catalog = await modelsApi.patchModelCatalogModel(request)
+            const catalog    = await modelsApi.patchModelCatalogModel(request)
+            const savedPrice = catalog.models.find((row) => modelKey(row.name) ===
+                                                            modelKey(editDraft.originalModel))?.price
+            if (speedRatesChanged && speedRatesSignature(savedPrice?.speed_rates) !== speedRatesSignature(speedRates)) {
+                throw new Error(t('model_management.speed_rates_not_saved'))
+            }
+            if (priceRulesChanged && priceRulesSignature(savedPrice) !== priceRulesSignature(price)) {
+                throw new Error(t(
+                    'model_management.price_rules_not_saved',
+                    { defaultValue: '服务器返回的价格规则与本次保存内容不一致，请刷新后核对' },
+                ))
+            }
             applyCatalogResponse(catalog)
             setEditDraft(null)
             showNotification(t('model_management.save_success', { defaultValue: '模型配置已保存' }), 'success')
@@ -741,6 +1014,9 @@ export function ModelManagementPage() {
             addDraft.cacheWrite,
             addDraft.cacheWrite5m,
             addDraft.cacheWrite1h,
+            null,
+            addDraft.cacheWrite30m,
+            addDraft.cacheWrite12h,
         )
         if (!parsedPrice.ok) {
             showNotification(
@@ -749,20 +1025,54 @@ export function ModelManagementPage() {
             )
             return
         }
+        const speedRates = parseSpeedRates(addDraft.speedRates)
+        if (!speedRates) {
+            showNotification(t('model_management.speed_rates_invalid'), 'error')
+            return
+        }
+        const parsedRules = parsePriceRules(addDraft.priceRules)
+        if (!parsedRules.ok) {
+            showNotification(t(`model_management.${parsedRules.section}_invalid`), 'error')
+            return
+        }
+        const price = withPriceRules(parsedPrice.price, parsedRules.price)
+        if (!price && speedRates.length > 0) {
+            showNotification(t('model_management.speed_rates_require_price'), 'error')
+            return
+        }
         setSavingModel(model)
         try {
-            const catalog = await modelsApi.patchModelCatalogModel({
-                                                                       name: model,
-                                                                       provider: addDraft.provider.trim(),
-                                                                       channel: addDraft.channel.trim().toLowerCase(),
-                                                                       group: addDraft.group.trim(),
-                                                                       display_name: addDraft.displayName.trim(),
-                                                                       enabled: false,
-                                                                       aliases: parseAliases(addDraft.aliasesText),
-                                                                       ...(parsedPrice.price ?
-                                                                           { price: parsedPrice.price } :
-                                                                           {}),
-                                                                   })
+            const catalog    = await modelsApi.patchModelCatalogModel({
+                                                                          name: model,
+                                                                          provider: addDraft.provider.trim(),
+                                                                          channel: addDraft.channel.trim()
+                                                                                           .toLowerCase(),
+                                                                          group: addDraft.group.trim(),
+                                                                          display_name: addDraft.displayName.trim(),
+                                                                          enabled: false,
+                                                                          aliases: parseAliases(addDraft.aliasesText),
+                                                                          ...(price ?
+                                                                              {
+                                                                                  price: {
+                                                                                      ...price,
+                                                                                      speed_rates: speedRates,
+                                                                                  },
+                                                                              } :
+                                                                              {}),
+                                                                      })
+            const savedPrice = catalog.models.find((row) => modelKey(row.name) === modelKey(model))?.price
+            if (speedRates.length >
+                0 &&
+                speedRatesSignature(savedPrice?.speed_rates) !==
+                speedRatesSignature(speedRates)) {
+                throw new Error(t('model_management.speed_rates_not_saved'))
+            }
+            if (priceRulesSignature(price) !== priceRulesSignature(savedPrice)) {
+                throw new Error(t(
+                    'model_management.price_rules_not_saved',
+                    { defaultValue: '服务器返回的价格规则与本次保存内容不一致，请刷新后核对' },
+                ))
+            }
             applyCatalogResponse(catalog)
             setAddDraft(null)
             showNotification(t('model_management.add_success', { defaultValue: '模型已添加' }), 'success')
@@ -907,6 +1217,12 @@ export function ModelManagementPage() {
             cell: () => null,
         },
         {
+            key: 'speed',
+            header: t('model_management.speed'),
+            headerClassName: styles.centerCell,
+            cell: () => null,
+        },
+        {
             key: 'alias',
             header: t('model_management.alias', { defaultValue: '别名' }),
             headerClassName: styles.centerCell,
@@ -989,7 +1305,6 @@ export function ModelManagementPage() {
                                         )
                                         :
                                         ''
-            const priceStatus         = row.price ? effectivePriceStatus(row.price) : null
             const cacheRead           = row.price?.cache_read ?? row.price?.cache
             const priceSource         = row.price ? priceSourceLabel(row.price, t) : ''
             const priceDetails        = row.price ? priceTooltip(row.price, t) : ''
@@ -1049,6 +1364,27 @@ export function ModelManagementPage() {
                     </td>
                     <td className={styles.centerCell}>
                         <div className={styles.centerContent}>
+                            {row.speedOptions.length > 0 ? (
+                                <div className={styles.speedControl} title={t('model_management.speed_hint')}>
+                                    <Select
+                                        value={row.speed}
+                                        options={row.speedOptions.map((value) => ({
+                                            value,
+                                            label: t(`model_management.speed_${value}`),
+                                        }))}
+                                        ariaLabel={`${row.model} ${t('model_management.speed')}`}
+                                        disabled={Boolean(savingModel)}
+                                        onChange={(value) => void handleSetModelSpeed(row, value)}
+                                    />
+                                    <span className={styles.muted}>
+                                        {row.channel}{row.speed === 'ultrafast' ? ' · Responses' : ''}
+                                    </span>
+                                </div>
+                            ) : <span className={styles.muted}>{t('model_management.speed_unavailable')}</span>}
+                        </div>
+                    </td>
+                    <td className={styles.centerCell}>
+                        <div className={styles.centerContent}>
                             {firstAlias ? (
                                 <div className={styles.aliasCell} title={row.aliases.join('\n')}>
                                     <span>{firstAlias}</span>
@@ -1061,17 +1397,13 @@ export function ModelManagementPage() {
                     </td>
                     <td className={styles.centerCell}>
                         <div className={styles.centerContent}>
-                            {row.price && priceStatus ? (
+                            {row.price ? (
                                 <div className={styles.priceCell} title={priceDetails}>
-                                    <span className={`${styles.priceStatus} ${
-                                        priceStatus === 'complete' ?
-                                        styles.priceStatusComplete :
-                                        priceStatus === 'partial' ?
-                                        styles.priceStatusPartial :
-                                        styles.priceStatusUnpriced
-                                    }`}>
-                                        {priceStatusLabel(priceStatus, t)}
-                                    </span>
+                                    {row.price.status === 'unpriced' && (
+                                        <span className={`${styles.priceStatus} ${styles.priceStatusUnpriced}`}>
+                                            {t('model_management.price_status_unpriced')}
+                                        </span>
+                                    )}
                                     {typeof row.price.prompt === 'number' ? (
                                         <span className={styles.priceItem}>
                                             <span>
@@ -1121,6 +1453,30 @@ export function ModelManagementPage() {
                                             <strong>${row.price.cache_write_1h.toFixed(4)}</strong>
                                         </span>
                                     ) : null}
+                                    {(['cache_write_30m', 'cache_write_12h'] as const).map((bucket) => {
+                                        const value = row.price?.[bucket]
+                                        return typeof value === 'number' ? (
+                                            <span className={styles.priceItem} key={bucket}>
+                                                <span>{t(`model_management.${bucket}_price_short`)}</span>
+                                                <strong>${value.toFixed(4)}</strong>
+                                            </span>
+                                        ) : null
+                                    })}
+                                    {(row.price.conditional_rates?.length ||
+                                      row.price.modality_rates?.length ||
+                                      row.price.charge_rates?.length) ? (
+                                         <span className={styles.muted}>{t('model_management.price_rules_count', {
+                                             defaultValue: '{{count}} 条条件或附加费用规则',
+                                             count: (row.price.conditional_rates?.length ?? 0) +
+                                                    (row.price.modality_rates?.length ?? 0) +
+                                                    (row.price.charge_rates?.length ?? 0),
+                                         })}</span>
+                                     ) : null}
+                                    {row.price.speed_rates && row.price.speed_rates.length > 0 && (
+                                        <span className={styles.muted}>{t('model_management.speed_rates_count', {
+                                            count: row.price.speed_rates.length,
+                                        })}</span>
+                                    )}
                                     {row.price.source ? (
                                         <a
                                             className={styles.priceSource}
@@ -1162,6 +1518,7 @@ export function ModelManagementPage() {
         },
         [
             deleteModel,
+            handleSetModelSpeed,
             effectiveCollapsedRows,
             handleSetModelEnabled,
             isTreeSearchActive,
@@ -1183,6 +1540,8 @@ export function ModelManagementPage() {
                     <p>{t('model_management.subtitle')}</p>
                 </div>
                 <div className={styles.headerActions}>
+                    <Button variant='secondary' onClick={() => void navigate('/models/oauth-aliases')}>{t(
+                        'config_management.oauth_aliases_title')}</Button>
                     <Button variant='secondary' onClick={() => void loadAll()} loading={loading}>
                         {t('common.refresh')}
                     </Button>
@@ -1202,6 +1561,10 @@ export function ModelManagementPage() {
                                                                              cacheWrite: '',
                                                                              cacheWrite5m: '',
                                                                              cacheWrite1h: '',
+                                                                             cacheWrite30m: '',
+                                                                             cacheWrite12h: '',
+                                                                             priceRules: priceRulesToInputs(null, true),
+                                                                             speedRates: [],
                                                                          })}>
                         {t('model_management.add_model')}
                     </Button>
@@ -1284,6 +1647,8 @@ export function ModelManagementPage() {
                   title={t('model_management.model_table_title', { defaultValue: '模型与价格记录' })}>
                 <Sheet
                     rows={visibleTreeTableRows}
+                    pagination
+                    defaultPageSize={25}
                     columns={modelColumns}
                     rowKey={(item) => item.key}
                     status={treeStatus}
@@ -1309,7 +1674,7 @@ export function ModelManagementPage() {
                                 {t('model_management.source_help', {
                                     defaultValue:
                                         '已保存的模型、价格、别名和启用状态来自后端 models.json；' +
-                                        '运行时发现结果会追加尚未保存的模型。可请求由启用状态、' +
+                                        '运行时发现结果会追加尚未保存的模型，可请求由启用状态、' +
                                         '当前服务支持情况和 API key / 凭证访问规则共同决定',
                                 })}
                             </span>
@@ -1333,6 +1698,7 @@ export function ModelManagementPage() {
                             <col className={styles.modelTreeCol} />
                             <col className={styles.enabledCol} />
                             <col className={styles.requestableCol} />
+                            <col className={styles.speedCol} />
                             <col className={styles.aliasCol} />
                             <col className={styles.priceCol} />
                             <col className={styles.actionsCol} />
@@ -1460,7 +1826,41 @@ export function ModelManagementPage() {
                                     { ...prev, cacheWrite1h: event.target.value } :
                                                                             prev)}
                             />
+                            <Input
+                                label={`${t(
+                                    'model_management.cache_write_30m_price',
+                                    { defaultValue: '30 分钟缓存写入' },
+                                )} ($/1M)`}
+                                value={editDraft.cacheWrite30m}
+                                type='number' min='0' step='any'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setEditDraft((prev) => prev ?
+                                    { ...prev, cacheWrite30m: event.target.value } : prev)}
+                            />
+                            <Input
+                                label={`${t(
+                                    'model_management.cache_write_12h_price',
+                                    { defaultValue: '12 小时缓存写入' },
+                                )} ($/1M)`}
+                                value={editDraft.cacheWrite12h}
+                                type='number' min='0' step='any'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setEditDraft((prev) => prev ?
+                                    { ...prev, cacheWrite12h: event.target.value } : prev)}
+                            />
                         </div>
+                        <ModelPriceRulesEditor
+                            value={editDraft.priceRules}
+                            onChange={(priceRules) => setEditDraft((prev) => prev ? { ...prev, priceRules } : prev)}
+                            disabled={Boolean(savingModel)}
+                            t={t}
+                        />
+                        <SpeedRateEditor
+                            rules={editDraft.speedRates}
+                            onChange={(speedRates) => setEditDraft((prev) => prev ? { ...prev, speedRates } : prev)}
+                            disabled={Boolean(savingModel)}
+                            t={t}
+                        />
                         <label className={styles.textareaField}>
                             <span>{t('model_management.alias', { defaultValue: '别名' })}</span>
                             <textarea
@@ -1628,7 +2028,41 @@ export function ModelManagementPage() {
                                     { ...prev, cacheWrite1h: event.target.value } :
                                                                            prev)}
                             />
+                            <Input
+                                label={`${t(
+                                    'model_management.cache_write_30m_price',
+                                    { defaultValue: '30 分钟缓存写入' },
+                                )} ($/1M)`}
+                                value={addDraft.cacheWrite30m}
+                                type='number' min='0' step='any'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setAddDraft((prev) => prev ?
+                                    { ...prev, cacheWrite30m: event.target.value } : prev)}
+                            />
+                            <Input
+                                label={`${t(
+                                    'model_management.cache_write_12h_price',
+                                    { defaultValue: '12 小时缓存写入' },
+                                )} ($/1M)`}
+                                value={addDraft.cacheWrite12h}
+                                type='number' min='0' step='any'
+                                placeholder={t('model_management.price_empty_placeholder')}
+                                onChange={(event) => setAddDraft((prev) => prev ?
+                                    { ...prev, cacheWrite12h: event.target.value } : prev)}
+                            />
                         </div>
+                        <ModelPriceRulesEditor
+                            value={addDraft.priceRules}
+                            onChange={(priceRules) => setAddDraft((prev) => prev ? { ...prev, priceRules } : prev)}
+                            disabled={Boolean(savingModel)}
+                            t={t}
+                        />
+                        <SpeedRateEditor
+                            rules={addDraft.speedRates}
+                            onChange={(speedRates) => setAddDraft((prev) => prev ? { ...prev, speedRates } : prev)}
+                            disabled={Boolean(savingModel)}
+                            t={t}
+                        />
                         <label className={styles.textareaField}>
                             <span>{t('model_management.alias', { defaultValue: '别名' })}</span>
                             <textarea

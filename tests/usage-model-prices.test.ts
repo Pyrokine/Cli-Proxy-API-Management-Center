@@ -36,7 +36,7 @@ describe('usage model price loading', () => {
         // noinspection JSUnresolvedReference,JSXUnresolvedComponent
         expectSourceToContain(modelManagementSource, '<CostRecalculationCard refreshKey={recalculationRefresh} />');
         expect(modelManagementSource).toContain('setRecalculationRefresh((value) => value + 1)');
-        expect(modelManagementSource).toContain('const catalog = await modelsApi.patchModelCatalogModel(request)');
+        expectSourceToContain(modelManagementSource, 'const catalog = await modelsApi.patchModelCatalogModel(request)');
         expect(modelManagementSource).toContain('if (catalog.recalculation_pending)');
         expect(modelManagementSource).toContain('if (response.catalog.recalculation_pending)');
         expect(modelManagementSource).toContain('observePriceRecalculation()');
@@ -111,8 +111,6 @@ describe('usage model price loading', () => {
             'cache_write_1h_price',
             'cache_write_5m_price_short',
             'cache_write_1h_price_short',
-            'price_status_complete',
-            'price_status_partial',
             'price_status_unpriced',
             'price_source',
             'runtime_clients_summary',
@@ -134,7 +132,6 @@ describe('usage model price loading', () => {
             'request_events_pricing_revision',
             'request_events_pricing_request_cost',
             'request_events_pricing_current_cost',
-            'request_events_pricing_coverage',
             'request_events_pricing_effective',
             'request_events_pricing_request_short',
             'request_events_pricing_recalculated',

@@ -38,6 +38,7 @@ export interface CostRecalculationStatus {
     error?: string
     started_at?: string
     updated_at?: string
+    completed_at?: string
     resumable?: boolean
     resumed?: boolean
     restart_reason?: string
@@ -69,11 +70,22 @@ export const modelPricesApi = {
     },
 
     async put(prices: Record<string, ModelPrice>): Promise<PutModelPricesResponse> {
-        return apiClient.put<PutModelPricesResponse>('/model-prices', { prices })
+        return apiClient.put<PutModelPricesResponse>(
+            '/model-prices',
+            { prices },
+            { mutationReadback: () => modelPricesApi.get() },
+        )
     },
 
     async startRecalculation(options: RecalculationRequestOptions = {}): Promise<CostRecalculationStatus> {
-        return apiClient.post<CostRecalculationStatus>('/usage/recalculate-costs', undefined, options)
+        return apiClient.post<CostRecalculationStatus>(
+            '/usage/recalculate-costs',
+            undefined,
+            {
+                ...(options),
+                mutationReadback: () => modelPricesApi.getRecalculationStatus(),
+            },
+        )
     },
 
     async getRecalculationStatus(options: RecalculationRequestOptions = {}): Promise<CostRecalculationStatus> {

@@ -15,5 +15,9 @@ export interface ModelCatalogRefreshMeta {
 
 export const modelCatalogApi = {
     getMeta: () => apiClient.get<ModelCatalogRefreshMeta>('/models-catalog-meta'),
-    refresh: () => apiClient.post<ModelCatalogRefreshMeta>('/models-catalog-refresh'),
+    refresh: () => apiClient.post<ModelCatalogRefreshMeta>(
+        '/models-catalog-refresh',
+        undefined,
+        { mutationReadback: () => modelCatalogApi.getMeta() },
+    ),
 }
