@@ -1,7 +1,7 @@
-// cspell:ignore wxyz
+// cspell:ignoreRegExp /abcdefghijklmnopqrstuvwxyz0123456789/g
+import {evaluateApiKeyStrength} from '@/utils/apiKeyStrength'
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
-import {evaluateApiKeyStrength} from '@/utils/apiKeyStrength'
 
 const GENERATED_KEY = `sk-${'7f3a9c2e4b6d8f10'.repeat(4)}`
 

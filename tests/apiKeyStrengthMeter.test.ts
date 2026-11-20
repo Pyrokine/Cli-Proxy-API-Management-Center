@@ -1,9 +1,9 @@
+import {ApiKeyStrengthMeter} from '@/components/config/ApiKeyStrengthMeter'
+import i18n from '@/i18n'
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {createElement} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
-import {ApiKeyStrengthMeter} from '@/components/config/ApiKeyStrengthMeter'
-import i18n from '@/i18n'
 
 const LOCALES = ['en', 'zh-CN', 'zh-TW', 'ru'] as const
 

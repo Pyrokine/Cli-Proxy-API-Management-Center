@@ -1,12 +1,12 @@
-import {describe, expect, spyOn, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-import {fileURLToPath, URL} from 'node:url'
 import {apiClient} from '@/services/api/client'
 import {configApi} from '@/services/api/config'
 import {configFileApi, normalizeConfigYamlSaveResult} from '@/services/api/configFile'
+import {useConfigStore} from '@/stores/useConfigStore'
+import {describe, expect, spyOn, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
+import {fileURLToPath, URL} from 'node:url'
 
 import {expectSourceToContain} from './sourceContractAssertions'
-import {useConfigStore} from '@/stores/useConfigStore'
 
 const configStoreSource = readFileSync(
     fileURLToPath(new URL('../src/stores/useConfigStore.ts', import.meta.url)),
@@ -29,17 +29,19 @@ const localePaths       = ['en', 'ru', 'zh-CN', 'zh-TW'].map((locale) =>
 
 describe('config section descriptors', () => {
     test('normalizes cleanup warnings from successful config saves', async () => {
-        expect(normalizeConfigYamlSaveResult({ cleanup_error: ' cleanup failed ' })).toEqual({
-                                                                                                 cleanupError: 'cleanup failed',
-                                                                                             })
+        expect(normalizeConfigYamlSaveResult({ cleanup_error: ' cleanup failed ' })).toEqual(
+            {
+                cleanupError: 'cleanup failed',
+            })
         expect(normalizeConfigYamlSaveResult({ cleanup_error: '' })).toEqual({})
 
         const put = spyOn(apiClient, 'put').mockResolvedValue({ cleanup_error: 'remove failed' })
         try {
             // noinspection ES6RedundantAwait
-            await expect(configFileApi.saveConfigYaml('debug: true\n', 'etag-value')).resolves.toEqual({
-                                                                                                           cleanupError: 'remove failed',
-                                                                                                       })
+            await expect(configFileApi.saveConfigYaml('debug: true\n', 'etag-value')).resolves.toEqual(
+                {
+                    cleanupError: 'remove failed',
+                })
             expect(put).toHaveBeenCalledTimes(1)
         } finally {
             put.mockRestore()
@@ -114,18 +116,19 @@ describe('config section descriptors', () => {
     })
 
     test('a new login does not reuse or publish an in-flight config from the old connection', async () => {
-        const loginStart = authStoreSource.indexOf('login: async (credentials) =>')
+        const loginStart  = authStoreSource.indexOf('login: async (credentials) =>')
         const logoutStart = authStoreSource.indexOf('logout: () =>', loginStart)
-        const loginBody = authStoreSource.slice(loginStart, logoutStart)
+        const loginBody   = authStoreSource.slice(loginStart, logoutStart)
         expect(loginStart).toBeGreaterThan(-1)
         expect(loginBody.indexOf('useConfigStore.getState().clearCache()'))
             .toBeLessThan(loginBody.indexOf('apiClient.setConfig({'))
         expect(loginBody.indexOf('apiClient.setConfig({'))
             .toBeLessThan(loginBody.indexOf('useConfigStore.getState().fetchConfig(undefined, true)'))
 
-        const pending: Array<(value: {debug: boolean}) => void> = []
-        const getConfig = spyOn(configApi, 'getConfig').mockImplementation(() =>
-            new Promise((resolve) => pending.push(resolve)))
+        const pending: Array<(value: { debug: boolean }) => void> = []
+        const getConfig                                           = spyOn(configApi, 'getConfig')
+            .mockImplementation(() =>
+                                    new Promise((resolve) => pending.push(resolve)))
         try {
             useConfigStore.getState().clearCache()
             const stale = useConfigStore.getState().fetchConfig()
@@ -134,13 +137,13 @@ describe('config section descriptors', () => {
             useConfigStore.getState().clearCache()
             const current = useConfigStore.getState().fetchConfig(undefined, true)
             expect(pending).toHaveLength(2)
-            pending[1]!({debug: true})
+            pending[1]!({ debug: true })
             await current
-            pending[0]!({debug: false})
+            pending[0]!({ debug: false })
             await stale
 
             expect(useConfigStore.getState().config?.debug).toBe(true)
-            expect(await useConfigStore.getState().fetchConfig()).toMatchObject({debug: true})
+            expect(await useConfigStore.getState().fetchConfig()).toMatchObject({ debug: true })
             expect(getConfig).toHaveBeenCalledTimes(2)
         } finally {
             getConfig.mockRestore()
@@ -189,7 +192,10 @@ describe('config section descriptors', () => {
 
         expect(confirmBody).toContain('let nextMergedYaml = prepared.content')
         expect(confirmBody).toContain('if (prepared.origin !== \'source\')')
-        expect(saveBody).toContain('revisionStateRef.current.buildSaveDraft(latestServerYaml, mode, applyVisualChangesToYaml)')
+        expectSourceToContain(
+            saveBody,
+            'revisionStateRef.current.buildSaveDraft(latestServerYaml, mode, applyVisualChangesToYaml)',
+        )
         expect(saveBody).toContain('serverYaml: latestServerYaml')
         expect(configPageSource).toContain('original={diffOriginalYaml}')
     })

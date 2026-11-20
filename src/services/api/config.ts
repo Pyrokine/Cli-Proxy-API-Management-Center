@@ -24,48 +24,80 @@ export const configApi = {
     /**
      * 更新 Debug 模式
      */
-    updateDebug: (enabled: boolean) => apiClient.put('/debug', { value: enabled }),
+    updateDebug: (enabled: boolean) => apiClient.put(
+        '/debug',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 更新代理 URL
      */
-    updateProxyUrl: (proxyUrl: string) => apiClient.put('/proxy-url', { value: proxyUrl }),
+    updateProxyUrl: (proxyUrl: string) => apiClient.put(
+        '/proxy-url',
+        { value: proxyUrl },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 清除代理 URL
      */
-    clearProxyUrl: () => apiClient.delete('/proxy-url'),
+    clearProxyUrl: () => apiClient.delete('/proxy-url', { mutationReadback: () => configApi.getConfig() }),
 
     /**
      * 更新重试次数
      */
-    updateRequestRetry: (retryCount: number) => apiClient.put('/request-retry', { value: retryCount }),
+    updateRequestRetry: (retryCount: number) => apiClient.put(
+        '/request-retry',
+        { value: retryCount },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 配额回退：切换项目
      */
-    updateSwitchProject: (enabled: boolean) => apiClient.put('/quota-exceeded/switch-project', { value: enabled }),
+    updateSwitchProject: (enabled: boolean) => apiClient.put(
+        '/quota-exceeded/switch-project',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 配额回退：切换预览模型
      */
     updateSwitchPreviewModel: (enabled: boolean) =>
-        apiClient.put('/quota-exceeded/switch-preview-model', { value: enabled }),
+        apiClient.put(
+            '/quota-exceeded/switch-preview-model',
+            { value: enabled },
+            { mutationReadback: () => configApi.getConfig() },
+        ),
 
     /**
      * 使用统计开关
      */
-    updateUsageStatistics: (enabled: boolean) => apiClient.put('/usage-statistics-enabled', { value: enabled }),
+    updateUsageStatistics: (enabled: boolean) => apiClient.put(
+        '/usage-statistics-enabled',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 请求日志开关
      */
-    updateRequestLog: (enabled: boolean) => apiClient.put('/request-log', { value: enabled }),
+    updateRequestLog: (enabled: boolean) => apiClient.put(
+        '/request-log',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 写日志到文件开关
      */
-    updateLoggingToFile: (enabled: boolean) => apiClient.put('/logging-to-file', { value: enabled }),
+    updateLoggingToFile: (enabled: boolean) => apiClient.put(
+        '/logging-to-file',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 获取日志总大小上限（MB）
@@ -80,12 +112,20 @@ export const configApi = {
     /**
      * 更新日志总大小上限（MB）
      */
-    updateLogsMaxTotalSizeMb: (value: number) => apiClient.put('/logs-max-total-size-mb', { value }),
+    updateLogsMaxTotalSizeMb: (value: number) => apiClient.put(
+        '/logs-max-total-size-mb',
+        { value },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * WebSocket 鉴权开关
      */
-    updateWsAuth: (enabled: boolean) => apiClient.put('/ws-auth', { value: enabled }),
+    updateWsAuth: (enabled: boolean) => apiClient.put(
+        '/ws-auth',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 获取强制模型前缀开关
@@ -98,7 +138,11 @@ export const configApi = {
     /**
      * 更新强制模型前缀开关
      */
-    updateForceModelPrefix: (enabled: boolean) => apiClient.put('/force-model-prefix', { value: enabled }),
+    updateForceModelPrefix: (enabled: boolean) => apiClient.put(
+        '/force-model-prefix',
+        { value: enabled },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 获取路由策略
@@ -112,7 +156,11 @@ export const configApi = {
     /**
      * 更新路由策略
      */
-    updateRoutingStrategy: (strategy: string) => apiClient.put('/routing/strategy', { value: strategy }),
+    updateRoutingStrategy: (strategy: string) => apiClient.put(
+        '/routing/strategy',
+        { value: strategy },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 
     /**
      * 获取自动刷新间隔（秒）
@@ -127,5 +175,9 @@ export const configApi = {
     /**
      * 更新自动刷新间隔（秒）
      */
-    updateAutoRefreshInterval: (seconds: number) => apiClient.put('/auto-refresh-interval', { value: seconds }),
+    updateAutoRefreshInterval: (seconds: number) => apiClient.put(
+        '/auto-refresh-interval',
+        { value: seconds },
+        { mutationReadback: () => configApi.getConfig() },
+    ),
 }

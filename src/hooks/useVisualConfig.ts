@@ -1,3 +1,4 @@
+import type {RequestScopedErrorRule} from '@/types'
 import type {
     PayloadFilterRule,
     PayloadParamEntry,
@@ -10,17 +11,21 @@ import type {
 } from '@/types/visualConfig'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 import {parseGoDuration, parsePositiveGoDuration} from '@/utils/apiKeyPolicy'
+import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
+import {getOAuthModelAliasError} from '@/utils/oauthModelAlias'
 import {useCallback, useMemo, useRef, useState} from 'react'
+import {parse as parseYaml} from 'yaml'
 import {
     type ApiKeysStorageMetadata,
     areVisualConfigValuesEqual,
     decodeVisualConfigYaml,
     DEFAULT_API_KEYS_STORAGE_METADATA,
     encodeVisualConfigYaml,
+    getPayloadModelHeaderError,
     integerFieldValue,
     parseVisualConfigInteger,
-    VISUAL_INTEGER_FIELDS,
     updateApiKeysStorageMetadata,
+    VISUAL_INTEGER_FIELDS,
 } from './visualConfigCodec'
 
 export {hasImageArtifactCacheChanges} from './visualConfigCodec'
@@ -58,7 +63,7 @@ function isLiteralIP(value: string): boolean {
         return false
     }
     try {
-        return new URL(`http://[${ip}]/`).hostname.startsWith('[')
+        return new URL(`https://[${ip}]/`).hostname.startsWith('[')
     } catch {
         return false
     }
@@ -66,7 +71,7 @@ function isLiteralIP(value: string): boolean {
 
 function isValidIceServerUrl(value: string): boolean {
     const url = value.trim()
-    if (!/^(stun|stuns|turn|turns):/i.test(url) || /\s|%(?![\da-f]{2})/i.test(url)) {
+    if (!/^(?:stun|stuns|turn|turns):/i.test(url) || /\s|%(?![\da-f]{2})/i.test(url)) {
         return false
     }
     try {
@@ -102,6 +107,121 @@ function getQuotaRefreshMaxIntervalError(values: VisualConfigValues): VisualConf
     return undefined
 }
 
+function getOAuthExcludedModelsError(text: string): VisualConfigValidationErrorCode | undefined {
+    if (!text.trim()) {
+        return undefined
+    }
+    let value: unknown
+    try {
+        value = parseYaml(text)
+    } catch {
+        return 'oauth_exclusions_invalid'
+    }
+    if (value === null) {
+        return undefined
+    }
+    if (typeof value !== 'object' || Array.isArray(value)) {
+        return 'oauth_exclusions_invalid'
+    }
+    return (
+        Object.entries(value as Record<string, unknown>).some(
+            ([channel, rules]) => !channel.trim() ||
+                                  !Array.isArray(rules) ||
+                                  rules.some(
+                                      (rule) => typeof rule !==
+                                  'string' ||
+                                  !rule.trim())) ?
+        'oauth_exclusions_invalid' :
+        undefined
+    )
+}
+
+function getOAuthConfigRulesError(
+    text: string,
+    kind: 'settings' | 'errors',
+    baselineText?: string,
+): VisualConfigValidationErrorCode | undefined {
+    if (!text.trim()) {
+        return undefined
+    }
+    let value: unknown
+    let previous: unknown
+    try {
+        value    = parseYaml(text);
+        previous = parseYaml(baselineText || '{}')
+    } catch {
+        return 'oauth_rules_shape'
+    }
+    if (value === null) {
+        return undefined
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return 'oauth_rules_shape'
+    }
+    const baseline = previous && typeof previous === 'object' && !Array.isArray(previous) ?
+                     previous as Record<string, unknown> :
+        {}
+    const channels = new Set<string>()
+    for (const [provider, rules] of Object.entries(value as Record<string, unknown>)) {
+        const channel = provider.trim().toLowerCase()
+        if (!channel || channels.has(channel) || !Array.isArray(rules)) {
+            return 'oauth_rules_shape'
+        }
+        channels.add(channel)
+        const oldRules  = Array.isArray(baseline[provider]) ? baseline[provider] as unknown[] : []
+        const unchanged = new Set(oldRules.map((row) => JSON.stringify(row)))
+        for (const raw of rules) {
+            if (unchanged.has(JSON.stringify(raw))) {
+                continue
+            }
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                return 'oauth_rules_shape'
+            }
+            const rule = raw as Record<string, unknown>
+            if (kind === 'settings') {
+                if (typeof rule.name !==
+                    'string' ||
+                    !rule.name.trim() ||
+                    (rule.alias !== undefined && typeof rule.alias !== 'string')) {
+                    return 'oauth_settings_invalid'
+                }
+                if (rule['max-context-length'] !== undefined && !Number.isSafeInteger(rule['max-context-length'])) {
+                    return 'oauth_settings_integer'
+                }
+            } else {
+                if (['match', 'match-regexr'].some((key) => rule[key] !==
+                                                            undefined &&
+                                                            (!Array.isArray(rule[key]) ||
+                                                             (rule[key] as unknown[]).some((entry) => typeof entry !==
+                                                                                                      'string')))) {
+                    return 'oauth_error_rules_invalid'
+                }
+                const current  = {
+                    status: rule.status,
+                    match: rule.match,
+                    matchRegex: rule['match-regexr'],
+                    action: rule.action,
+                } as RequestScopedErrorRule
+                const original = oldRules.filter((row): row is Record<string, unknown> => Boolean(row) &&
+                                                                                          typeof row ===
+                                                                                          'object' &&
+                                                                                          !Array.isArray(row))
+                                         .map((row) => ({
+                                             status: row.status,
+                                             match: row.match,
+                                             matchRegex: row['match-regexr'],
+                                             action: row.action,
+                                         }) as RequestScopedErrorRule)
+                if (getRequestScopedErrorsValidationKey([current], original) ||
+                    ![...(current.match ?? []), ...(current.matchRegex ?? [])].some((entry) => entry.trim())) {
+                    return 'oauth_error_rules_invalid'
+                }
+            }
+        }
+    }
+    return undefined
+}
+
 export function getVisualConfigValidationErrors(
     values: VisualConfigValues,
     baseline?: VisualConfigValues,
@@ -112,19 +232,47 @@ export function getVisualConfigValidationErrors(
             parseVisualConfigInteger(integerFieldValue(values, field), contract.minimum, contract.maximum)
         } catch {
             errors[field as keyof VisualConfigValidationErrors] = field === 'port'
-                ? 'port_range'
-                : field === 'redisUsageQueueRetentionSeconds'
-                  ? 'integer_range_1_3600'
-                  : field === 'codexLiveMediaRelayUDPPortMin' || field === 'codexLiveMediaRelayUDPPortMax'
-                    ? 'integer_range_0_65535'
-                    : contract.minimum < 0 || contract.maximum < Number.MAX_SAFE_INTEGER
-                      ? 'payload_invalid_number'
-                      : 'non_negative_integer'
+                                                                  ? 'port_range'
+                                                                  : field === 'redisUsageQueueRetentionSeconds'
+                                                                    ?
+                                                                    'integer_range_1_3600'
+                                                                    :
+                                                                    field ===
+                                                                    'codexLiveMediaRelayUDPPortMin' ||
+                                                                    field ===
+                                                                    'codexLiveMediaRelayUDPPortMax'
+                                                                    ?
+                                                                    'integer_range_0_65535'
+                                                                    :
+                                                                    contract.minimum <
+                                                                    0 ||
+                                                                    contract.maximum <
+                                                                    Number.MAX_SAFE_INTEGER
+                                                                    ? 'payload_invalid_number'
+                                                                    : 'non_negative_integer'
         }
     }
-    errors.quotaRefreshInterval = getQuotaRefreshIntervalError(values)
+    if (!baseline || values.oauthModelAliasText !== baseline.oauthModelAliasText) {
+        errors.oauthModelAliasText = getOAuthModelAliasError(values.oauthModelAliasText)
+    }
+    if (!baseline || values.oauthSettingsText !== baseline.oauthSettingsText) {
+        errors.oauthSettingsText =
+            getOAuthConfigRulesError(values.oauthSettingsText, 'settings', baseline?.oauthSettingsText)
+    }
+    if (!baseline || values.oauthRequestScopedErrorsText !== baseline.oauthRequestScopedErrorsText) {
+        errors.oauthRequestScopedErrorsText =
+            getOAuthConfigRulesError(
+                values.oauthRequestScopedErrorsText,
+                'errors',
+                baseline?.oauthRequestScopedErrorsText,
+            )
+    }
+    if (!baseline || values.oauthExcludedModelsText !== baseline.oauthExcludedModelsText) {
+        errors.oauthExcludedModelsText = getOAuthExcludedModelsError(values.oauthExcludedModelsText)
+    }
+    errors.quotaRefreshInterval    = getQuotaRefreshIntervalError(values)
     errors.quotaRefreshMaxInterval = getQuotaRefreshMaxIntervalError(values)
-    const ttl = values.videoResultAuthCacheTTL.trim()
+    const ttl                      = values.videoResultAuthCacheTTL.trim()
     if (ttl && (!baseline || values.videoResultAuthCacheTTL !== baseline.videoResultAuthCacheTTL) &&
         parsePositiveGoDuration(ttl) === null) {
         errors.videoResultAuthCacheTTL = 'positive_duration'
@@ -203,10 +351,13 @@ export function getPayloadParamValidationError(param: PayloadParamEntry): Payloa
 }
 
 function hasPayloadParamValidationErrors(rules: Array<PayloadRule | PayloadFilterRule>): boolean {
-    const invalid = (param: PayloadParamEntry) => Boolean(param.path.trim()) && getPayloadParamValidationError(param) !== undefined
+    const invalid = (param: PayloadParamEntry) => Boolean(param.path.trim()) &&
+                                                  getPayloadParamValidationError(param) !==
+                                                  undefined
     return rules.some((rule) =>
-        rule.params.some((param) => typeof param !== 'string' && invalid(param)) ||
-        rule.models.some((model) => (model.match ?? []).some(invalid) || (model.notMatch ?? []).some(invalid)),
+                          rule.params.some((param) => typeof param !== 'string' && invalid(param)) ||
+                          rule.models.some((model) => getPayloadModelHeaderError(model.headers) !== undefined ||
+                          (model.match ?? []).some(invalid) || (model.notMatch ?? []).some(invalid)),
     )
 }
 
@@ -292,6 +443,7 @@ export function useVisualConfig() {
 
     return {
         visualValues,
+        baselineValues,
         visualDirty,
         visualParseError,
         validationErrors,

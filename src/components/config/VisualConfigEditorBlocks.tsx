@@ -10,7 +10,9 @@ import {
     VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS,
     VISUAL_CONFIG_PROTOCOL_OPTIONS,
 } from '@/hooks/useVisualConfig'
-import {isMap, parseDocument} from 'yaml'
+import {getPayloadModelHeaderError} from '@/hooks/visualConfigCodec'
+import {apiKeysApi} from '@/services/api/apiKeys'
+import {apiClient} from '@/services/api/client'
 import {type ModelCatalogRow, modelsApi} from '@/services/api/models'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {
@@ -43,6 +45,7 @@ import {
 import {isValidApiKey} from '@/utils/validation'
 import {Fragment, memo, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {isMap, parseDocument} from 'yaml'
 import {ApiKeyStrengthMeter} from './ApiKeyStrengthMeter'
 import styles from './VisualConfigEditor.module.scss'
 
@@ -52,6 +55,8 @@ type ModelLimitCatalogEntry = {
     model: string
     provider?: string
     group?: string
+    enabled: boolean
+    requestable: boolean
 }
 
 function modelKey(model: string): string {
@@ -104,22 +109,33 @@ function removeModelLimitMatches(models: Set<string>, model: string): void {
 }
 
 function catalogModelEntries(rows: ModelCatalogRow[]): ModelLimitCatalogEntry[] {
-    const seen                              = new Set<string>()
-    const entries: ModelLimitCatalogEntry[] = []
+    const entries = new Map<string, ModelLimitCatalogEntry>()
     for (const row of rows) {
         const model = row.name.trim()
         const key   = modelKey(model)
-        if (!model || seen.has(key)) {
+        if (!model) {
             continue
         }
-        seen.add(key)
-        entries.push({
-                         model,
-                         provider: row.provider.trim() || undefined,
-                         group: row.group.trim() || undefined,
-                     })
+        const enabled     = row.enabled
+        const requestable = enabled && row.requestable
+        const existing    = entries.get(key)
+        if (existing) {
+            existing.enabled ||= enabled
+            existing.requestable ||= requestable
+        } else {
+            entries.set(
+                key,
+                {
+                    model,
+                    provider: row.provider.trim() || undefined,
+                    group: row.group.trim() || undefined,
+                    enabled,
+                    requestable,
+                },
+            )
+        }
     }
-    return entries.sort((a, b) => a.model.localeCompare(b.model))
+    return [...entries.values()].sort((a, b) => a.model.localeCompare(b.model))
 }
 
 function buildCatalogAliasLabelsByModel(rows: ModelCatalogRow[]): Map<string, string[]> {
@@ -147,10 +163,10 @@ function getModelLimitUnavailableSummary(
 ): string {
     const preview = models.slice(0, 6).join('、')
     const suffix  = models.length > 6 ? ` 等 ${models.length} 个` : `${models.length} 个`
-    return t('config_management.visual.api_keys.model_limit_global_disabled_summary', {
+    return t('config_management.visual.api_keys.model_limit_unavailable_summary', {
         count: models.length,
         models: preview,
-        defaultValue: `全局禁用 ${suffix}模型，已从 API Key 可用列表移除：${preview}`,
+        defaultValue: `当前不可请求的 ${suffix}模型，已从 API Key 可用列表移除：${preview}`,
     })
 }
 
@@ -417,1268 +433,1711 @@ type ApiKeyLimitDraft = ApiKeyPolicyLimit & {
     id: string
 }
 
-const ApiKeyPolicyEditor = memo(function ApiKeyPolicyEditor({
-                                                                target,
-                                                                rule,
-                                                                disabled,
-                                                                onClose,
-                                                                onSave,
-                                                            }: {
-    target: string
-    rule?: ApiKeyModelRule
-    disabled?: boolean
-    onClose: () => void
-    onSave: (rule: ApiKeyModelRule) => void
-}) {
-    const { t: visualT }                    = useTranslation(undefined, { keyPrefix: 'config_management.visual' })
-    const [draftRule, setDraftRule]         = useState<ApiKeyModelRule>(() => cloneApiKeyModelRule(rule))
-    const [mappingDrafts, setMappingDrafts] = useState<ApiKeyMappingDraft[]>(() =>
-                                                                                 Object.entries(rule?.modelMappings ??
-                                                                                                    {})
-                                                                                       .map(([source, mappedTarget]) => ({
-                                                                                           id: makeClientId(),
-                                                                                           source,
-                                                                                           target: mappedTarget,
-                                                                                       })),
-    )
-    const [limitDrafts, setLimitDrafts]     = useState<ApiKeyLimitDraft[]>(() =>
-                                                                               (rule?.limits ??
-                                                                                   []).map((limit) => ({ id: makeClientId(), ...limit })),
-    )
-    const [error, setError]                 = useState('')
+const ApiKeyPolicyEditor =
+          memo(
+              function ApiKeyPolicyEditor({
+                                              target,
+                                              rule,
+                                              disabled,
+                                              onClose,
+                                              onSave,
+                                          }: {
+                  target: string
+                  rule?: ApiKeyModelRule
+                  disabled?: boolean
+                  onClose: () => void
+                  onSave: (rule: ApiKeyModelRule) => void
+              }) {
+                  const { t: visualT }                    = useTranslation(
+                      undefined,
+                      { keyPrefix: 'config_management.visual' },
+                  )
+                  const [draftRule, setDraftRule]         = useState<ApiKeyModelRule>(() => cloneApiKeyModelRule(rule))
+                  const [mappingDrafts, setMappingDrafts] =
+                            useState<
+                                ApiKeyMappingDraft[]>(
+                                () =>
+                                    Object.entries(rule?.modelMappings ??
+                                                       {})
+                                          .map(
+                                              ([
+                                                   source,
+                                                   mappedTarget,
+                                               ]) => (
+                                                  {
+                                                      id: makeClientId(),
+                                                      source,
+                                                      target: mappedTarget,
+                                                  })),
+                            )
+                  const [limitDrafts, setLimitDrafts]     = useState<ApiKeyLimitDraft[]>(
+                      () =>
+                          (rule?.limits ??
+                              []).map(
+                              (limit) => (
+                                  { id: makeClientId(), ...limit }),
+                          ),
+                  )
+                  const [error, setError]                 = useState('')
 
-    const updateMapping = (id: string, patch: Partial<ApiKeyMappingDraft>) => {
-        setMappingDrafts((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry))
-        setError('')
-    }
-    const updateLimit   = (id: string, patch: Partial<ApiKeyLimitDraft>) => {
-        setLimitDrafts((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry))
-        setError('')
-    }
+                  const updateMapping = (id: string, patch: Partial<ApiKeyMappingDraft>) => {
+                      setMappingDrafts((current) => current.map((entry) => entry.id === id ?
+                          { ...entry, ...patch } :
+                                                                           entry))
+                      setError('')
+                  }
+                  const updateLimit   = (id: string, patch: Partial<ApiKeyLimitDraft>) => {
+                      setLimitDrafts((current) => current.map((entry) => entry.id === id ?
+                          { ...entry, ...patch } :
+                                                                         entry))
+                      setError('')
+                  }
 
-    const save = () => {
-        const result = validateApiKeyPolicyDraft(draftRule, mappingDrafts, limitDrafts)
-        if (result.error) {
-            setError(visualT(`api_keys.policy_error_${result.error}`))
-            return
-        }
-        onSave(result.rule)
-    }
+                  const save = () => {
+                      const result = validateApiKeyPolicyDraft(draftRule, mappingDrafts, limitDrafts)
+                      if (result.error) {
+                          setError(visualT(`api_keys.policy_error_${result.error}`))
+                          return
+                      }
+                      onSave(result.rule)
+                  }
 
-    return (
-        <Modal
-            open
-            onClose={onClose}
-            width='min(960px, calc(100vw - 48px))'
-            title={visualT('api_keys.policy_title')}
-            footer={
-                <>
-                    <Button variant='secondary' onClick={onClose} disabled={disabled}>
-                        {visualT('common.cancel')}
-                    </Button>
-                    <Button onClick={save} disabled={disabled}>
-                        {visualT('common.update')}
-                    </Button>
-                </>
-            }
-        >
-            <div className={styles.apiKeyPolicyEditor}>
-                <div className={styles.modelLimitTarget}>{target}</div>
-                <div className={styles.modelLimitHint}>{visualT('api_keys.policy_hint')}</div>
-                {error ? <div className='error-box'>{error}</div> : null}
+                  return (
+                      <Modal
+                          open
+                          onClose={onClose}
+                          width='min(960px, calc(100vw - 48px))'
+                          title={visualT('api_keys.policy_title')}
+                          footer={
+                              <>
+                                  <Button variant='secondary' onClick={onClose} disabled={disabled}>
+                                      {visualT('common.cancel')}
+                                  </Button>
+                                  <Button onClick={save} disabled={disabled}>
+                                      {visualT('common.update')}
+                                  </Button>
+                              </>
+                          }
+                      >
+                          <div className={styles.apiKeyPolicyEditor}>
+                              <div className={styles.modelLimitTarget}>{target}</div>
+                              <div className={styles.modelLimitHint}>{visualT('api_keys.policy_hint')}</div>
+                              {error ? <div className='error-box'>{error}</div> : null}
 
-                <div className={styles.apiKeyPolicyGrid}>
-                    <Input
-                        label={visualT('api_keys.policy_profile')}
-                        placeholder={visualT('api_keys.policy_profile_default')}
-                        maxLength={128}
-                        value={draftRule.policyProfile}
-                        onChange={(event) => {
-                            setDraftRule((current) => ({ ...current, policyProfile: event.target.value }))
-                            setError('')
-                        }}
-                        disabled={disabled}
-                    />
-                    <Input
-                        label={visualT('api_keys.policy_ttl')}
-                        placeholder={visualT('api_keys.policy_ttl_default')}
-                        maxLength={128}
-                        value={draftRule.reservationTtl}
-                        onChange={(event) => {
-                            setDraftRule((current) => ({ ...current, reservationTtl: event.target.value }))
-                            setError('')
-                        }}
-                        disabled={disabled}
-                    />
-                </div>
+                              <div className={styles.apiKeyPolicyGrid}>
+                                  <Input
+                                      label={visualT('api_keys.policy_profile')}
+                                      placeholder={visualT('api_keys.policy_profile_default')}
+                                      maxLength={128}
+                                      value={draftRule.policyProfile}
+                                      onChange={(event) => {
+                                          setDraftRule((current) => ({ ...current, policyProfile: event.target.value }))
+                                          setError('')
+                                      }}
+                                      disabled={disabled}
+                                  />
+                                  <Input
+                                      label={visualT('api_keys.policy_ttl')}
+                                      placeholder={visualT('api_keys.policy_ttl_default')}
+                                      maxLength={128}
+                                      value={draftRule.reservationTtl}
+                                      onChange={(event) => {
+                                          setDraftRule((current) => ({
+                                              ...current,
+                                              reservationTtl: event.target.value,
+                                          }))
+                                          setError('')
+                                      }}
+                                      disabled={disabled}
+                                  />
+                              </div>
 
-                <div className={styles.apiKeyPolicySection}>
-                    <div>
-                        <strong>{visualT('api_keys.policy_providers')}</strong>
-                        <div className='hint'>{visualT('api_keys.policy_providers_hint')}</div>
-                    </div>
-                    <StringListEditor
-                        value={draftRule.providers}
-                        placeholder='openai'
-                        inputAriaLabel={visualT('api_keys.policy_provider')}
-                        onChange={(providers) => {
-                            setDraftRule((current) => ({ ...current, providers }))
-                            setError('')
-                        }}
-                        disabled={disabled}
-                    />
-                </div>
+                              <div className={styles.apiKeyPolicySection}>
+                                  <div>
+                                      <strong>{visualT('api_keys.policy_providers')}</strong>
+                                      <div className='hint'>{visualT('api_keys.policy_providers_hint')}</div>
+                                  </div>
+                                  <StringListEditor
+                                      value={draftRule.providers}
+                                      placeholder='openai'
+                                      inputAriaLabel={visualT('api_keys.policy_provider')}
+                                      onChange={(providers) => {
+                                          setDraftRule((current) => ({ ...current, providers }))
+                                          setError('')
+                                      }}
+                                      disabled={disabled}
+                                  />
+                              </div>
 
-                <div className={styles.apiKeyPolicySection}>
-                    <div>
-                        <strong>{visualT('api_keys.policy_canonical_models')}</strong>
-                        <div className='hint'>{visualT('api_keys.policy_canonical_models_hint')}</div>
-                    </div>
-                    <StringListEditor
-                        value={draftRule.canonicalModels}
-                        placeholder='gpt-5'
-                        inputAriaLabel={visualT('api_keys.policy_canonical_model')}
-                        onChange={(canonicalModels) => {
-                            setDraftRule((current) => ({ ...current, canonicalModels }))
-                            setError('')
-                        }}
-                        disabled={disabled}
-                    />
-                </div>
+                              <div className={styles.apiKeyPolicySection}>
+                                  <div>
+                                      <strong>{visualT('api_keys.policy_canonical_models')}</strong>
+                                      <div className='hint'>{visualT('api_keys.policy_canonical_models_hint')}</div>
+                                  </div>
+                                  <StringListEditor
+                                      value={draftRule.canonicalModels}
+                                      placeholder='gpt-5'
+                                      inputAriaLabel={visualT('api_keys.policy_canonical_model')}
+                                      onChange={(canonicalModels) => {
+                                          setDraftRule((current) => ({ ...current, canonicalModels }))
+                                          setError('')
+                                      }}
+                                      disabled={disabled}
+                                  />
+                              </div>
 
-                <div className={styles.apiKeyPolicySection}>
-                    <div className={styles.blockHeaderRow}>
-                        <div>
-                            <strong>{visualT('api_keys.policy_mappings')}</strong>
-                            <div className='hint'>{visualT('api_keys.policy_mappings_hint')}</div>
-                        </div>
-                        <Button
-                            type='button'
-                            variant='secondary'
-                            size='sm'
-                            onClick={() => setMappingDrafts((current) => [
-                                ...current,
-                                { id: makeClientId(), source: '', target: '' },
-                            ])}
-                            disabled={disabled}
-                        >
-                            {visualT('common.add')}
-                        </Button>
-                    </div>
-                    {mappingDrafts.length === 0 ? (
-                        <div className={styles.storeAuthEmpty}>{visualT('api_keys.policy_mappings_empty')}</div>
-                    ) : mappingDrafts.map((mapping) => (
-                        <div key={mapping.id} className={styles.apiKeyPolicyMappingRow}>
-                            <Input
-                                placeholder={visualT('api_keys.policy_mapping_source')}
-                                aria-label={visualT('api_keys.policy_mapping_source')}
-                                value={mapping.source}
-                                onChange={(event) => updateMapping(mapping.id, { source: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <span aria-hidden='true'>→</span>
-                            <Input
-                                placeholder={visualT('api_keys.policy_mapping_target')}
-                                aria-label={visualT('api_keys.policy_mapping_target')}
-                                value={mapping.target}
-                                onChange={(event) => updateMapping(mapping.id, { target: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={() => setMappingDrafts((current) =>
-                                                                    current.filter((entry) => entry.id !== mapping.id),
-                                )}
-                                disabled={disabled}
-                            >
-                                {visualT('common.delete')}
-                            </Button>
-                        </div>
-                    ))}
-                </div>
+                              <div className={styles.apiKeyPolicySection}>
+                                  <div className={styles.blockHeaderRow}>
+                                      <div>
+                                          <strong>{visualT('api_keys.policy_mappings')}</strong>
+                                          <div className='hint'>{visualT('api_keys.policy_mappings_hint')}</div>
+                                      </div>
+                                      <Button
+                                          type='button'
+                                          variant='secondary'
+                                          size='sm'
+                                          onClick={() => setMappingDrafts((current) => [
+                                              ...current,
+                                              { id: makeClientId(), source: '', target: '' },
+                                          ])}
+                                          disabled={disabled}
+                                      >
+                                          {visualT('common.add')}
+                                      </Button>
+                                  </div>
+                                  {mappingDrafts.length === 0 ? (
+                                      <div
+                                          className={styles.storeAuthEmpty}>
+                                          {visualT('api_keys.policy_mappings_empty')}
+                                      </div>
+                                  ) : mappingDrafts.map((mapping) => (
+                                      <div key={mapping.id} className={styles.apiKeyPolicyMappingRow}>
+                                          <Input
+                                              placeholder={visualT('api_keys.policy_mapping_source')}
+                                              aria-label={visualT('api_keys.policy_mapping_source')}
+                                              value={mapping.source}
+                                              onChange={(event) => updateMapping(
+                                                  mapping.id,
+                                                  { source: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <span aria-hidden='true'>→</span>
+                                          <Input
+                                              placeholder={visualT('api_keys.policy_mapping_target')}
+                                              aria-label={visualT('api_keys.policy_mapping_target')}
+                                              value={mapping.target}
+                                              onChange={(event) => updateMapping(
+                                                  mapping.id,
+                                                  { target: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <Button
+                                              type='button'
+                                              variant='ghost'
+                                              size='sm'
+                                              onClick={() => setMappingDrafts((current) =>
+                                                                                  current.filter((entry) => entry.id !==
+                                                                                                            mapping.id),
+                                              )}
+                                              disabled={disabled}
+                                          >
+                                              {visualT('common.delete')}
+                                          </Button>
+                                      </div>
+                                  ))}
+                              </div>
 
-                <div className={styles.apiKeyPolicySection}>
-                    <div className={styles.blockHeaderRow}>
-                        <div>
-                            <strong>{visualT('api_keys.policy_limits')}</strong>
-                            <div className='hint'>{visualT('api_keys.policy_limits_hint')}</div>
-                        </div>
-                        <Button
-                            type='button'
-                            variant='secondary'
-                            size='sm'
-                            onClick={() => setLimitDrafts((current) => [
-                                ...current,
-                                { id: makeClientId(), window: '', requests: '', tokens: '', costMicro: '' },
-                            ])}
-                            disabled={disabled}
-                        >
-                            {visualT('common.add')}
-                        </Button>
-                    </div>
-                    {limitDrafts.length === 0 ? (
-                        <div className={styles.storeAuthEmpty}>{visualT('api_keys.policy_limits_empty')}</div>
-                    ) : limitDrafts.map((limit) => (
-                        <div key={limit.id} className={styles.apiKeyPolicyLimitRow}>
-                            <Input
-                                label={visualT('api_keys.policy_window')}
-                                placeholder='1h'
-                                maxLength={128}
-                                value={limit.window}
-                                onChange={(event) => updateLimit(limit.id, { window: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <Input
-                                label={visualT('api_keys.policy_requests')}
-                                inputMode='numeric'
-                                maxLength={19}
-                                value={limit.requests}
-                                onChange={(event) => updateLimit(limit.id, { requests: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <Input
-                                label={visualT('api_keys.policy_tokens')}
-                                inputMode='numeric'
-                                maxLength={19}
-                                value={limit.tokens}
-                                onChange={(event) => updateLimit(limit.id, { tokens: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <Input
-                                label={visualT('api_keys.policy_cost_micro')}
-                                inputMode='numeric'
-                                maxLength={19}
-                                value={limit.costMicro}
-                                onChange={(event) => updateLimit(limit.id, { costMicro: event.target.value })}
-                                disabled={disabled}
-                            />
-                            <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={() => setLimitDrafts((current) =>
-                                                                  current.filter((entry) => entry.id !== limit.id),
-                                )}
-                                disabled={disabled}
-                            >
-                                {visualT('common.delete')}
-                            </Button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </Modal>
-    )
-})
+                              <div className={styles.apiKeyPolicySection}>
+                                  <div className={styles.blockHeaderRow}>
+                                      <div>
+                                          <strong>{visualT('api_keys.policy_limits')}</strong>
+                                          <div className='hint'>{visualT('api_keys.policy_limits_hint')}</div>
+                                      </div>
+                                      <Button
+                                          type='button'
+                                          variant='secondary'
+                                          size='sm'
+                                          onClick={() => setLimitDrafts((current) => [
+                                              ...current,
+                                              {
+                                                  id: makeClientId(),
+                                                  window: '',
+                                                  requests: '',
+                                                  tokens: '',
+                                                  costMicro: '',
+                                              },
+                                          ])}
+                                          disabled={disabled}
+                                      >
+                                          {visualT('common.add')}
+                                      </Button>
+                                  </div>
+                                  {limitDrafts.length === 0 ? (
+                                      <div
+                                          className={styles.storeAuthEmpty}>
+                                          {visualT('api_keys.policy_limits_empty')}
+                                      </div>
+                                  ) : limitDrafts.map((limit) => (
+                                      <div key={limit.id} className={styles.apiKeyPolicyLimitRow}>
+                                          <Input
+                                              label={visualT('api_keys.policy_window')}
+                                              placeholder='1h'
+                                              maxLength={128}
+                                              value={limit.window}
+                                              onChange={(event) => updateLimit(
+                                                  limit.id,
+                                                  { window: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <Input
+                                              label={visualT('api_keys.policy_requests')}
+                                              inputMode='numeric'
+                                              maxLength={19}
+                                              value={limit.requests}
+                                              onChange={(event) => updateLimit(
+                                                  limit.id,
+                                                  { requests: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <Input
+                                              label={visualT('api_keys.policy_tokens')}
+                                              inputMode='numeric'
+                                              maxLength={19}
+                                              value={limit.tokens}
+                                              onChange={(event) => updateLimit(
+                                                  limit.id,
+                                                  { tokens: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <Input
+                                              label={visualT('api_keys.policy_cost_micro')}
+                                              inputMode='numeric'
+                                              maxLength={19}
+                                              value={limit.costMicro}
+                                              onChange={(event) => updateLimit(
+                                                  limit.id,
+                                                  { costMicro: event.target.value },
+                                              )}
+                                              disabled={disabled}
+                                          />
+                                          <Button
+                                              type='button'
+                                              variant='ghost'
+                                              size='md'
+                                              onClick={() => setLimitDrafts((current) =>
+                                                                                current.filter((entry) => entry.id !==
+                                                                                                          limit.id),
+                                              )}
+                                              disabled={disabled}
+                                          >
+                                              {visualT('common.delete')}
+                                          </Button>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      </Modal>
+                  )
+              })
 
-export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
-                                                                     value,
-                                                                     aliasesText,
-                                                                     modelRules: configuredModelRules,
-                                                                     disabled,
-                                                                     onChange,
-                                                                     onModelRulesChange,
-                                                                 }: {
-    value: string
-    aliasesText: string
-    modelRules: Record<string, ApiKeyModelRule>
-    disabled?: boolean
-    onChange: (nextValue: string, nextAliasesText: string) => void
-    onModelRulesChange: (nextValue: Record<string, ApiKeyModelRule>) => void
-}) {
-    const { t }                     = useTranslation()
-    const { t: visualT }            = useTranslation(undefined, {
-        keyPrefix: 'config_management.visual',
-    })
-    const showNotification          = useNotificationStore((state) => state.showNotification)
-    const apiBase                   = useAuthStore((state) => state.apiBase)
-    const connectionStatus          = useAuthStore((state) => state.connectionStatus)
-    const oauthExcludedModels       = useConfigStore((state) => state.config?.oauthExcludedModels)
-    const apiKeys                   = useMemo(
-        () =>
-            value
-                .split('\n')
-                .map((key) => key.trim())
-                .filter(Boolean),
-        [value],
-    )
-    const modelRules = useMemo<Record<string, ApiKeyModelRule>>(
-        () => Object.assign(Object.create(null), configuredModelRules),
-        [configuredModelRules],
-    )
-    const [apiKeyIds, setApiKeyIds] = useState(() => apiKeys.map(() => makeClientId()))
-    const renderApiKeyIds           = useMemo(() => {
-        if (apiKeyIds.length === apiKeys.length) {
-            return apiKeyIds
-        }
-        if (apiKeyIds.length > apiKeys.length) {
-            return apiKeyIds.slice(0, apiKeys.length)
-        }
-        return [...apiKeyIds, ...Array.from({ length: apiKeys.length - apiKeyIds.length }, () => makeClientId())]
-    }, [apiKeyIds, apiKeys.length])
+export const ApiKeysCardEditor =
+                 memo(
+                     function ApiKeysCardEditor({
+                                                    value,
+                                                    aliasesText,
+                                                    modelRules: configuredModelRules,
+                                                    disabled,
+                                                    onChange,
+                                                    onModelRulesChange,
+                                                }: {
+                         value: string
+                         aliasesText: string
+                         modelRules: Record<string, ApiKeyModelRule>
+                         disabled?: boolean
+                         onChange: (nextValue: string, nextAliasesText: string) => void
+                         onModelRulesChange: (nextValue: Record<string, ApiKeyModelRule>) => void
+                     }) {
+                         const { t } = useTranslation()
 
-    const apiKeyInputId                                 = useId()
-    const aliasInputId                                  = useId()
-    const apiKeyHintId                                  = `${apiKeyInputId}-hint`
-    const apiKeyErrorId                                 = `${apiKeyInputId}-error`
-    const apiKeyStrengthId                              = `${apiKeyInputId}-strength`
-    const aliasHintId                                   = `${aliasInputId}-hint`
-    const aliasErrorId                                  = `${aliasInputId}-error`
-    const [modalOpen, setModalOpen]                     = useState(false)
-    const [editingApiKeyId, setEditingApiKeyId]         = useState<string | null>(null)
-    const [inputValue, setInputValue]                   = useState('')
-    const [apiKeyVisible, setApiKeyVisible]             = useState(false)
-    const [formError, setFormError]                     = useState('')
-    const [aliasValue, setAliasValue]                   = useState('')
-    const [aliasError, setAliasError]                   = useState('')
-    const {document: aliasDocument, aliases, error: aliasConfigError} = useMemo(() => {
-        const document = parseDocument(aliasesText || '{}')
-        const aliases: Record<string, string> = Object.create(null)
-        const invalid = () => ({document, aliases, error: t('config_management.visual_mode_save_blocked')})
-        if (document.errors.length || !isMap(document.contents)) {
-            return invalid()
-        }
-        try {
-            for (const [key, alias] of Object.entries(document.toJS() as Record<string, unknown>)) {
-                if (typeof alias !== 'string') {
-                    return invalid()
-                }
-                aliases[key] = alias
-            }
-        } catch {
-            return invalid()
-        }
-        return {document, aliases, error: ''}
-    }, [aliasesText, t])
-    const [modelCatalogRows, setModelCatalogRows]       = useState<ModelCatalogRow[]>([])
-    const [modelCatalogLoaded, setModelCatalogLoaded]   = useState(false)
-    const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
-    const [modelCatalogError, setModelCatalogError]     = useState('')
-    const [modelLimitKey, setModelLimitKey]             = useState<string | null>(null)
-    const [policyKey, setPolicyKey]                     = useState<string | null>(null)
-    const [modelLimitQuery, setModelLimitQuery]         = useState('')
-    const [draftBlockedModels, setDraftBlockedModels]   = useState<Set<string>>(() => new Set())
-    const [selectedAllowed, setSelectedAllowed]         = useState<Set<string>>(() => new Set())
-    const [selectedBlocked, setSelectedBlocked]         = useState<Set<string>>(() => new Set())
+                         const { t: visualT } = useTranslation(undefined, {
+                             keyPrefix: 'config_management.visual',
+                         })
 
-    const [searchQuery, setSearchQuery] = useState('')
-    const showSearch                    = apiKeys.length >= 6
+                         const showNotification = useNotificationStore((state) => state.showNotification)
 
-    const filteredKeys = useMemo(() => {
-        const q = searchQuery.trim().toLowerCase()
-        if (!q) {
-            return apiKeys.map((key, i) => ({ key, index: i }))
-        }
-        return apiKeys
-            .map((key, i) => ({ key, index: i }))
-            .filter(({ key }) => {
-                const alias = aliases[key]
-                return key.toLowerCase().includes(q) || (alias?.toLowerCase().includes(q) ?? false)
-            })
-    }, [apiKeys, searchQuery, aliases])
+                         const apiBase = useAuthStore((state) => state.apiBase)
 
-    useEffect(() => {
-        let cancelled = false
+                         const connectionStatus = useAuthStore((state) => state.connectionStatus)
 
-        const loadModelCatalog = async () => {
-            if (modelLimitKey === null) {
-                return
-            }
-            if (connectionStatus !== 'connected' || !apiBase) {
-                if (!cancelled) {
-                    setModelCatalogLoaded(false)
-                    setModelCatalogLoading(false)
-                    setModelCatalogError(visualT('api_keys.model_catalog_disconnected', {
-                        defaultValue: '管理端未连接，无法加载模型目录',
-                    }))
-                }
-                return
-            }
-            setModelCatalogLoading(true)
-            setModelCatalogError('')
-            try {
-                const catalog = await modelsApi.fetchModelCatalog()
-                if (cancelled) {
-                    return
-                }
-                setModelCatalogRows(catalog.models ?? [])
-                setModelCatalogLoaded(true)
-            } catch (err) {
-                if (cancelled) {
-                    return
-                }
-                console.warn('Failed to load model catalog:', err)
-                setModelCatalogRows([])
-                setModelCatalogLoaded(false)
-                setModelCatalogError(err instanceof Error ? err.message : String(err || t('common.unknown_error')))
-            } finally {
-                if (!cancelled) {
-                    setModelCatalogLoading(false)
-                }
-            }
-        }
+                         const oauthExcludedModels = useConfigStore((state) => state.config?.oauthExcludedModels)
 
-        void loadModelCatalog()
-        return () => {
-            cancelled = true
-        }
-    }, [apiBase, connectionStatus, modelLimitKey, t, visualT])
+                         const apiKeys = useMemo(
+                             () =>
+                                 value
+                                     .split('\n')
+                                     .map((key) => key.trim())
+                                     .filter(Boolean),
+                             [value],
+                         )
 
-    const aliasLabelsByModel                                   = useMemo(
-        () => buildCatalogAliasLabelsByModel(modelCatalogRows),
-        [modelCatalogRows],
-    )
-    const globallyExcludedModelKeys                            = useMemo(
-        () => getGloballyExcludedModelKeys(oauthExcludedModels),
-        [oauthExcludedModels],
-    )
-    const catalogEntries                                       = useMemo(
-        () => catalogModelEntries(modelCatalogRows),
-        [modelCatalogRows],
-    )
-    const catalogModelNames                                    = useMemo(
-        () => catalogEntries.map((entry) => entry.model),
-        [catalogEntries],
-    )
-    const draftBlockedModelKeys                                = useMemo(
-        () => modelLimitKeySet(draftBlockedModels),
-        [draftBlockedModels],
-    )
-    const unavailableModelNames                                = useMemo(
-        () => catalogModelNames
-            .filter((model) => isModelGloballyExcluded(model, globallyExcludedModelKeys)),
-        [catalogModelNames, globallyExcludedModelKeys],
-    )
-    const availableModelEntries                                = useMemo(
-        () => catalogEntries
-            .filter((entry) => !isModelGloballyExcluded(entry.model, globallyExcludedModelKeys)),
-        [catalogEntries, globallyExcludedModelKeys],
-    )
-    const availableModelNames                                  = useMemo(
-        () => availableModelEntries.map((entry) => entry.model),
-        [availableModelEntries],
-    )
-    const modelLimitCatalogReady                               = modelCatalogLoaded &&
-                                                                 !modelCatalogLoading &&
-                                                                 !modelCatalogError
-    const availableModelsAllBlocked                            = availableModelNames.length >
-                                                                 0 &&
-                                                                 availableModelNames.every((model) => modelLimitMatches(
-                                                                     draftBlockedModelKeys,
-                                                                     model,
-                                                                 ))
-    const hasVisibleBlockedModels                              = availableModelNames.some((model) => modelLimitMatches(
-        draftBlockedModelKeys,
-        model,
-    ))
-    const allowedModelTree                                     = useMemo(
-        () => buildModelTree(availableModelEntries.filter((entry) => !modelLimitMatches(
-            draftBlockedModelKeys,
-            entry.model,
-        ))),
-        [availableModelEntries, draftBlockedModelKeys],
-    )
-    const blockedModelTree                                     = useMemo(
-        () => buildModelTree(availableModelEntries.filter((entry) => modelLimitMatches(
-            draftBlockedModelKeys,
-            entry.model,
-        ))),
-        [availableModelEntries, draftBlockedModelKeys],
-    )
-    const filteredAllowedTree                                  = useMemo(
-        () => filterModelTreeWithAliases(allowedModelTree, modelLimitQuery, aliasLabelsByModel),
-        [aliasLabelsByModel, allowedModelTree, modelLimitQuery],
-    )
-    const filteredBlockedTree                                  = useMemo(
-        () => filterModelTreeWithAliases(blockedModelTree, modelLimitQuery, aliasLabelsByModel),
-        [aliasLabelsByModel, blockedModelTree, modelLimitQuery],
-    )
-    const hasModelLimitQuery                                   = modelLimitQuery.trim().length > 0
-    const expandModelMatches                                   = hasModelLimitQuery
-    const modelLimitBothPanelsEmpty                            = filteredAllowedTree.length ===
-                                                                 0 &&
-                                                                 filteredBlockedTree.length ===
-                                                                 0
-    const currentModelLimitTitle                               = modelLimitKey
-                                                                 ? aliases[modelLimitKey]
-                                                                   ?
-                                                                   `${aliases[modelLimitKey]} · ${maskApiKey(
-                                                                       modelLimitKey)}`
-                                                                   :
-                                                                   maskApiKey(modelLimitKey)
-                                                                 : ''
-    const currentPolicyTitle                                   = policyKey
-                                                                 ? aliases[policyKey]
-                                                                   ?
-                                                                   `${aliases[policyKey]} · ${maskApiKey(policyKey)}`
-                                                                   :
-                                                                   maskApiKey(policyKey)
-                                                                 : ''
-    const modelLimitAllowedEmptyText                           = hasModelLimitQuery
-                                                                 ?
-                                                                 visualT(
-                                                                     'api_keys.model_limit_search_empty_allowed',
-                                                                     {
-                                                                         defaultValue: '允许列表中没有匹配模型',
-                                                                     },
-                                                                 )
-                                                                 :
-                                                                 modelCatalogLoading
-                                                                 ?
-                                                                 visualT(
-                                                                     'api_keys.model_limit_loading',
-                                                                     {
-                                                                         defaultValue: '模型列表加载中',
-                                                                     },
-                                                                 )
-                                                                 :
-                                                                 catalogModelNames.length === 0
-                                                                 ?
-                                                                 visualT(
-                                                                     'api_keys.model_limit_registry_empty',
-                                                                     {
-                                                                         defaultValue: '模型列表未加载，请刷新后再配置模型限制',
-                                                                     },
-                                                                 )
-                                                                 :
-                                                                 availableModelNames.length === 0
-                                                                 ?
-                                                                 visualT(
-                                                                     'api_keys.model_limit_global_empty',
-                                                                     {
-                                                                         defaultValue: '全局可用模型为空，请先检查模型管理中的全局禁用配置',
-                                                                     },
-                                                                 )
-                                                                 :
-                                                                 visualT(
-                                                                     'api_keys.model_limit_allowed_empty',
-                                                                     {
-                                                                         defaultValue: '当前密钥已限制所有模型，将无法发起任何 API 请求',
-                                                                     },
-                                                                 )
-    const modelLimitAllowedEmptyVariant: 'neutral' | 'warning' = !hasModelLimitQuery &&
-                                                                 !modelCatalogLoading &&
-                                                                 catalogModelNames.length >
-                                                                 0 &&
-                                                                 availableModelNames.length >
-                                                                 0
-                                                                 ? 'warning'
-                                                                 : 'neutral'
-    const modelLimitPrimaryEmptyText                           = modelLimitBothPanelsEmpty && hasModelLimitQuery
-                                                                 ?
-                                                                 visualT(
-                                                                     'api_keys.model_limit_search_empty',
-                                                                     {
-                                                                         defaultValue: '没有匹配模型',
-                                                                     },
-                                                                 )
-                                                                 :
-                                                                 modelLimitAllowedEmptyText
+                         const modelRules = useMemo<Record<string, ApiKeyModelRule>>(
+                             () => Object.assign(Object.create(null), configuredModelRules),
+                             [configuredModelRules],
+                         )
 
-    const {
-              currentItems: pagedKeys,
-              currentPage,
-              pageSize,
-              totalPages,
-              goToPage,
-              setPageSize,
-          } = usePagination(filteredKeys, 20)
+                         const [apiKeyIds, setApiKeyIds] = useState(() => apiKeys.map(() => makeClientId()))
 
-    const validateAlias = useCallback(
-        (alias: string): string | null => {
-            if (!alias) {
-                return null
-            }
-            if (alias.length > 20) {
-                return visualT('api_keys.alias_error_length')
-            }
-            if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
-                return visualT('api_keys.alias_error_format')
-            }
-            return null
-        },
-        [visualT],
-    )
+                         const renderApiKeyIds = useMemo(() => {
+                             if (apiKeyIds.length === apiKeys.length) {
+                                 return apiKeyIds
+                             }
+                             if (apiKeyIds.length > apiKeys.length) {
+                                 return apiKeyIds.slice(0, apiKeys.length)
+                             }
+                             return [
+                                 ...apiKeyIds,
+                                 ...Array.from({ length: apiKeys.length - apiKeyIds.length }, () => makeClientId()),
+                             ]
+                         }, [apiKeyIds, apiKeys.length])
 
-    function generateSecureApiKey(alias?: string): string {
-        const random = generateTokenHex(32)
-        return alias ? `sk-${alias}-${random}` : `sk-${random}`
-    }
+                         const apiKeyInputId = useId()
 
-    const openAddModal = () => {
-        setEditingApiKeyId(null)
-        setInputValue('')
-        setFormError('')
-        setApiKeyVisible(false)
-        setAliasValue('')
-        setAliasError('')
-        setModalOpen(true)
-    }
+                         const aliasInputId = useId()
 
-    const openEditModal = (apiKeyId: string) => {
-        const editingIndex = renderApiKeyIds.findIndex((id) => id === apiKeyId)
-        const key          = apiKeys[editingIndex] ?? ''
-        setEditingApiKeyId(apiKeyId)
-        setInputValue(key)
-        setFormError('')
-        setApiKeyVisible(false)
-        setAliasValue(aliases[key] ?? '')
-        setAliasError('')
-        setModalOpen(true)
-    }
+                         const apiKeyHintId = `${apiKeyInputId}-hint`
 
-    const openModelLimitModal = (apiKey: string) => {
-        const blockedModels = (modelRules[apiKey]?.blockedModels ?? [])
-            .map((model) => model.trim())
-            .filter(Boolean)
-        setModelCatalogRows([])
-        setModelCatalogLoaded(false)
-        setModelCatalogError('')
-        setModelLimitKey(apiKey)
-        setDraftBlockedModels(new Set(blockedModels))
-        setSelectedAllowed(new Set())
-        setSelectedBlocked(new Set())
-        setModelLimitQuery('')
-    }
+                         const apiKeyErrorId = `${apiKeyInputId}-error`
 
-    const closeModelLimitModal = () => {
-        setModelLimitKey(null)
-        setDraftBlockedModels(new Set())
-        setSelectedAllowed(new Set())
-        setSelectedBlocked(new Set())
-        setModelLimitQuery('')
-    }
+                         const apiKeyStrengthId = `${apiKeyInputId}-strength`
 
-    const saveModelLimitRules = () => {
-        if (!modelLimitKey || !modelLimitCatalogReady) {
-            return
-        }
-        const blockedModels = uniqueSorted(draftBlockedModels)
-        const nextRules     = Object.assign(Object.create(null), modelRules)
-        const nextRule      = {
-            ...EMPTY_API_KEY_MODEL_RULE,
-            ...modelRules[modelLimitKey],
-            blockedModels,
-        }
-        if (isApiKeyModelRuleEmpty(nextRule)) {
-            delete nextRules[modelLimitKey]
-        } else {
-            nextRules[modelLimitKey] = nextRule
-        }
-        onModelRulesChange(nextRules)
-        closeModelLimitModal()
-    }
+                         const aliasHintId = `${aliasInputId}-hint`
 
-    const savePolicyRule = (rule: ApiKeyModelRule) => {
-        if (!policyKey) {
-            return
-        }
-        const nextRules = Object.assign(Object.create(null), modelRules)
-        if (isApiKeyModelRuleEmpty(rule)) {
-            delete nextRules[policyKey]
-        } else {
-            nextRules[policyKey] = rule
-        }
-        onModelRulesChange(nextRules)
-        setPolicyKey(null)
-    }
+                         const aliasErrorId = `${aliasInputId}-error`
 
-    const closeModal = () => {
-        setModalOpen(false)
-        setInputValue('')
-        setEditingApiKeyId(null)
-        setFormError('')
-        setApiKeyVisible(false)
-        setAliasValue('')
-        setAliasError('')
-        setSearchQuery('')
-    }
+                         const [modalOpen, setModalOpen] = useState(false)
 
-    const updateApiKeys = (nextKeys: string[], nextAliasesText: string) => {
-        onChange(nextKeys.join('\n'), nextAliasesText)
-    }
+                         const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(
+                             null)
 
-    const toggleTreeSelection = (
-        node: ModelTreeNode,
-        selected: Set<string>,
-        setSelected: (next: Set<string>) => void,
-    ) => {
-        const leaves      = modelLeaves(node)
-        const allSelected = leaves.length > 0 && leaves.every((model) => selected.has(model))
-        const next        = new Set(selected)
-        for (const model of leaves) {
-            if (allSelected) {
-                next.delete(model)
-            } else {
-                next.add(model)
-            }
-        }
-        setSelected(next)
-    }
+                         const [inputValue, setInputValue] = useState('')
 
-    const moveAllowedToBlocked = (models: Iterable<string>) => {
-        const next = new Set(draftBlockedModels)
-        for (const model of models) {
-            removeModelLimitMatches(next, model)
-            next.add(model)
-        }
-        setDraftBlockedModels(next)
-        setSelectedAllowed(new Set())
-    }
+                         const [apiKeyVisible, setApiKeyVisible] = useState(false)
 
-    const moveAllAllowedToBlocked = () => {
-        setDraftBlockedModels(new Set([...draftBlockedModels, ...availableModelNames]))
-        setSelectedAllowed(new Set())
-        setSelectedBlocked(new Set())
-    }
+                         const [formError, setFormError] = useState('')
 
-    const moveBlockedToAllowed = (models: Iterable<string>) => {
-        const next = new Set(draftBlockedModels)
-        for (const model of models) {
-            removeModelLimitMatches(next, model)
-        }
-        setDraftBlockedModels(next)
-        setSelectedBlocked(new Set())
-    }
+                         const [aliasValue, setAliasValue] = useState('')
 
-    const handleDelete = (apiKeyId: string) => {
-        if (aliasConfigError) {
-            return
-        }
-        const index = renderApiKeyIds.findIndex((id) => id === apiKeyId)
-        if (index < 0) {
-            return
-        }
-        const deletedKey = apiKeys[index]
-        const nextKeys = apiKeys.filter((_, i) => i !== index)
-        const aliasDraft = aliasDocument.clone()
-        if (deletedKey && !nextKeys.includes(deletedKey)) {
-            aliasDraft.deleteIn([deletedKey])
-        }
-        setApiKeyIds(renderApiKeyIds.filter((id) => id !== apiKeyId))
-        updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
-        if (deletedKey && !nextKeys.includes(deletedKey) && modelRules[deletedKey]) {
-            const nextRules = Object.assign(Object.create(null), modelRules)
-            delete nextRules[deletedKey]
-            onModelRulesChange(nextRules)
-        }
-    }
+                         const [aliasError, setAliasError] = useState('')
 
-    const handleSave = () => {
-        if (aliasConfigError) {
-            setAliasError(aliasConfigError)
-            return
-        }
-        const trimmed      = inputValue.trim()
-        const trimmedAlias = aliasValue.trim()
+                         const editingSavedKey = editingApiKeyId !==
+                                                 null &&
+                                                 CONFIG_SECRET_PLACEHOLDER.test(
+                                                     apiKeys[renderApiKeyIds.indexOf(
+                                                         editingApiKeyId)] ??
+                                                     '',
+                                                 )
 
-        if (!trimmed) {
-            setFormError(visualT('api_keys.error_empty'))
-            return
-        }
-        if (!isValidApiKey(trimmed)) {
-            setFormError(
-                trimmed.length < 8
-                ? visualT('api_keys.error_too_short')
-                : visualT('api_keys.error_invalid'),
-            )
-            return
-        }
+                         const { document: aliasDocument, aliases, error: aliasConfigError } = useMemo(() => {
+                             const document                        = parseDocument(aliasesText || '{}')
+                             const aliases: Record<string, string> = Object.create(null)
+                             const invalid                         = () => ({
+                                 document,
+                                 aliases,
+                                 error: t('config_management.visual_mode_save_blocked'),
+                             })
+                             if (document.errors.length || !isMap(document.contents)) {
+                                 return invalid()
+                             }
+                             try {
+                                 for (const [key, alias] of
+                                     Object.entries(document.toJS() as Record<string, unknown>)) {
+                                     if (typeof alias !== 'string') {
+                                         return invalid()
+                                     }
+                                     aliases[key] = alias
+                                 }
+                             } catch {
+                                 return invalid()
+                             }
+                             return { document, aliases, error: '' }
+                         }, [aliasesText, t])
 
-        // 验证别名格式
-        const aliasFormatError = validateAlias(trimmedAlias)
-        if (aliasFormatError) {
-            setAliasError(aliasFormatError)
-            return
-        }
+                         const [modelCatalogRows, setModelCatalogRows] = useState<ModelCatalogRow[]>(
+                             [])
 
-        // 检查别名是否与其他 key 重复
-        if (trimmedAlias) {
-            const editingIndex = editingApiKeyId ? renderApiKeyIds.findIndex((id) => id === editingApiKeyId) : -1
-            const currentKey   = editingIndex >= 0 ? apiKeys[editingIndex] : undefined
-            const duplicate    = Object.entries(aliases).some(
-                ([key, alias]) => alias === trimmedAlias && key !== currentKey && key !== trimmed,
-            )
-            if (duplicate) {
-                setAliasError(visualT('api_keys.alias_error_duplicate'))
-                return
-            }
-        }
+                         const [modelCatalogLoaded, setModelCatalogLoaded] = useState(false)
 
-        const editingIndex = editingApiKeyId ? renderApiKeyIds.findIndex((id) => id === editingApiKeyId) : -1
-        const oldKey       = editingIndex >= 0 ? apiKeys[editingIndex] : undefined
-        if (editingApiKeyId !== null && !oldKey) {
-            setFormError(t('config_management.config_changed'))
-            return
-        }
-        if (trimmed !== oldKey && apiKeys.includes(trimmed)) {
-            setFormError(visualT('api_keys.error_duplicate'))
-            return
-        }
-        const nextKeys     =
-                  editingApiKeyId === null
-                  ? [...apiKeys, trimmed]
-                  : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key))
-        const aliasDraft = aliasDocument.clone()
-        if (trimmedAlias) {
-            aliasDraft.setIn([trimmed], trimmedAlias)
-        } else {
-            aliasDraft.deleteIn([trimmed])
-        }
-        if (oldKey && oldKey !== trimmed && !nextKeys.includes(oldKey)) {
-            aliasDraft.deleteIn([oldKey])
-        }
-        if (editingApiKeyId === null) {
-            setApiKeyIds([...renderApiKeyIds, makeClientId()])
-        }
-        updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
-        if (oldKey && oldKey !== trimmed && modelRules[oldKey]) {
-            const nextRules = { ...modelRules, [trimmed]: modelRules[oldKey] }
-            if (!nextKeys.includes(oldKey)) {
-                delete nextRules[oldKey]
-            }
-            onModelRulesChange(nextRules)
-        }
-        closeModal()
-    }
+                         const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
 
-    const handleCopy = async (apiKey: string) => {
-        const copied = await copyToClipboard(apiKey)
-        showNotification(
-            t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
-            copied ? 'success' : 'error',
-        )
-    }
+                         const [modelCatalogError, setModelCatalogError] = useState('')
 
-    const handleGenerate = () => {
-        const trimmedAlias = aliasValue.trim()
-        setInputValue(generateSecureApiKey(trimmedAlias || undefined))
-        setFormError('')
-    }
+                         const [modelLimitKey, setModelLimitKey] = useState<string | null>(
+                             null)
 
-    return (
-        <div className='form-group' style={{ marginBottom: 0 }}>
-            <div className={styles.blockHeaderRow}>
-                <label style={{ margin: 0 }}>{visualT('api_keys.label')}</label>
-                <Button size='sm' onClick={openAddModal} disabled={disabled || Boolean(aliasConfigError)}>
-                    {visualT('api_keys.add')}
-                </Button>
-            </div>
-            {aliasConfigError && <div role='alert'>{aliasConfigError}</div>}
+                         const [policyKey, setPolicyKey] = useState<string | null>(
+                             null)
 
-            {showSearch && (
-                <Input
-                    placeholder={visualT('api_keys.search_placeholder')}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                />
-            )}
+                         const [modelLimitQuery, setModelLimitQuery] = useState('')
 
-            {apiKeys.length === 0 ? (
-                <div className={styles.emptyState}>{visualT('api_keys.empty')}</div>
-            ) : (
-                 <div className='item-list' style={{ marginTop: 4 }}>
-                     {pagedKeys.map((item) => {
-                         const redacted = CONFIG_SECRET_PLACEHOLDER.test(item.key)
+                         const [draftBlockedModels, setDraftBlockedModels] = useState<Set<string>>(() => new Set())
+
+                         const [selectedAllowed, setSelectedAllowed] = useState<Set<string>>(() => new Set())
+
+                         const [selectedBlocked, setSelectedBlocked] = useState<Set<string>>(() => new Set())
+
+                         const [searchQuery, setSearchQuery] = useState('')
+
+                         const showSearch = apiKeys.length >= 6
+
+                         const query = searchQuery.trim()
+
+                         const searchGeneration = apiClient.getAuthGeneration()
+
+                         const needsSavedSearch = Boolean(query) &&
+                                                  apiKeys.some((key) => CONFIG_SECRET_PLACEHOLDER.test(
+                                                      key))
+
+                         const [savedKeySearch, setSavedKeySearch] = useState<{
+                                                                                  query: string;
+                                                                                  value: string;
+                                                                                  aliasesText: string;
+                                                                                  generation: number;
+                                                                                  signal: AbortSignal;
+                                                                                  matches: Set<string>;
+                                                                                  error: string
+                                                                              } | null>(null)
+
+                         const currentSavedKeySearch = savedKeySearch?.query ===
+                                                       query &&
+                                                       savedKeySearch.value ===
+                                                       value &&
+                                                       savedKeySearch.aliasesText ===
+                                                       aliasesText &&
+                                                       savedKeySearch.generation ===
+                                                       searchGeneration &&
+                                                       !savedKeySearch.signal.aborted ?
+                                                       savedKeySearch :
+                                                       null
+
+                         useEffect(
+                             () => {
+                                 if (!needsSavedSearch) {
+                                     return
+                                 }
+                                 const controller      = new AbortController()
+                                 const snapshot        = {
+                                     query,
+                                     value,
+                                     aliasesText,
+                                     generation: searchGeneration,
+                                     signal: controller.signal,
+                                 }
+                                 const isCurrent       = () => !controller.signal.aborted &&
+                                                               searchGeneration ===
+                                                               apiClient.getAuthGeneration()
+                                 const searchSavedKeys = async () => {
+                                     try {
+                                         if (connectionStatus !== 'connected' || !apiBase) {
+                                             // noinspection ExceptionCaughtLocallyJS
+                                             throw new Error('Disconnected')
+                                         }
+                                         const matches = await apiKeysApi.search(
+                                             query,
+                                             { signal: controller.signal },
+                                         )
+                                         if (isCurrent()) {
+                                             setSavedKeySearch({
+                                                                   ...snapshot,
+                                                                   matches: new Set(matches),
+                                                                   error: '',
+                                                               })
+                                         }
+                                     } catch {
+                                         if (isCurrent()) {
+                                             setSavedKeySearch({
+                                                                   ...snapshot,
+                                                                   matches: new Set(),
+                                                                   error: visualT('api_keys.search_failed'),
+                                                               })
+                                         }
+                                     }
+                                 }
+                                 void searchSavedKeys()
+                                 return () => controller.abort()
+                             },
+                             [
+                                 apiBase,
+                                 connectionStatus,
+                                 query,
+                                 value,
+                                 aliasesText,
+                                 searchGeneration,
+                                 needsSavedSearch,
+                                 visualT,
+                             ],
+                         )
+
+                         const filteredKeys = useMemo(() => {
+                             const q = searchQuery.trim().toLowerCase()
+                             if (!q) {
+                                 return apiKeys.map((key, i) => ({ key, index: i }))
+                             }
+                             return apiKeys
+                                 .map((key, i) => ({ key, index: i }))
+                                 .filter(({ key }) => {
+                                     const alias = aliases[key]
+                                     return (!CONFIG_SECRET_PLACEHOLDER.test(key) &&
+                                             key.toLowerCase().includes(q)) ||
+                                            (alias?.toLowerCase().includes(q) ?? false) ||
+                                            Boolean(currentSavedKeySearch?.matches.has(key))
+                                 })
+                         }, [apiKeys, searchQuery, aliases, currentSavedKeySearch])
+
+                         useEffect(() => {
+                             let cancelled = false
+
+                             const loadModelCatalog = async () => {
+                                 if (modelLimitKey === null) {
+                                     return
+                                 }
+                                 if (connectionStatus !== 'connected' || !apiBase) {
+                                     if (!cancelled) {
+                                         setModelCatalogLoaded(false)
+                                         setModelCatalogLoading(false)
+                                         setModelCatalogError(visualT('api_keys.model_catalog_disconnected', {
+                                             defaultValue: '管理端未连接，无法加载模型目录',
+                                         }))
+                                     }
+                                     return
+                                 }
+                                 setModelCatalogLoading(true)
+                                 setModelCatalogError('')
+                                 try {
+                                     const catalog = await modelsApi.fetchModelCatalog()
+                                     if (cancelled) {
+                                         return
+                                     }
+                                     setModelCatalogRows(catalog.models ?? [])
+                                     setModelCatalogLoaded(true)
+                                 } catch (err) {
+                                     if (cancelled) {
+                                         return
+                                     }
+                                     console.warn('Failed to load model catalog:', err)
+                                     setModelCatalogRows([])
+                                     setModelCatalogLoaded(false)
+                                     setModelCatalogError(err instanceof Error ?
+                                                          err.message :
+                                                          String(err || t('common.unknown_error')))
+                                 } finally {
+                                     if (!cancelled) {
+                                         setModelCatalogLoading(false)
+                                     }
+                                 }
+                             }
+
+                             void loadModelCatalog()
+                             return () => {
+                                 cancelled = true
+                             }
+                         }, [apiBase, connectionStatus, modelLimitKey, t, visualT])
+
+                         const aliasLabelsByModel = useMemo(
+                             () => buildCatalogAliasLabelsByModel(modelCatalogRows),
+                             [modelCatalogRows],
+                         )
+
+                         const globallyExcludedModelKeys = useMemo(
+                             () => getGloballyExcludedModelKeys(oauthExcludedModels),
+                             [oauthExcludedModels],
+                         )
+
+                         const catalogEntries = useMemo(
+                             () => catalogModelEntries(modelCatalogRows),
+                             [modelCatalogRows],
+                         )
+
+                         const catalogModelNames = useMemo(
+                             () => catalogEntries.map((entry) => entry.model),
+                             [catalogEntries],
+                         )
+
+                         const draftBlockedModelKeys = useMemo(
+                             () => modelLimitKeySet(draftBlockedModels),
+                             [draftBlockedModels],
+                         )
+
+                         const unavailableModelNames = useMemo(
+                             () => catalogEntries
+                                 .filter((entry) => !entry.enabled ||
+                                                    !entry.requestable ||
+                                                    isModelGloballyExcluded(entry.model, globallyExcludedModelKeys))
+                                 .map((entry) => entry.model),
+                             [catalogEntries, globallyExcludedModelKeys],
+                         )
+
+                         const availableModelEntries = useMemo(
+                             () => catalogEntries
+                                 .filter((entry) => entry.enabled &&
+                                                    entry.requestable &&
+                                                    !isModelGloballyExcluded(
+                                                        entry.model,
+                                                        globallyExcludedModelKeys,
+                                                    )),
+                             [catalogEntries, globallyExcludedModelKeys],
+                         )
+
+                         const availableModelNames = useMemo(
+                             () => availableModelEntries.map((entry) => entry.model),
+                             [availableModelEntries],
+                         )
+
+                         const modelLimitCatalogReady = modelCatalogLoaded &&
+                                                        !modelCatalogLoading &&
+                                                        !modelCatalogError
+
+                         const availableModelsAllBlocked = availableModelNames.length >
+                                                           0 &&
+                                                           availableModelNames.every((model) => modelLimitMatches(
+                                                               draftBlockedModelKeys,
+                                                               model,
+                                                           ))
+
+                         const hasVisibleBlockedModels = availableModelNames.some((model) => modelLimitMatches(
+                             draftBlockedModelKeys,
+                             model,
+                         ))
+
+                         const allowedModelTree = useMemo(
+                             () => buildModelTree(availableModelEntries.filter((entry) => !modelLimitMatches(
+                                 draftBlockedModelKeys,
+                                 entry.model,
+                             ))),
+                             [availableModelEntries, draftBlockedModelKeys],
+                         )
+
+                         const blockedModelTree = useMemo(
+                             () => buildModelTree(availableModelEntries.filter((entry) => modelLimitMatches(
+                                 draftBlockedModelKeys,
+                                 entry.model,
+                             ))),
+                             [availableModelEntries, draftBlockedModelKeys],
+                         )
+
+                         const filteredAllowedTree = useMemo(
+                             () => filterModelTreeWithAliases(
+                                 allowedModelTree,
+                                 modelLimitQuery,
+                                 aliasLabelsByModel,
+                             ),
+                             [aliasLabelsByModel, allowedModelTree, modelLimitQuery],
+                         )
+
+                         const filteredBlockedTree = useMemo(
+                             () => filterModelTreeWithAliases(
+                                 blockedModelTree,
+                                 modelLimitQuery,
+                                 aliasLabelsByModel,
+                             ),
+                             [aliasLabelsByModel, blockedModelTree, modelLimitQuery],
+                         )
+
+                         const hasModelLimitQuery = modelLimitQuery.trim().length > 0
+
+                         const expandModelMatches = hasModelLimitQuery
+
+                         const modelLimitBothPanelsEmpty = filteredAllowedTree.length ===
+                                                           0 &&
+                                                           filteredBlockedTree.length ===
+                                                           0
+
+                         const currentModelLimitTitle =
+                                   modelLimitKey
+                                   ?
+                                   aliases[modelLimitKey]
+                                   ?
+                                   `${
+                                       aliases[modelLimitKey]} · ${
+                                       (
+                                           CONFIG_SECRET_PLACEHOLDER.test(
+                                               modelLimitKey) ?
+                                           visualT(
+                                               'api_keys.saved_key_hidden') :
+                                           maskApiKey(
+                                               modelLimitKey))}`
+                                   :
+                                   (CONFIG_SECRET_PLACEHOLDER.test(modelLimitKey) ?
+                                    visualT('api_keys.saved_key_hidden') :
+                                    maskApiKey(modelLimitKey))
+                                   :
+                                   ''
+
+                         const currentPolicyTitle =
+                                   policyKey
+                                   ?
+                                   aliases[policyKey]
+                                   ?
+                                   `${
+                                       aliases[policyKey]} · ${
+                                       CONFIG_SECRET_PLACEHOLDER.test(
+                                           policyKey) ?
+                                       visualT(
+                                           'api_keys.saved_key_hidden') :
+                                       maskApiKey(policyKey)}`
+                                   :
+                                   (CONFIG_SECRET_PLACEHOLDER.test(policyKey) ?
+                                    visualT('api_keys.saved_key_hidden') :
+                                    maskApiKey(policyKey))
+                                   :
+                                   ''
+
+                         const modelLimitAllowedEmptyText = hasModelLimitQuery
+                                                            ?
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'search_empty_allowed'
+                                                                ),
+                                                                {
+                                                                    defaultValue: '允许列表中没有匹配模型',
+                                                                },
+                                                            )
+                                                            :
+                                                            modelCatalogLoading
+                                                            ?
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'loading'
+                                                                ),
+                                                                {
+                                                                    defaultValue: '模型列表加载中',
+                                                                },
+                                                            )
+                                                            :
+                                                            catalogModelNames.length === 0
+                                                            ?
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'registry_empty'
+                                                                ),
+                                                                {
+                                                                    defaultValue: (
+                                                                        '模型列表未加载，请刷新后再配置模型限' +
+                                                                        '制'
+                                                                    ),
+                                                                },
+                                                            )
+                                                            :
+                                                            availableModelNames.length === 0
+                                                            ?
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'global_empty'
+                                                                ),
+                                                                {
+                                                                    defaultValue: (
+                                                                        '当前没有可请求的模型，请检查模型管理' +
+                                                                        '中的启用状态和运行支持'
+                                                                    ),
+                                                                },
+                                                            )
+                                                            :
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'allowed_empty'
+                                                                ),
+                                                                {
+                                                                    defaultValue: (
+                                                                        '当前密钥已限制所有模型，将无法发起任' +
+                                                                        '何 API 请求'
+                                                                    ),
+                                                                },
+                                                            )
+
+                         const modelLimitAllowedEmptyVariant: 'neutral' | 'warning' = !hasModelLimitQuery &&
+                                                                                      !modelCatalogLoading &&
+                                                                                      catalogModelNames.length >
+                                                                                      0 &&
+                                                                                      availableModelNames.length >
+                                                                                      0
+                                                                                      ? 'warning'
+                                                                                      : 'neutral'
+
+                         const modelLimitPrimaryEmptyText = modelLimitBothPanelsEmpty &&
+                                                            hasModelLimitQuery
+                                                            ?
+                                                            visualT(
+                                                                (
+                                                                    'api_keys.model_limit_' +
+                                                                    'search_empty'
+                                                                ),
+                                                                {
+                                                                    defaultValue: '没有匹配模型',
+                                                                },
+                                                            )
+                                                            :
+                                                            modelLimitAllowedEmptyText
+
+                         const {
+                                   currentItems: pagedKeys,
+                                   currentPage,
+                                   pageSize,
+                                   totalPages,
+                                   goToPage,
+                                   setPageSize,
+                               } = usePagination(filteredKeys, 20)
+
+                         const validateAlias = useCallback(
+                             (alias: string): string | null => {
+                                 if (!alias) {
+                                     return null
+                                 }
+                                 if (alias.length > 20) {
+                                     return visualT('api_keys.alias_error_length')
+                                 }
+                                 if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
+                                     return visualT('api_keys.alias_error_format')
+                                 }
+                                 return null
+                             },
+                             [visualT],
+                         )
+
+                         function generateSecureApiKey(alias?: string): string {
+                             const random = generateTokenHex(32)
+                             return alias ? `sk-${alias}-${random}` : `sk-${random}`
+                         }
+
+                         const openAddModal = () => {
+                             setEditingApiKeyId(null)
+                             setInputValue('')
+                             setFormError('')
+                             setApiKeyVisible(false)
+                             setAliasValue('')
+                             setAliasError('')
+                             setModalOpen(true)
+                         }
+
+                         const openEditModal = (apiKeyId: string) => {
+                             const editingIndex = renderApiKeyIds.findIndex((id) => id === apiKeyId)
+                             const key          = apiKeys[editingIndex] ?? ''
+                             setEditingApiKeyId(apiKeyId)
+                             setInputValue(CONFIG_SECRET_PLACEHOLDER.test(key) ? '' : key)
+                             setFormError('')
+                             setApiKeyVisible(false)
+                             setAliasValue(aliases[key] ?? '')
+                             setAliasError('')
+                             setModalOpen(true)
+                         }
+
+                         const openModelLimitModal = (apiKey: string) => {
+                             const blockedModels = (modelRules[apiKey]?.blockedModels ?? [])
+                                 .map((model) => model.trim())
+                                 .filter(Boolean)
+                             setModelCatalogRows([])
+                             setModelCatalogLoaded(false)
+                             setModelCatalogError('')
+                             setModelLimitKey(apiKey)
+                             setDraftBlockedModels(new Set(blockedModels))
+                             setSelectedAllowed(new Set())
+                             setSelectedBlocked(new Set())
+                             setModelLimitQuery('')
+                         }
+
+                         const closeModelLimitModal = () => {
+                             setModelLimitKey(null)
+                             setDraftBlockedModels(new Set())
+                             setSelectedAllowed(new Set())
+                             setSelectedBlocked(new Set())
+                             setModelLimitQuery('')
+                         }
+
+                         const saveModelLimitRules = () => {
+                             if (!modelLimitKey || !modelLimitCatalogReady) {
+                                 return
+                             }
+                             const blockedModels = uniqueSorted(draftBlockedModels)
+                             const nextRules     = Object.assign(Object.create(null), modelRules)
+                             const nextRule      = {
+                                 ...EMPTY_API_KEY_MODEL_RULE,
+                                 ...modelRules[modelLimitKey],
+                                 blockedModels,
+                             }
+                             if (isApiKeyModelRuleEmpty(nextRule)) {
+                                 delete nextRules[modelLimitKey]
+                             } else {
+                                 nextRules[modelLimitKey] = nextRule
+                             }
+                             onModelRulesChange(nextRules)
+                             closeModelLimitModal()
+                         }
+
+                         const savePolicyRule = (rule: ApiKeyModelRule) => {
+                             if (!policyKey) {
+                                 return
+                             }
+                             const nextRules = Object.assign(Object.create(null), modelRules)
+                             if (isApiKeyModelRuleEmpty(rule)) {
+                                 delete nextRules[policyKey]
+                             } else {
+                                 nextRules[policyKey] = rule
+                             }
+                             onModelRulesChange(nextRules)
+                             setPolicyKey(null)
+                         }
+
+                         const closeModal = () => {
+                             setModalOpen(false)
+                             setInputValue('')
+                             setEditingApiKeyId(null)
+                             setFormError('')
+                             setApiKeyVisible(false)
+                             setAliasValue('')
+                             setAliasError('')
+                             setSearchQuery('')
+                         }
+
+                         const updateApiKeys = (nextKeys: string[], nextAliasesText: string) => {
+                             onChange(nextKeys.join('\n'), nextAliasesText)
+                         }
+
+                         const toggleTreeSelection = (
+                             node: ModelTreeNode,
+                             selected: Set<string>,
+                             setSelected: (next: Set<string>) => void,
+                         ) => {
+                             const leaves      = modelLeaves(node)
+                             const allSelected = leaves.length > 0 && leaves.every((model) => selected.has(model))
+                             const next        = new Set(selected)
+                             for (const model of leaves) {
+                                 if (allSelected) {
+                                     next.delete(model)
+                                 } else {
+                                     next.add(model)
+                                 }
+                             }
+                             setSelected(next)
+                         }
+
+                         const moveAllowedToBlocked = (models: Iterable<string>) => {
+                             const next = new Set(draftBlockedModels)
+                             for (const model of models) {
+                                 removeModelLimitMatches(next, model)
+                                 next.add(model)
+                             }
+                             setDraftBlockedModels(next)
+                             setSelectedAllowed(new Set())
+                         }
+
+                         const moveAllAllowedToBlocked = () => {
+                             setDraftBlockedModels(new Set([...draftBlockedModels, ...availableModelNames]))
+                             setSelectedAllowed(new Set())
+                             setSelectedBlocked(new Set())
+                         }
+
+                         const moveBlockedToAllowed = (models: Iterable<string>) => {
+                             const next = new Set(draftBlockedModels)
+                             for (const model of models) {
+                                 removeModelLimitMatches(next, model)
+                             }
+                             setDraftBlockedModels(next)
+                             setSelectedBlocked(new Set())
+                         }
+
+                         const handleDelete = (apiKeyId: string) => {
+                             if (aliasConfigError) {
+                                 return
+                             }
+                             const index = renderApiKeyIds.findIndex((id) => id === apiKeyId)
+                             if (index < 0) {
+                                 return
+                             }
+                             const deletedKey = apiKeys[index]
+                             const nextKeys   = apiKeys.filter((_, i) => i !== index)
+                             const aliasDraft = aliasDocument.clone()
+                             if (deletedKey && !nextKeys.includes(deletedKey)) {
+                                 aliasDraft.deleteIn([deletedKey])
+                             }
+                             setApiKeyIds(renderApiKeyIds.filter((id) => id !== apiKeyId))
+                             updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
+                             if (deletedKey && !nextKeys.includes(deletedKey) && modelRules[deletedKey]) {
+                                 const nextRules = Object.assign(Object.create(null), modelRules)
+                                 delete nextRules[deletedKey]
+                                 onModelRulesChange(nextRules)
+                             }
+                         }
+
+                         const handleSave = () => {
+                             if (aliasConfigError) {
+                                 setAliasError(aliasConfigError)
+                                 return
+                             }
+                             const editingIndex = editingApiKeyId ?
+                                                  renderApiKeyIds.findIndex((id) => id === editingApiKeyId) :
+                                                  -1
+                             const oldKey       = editingIndex >= 0 ? apiKeys[editingIndex] : undefined
+                             const trimmed      = inputValue.trim() ||
+                                                  (oldKey && CONFIG_SECRET_PLACEHOLDER.test(oldKey) ? oldKey : '')
+                             const trimmedAlias = aliasValue.trim()
+
+                             if (!trimmed) {
+                                 setFormError(visualT('api_keys.error_empty'))
+                                 return
+                             }
+                             if (!isValidApiKey(trimmed)) {
+                                 setFormError(
+                                     trimmed.length < 8
+                                     ? visualT('api_keys.error_too_short')
+                                     : visualT('api_keys.error_invalid'),
+                                 )
+                                 return
+                             }
+
+                             // 验证别名格式
+                             const aliasFormatError = validateAlias(trimmedAlias)
+                             if (aliasFormatError) {
+                                 setAliasError(aliasFormatError)
+                                 return
+                             }
+
+                             // 检查别名是否与其他 key 重复
+                             if (trimmedAlias) {
+                                 const editingIndex = editingApiKeyId ?
+                                                      renderApiKeyIds.findIndex((id) => id === editingApiKeyId) :
+                                                      -1
+                                 const currentKey   = editingIndex >= 0 ? apiKeys[editingIndex] : undefined
+                                 const duplicate    = Object.entries(aliases).some(
+                                     ([key, alias]) => alias ===
+                                                       trimmedAlias &&
+                                                       key !==
+                                                       currentKey &&
+                                                       key !==
+                                                       trimmed,
+                                 )
+                                 if (duplicate) {
+                                     setAliasError(visualT('api_keys.alias_error_duplicate'))
+                                     return
+                                 }
+                             }
+
+                             if (editingApiKeyId !== null && !oldKey) {
+                                 setFormError(t('config_management.config_changed'))
+                                 return
+                             }
+                             if (trimmed !== oldKey && apiKeys.includes(trimmed)) {
+                                 setFormError(visualT('api_keys.error_duplicate'))
+                                 return
+                             }
+                             const nextKeys   =
+                                       editingApiKeyId === null
+                                       ? [...apiKeys, trimmed]
+                                       : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key))
+                             const aliasDraft = aliasDocument.clone()
+                             if (trimmedAlias) {
+                                 aliasDraft.setIn([trimmed], trimmedAlias)
+                             } else {
+                                 aliasDraft.deleteIn([trimmed])
+                             }
+                             if (oldKey && oldKey !== trimmed && !nextKeys.includes(oldKey)) {
+                                 aliasDraft.deleteIn([oldKey])
+                             }
+                             if (editingApiKeyId === null) {
+                                 setApiKeyIds([...renderApiKeyIds, makeClientId()])
+                             }
+                             updateApiKeys(nextKeys, aliasDraft.toString().trimEnd())
+                             if (oldKey && oldKey !== trimmed && modelRules[oldKey]) {
+                                 const nextRules = { ...modelRules, [trimmed]: modelRules[oldKey] }
+                                 if (!nextKeys.includes(oldKey)) {
+                                     delete nextRules[oldKey]
+                                 }
+                                 onModelRulesChange(nextRules)
+                             }
+                             closeModal()
+                         }
+
+                         const handleCopy = async (apiKey: string) => {
+                             const copied = await copyToClipboard(apiKey)
+                             showNotification(
+                                 t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
+                                 copied ? 'success' : 'error',
+                             )
+                         }
+
+                         const handleGenerate = () => {
+                             const trimmedAlias = aliasValue.trim()
+                             setInputValue(generateSecureApiKey(trimmedAlias || undefined))
+                             setFormError('')
+                         }
+
                          return (
-                         <div key={renderApiKeyIds[item.index] ?? `${item.key}-${item.index}`} className='item-row'>
-                             <div className='item-meta'>
-                                 <div className='pill'>#{item.index + 1}</div>
-                                 <div className='item-title'>
-                                     {highlightText(
-                                         aliases[item.key] || visualT('api_keys.input_label'),
-                                         searchQuery,
+                             <div className='form-group' style={{ marginBottom: 0 }}>
+                                 <div className={styles.blockHeaderRow}>
+                                     <label style={{ margin: 0 }}>{visualT('api_keys.label')}</label>
+                                     <Button size='sm' onClick={openAddModal}
+                                             disabled={disabled || Boolean(aliasConfigError)}>
+                                         {visualT('api_keys.add')}
+                                     </Button>
+                                 </div>
+                                 {aliasConfigError && <div role='alert'>{aliasConfigError}</div>}
+
+                                 {showSearch && (
+                                     <Input
+                                         placeholder={visualT('api_keys.search_placeholder')}
+                                         value={searchQuery}
+                                         onChange={(e) => setSearchQuery(e.target.value)}
+                                     />
+                                 )}
+
+                                 {needsSavedSearch &&
+                                  !currentSavedKeySearch &&
+                                  <div role='status'>{t('common.loading')}</div>}
+                                 {currentSavedKeySearch?.error &&
+                                  <div role='alert'>{currentSavedKeySearch.error}</div>}
+
+                                 {apiKeys.length === 0 ? (
+                                     <div className={styles.emptyState}>{visualT('api_keys.empty')}</div>
+                                 ) : (
+                                      <div className='item-list' style={{ marginTop: 4 }}>
+                                          {pagedKeys.map(
+                                              (item) => {
+                                                  const redacted = CONFIG_SECRET_PLACEHOLDER.test(item.key)
+                                                  return (
+                                                      <div key={renderApiKeyIds[item.index] ??
+                                                                `${item.key}-${item.index}`}
+                                                           className='item-row'>
+                                                          <div className='item-meta'>
+                                                              <div className='pill'>#{item.index + 1}</div>
+                                                              <div className='item-title'>
+                                                                  {highlightText(
+                                                                      aliases[item.key] ||
+                                                                      visualT('api_keys.input_label'),
+                                                                      searchQuery,
+                                                                  )}
+                                                              </div>
+                                                              <div className='item-subtitle'>
+                                                                  {redacted
+                                                                   ?
+                                                                   currentSavedKeySearch?.matches.has(item.key)
+                                                                   ?
+                                                                   <mark
+                                                                       className={styles.searchHighlight}>{visualT(
+                                                                       'api_keys.saved_key_hidden')}</mark>
+                                                                   :
+                                                                   visualT('api_keys.saved_key_hidden')
+                                                                   :
+                                                                   highlightText(
+                                                                       maskApiKey(String(item.key || '')),
+                                                                       searchQuery,
+                                                                   )}
+                                                              </div>
+                                                              <div className={styles.apiKeyModelLimitSummary}>
+                                                                  {modelRules[item.key]?.blockedModels?.length
+                                                                   ?
+                                                                   visualT('api_keys.model_limit_blocked_summary', {
+                                                                       count: (
+                                                                           modelRules[
+                                                                               item.key
+                                                                               ]?.blockedModels.length
+                                                                       ),
+                                                                       defaultValue: '模型访问：已禁止 {{count}} 个模型',
+                                                                   })
+                                                                   :
+                                                                   visualT('api_keys.model_limit_all_allowed', {
+                                                                       defaultValue: '模型访问：全部允许',
+                                                                   })}
+                                                              </div>
+                                                              <div className={styles.apiKeyPolicySummary}>
+                                                                  {isApiKeyPolicyConfigured(modelRules[item.key])
+                                                                   ? visualT(
+                                                                          'api_keys.policy_summary',
+                                                                          {
+                                                                              profile: (
+                                                                                  modelRules[
+                                                                                      item.key
+                                                                                      ]?.policyProfile ||
+                                                                                  visualT(
+                                                                                      (
+                                                                                          'api_keys.' +
+                                                                                          'policy_' +
+                                                                                          'profile_' +
+                                                                                          'default'
+                                                                                      ),
+                                                                                  )
+                                                                              ),
+                                                                              ttl: (
+                                                                                  modelRules[
+                                                                                      item.key
+                                                                                      ]?.reservationTtl ||
+                                                                                  visualT(
+                                                                                      (
+                                                                                          'api_keys.' +
+                                                                                          'policy_ttl_' +
+                                                                                          'default'
+                                                                                      ))
+                                                                              ),
+                                                                              providers: (
+                                                                                  modelRules[
+                                                                                      item.key
+                                                                                      ]?.providers.length ??
+                                                                                  0
+                                                                              ),
+                                                                              models: (
+                                                                                  modelRules[
+                                                                                      item.key
+                                                                                      ]?.canonicalModels.length ??
+                                                                                  0
+                                                                              ),
+                                                                              mappings: (
+                                                                                  Object.keys(
+                                                                                      modelRules[
+                                                                                          item.key
+                                                                                          ]?.modelMappings ??
+                                                                                      {},
+                                                                                  ).length
+                                                                              ),
+                                                                              limits: (
+                                                                                  modelRules[
+                                                                                      item.key
+                                                                                      ]?.limits.length ??
+                                                                                  0
+                                                                              ),
+                                                                              defaultValue:
+                                                                                  (
+                                                                                      '策略：{{profile}} · ' +
+                                                                                      'TTL {{ttl}} · 供应商 ' +
+                                                                                      '{{providers}} · ' +
+                                                                                      '模型 {{models}} · ' +
+                                                                                      '映射 {{mappings}} · ' +
+                                                                                      '额度窗口 {{limits}}'
+                                                                                  ),
+                                                                          },
+                                                                      )
+                                                                   : visualT('api_keys.policy_unconfigured', {
+                                                                          defaultValue: '额度策略：未配置',
+                                                                      })}
+                                                              </div>
+                                                          </div>
+                                                          <div className='item-actions'>
+                                                              {!redacted && <Button
+                                                                  variant='secondary'
+                                                                  size='sm'
+                                                                  onClick={() => handleCopy(item.key)}
+                                                                  disabled={disabled}
+                                                              >
+                                                                  {t('common.copy')}
+                                                              </Button>}
+                                                              <Button
+                                                                  variant='secondary'
+                                                                  size='sm'
+                                                                  onClick={() => (
+                                                                      openEditModal(renderApiKeyIds[item.index] ??
+                                                                                    '')
+                                                                  )}
+                                                                  disabled={disabled || Boolean(aliasConfigError)}
+                                                              >
+                                                                  {visualT('common.edit')}
+                                                              </Button>
+                                                              <Button
+                                                                  variant='secondary'
+                                                                  size='sm'
+                                                                  onClick={() => openModelLimitModal(item.key)}
+                                                                  disabled={disabled}
+                                                              >
+                                                                  {visualT('api_keys.model_limit_button', {
+                                                                      defaultValue: '模型限制',
+                                                                  })}
+                                                              </Button>
+                                                              <Button
+                                                                  variant='secondary'
+                                                                  size='sm'
+                                                                  onClick={() => setPolicyKey(item.key)}
+                                                                  disabled={disabled}
+                                                              >
+                                                                  {visualT('api_keys.policy_button')}
+                                                              </Button>
+                                                              <Button
+                                                                  variant='danger'
+                                                                  size='sm'
+                                                                  onClick={() => {
+                                                                      const id         = renderApiKeyIds[item.index] ??
+                                                                                         ''
+                                                                      const alias      = aliases[item.key]
+                                                                      const displayKey = redacted ?
+                                                                                         visualT(
+                                                                                             (
+                                                                                                 'api_keys.' +
+                                                                                                 'saved_key_' +
+                                                                                                 'hidden'
+                                                                                             ),
+                                                                                         ) :
+                                                                                         maskApiKey(item.key)
+                                                                      const display    = alias ?
+                                                                                         `${alias} (${displayKey})` :
+                                                                                         displayKey
+                                                                      useNotificationStore
+                                                                          .getState()
+                                                                          .showConfirmation(
+                                                                              {
+                                                                                  title: visualT(
+                                                                                      'api_keys.delete_title',
+                                                                                      {
+                                                                                          defaultValue: (
+                                                                                              'Delete API ' +
+                                                                                              'key'
+                                                                                          ),
+                                                                                      },
+                                                                                  ),
+                                                                                  message: (
+                                                                                      visualT(
+                                                                                          (
+                                                                                              'api_keys.delete_' +
+                                                                                              'confirm'
+                                                                                          ),
+                                                                                          {
+                                                                                              key: display,
+                                                                                              defaultValue: (
+                                                                                                  `Delete API key "${
+                                                                                                      display
+                                                                                                  }"?`
+                                                                                              ),
+                                                                                          },
+                                                                                      )
+                                                                                  ),
+                                                                                  variant: 'danger',
+                                                                                  confirmText: visualT(
+                                                                                      'common.delete'),
+                                                                                  onConfirm: () => handleDelete(
+                                                                                      id),
+                                                                              },
+                                                                          )
+                                                                  }}
+                                                                  disabled={disabled || Boolean(aliasConfigError)}
+                                                              >
+                                                                  {visualT('common.delete')}
+                                                              </Button>
+                                                          </div>
+                                                      </div>
+                                                  )
+                                              },
+                                          )}
+                                      </div>
+                                  )}
+
+                                 {totalPages > 1 && (
+                                     <Pagination
+                                         total={filteredKeys.length}
+                                         page={currentPage}
+                                         pageSize={pageSize}
+                                         onPageChange={goToPage}
+                                         onPageSizeChange={setPageSize}
+                                     />
+                                 )}
+
+                                 <div className='hint'>
+                                     {visualT('api_keys.hint')}
+                                     {apiKeys.some((key) => CONFIG_SECRET_PLACEHOLDER.test(key)) && (
+                                         <div>{visualT('api_keys.saved_key_hint')}</div>
                                      )}
                                  </div>
-                                 <div className='item-subtitle'>
-                                     {redacted
-                                      ? visualT('api_keys.saved_key_hidden')
-                                      : highlightText(maskApiKey(String(item.key || '')), searchQuery)}
-                                 </div>
-                                 {!redacted && <Fragment><div className={styles.apiKeyModelLimitSummary}>
-                                     {modelRules[item.key]?.blockedModels?.length
-                                      ? visualT('api_keys.model_limit_blocked_summary', {
-                                             count: modelRules[item.key]?.blockedModels.length,
-                                             defaultValue: '模型访问：已禁止 {{count}} 个模型',
-                                         })
-                                      : visualT('api_keys.model_limit_all_allowed', {
-                                             defaultValue: '模型访问：全部允许',
-                                         })}
-                                 </div>
-                                 <div className={styles.apiKeyPolicySummary}>
-                                     {isApiKeyPolicyConfigured(modelRules[item.key])
-                                      ? visualT('api_keys.policy_summary', {
-                                             profile: modelRules[item.key]?.policyProfile ||
-                                                      visualT('api_keys.policy_profile_default'),
-                                             ttl: modelRules[item.key]?.reservationTtl ||
-                                                  visualT('api_keys.policy_ttl_default'),
-                                             providers: modelRules[item.key]?.providers.length ?? 0,
-                                             models: modelRules[item.key]?.canonicalModels.length ?? 0,
-                                             mappings: Object.keys(modelRules[item.key]?.modelMappings ?? {}).length,
-                                             limits: modelRules[item.key]?.limits.length ?? 0,
-                                             defaultValue:
-                                                 '策略：{{profile}} · TTL {{ttl}} · 供应商 {{providers}} · 模型 {{models}} · 映射 {{mappings}} · 额度窗口 {{limits}}',
-                                         })
-                                      : visualT('api_keys.policy_unconfigured', {
-                                             defaultValue: '额度策略：未配置',
-                                         })}
-                                 </div></Fragment>}
-                             </div>
-                             {!redacted && <div className='item-actions'>
-                                 <Button
-                                     variant='secondary'
-                                     size='sm'
-                                     onClick={() => handleCopy(item.key)}
-                                     disabled={disabled}
+
+                                 <Modal
+                                     open={modalOpen}
+                                     onClose={closeModal}
+                                     title={
+                                         editingApiKeyId !== null
+                                         ? visualT('api_keys.edit_title')
+                                         : visualT('api_keys.add_title')
+                                     }
+                                     footer={
+                                         <>
+                                             <Button variant='secondary' onClick={closeModal}
+                                                     disabled={disabled || Boolean(aliasConfigError)}>
+                                                 {visualT('common.cancel')}
+                                             </Button>
+                                             <Button onClick={handleSave}
+                                                     disabled={disabled || Boolean(aliasConfigError)}>
+                                                 {editingApiKeyId !== null
+                                                  ? visualT('common.update')
+                                                  : visualT('common.add')}
+                                             </Button>
+                                         </>
+                                     }
                                  >
-                                     {t('common.copy')}
-                                 </Button>
-                                 <Button
-                                     variant='secondary'
-                                     size='sm'
-                                     onClick={() => openEditModal(renderApiKeyIds[item.index] ?? '')}
-                                     disabled={disabled || Boolean(aliasConfigError)}
-                                 >
-                                     {visualT('common.edit')}
-                                 </Button>
-                                 <Button
-                                     variant='secondary'
-                                     size='sm'
-                                     onClick={() => openModelLimitModal(item.key)}
-                                     disabled={disabled}
-                                 >
-                                     {visualT('api_keys.model_limit_button', {
-                                         defaultValue: '模型限制',
+                                     <div className='form-group'>
+                                         <label htmlFor={aliasInputId}>{visualT('api_keys.alias_label')}</label>
+                                         <input
+                                             id={aliasInputId}
+                                             className='input'
+                                             placeholder={visualT('api_keys.alias_placeholder')}
+                                             value={aliasValue}
+                                             onChange={(e) => {
+                                                 setAliasValue(e.target.value)
+                                                 setAliasError('')
+                                             }}
+                                             disabled={disabled || Boolean(aliasConfigError)}
+                                             aria-describedby={aliasError ?
+                                                               `${aliasErrorId} ${aliasHintId}` :
+                                                               aliasHintId}
+                                             aria-invalid={Boolean(aliasError)}
+                                         />
+                                         <div id={aliasHintId} className='hint'>
+                                             {visualT('api_keys.alias_hint')}
+                                         </div>
+                                         {aliasError && (
+                                             <div id={aliasErrorId} className='error-box'>
+                                                 {aliasError}
+                                             </div>
+                                         )}
+                                     </div>
+
+                                     <div className='form-group'>
+                                         <label htmlFor={apiKeyInputId}>{visualT('api_keys.input_label')}</label>
+                                         <div className={styles.apiKeyModalInputRow}>
+                                             <div className={styles.apiKeyModalSecretInput}>
+                                                 <input
+                                                     id={apiKeyInputId}
+                                                     className='input'
+                                                     type={apiKeyVisible ? 'text' : 'password'}
+                                                     placeholder={visualT(editingSavedKey ?
+                                                                          'api_keys.saved_key_keep' :
+                                                                          'api_keys.input_placeholder')}
+                                                     value={inputValue}
+                                                     onChange={(e) => setInputValue(e.target.value)}
+                                                     disabled={disabled || Boolean(aliasConfigError)}
+                                                     aria-describedby={`${apiKeyStrengthId} ${apiKeyHintId}${
+                                                         formError ? ` ${apiKeyErrorId}` : ''
+                                                     }`}
+                                                     aria-invalid={Boolean(formError)}
+                                                     autoComplete='new-password'
+                                                     spellCheck={false}
+                                                     autoCapitalize='none'
+                                                     autoCorrect='off'
+                                                 />
+                                                 <button
+                                                     type='button'
+                                                     className={styles.apiKeyModalVisibilityButton}
+                                                     onClick={() => setApiKeyVisible((value) => !value)}
+                                                     disabled={disabled || Boolean(aliasConfigError)}
+                                                     aria-label={
+                                                         apiKeyVisible
+                                                         ? t('login.hide_key', { defaultValue: 'Hide key' })
+                                                         : t('login.show_key', { defaultValue: 'Show key' })
+                                                     }
+                                                 >
+                                                     {apiKeyVisible ?
+                                                      <IconEyeOff size={16} /> :
+                                                      <IconEye size={16} />}
+                                                 </button>
+                                             </div>
+                                             <Button
+                                                 type='button'
+                                                 variant='secondary'
+                                                 size='sm'
+                                                 onClick={handleGenerate}
+                                                 disabled={disabled || Boolean(aliasConfigError)}
+                                             >
+                                                 {visualT('api_keys.generate')}
+                                             </Button>
+                                         </div>
+                                         <ApiKeyStrengthMeter id={apiKeyStrengthId} value={inputValue} />
+                                         <div id={apiKeyHintId} className='hint'>
+                                             {visualT(editingSavedKey ?
+                                                      'api_keys.saved_key_keep' :
+                                                      'api_keys.input_hint')}
+                                         </div>
+                                         {formError && (
+                                             <div id={apiKeyErrorId} className='error-box'>
+                                                 {formError}
+                                             </div>
+                                         )}
+                                     </div>
+                                 </Modal>
+
+                                 <Modal
+                                     open={modelLimitKey !== null}
+                                     onClose={closeModelLimitModal}
+                                     width='min(1180px, calc(100vw - 48px))'
+                                     title={visualT('api_keys.model_limit_title', {
+                                         defaultValue: '模型访问限制',
                                      })}
-                                 </Button>
-                                 <Button
-                                     variant='secondary'
-                                     size='sm'
-                                     onClick={() => setPolicyKey(item.key)}
-                                     disabled={disabled}
+                                     footer={
+                                         <>
+                                             <Button variant='secondary' onClick={closeModelLimitModal}
+                                                     disabled={disabled}>
+                                                 {visualT('common.cancel')}
+                                             </Button>
+                                             <Button onClick={saveModelLimitRules}
+                                                     disabled={disabled || !modelLimitCatalogReady}>
+                                                 {visualT('common.update')}
+                                             </Button>
+                                         </>
+                                     }
                                  >
-                                     {visualT('api_keys.policy_button')}
-                                 </Button>
-                                 <Button
-                                     variant='danger'
-                                     size='sm'
-                                     onClick={() => {
-                                         const id      = renderApiKeyIds[item.index] ?? ''
-                                         const alias   = aliases[item.key]
-                                         const display = alias
-                                                         ? `${alias} (${maskApiKey(item.key)})`
-                                                         : maskApiKey(item.key)
-                                         useNotificationStore
-                                             .getState()
-                                             .showConfirmation({
-                                                                   title: visualT('api_keys.delete_title', {
-                                                                       defaultValue: 'Delete API key',
-                                                                   }),
-                                                                   message: visualT('api_keys.delete_confirm', {
-                                                                       key: display,
-                                                                       defaultValue: `Delete API key "${display}"?`,
-                                                                   }),
-                                                                   variant: 'danger',
-                                                                   confirmText: visualT('common.delete'),
-                                                                   onConfirm: () => handleDelete(id),
-                                                               })
-                                     }}
-                                     disabled={disabled || Boolean(aliasConfigError)}
-                                 >
-                                     {visualT('common.delete')}
-                                 </Button>
-                             </div>}
-                         </div>
-                         )
-                     })}
-                 </div>
-             )}
-
-            {totalPages > 1 && (
-                <Pagination
-                    total={filteredKeys.length}
-                    page={currentPage}
-                    pageSize={pageSize}
-                    onPageChange={goToPage}
-                    onPageSizeChange={setPageSize}
-                />
-            )}
-
-            <div className='hint'>
-                {visualT('api_keys.hint')}
-                {apiKeys.some((key) => CONFIG_SECRET_PLACEHOLDER.test(key)) && (
-                    <div>{visualT('api_keys.saved_key_hint')}</div>
-                )}
-            </div>
-
-            <Modal
-                open={modalOpen}
-                onClose={closeModal}
-                title={
-                    editingApiKeyId !== null
-                    ? visualT('api_keys.edit_title')
-                    : visualT('api_keys.add_title')
-                }
-                footer={
-                    <>
-                        <Button variant='secondary' onClick={closeModal} disabled={disabled || Boolean(aliasConfigError)}>
-                            {visualT('common.cancel')}
-                        </Button>
-                        <Button onClick={handleSave} disabled={disabled || Boolean(aliasConfigError)}>
-                            {editingApiKeyId !== null
-                             ? visualT('common.update')
-                             : visualT('common.add')}
-                        </Button>
-                    </>
-                }
-            >
-                <div className='form-group'>
-                    <label htmlFor={aliasInputId}>{visualT('api_keys.alias_label')}</label>
-                    <input
-                        id={aliasInputId}
-                        className='input'
-                        placeholder={visualT('api_keys.alias_placeholder')}
-                        value={aliasValue}
-                        onChange={(e) => {
-                            setAliasValue(e.target.value)
-                            setAliasError('')
-                        }}
-                        disabled={disabled || Boolean(aliasConfigError)}
-                        aria-describedby={aliasError ? `${aliasErrorId} ${aliasHintId}` : aliasHintId}
-                        aria-invalid={Boolean(aliasError)}
-                    />
-                    <div id={aliasHintId} className='hint'>
-                        {visualT('api_keys.alias_hint')}
-                    </div>
-                    {aliasError && (
-                        <div id={aliasErrorId} className='error-box'>
-                            {aliasError}
-                        </div>
-                    )}
-                </div>
-
-                <div className='form-group'>
-                    <label htmlFor={apiKeyInputId}>{visualT('api_keys.input_label')}</label>
-                    <div className={styles.apiKeyModalInputRow}>
-                        <div className={styles.apiKeyModalSecretInput}>
-                            <input
-                                id={apiKeyInputId}
-                                className='input'
-                                type={apiKeyVisible ? 'text' : 'password'}
-                                placeholder={visualT('api_keys.input_placeholder')}
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                                disabled={disabled || Boolean(aliasConfigError)}
-                                aria-describedby={`${apiKeyStrengthId} ${apiKeyHintId}${
-                                    formError ? ` ${apiKeyErrorId}` : ''
-                                }`}
-                                aria-invalid={Boolean(formError)}
-                                autoComplete='new-password'
-                                spellCheck={false}
-                                autoCapitalize='none'
-                                autoCorrect='off'
-                            />
-                            <button
-                                type='button'
-                                className={styles.apiKeyModalVisibilityButton}
-                                onClick={() => setApiKeyVisible((value) => !value)}
-                                disabled={disabled || Boolean(aliasConfigError)}
-                                aria-label={
-                                    apiKeyVisible
-                                    ? t('login.hide_key', { defaultValue: 'Hide key' })
-                                    : t('login.show_key', { defaultValue: 'Show key' })
-                                }
-                            >
-                                {apiKeyVisible ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-                            </button>
-                        </div>
-                        <Button
-                            type='button'
-                            variant='secondary'
-                            size='sm'
-                            onClick={handleGenerate}
-                            disabled={disabled || Boolean(aliasConfigError)}
-                        >
-                            {visualT('api_keys.generate')}
-                        </Button>
-                    </div>
-                    <ApiKeyStrengthMeter id={apiKeyStrengthId} value={inputValue} />
-                    <div id={apiKeyHintId} className='hint'>
-                        {visualT('api_keys.input_hint')}
-                    </div>
-                    {formError && (
-                        <div id={apiKeyErrorId} className='error-box'>
-                            {formError}
-                        </div>
-                    )}
-                </div>
-            </Modal>
-
-            <Modal
-                open={modelLimitKey !== null}
-                onClose={closeModelLimitModal}
-                width='min(1180px, calc(100vw - 48px))'
-                title={visualT('api_keys.model_limit_title', {
-                    defaultValue: '模型访问限制',
-                })}
-                footer={
-                    <>
-                        <Button variant='secondary' onClick={closeModelLimitModal} disabled={disabled}>
-                            {visualT('common.cancel')}
-                        </Button>
-                        <Button onClick={saveModelLimitRules} disabled={disabled || !modelLimitCatalogReady}>
-                            {visualT('common.update')}
-                        </Button>
-                    </>
-                }
-            >
-                <div className={styles.modelLimitModal}>
-                    <div className={styles.modelLimitTarget}>{currentModelLimitTitle}</div>
-                    <div className={styles.modelLimitHint}>
-                        {visualT('api_keys.model_limit_hint', {
-                            defaultValue: '默认允许全部模型，系统新增模型也会默认允许；移入右侧后该 key 将无法访问',
-                        })}
-                    </div>
-                    {unavailableModelNames.length > 0 ? (
-                        <div className={styles.modelLimitUnavailable}>
-                            {getModelLimitUnavailableSummary(t, unavailableModelNames)}
-                        </div>
-                    ) : null}
-                    {modelCatalogError ? (
-                        <div className='error-box'>
-                            {visualT('api_keys.model_catalog_load_failed', {
-                                error: modelCatalogError,
-                                defaultValue: `模型目录加载失败：${modelCatalogError}`,
-                            })}
-                        </div>
-                    ) : null}
-                    <Input
-                        placeholder={visualT('api_keys.model_limit_search', {
-                            defaultValue: '搜索模型或供应商',
-                        })}
-                        value={modelLimitQuery}
-                        onChange={(event) => setModelLimitQuery(event.target.value)}
-                    />
-                    <div className={styles.modelLimitTransfer}>
-                        <ModelTreePanel
-                            title={visualT('api_keys.model_limit_allowed', {
-                                defaultValue: '允许访问（默认）',
-                            })}
-                            nodes={filteredAllowedTree}
-                            selected={selectedAllowed}
-                            onToggle={(node) => toggleTreeSelection(node, selectedAllowed, setSelectedAllowed)}
-                            onMoveModel={(model) => moveAllowedToBlocked([model])}
-                            emptyText={modelLimitPrimaryEmptyText}
-                            emptyVariant={modelLimitAllowedEmptyVariant}
-                            expandMatches={expandModelMatches}
-                            aliasLabelsByModel={aliasLabelsByModel}
-                        />
-                        <div className={styles.modelLimitActions}>
-                            <Button
-                                type='button'
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => moveAllowedToBlocked(selectedAllowed)}
-                                disabled={selectedAllowed.size === 0 || disabled}
-                            >
+                                     <div className={styles.modelLimitModal}>
+                                         <div className={styles.modelLimitTarget}>{currentModelLimitTitle}</div>
+                                         <div className={styles.modelLimitHint}>
+                                             {visualT('api_keys.model_limit_hint', {
+                                                 defaultValue: '默认允许全部模型，系统新增模型也会默认允许；移入右侧后该 key 将无法访问',
+                                             })}
+                                         </div>
+                                         {unavailableModelNames.length > 0 ? (
+                                             <div className={styles.modelLimitUnavailable}>
+                                                 {getModelLimitUnavailableSummary(t, unavailableModelNames)}
+                                             </div>
+                                         ) : null}
+                                         {modelCatalogError ? (
+                                             <div className='error-box'>
+                                                 {visualT('api_keys.model_catalog_load_failed', {
+                                                     error: modelCatalogError,
+                                                     defaultValue: `模型目录加载失败：${modelCatalogError}`,
+                                                 })}
+                                             </div>
+                                         ) : null}
+                                         <Input
+                                             placeholder={visualT('api_keys.model_limit_search', {
+                                                 defaultValue: '搜索模型或供应商',
+                                             })}
+                                             value={modelLimitQuery}
+                                             onChange={(event) => setModelLimitQuery(event.target.value)}
+                                         />
+                                         <div className={styles.modelLimitTransfer}>
+                                             <ModelTreePanel
+                                                 title={visualT('api_keys.model_limit_allowed', {
+                                                     defaultValue: '允许访问（默认）',
+                                                 })}
+                                                 nodes={filteredAllowedTree}
+                                                 selected={selectedAllowed}
+                                                 onToggle={(node) => toggleTreeSelection(
+                                                     node,
+                                                     selectedAllowed,
+                                                     setSelectedAllowed,
+                                                 )}
+                                                 onMoveModel={(model) => moveAllowedToBlocked([model])}
+                                                 emptyText={modelLimitPrimaryEmptyText}
+                                                 emptyVariant={modelLimitAllowedEmptyVariant}
+                                                 expandMatches={expandModelMatches}
+                                                 aliasLabelsByModel={aliasLabelsByModel}
+                                             />
+                                             <div className={styles.modelLimitActions}>
+                                                 <Button
+                                                     type='button'
+                                                     variant='secondary'
+                                                     size='sm'
+                                                     onClick={() => moveAllowedToBlocked(selectedAllowed)}
+                                                     disabled={selectedAllowed.size === 0 || disabled}
+                                                 >
                                 <span className={styles.modelLimitActionContent}>
                                     {visualT('api_keys.model_limit_move_blocked', {
                                         defaultValue: '移到禁止',
                                     })}
                                     <IconChevronRight size={14} />
                                 </span>
-                            </Button>
-                            <Button
-                                type='button'
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => moveBlockedToAllowed(selectedBlocked)}
-                                disabled={selectedBlocked.size === 0 || disabled}
-                            >
+                                                 </Button>
+                                                 <Button
+                                                     type='button'
+                                                     variant='secondary'
+                                                     size='sm'
+                                                     onClick={() => moveBlockedToAllowed(selectedBlocked)}
+                                                     disabled={selectedBlocked.size === 0 || disabled}
+                                                 >
                                 <span className={styles.modelLimitActionContent}>
                                     <IconChevronLeft size={14} />
                                     {visualT('api_keys.model_limit_move_allowed', {
                                         defaultValue: '恢复允许',
                                     })}
                                 </span>
-                            </Button>
-                            <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={moveAllAllowedToBlocked}
-                                disabled={availableModelNames.length === 0 || availableModelsAllBlocked || disabled}
-                            >
+                                                 </Button>
+                                                 <Button
+                                                     type='button'
+                                                     variant='ghost'
+                                                     size='sm'
+                                                     onClick={moveAllAllowedToBlocked}
+                                                     disabled={availableModelNames.length ===
+                                                               0 ||
+                                                               availableModelsAllBlocked ||
+                                                               disabled}
+                                                 >
                                 <span className={styles.modelLimitActionContent}>
                                     {visualT('api_keys.model_limit_block_all', {
                                         defaultValue: '全部禁止',
                                     })}
                                     <IconChevronRight size={14} />
                                 </span>
-                            </Button>
-                            <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={() => {
-                                    const next = new Set(draftBlockedModels)
-                                    for (const model of availableModelNames) {
-                                        removeModelLimitMatches(next, model)
-                                    }
-                                    setDraftBlockedModels(next)
-                                    setSelectedAllowed(new Set())
-                                    setSelectedBlocked(new Set())
-                                }}
-                                disabled={!hasVisibleBlockedModels || disabled}
-                            >
+                                                 </Button>
+                                                 <Button
+                                                     type='button'
+                                                     variant='ghost'
+                                                     size='sm'
+                                                     onClick={() => {
+                                                         const next = new Set(draftBlockedModels)
+                                                         for (const model of availableModelNames) {
+                                                             removeModelLimitMatches(next, model)
+                                                         }
+                                                         setDraftBlockedModels(next)
+                                                         setSelectedAllowed(new Set())
+                                                         setSelectedBlocked(new Set())
+                                                     }}
+                                                     disabled={!hasVisibleBlockedModels || disabled}
+                                                 >
                                 <span className={styles.modelLimitActionContent}>
                                     <IconChevronLeft size={14} />
                                     {visualT('api_keys.model_limit_allow_all', {
                                         defaultValue: '全部允许',
                                     })}
                                 </span>
-                            </Button>
-                        </div>
-                        <ModelTreePanel
-                            title={visualT('api_keys.model_limit_blocked', {
-                                defaultValue: '禁止访问（黑名单）',
-                            })}
-                            nodes={filteredBlockedTree}
-                            selected={selectedBlocked}
-                            onToggle={(node) => toggleTreeSelection(node, selectedBlocked, setSelectedBlocked)}
-                            onMoveModel={(model) => moveBlockedToAllowed([model])}
-                            emptyText={
-                                hasModelLimitQuery
-                                ? visualT('api_keys.model_limit_search_empty_blocked', {
-                                    defaultValue: '黑名单中没有匹配模型',
-                                })
-                                : visualT('api_keys.model_limit_blocked_empty', {
-                                    defaultValue: '未限制任何模型，从左侧移入后禁止访问',
-                                })
-                            }
-                            expandMatches={expandModelMatches}
-                            showEmptyState={!modelLimitBothPanelsEmpty}
-                            aliasLabelsByModel={aliasLabelsByModel}
-                        />
-                    </div>
-                </div>
-            </Modal>
+                                                 </Button>
+                                             </div>
+                                             <ModelTreePanel
+                                                 title={visualT('api_keys.model_limit_blocked', {
+                                                     defaultValue: '禁止访问（黑名单）',
+                                                 })}
+                                                 nodes={filteredBlockedTree}
+                                                 selected={selectedBlocked}
+                                                 onToggle={(node) => toggleTreeSelection(
+                                                     node,
+                                                     selectedBlocked,
+                                                     setSelectedBlocked,
+                                                 )}
+                                                 onMoveModel={(model) => moveBlockedToAllowed([model])}
+                                                 emptyText={
+                                                     hasModelLimitQuery
+                                                     ? visualT('api_keys.model_limit_search_empty_blocked', {
+                                                         defaultValue: '黑名单中没有匹配模型',
+                                                     })
+                                                     : visualT('api_keys.model_limit_blocked_empty', {
+                                                         defaultValue: '未限制任何模型，从左侧移入后禁止访问',
+                                                     })
+                                                 }
+                                                 expandMatches={expandModelMatches}
+                                                 showEmptyState={!modelLimitBothPanelsEmpty}
+                                                 aliasLabelsByModel={aliasLabelsByModel}
+                                             />
+                                         </div>
+                                     </div>
+                                 </Modal>
 
-            {policyKey ? (
-                <ApiKeyPolicyEditor
-                    key={policyKey}
-                    target={currentPolicyTitle}
-                    rule={modelRules[policyKey]}
-                    disabled={disabled}
-                    onClose={() => setPolicyKey(null)}
-                    onSave={savePolicyRule}
-                />
-            ) : null}
-        </div>
-    )
-})
+                                 {policyKey ? (
+                                     <ApiKeyPolicyEditor
+                                         key={policyKey}
+                                         target={currentPolicyTitle}
+                                         rule={modelRules[policyKey]}
+                                         disabled={disabled}
+                                         onClose={() => setPolicyKey(null)}
+                                         onSave={savePolicyRule}
+                                     />
+                                 ) : null}
+                             </div>
+                         )
+                     })
 
 export const StringListEditor = memo(function StringListEditor({
                                                                    value,
@@ -1745,26 +2204,28 @@ export const StringListEditor = memo(function StringListEditor({
 })
 
 export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor({
-    value,
-    disabled,
-    error,
-    onChange,
-}: {
+                                                                                     value,
+                                                                                     disabled,
+                                                                                     error,
+                                                                                     onChange,
+                                                                                 }: {
     value: CodexLiveICEServerDraft[]
     disabled?: boolean
     error?: string
     onChange: (next: CodexLiveICEServerDraft[]) => void
 }) {
-    const { t } = useTranslation()
-    const id = useId()
-    const errorId = `${id}-error`
-    const label = (key: string, fallback: string, index?: number) =>
-        t(`config_management.visual.sections.advanced.${key}`, {defaultValue: fallback, index})
-    const update = (rowId: string, patch: Partial<CodexLiveICEServerDraft>) =>
-        onChange(value.map((row) => row.id === rowId ? {...row, ...patch} : row))
+    const { t }        = useTranslation()
+    const id           = useId()
+    const errorId      = `${id}-error`
+    const label        = (key: string, fallback: string, index?: number) =>
+        t(`config_management.visual.sections.advanced.${key}`, { defaultValue: fallback, index })
+    const update       = (rowId: string, patch: Partial<CodexLiveICEServerDraft>) =>
+        onChange(value.map((row) => row.id === rowId ? { ...row, ...patch } : row))
     const cannotRemove = (index: number) => value.slice(index + 1).some((row) =>
-        (row.usernameConfigured && !row.usernameEdited) ||
-        (row.credentialConfigured && !row.credentialEdited))
+                                                                            (row.usernameConfigured &&
+                                                                             !row.usernameEdited) ||
+                                                                            (row.credentialConfigured &&
+                                                                             !row.credentialEdited))
 
     return (
         <div role='group' aria-label={label('ice_servers', 'ICE servers')}
@@ -1787,7 +2248,7 @@ export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor
                             <textarea className={`input ${styles.yamlTextArea}`} rows={3} value={row.urlsText}
                                       disabled={disabled} spellCheck={false}
                                       aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
-                                      onChange={(event) => update(row.id, {urlsText: event.target.value})} />
+                                      onChange={(event) => update(row.id, { urlsText: event.target.value })} />
                         </label>
                         <label className={styles.storeAuthField}>
                             <span>{label('ice_username', 'TURN username')}</span>
@@ -1804,7 +2265,9 @@ export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor
                             <input className='input' type='password' value={row.credential} disabled={disabled}
                                    autoComplete='new-password' aria-describedby={error ? errorId : undefined}
                                    placeholder={row.credentialConfigured && !row.credentialEdited
-                                                ? label('ice_credential_saved', 'Saved credential (unchanged)') : undefined}
+                                                ?
+                                                label('ice_credential_saved', 'Saved credential (unchanged)') :
+                                                undefined}
                                    onChange={(event) => update(row.id, {
                                        credential: event.target.value, credentialEdited: true,
                                    })} />
@@ -1812,15 +2275,17 @@ export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor
                     </div>
                     {cannotRemove(index) ? (
                         <div role='note' className={styles.storeAuthEmpty}>
-                            {label('ice_remove_blocked',
-                                'Replace saved usernames and credentials in later servers before removing this row')}
+                            {label(
+                                'ice_remove_blocked',
+                                'Replace saved usernames and credentials in later servers before removing this row',
+                            )}
                         </div>
                     ) : null}
                     {row.usernameConfigured ? (
                         <Button type='button' variant='ghost' size='sm' disabled={disabled}
                                 onClick={() => update(row.id, row.usernameEdited
-                                    ? {username: '', usernameEdited: false}
-                                    : {username: '', usernameEdited: true})}>
+                                                              ? { username: '', usernameEdited: false }
+                                                              : { username: '', usernameEdited: true })}>
                             {row.usernameEdited
                              ? label('ice_keep_username', 'Keep saved username')
                              : label('ice_clear_username', 'Clear saved username')}
@@ -1829,8 +2294,8 @@ export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor
                     {row.credentialConfigured ? (
                         <Button type='button' variant='ghost' size='sm' disabled={disabled}
                                 onClick={() => update(row.id, row.credentialEdited
-                                    ? {credential: '', credentialEdited: false}
-                                    : {credential: '', credentialEdited: true})}>
+                                                              ? { credential: '', credentialEdited: false }
+                                                              : { credential: '', credentialEdited: true })}>
                             {row.credentialEdited
                              ? label('ice_keep_credential', 'Keep saved credential')
                              : label('ice_clear_credential', 'Clear saved credential')}
@@ -1841,11 +2306,13 @@ export const CodexLiveICEServersEditor = memo(function CodexLiveICEServersEditor
             {error ? <div id={errorId} className='error-box'>{error}</div> : null}
             <div className={styles.actionRow}>
                 <Button type='button' variant='secondary' size='sm' disabled={disabled}
-                        onClick={() => onChange([...value, {
-                            id: makeClientId(), urlsText: '', username: '', credential: '',
-                            usernameConfigured: false, usernameEdited: false,
-                            credentialConfigured: false, credentialEdited: false,
-                        }])}>
+                        onClick={() => onChange([
+                                                    ...value, {
+                                id: makeClientId(), urlsText: '', username: '', credential: '',
+                                usernameConfigured: false, usernameEdited: false,
+                                credentialConfigured: false, credentialEdited: false,
+                            },
+                                                ])}>
                     {label('ice_add', 'Add ICE server')}
                 </Button>
             </div>
@@ -2120,23 +2587,65 @@ export const PluginStoreAuthEditor = memo(function PluginStoreAuthEditor({
     )
 })
 
+function PayloadStringEditor(props: {
+    value: string
+    disabled?: boolean
+    placeholder: string
+    'aria-label': string
+    onChange: (event: { target: { value: string } }) => void
+}) {
+    const { t }             = useTranslation()
+    const inputId           = useId()
+    const [draft, setDraft] = useState<string | null>(null)
+    const closeEditor       = () => setDraft(null)
+    return (
+        <div className={styles.payloadStringEditor}>
+            <input {...props} id={inputId} />
+            <Button type='button' size='sm' variant='secondary' disabled={props.disabled}
+                    aria-label={`${t('config_management.visual.payload_rules.expand_value')}: ${props['aria-label']}`}
+                    onClick={() => setDraft(props.value)}>
+                {t('config_management.visual.payload_rules.expand_value')}
+            </Button>
+            <Modal open={draft !== null} onClose={closeEditor} title={props['aria-label']}
+                   initialFocusId={`${inputId}-expanded`} returnFocusId={inputId}
+                   footer={<>
+                       <Button variant='secondary' onClick={closeEditor}>{t('common.cancel')}</Button>
+                       <Button disabled={props.disabled} onClick={() => {
+                           if (draft === null || props.disabled) {
+                               return
+                           }
+                           props.onChange({ target: { value: draft } })
+                           closeEditor()
+                       }}>{t('common.confirm')}</Button>
+                   </>}>
+                <textarea id={`${inputId}-expanded`} className={`input ${styles.payloadJsonInput}`} rows={12}
+                          aria-label={props['aria-label']} value={draft ?? ''} disabled={props.disabled}
+                          onChange={(event) => setDraft(event.target.value)} />
+            </Modal>
+        </div>
+    )
+}
+
 function renderParamValueEditor(
     param: PayloadParamEntry,
     t: ReturnType<typeof useTranslation>['t'],
     disabled: boolean | undefined,
     onChange: (patch: Partial<PayloadParamEntry>) => void,
     rawJsonValues = false,
-    ariaLabel = t('config_management.visual.payload_rules.param_value'),
+    ariaLabel     = t('config_management.visual.payload_rules.param_value'),
 ): ReactNode {
     if (param.valueType === 'boolean' && !rawJsonValues) {
         return (
             <Select
                 value={param.value === 'true' || param.value === 'false' ? param.value : ''}
-                options={['true', 'false'].map((value) => ({value, label: t(`config_management.visual.payload_rules.boolean_${value}`)}))}
+                options={['true', 'false'].map((value) => ({
+                    value,
+                    label: t(`config_management.visual.payload_rules.boolean_${value}`),
+                }))}
                 placeholder={t('config_management.visual.payload_rules.value_boolean')}
                 disabled={disabled}
                 ariaLabel={ariaLabel}
-                onChange={(value) => onChange({value})}
+                onChange={(value) => onChange({ value })}
             />
         )
     }
@@ -2146,45 +2655,118 @@ function renderParamValueEditor(
         'aria-label': ariaLabel,
         value: param.value,
         disabled,
-        onChange: (event: {target: {value: string}}) => onChange({
-            value: event.target.value,
-            ...(rawJsonValues ? {valueType: 'json' as const} : {}),
-        }),
+        onChange: (event: { target: { value: string } }) => onChange({
+                                                                         value: event.target.value,
+                                                                         ...(rawJsonValues ?
+                                                                             { valueType: 'json' as const } :
+                                                                             {}),
+                                                                     }),
     }
-    return rawJsonValues || param.valueType === 'json' ? <textarea {...props} /> : <input {...props} />
+    return rawJsonValues || param.valueType === 'json' ?
+           <textarea {...props} /> :
+           param.valueType === 'string' ? <PayloadStringEditor {...props} /> : <input {...props} />
 }
 
-const PayloadConditionsEditor = memo(function PayloadConditionsEditor({model, disabled, onChange}: {
+const PayloadConditionsEditor = memo(function PayloadConditionsEditor({ model, disabled, onChange }: {
     model: PayloadModelEntry
     disabled?: boolean
     onChange: (patch: Partial<PayloadModelEntry>) => void
 }) {
-    const {t} = useTranslation()
-    const valueTypes = useMemo(() => VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS.map((option) => ({
-        value: option.value, label: t(option.labelKey, {defaultValue: option.defaultLabel}),
+    const { t }         = useTranslation()
+    const valueTypes    = useMemo(() => VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS.map((option) => ({
+        value: option.value, label: t(option.labelKey, { defaultValue: option.defaultLabel }),
     })), [t])
+    const headerError   = getValidationMessage(t, getPayloadModelHeaderError(model.headers))
+    const headerErrorId = useId()
     return (
-        <details>
+        <details className={styles.blockStack}>
             <summary>{t('config_management.visual.payload_rules.advanced')}</summary>
+            <Input
+                label={t('config_management.visual.payload_rules.from_protocol')}
+                value={model.fromProtocol ?? ''}
+                disabled={disabled}
+                onChange={(event) => onChange({ fromProtocol: event.target.value })}
+            />
+            <fieldset className={styles.payloadConditionGroup} disabled={disabled}>
+                <legend className={styles.blockLabel}>{t('config_management.visual.payload_rules.headers')}</legend>
+                {(model.headers ?? []).map((header) => (
+                    <div key={header.id} className={styles.payloadRuleParamRow}>
+                        <input className='input' value={header.name} disabled={disabled}
+                               aria-label={t('config_management.visual.payload_rules.header_name')}
+                               aria-invalid={Boolean(headerError)}
+                               aria-describedby={headerError ? headerErrorId : undefined}
+                               onChange={(event) => onChange({
+                                                                 headers: model.headers?.map((row) => row.id ===
+                                                                                                      header.id ?
+                                                                     { ...row, name: event.target.value } :
+                                                                                                      row),
+                                                             })} />
+                        <input className='input' value={header.value} disabled={disabled}
+                               aria-label={t('config_management.visual.payload_rules.header_value')}
+                               onChange={(event) => onChange({
+                                                                 headers: model.headers?.map((row) => row.id ===
+                                                                                                      header.id ?
+                                                                     { ...row, value: event.target.value } :
+                                                                                                      row),
+                                                             })} />
+                        <Button variant='ghost' size='sm' disabled={disabled}
+                                onClick={() => onChange({
+                                                            headers: model.headers?.filter((row) => row.id !==
+                                                                                                    header.id),
+                                                        })}>
+                            {t('config_management.visual.common.delete')}
+                        </Button>
+                    </div>
+                ))}
+                {headerError && <div id={headerErrorId} className='error-box' role='alert'>{headerError}</div>}
+                <Button variant='secondary' size='sm' disabled={disabled}
+                        onClick={() => onChange({
+                                                    headers: [
+                                                        ...(model.headers ?? []),
+                                                        { id: makeClientId(), name: '', value: '' },
+                                                    ],
+                                                })}>
+                    {t('config_management.visual.payload_rules.add_header')}
+                </Button>
+            </fieldset>
+            {(['exist', 'notExist'] as const).map((property) => (
+                <fieldset key={property} className={styles.payloadConditionGroup} disabled={disabled}>
+                    <legend
+                        className={styles.blockLabel}>{t(`config_management.visual.payload_rules.${property}`)}</legend>
+                    <StringListEditor value={model[property] ?? []} disabled={disabled}
+                                      inputAriaLabel={t(`config_management.visual.payload_rules.${property}`)}
+                                      onChange={(value) => onChange({ [property]: value })} />
+                </fieldset>
+            ))}
             {(['match', 'notMatch'] as const).map((property) => {
                 const entries = model[property] ?? []
-                const update = (index: number, patch: Partial<PayloadParamEntry>) => onChange({
-                    [property]: entries.map((entry, i) => i === index ? {...entry, ...patch} : entry),
-                })
-                const move = (index: number, direction: number) => {
-                    const next = [...entries]
+                const update  = (index: number, patch: Partial<PayloadParamEntry>) => onChange(
+                    {
+                        [property]: entries.map(
+                            (
+                                entry,
+                                i,
+                            ) => i ===
+                                 index ?
+                                { ...entry, ...patch } :
+                                 entry),
+                    })
+                const move    = (index: number, direction: number) => {
+                    const next   = [...entries]
                     const target = index + direction
                     if (target < 0 || target >= next.length) {
                         return
                     }
-                    const entry = next[index]!
-                    next[index] = next[target]!
+                    const entry  = next[index]!
+                    next[index]  = next[target]!
                     next[target] = entry
-                    onChange({[property]: next})
+                    onChange({ [property]: next })
                 }
                 return (
                     <fieldset key={property} className={styles.payloadConditionGroup} disabled={disabled}>
-                        <legend className={styles.blockLabel}>{t(`config_management.visual.payload_rules.${property}`)}</legend>
+                        <legend
+                            className={styles.blockLabel}>{t(`config_management.visual.payload_rules.${property
+                        }`)}</legend>
                         {entries.map((entry, index) => {
                             const error = getValidationMessage(t, getPayloadParamValidationError(entry))
                             return (
@@ -2196,7 +2778,7 @@ const PayloadConditionsEditor = memo(function PayloadConditionsEditor({model, di
                                             placeholder={t('config_management.visual.payload_rules.json_path')}
                                             value={entry.path}
                                             disabled={disabled}
-                                            onChange={(event) => update(index, {path: event.target.value})}
+                                            onChange={(event) => update(index, { path: event.target.value })}
                                         />
                                         <Select
                                             value={entry.valueType}
@@ -2205,24 +2787,39 @@ const PayloadConditionsEditor = memo(function PayloadConditionsEditor({model, di
                                             ariaLabel={t('config_management.visual.payload_rules.param_type')}
                                             onChange={(value) => update(index, {
                                                 valueType: value as PayloadParamValueType,
-                                                value: value === 'boolean' ? 'true' : value === 'json' && !entry.value.trim() ? '{}' : entry.value,
+                                                value: value === 'boolean' ?
+                                                       'true' :
+                                                       value === 'json' && !entry.value.trim() ? '{}' : entry.value,
                                             })}
                                         />
-                                        {renderParamValueEditor(entry, t, disabled, (patch) => update(index, patch), false,
-                                            t('config_management.visual.payload_rules.condition_value'))}
+                                        {renderParamValueEditor(
+                                            entry,
+                                            t,
+                                            disabled,
+                                            (patch) => update(index, patch),
+                                            false,
+                                            t('config_management.visual.payload_rules.condition_value'),
+                                        )}
                                         <div className={styles.payloadConditionActions}>
                                             <Button variant='ghost' size='sm' disabled={disabled || index === 0}
-                                                aria-label={t('ai_providers.error_rules_move_up')}
-                                                onClick={() => move(index, -1)}>
+                                                    aria-label={t('ai_providers.error_rules_move_up')}
+                                                    onClick={() => move(index, -1)}>
                                                 ↑
                                             </Button>
-                                            <Button variant='ghost' size='sm' disabled={disabled || index === entries.length - 1}
-                                                aria-label={t('ai_providers.error_rules_move_down')}
-                                                onClick={() => move(index, 1)}>
+                                            <Button variant='ghost' size='sm'
+                                                    disabled={disabled || index === entries.length - 1}
+                                                    aria-label={t('ai_providers.error_rules_move_down')}
+                                                    onClick={() => move(index, 1)}>
                                                 ↓
                                             </Button>
                                             <Button variant='ghost' size='sm' disabled={disabled}
-                                                onClick={() => onChange({[property]: entries.filter((_, i) => i !== index)})}>
+                                                    onClick={() => onChange({
+                                                                                [property]: entries.filter((
+                                                                                                               _,
+                                                                                                               i,
+                                                                                                           ) => i !==
+                                                                                                                index),
+                                                                            })}>
                                                 {t('config_management.visual.common.delete')}
                                             </Button>
                                         </div>
@@ -2231,9 +2828,18 @@ const PayloadConditionsEditor = memo(function PayloadConditionsEditor({model, di
                                 </div>
                             )
                         })}
-                        <Button variant='secondary' size='sm' disabled={disabled} onClick={() => onChange({
-                            [property]: [...entries, {id: makeClientId(), path: '', valueType: 'string', value: ''}],
-                        })}>
+                        <Button variant='secondary' size='sm' disabled={disabled} onClick={() => onChange(
+                            {
+                                [property]: [
+                                    ...entries,
+                                    {
+                                        id: makeClientId(),
+                                        path: '',
+                                        valueType: 'string',
+                                        value: '',
+                                    },
+                                ],
+                            })}>
                             {t('config_management.visual.payload_rules.add_condition')}
                         </Button>
                     </fieldset>
@@ -2267,8 +2873,8 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
             })),
         [t],
     )
-    const addRule    = () => onChange([...rules, { id: makeClientId(), models: [], params: [] }])
-    const removeRule = (ruleIndex: number) => onChange(rules.filter((_, i) => i !== ruleIndex))
+    const addRule                 = () => onChange([...rules, { id: makeClientId(), models: [], params: [] }])
+    const removeRule              = (ruleIndex: number) => onChange(rules.filter((_, i) => i !== ruleIndex))
 
     const updateRule = (ruleIndex: number, patch: Partial<PayloadRule>) =>
         onChange(rules.map((rule, i) => (i === ruleIndex ? { ...rule, ...patch } : rule)))
@@ -2336,76 +2942,81 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                         <div className={styles.blockLabel}>{t('config_management.visual.payload_rules.models')}</div>
                         {(rule.models.length ? rule.models : []).map((model, modelIndex) => (
                             <div key={model.id} className={styles.blockStack}>
-                            <div
-                                className={[
-                                    styles.payloadRuleModelRow,
-                                    protocolFirst ? styles.payloadRuleModelRowProtocolFirst : '',
-                                ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                            >
-                                {protocolFirst ? (
-                                    <>
-                                        <Select
-                                            value={model.protocol ?? ''}
-                                            options={protocolOptions}
-                                            disabled={disabled}
-                                            ariaLabel={t('config_management.visual.payload_rules.provider_type')}
-                                            onChange={(nextValue) =>
-                                                updateModel(ruleIndex, modelIndex, {
-                                                    protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
-                                                })
-                                            }
-                                        />
-                                        <input
-                                            className='input'
-                                            placeholder={t('config_management.visual.payload_rules.model_name')}
-                                            aria-label={t('config_management.visual.payload_rules.model_name')}
-                                            value={model.name}
-                                            onChange={(e) =>
-                                                updateModel(ruleIndex, modelIndex, { name: e.target.value })
-                                            }
-                                            disabled={disabled}
-                                        />
-                                    </>
-                                ) : (
-                                     <>
-                                         <input
-                                             className='input'
-                                             placeholder={t('config_management.visual.payload_rules.model_name')}
-                                             aria-label={t('config_management.visual.payload_rules.model_name')}
-                                             value={model.name}
-                                             onChange={(e) =>
-                                                 updateModel(ruleIndex, modelIndex, { name: e.target.value })
-                                             }
-                                             disabled={disabled}
-                                         />
-                                         <Select
-                                             value={model.protocol ?? ''}
-                                             options={protocolOptions}
-                                             disabled={disabled}
-                                             ariaLabel={t('config_management.visual.payload_rules.provider_type')}
-                                             onChange={(nextValue) =>
-                                                 updateModel(ruleIndex, modelIndex, {
-                                                     protocol: (nextValue ||
-                                                                undefined) as PayloadModelEntry['protocol'],
-                                                 })
-                                             }
-                                         />
-                                     </>
-                                 )}
-                                <Button
-                                    variant='ghost'
-                                    size='sm'
-                                    className={styles.payloadRowActionButton}
-                                    onClick={() => removeModel(ruleIndex, modelIndex)}
-                                    disabled={disabled}
+                                <div
+                                    className={[
+                                        styles.payloadRuleModelRow,
+                                        protocolFirst ? styles.payloadRuleModelRowProtocolFirst : '',
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' ')}
                                 >
-                                    {t('config_management.visual.common.delete')}
-                                </Button>
-                            </div>
-                            <PayloadConditionsEditor model={model} disabled={disabled}
-                                onChange={(patch) => updateModel(ruleIndex, modelIndex, patch)} />
+                                    {protocolFirst ? (
+                                        <>
+                                            <Select
+                                                value={model.protocol ?? ''}
+                                                options={protocolOptions}
+                                                disabled={disabled}
+                                                ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                                                onChange={(nextValue) =>
+                                                    updateModel(ruleIndex, modelIndex, {
+                                                        protocol: (nextValue ||
+                                                                   undefined) as PayloadModelEntry['protocol'],
+                                                    })
+                                                }
+                                            />
+                                            <input
+                                                className='input'
+                                                placeholder={t('config_management.visual.payload_rules.model_name')}
+                                                aria-label={t('config_management.visual.payload_rules.model_name')}
+                                                value={model.name}
+                                                onChange={(e) =>
+                                                    updateModel(ruleIndex, modelIndex, { name: e.target.value })
+                                                }
+                                                disabled={disabled}
+                                            />
+                                        </>
+                                    ) : (
+                                         <>
+                                             <input
+                                                 className='input'
+                                                 placeholder={t('config_management.visual.payload_rules.model_name')}
+                                                 aria-label={t('config_management.visual.payload_rules.model_name')}
+                                                 value={model.name}
+                                                 onChange={(e) =>
+                                                     updateModel(ruleIndex, modelIndex, { name: e.target.value })
+                                                 }
+                                                 disabled={disabled}
+                                             />
+                                             <Select
+                                                 value={model.protocol ?? ''}
+                                                 options={protocolOptions}
+                                                 disabled={disabled}
+                                                 ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                                                 onChange={(nextValue) =>
+                                                     updateModel(ruleIndex, modelIndex, {
+                                                         protocol: (nextValue ||
+                                                                    undefined) as PayloadModelEntry['protocol'],
+                                                     })
+                                                 }
+                                             />
+                                         </>
+                                     )}
+                                    <Button
+                                        variant='ghost'
+                                        size='sm'
+                                        className={styles.payloadRowActionButton}
+                                        onClick={() => removeModel(ruleIndex, modelIndex)}
+                                        disabled={disabled}
+                                    >
+                                        {t('config_management.visual.common.delete')}
+                                    </Button>
+                                </div>
+                                <PayloadConditionsEditor model={model} disabled={disabled}
+                                                         onChange={(patch) => updateModel(
+                                                             ruleIndex,
+                                                             modelIndex,
+                                                             patch,
+                                                         )} />
                             </div>
                         ))}
                         <div className={styles.actionRow}>
@@ -2464,11 +3075,16 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                                                 }
                                             />
                                         )}
-                                        {renderParamValueEditor(param, t, disabled,
-                                            (patch) => updateParam(ruleIndex, paramIndex, patch), rawJsonValues)}
+                                        {renderParamValueEditor(
+                                            param,
+                                            t,
+                                            disabled,
+                                            (patch) => updateParam(ruleIndex, paramIndex, patch),
+                                            rawJsonValues,
+                                        )}
                                         <Button
                                             variant='ghost'
-                                            size='sm'
+                                            size='md'
                                             className={styles.payloadRowActionButton}
                                             onClick={() => removeParam(ruleIndex, paramIndex)}
                                             disabled={disabled}
@@ -2563,38 +3179,42 @@ export const PayloadFilterRulesEditor = memo(function PayloadFilterRulesEditor({
                         <div className={styles.blockLabel}>{t('config_management.visual.payload_rules.models')}</div>
                         {rule.models.map((model, modelIndex) => (
                             <div key={model.id} className={styles.blockStack}>
-                            <div className={styles.payloadFilterModelRow}>
-                                <input
-                                    className='input'
-                                    placeholder={t('config_management.visual.payload_rules.model_name')}
-                                    aria-label={t('config_management.visual.payload_rules.model_name')}
-                                    value={model.name}
-                                    onChange={(e) => updateModel(ruleIndex, modelIndex, { name: e.target.value })}
-                                    disabled={disabled}
-                                />
-                                <Select
-                                    value={model.protocol ?? ''}
-                                    options={protocolOptions}
-                                    disabled={disabled}
-                                    ariaLabel={t('config_management.visual.payload_rules.provider_type')}
-                                    onChange={(nextValue) =>
-                                        updateModel(ruleIndex, modelIndex, {
-                                            protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
-                                        })
-                                    }
-                                />
-                                <Button
-                                    variant='ghost'
-                                    size='sm'
-                                    className={styles.payloadRowActionButton}
-                                    onClick={() => removeModel(ruleIndex, modelIndex)}
-                                    disabled={disabled}
-                                >
-                                    {t('config_management.visual.common.delete')}
-                                </Button>
-                            </div>
-                            <PayloadConditionsEditor model={model} disabled={disabled}
-                                onChange={(patch) => updateModel(ruleIndex, modelIndex, patch)} />
+                                <div className={styles.payloadFilterModelRow}>
+                                    <input
+                                        className='input'
+                                        placeholder={t('config_management.visual.payload_rules.model_name')}
+                                        aria-label={t('config_management.visual.payload_rules.model_name')}
+                                        value={model.name}
+                                        onChange={(e) => updateModel(ruleIndex, modelIndex, { name: e.target.value })}
+                                        disabled={disabled}
+                                    />
+                                    <Select
+                                        value={model.protocol ?? ''}
+                                        options={protocolOptions}
+                                        disabled={disabled}
+                                        ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                                        onChange={(nextValue) =>
+                                            updateModel(ruleIndex, modelIndex, {
+                                                protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
+                                            })
+                                        }
+                                    />
+                                    <Button
+                                        variant='ghost'
+                                        size='sm'
+                                        className={styles.payloadRowActionButton}
+                                        onClick={() => removeModel(ruleIndex, modelIndex)}
+                                        disabled={disabled}
+                                    >
+                                        {t('config_management.visual.common.delete')}
+                                    </Button>
+                                </div>
+                                <PayloadConditionsEditor model={model} disabled={disabled}
+                                                         onChange={(patch) => updateModel(
+                                                             ruleIndex,
+                                                             modelIndex,
+                                                             patch,
+                                                         )} />
                             </div>
                         ))}
                         <div className={styles.actionRow}>

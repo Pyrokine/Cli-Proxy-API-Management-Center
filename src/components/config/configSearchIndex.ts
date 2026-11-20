@@ -3,6 +3,7 @@ export type VisualSectionId = 'connectivity' | 'network' | 'logging' | 'quota' |
 export interface ConfigFieldSearchEntry {
     fieldId: string
     sectionId: VisualSectionId
+    path?: string
     labelKey: string
     qualifierKey?: string
     hintKey?: string
@@ -292,6 +293,13 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['error-logs-max-files'],
     },
     {
+        fieldId: 'redisUsageQueueRetentionSeconds',
+        sectionId: 'logging',
+        labelKey: L('sections.system.redis_usage_retention'),
+        hintKey: L('sections.system.redis_usage_retention_hint'),
+        yamlKeys: ['redis-usage-queue-retention-seconds'],
+    },
+    {
         fieldId: 'usageDataDir',
         sectionId: 'logging',
         labelKey: L('sections.system.usage_data_dir'),
@@ -354,27 +362,6 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         labelKey: L('sections.quota.transient_error_cooldown_seconds'),
         hintKey: L('sections.quota.transient_error_cooldown_seconds_hint'),
         yamlKeys: ['transient-error-cooldown-seconds'],
-    },
-    {
-        fieldId: 'quotaRefreshEnabled',
-        sectionId: 'quota',
-        labelKey: L('sections.quota.refresh_enabled'),
-        hintKey: L('sections.quota.refresh_enabled_desc'),
-        yamlKeys: ['quota-refresh', 'enabled'],
-    },
-    {
-        fieldId: 'quotaRefreshInterval',
-        sectionId: 'quota',
-        labelKey: L('sections.quota.refresh_interval'),
-        hintKey: L('sections.quota.refresh_interval_hint'),
-        yamlKeys: ['quota-refresh', 'interval'],
-    },
-    {
-        fieldId: 'quotaRefreshMaxInterval',
-        sectionId: 'quota',
-        labelKey: L('sections.quota.refresh_max_interval'),
-        hintKey: L('sections.quota.refresh_max_interval_hint'),
-        yamlKeys: ['quota-refresh', 'max-interval'],
     },
 
     {
@@ -469,10 +456,37 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         fieldId: 'providerConfig',
         sectionId: 'advanced',
         labelKey: L('sections.network.provider_keys'),
-        yamlKeys: ['gemini-api-key', 'codex-api-key', 'claude-api-key', 'vertex-api-key', 'openai-compatibility'],
+        yamlKeys: [
+            'gemini-api-key',
+            'interactions-api-key',
+            'codex-api-key',
+            'claude-api-key',
+            'vertex-api-key',
+            'meta-api-key',
+            'xai-api-key',
+            'openai-compatibility',
+        ],
+    },
+    {
+        fieldId: 'clientCodexEnableApplyPatch', sectionId: 'advanced',
+        labelKey: L('sections.advanced.client_apply_patch'), hintKey: L('sections.advanced.client_apply_patch_hint'),
+        yamlKeys: ['client', 'codex', 'enable-apply-patch'], keywords: ['apply_patch', 'freeform'],
+    },
+    {
+        fieldId: 'oauthSettings',
+        path: '/credentials/oauth-config', sectionId: 'advanced',
+        labelKey: L('sections.advanced.oauth_settings_title'), hintKey: L('sections.advanced.oauth_settings_hint'),
+        yamlKeys: ['oauth-settings', 'name', 'alias', 'max-context-length'],
+    },
+    {
+        fieldId: 'oauthRequestScopedErrors',
+        path: '/credentials/oauth-config', sectionId: 'advanced',
+        labelKey: L('sections.advanced.oauth_errors_title'), hintKey: L('sections.advanced.oauth_errors_hint'),
+        yamlKeys: ['oauth-request-scoped-errors', 'status', 'match', 'match-regexr', 'action'],
     },
     {
         fieldId: 'oauthExcludedModels',
+        path: '/credentials/oauth-config',
         sectionId: 'advanced',
         labelKey: L('sections.network.oauth_excluded_models'),
         hintKey: L('sections.network.oauth_excluded_models_hint'),
@@ -480,6 +494,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     },
     {
         fieldId: 'oauthModelAlias',
+        path: '/models/oauth-aliases',
         sectionId: 'advanced',
         labelKey: L('sections.network.oauth_model_alias'),
         hintKey: L('sections.network.oauth_model_alias_hint'),
@@ -687,4 +702,38 @@ export function searchConfigFields(query: string, t: Translate): ConfigFieldSear
 
     scored.sort((a, b) => a.score - b.score)
     return scored.slice(0, MAX_RESULTS).map((item) => item.entry)
+}
+
+export function getVisualConfigSectionId(field: string): VisualSectionId | undefined {
+    const groups: Record<string, VisualSectionId> = {
+        rmDisableControlPanel: 'connectivity',
+        rmAutoUpdatePanel: 'connectivity',
+        rmAutoUpdateCPA: 'connectivity',
+        rmAutoCheckUpdate: 'connectivity',
+        rmCheckInterval: 'connectivity',
+        rmPanelRepo: 'connectivity',
+        rmCpaRepo: 'connectivity',
+        apiKeysText: 'connectivity',
+        apiKeyAliasesText: 'connectivity',
+        apiKeyRules: 'connectivity',
+        usageStatisticsFile: 'logging',
+        pprofAddr: 'logging',
+        usageRetentionMaxDbSizeMb: 'logging',
+        usageRetentionWarningThresholdPct: 'logging',
+        modelRefreshInterval: 'logging',
+        enableGeminiCliEndpoint: 'network',
+        passthroughHeaders: 'network',
+        routingSessionAffinityTTL: 'network',
+        pluginConfigsText: 'advanced',
+        providerConfigText: 'advanced',
+        oauthExcludedModelsText: 'advanced',
+        clientCodexEnableApplyPatch: 'advanced',
+        oauthSettingsText: 'advanced',
+        oauthRequestScopedErrorsText: 'advanced',
+        oauthModelAliasText: 'advanced',
+        codexHeaderDefaultsText: 'advanced',
+        claudeHeaderDefaultsText: 'advanced',
+        streaming: 'streaming',
+    }
+    return groups[field] ?? findConfigFieldById(field)?.sectionId
 }

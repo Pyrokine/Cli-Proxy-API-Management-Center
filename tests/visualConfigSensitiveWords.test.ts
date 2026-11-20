@@ -1,13 +1,9 @@
+import {findConfigFieldById} from '@/components/config/configSearchIndex'
+import {areVisualConfigValuesEqual, decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
 import {parse} from 'yaml'
-import {findConfigFieldById} from '../src/components/config/configSearchIndex'
-import {
-    areVisualConfigValuesEqual,
-    decodeVisualConfigYaml,
-    encodeVisualConfigYaml,
-} from '../src/hooks/visualConfigCodec'
 
 const readSource = (relativePath: string) => readFileSync(
     fileURLToPath(new URL(relativePath, import.meta.url)),
@@ -26,23 +22,23 @@ describe('visual config provider sensitive words', () => {
     })
 
     test('writes trimmed lists without replacing retained sequence nodes or provider siblings', () => {
-        const source =
-            '# root comment\n' +
-            'antigravity:\n' +
-            '  # antigravity list comment\n' +
-            '  sensitive-words:\n' +
-            '    # antigravity item comment\n' +
-            '    - "proxy" # antigravity inline comment\n' +
-            '  antigravity-future-option: true\n' +
-            'devin:\n' +
-            '  # devin list comment\n' +
-            '  sensitive-words:\n' +
-            '    # devin item comment\n' +
-            '    - "old-word" # devin inline comment\n' +
-            '  # devin unknown comment\n' +
-            '  future-option: true\n'
+        const source  =
+                  '# root comment\n' +
+                  'antigravity:\n' +
+                  '  # antigravity list comment\n' +
+                  '  sensitive-words:\n' +
+                  '    # antigravity item comment\n' +
+                  '    - "proxy" # antigravity inline comment\n' +
+                  '  antigravity-future-option: true\n' +
+                  'devin:\n' +
+                  '  # devin list comment\n' +
+                  '  sensitive-words:\n' +
+                  '    # devin item comment\n' +
+                  '    - "old-word" # devin inline comment\n' +
+                  '  # devin unknown comment\n' +
+                  '  future-option: true\n'
         const decoded = decodeVisualConfigYaml(source)
-        const next = {
+        const next    = {
             ...decoded.values,
             antigravitySensitiveWords: [' proxy ', '', 'Nous Research'],
             devinSensitiveWords: [' old-word ', '', 'new phrase'],
@@ -57,13 +53,13 @@ describe('visual config provider sensitive words', () => {
         const parsed = parse(output)
 
         expect(parsed.antigravity).toEqual({
-            'sensitive-words': ['proxy', 'Nous Research'],
-            'antigravity-future-option': true,
-        })
+                                               'sensitive-words': ['proxy', 'Nous Research'],
+                                               'antigravity-future-option': true,
+                                           })
         expect(parsed.devin).toEqual({
-            'sensitive-words': ['old-word', 'new phrase'],
-            'future-option': true,
-        })
+                                         'sensitive-words': ['old-word', 'new phrase'],
+                                         'future-option': true,
+                                     })
         for (const comment of [
             'root comment',
             'antigravity list comment',
@@ -81,12 +77,12 @@ describe('visual config provider sensitive words', () => {
     })
 
     test('clears each key and removes provider maps that become empty', () => {
-        const source =
-            'debug: true\n' +
-            'antigravity:\n  sensitive-words:\n    - proxy\n' +
-            'devin:\n  sensitive-words:\n    - remove-me\n'
+        const source  =
+                  'debug: true\n' +
+                  'antigravity:\n  sensitive-words:\n    - proxy\n' +
+                  'devin:\n  sensitive-words:\n    - remove-me\n'
         const decoded = decodeVisualConfigYaml(source)
-        const output = encodeVisualConfigYaml(
+        const output  = encodeVisualConfigYaml(
             source,
             {
                 ...decoded.values,
@@ -97,7 +93,7 @@ describe('visual config provider sensitive words', () => {
             decoded.apiKeysStorage,
         )
 
-        expect(parse(output)).toEqual({debug: true})
+        expect(parse(output)).toEqual({ debug: true })
     })
 
     test('restoring either list clears the visual dirty state comparison', () => {
@@ -105,7 +101,7 @@ describe('visual config provider sensitive words', () => {
             'antigravity:\n  sensitive-words: [proxy]\n' +
             'devin:\n  sensitive-words: [original]\n',
         ).values
-        const changed = {
+        const changed  = {
             ...baseline,
             devinSensitiveWords: ['changed'],
         }
@@ -121,13 +117,16 @@ describe('visual config provider sensitive words', () => {
 
     test('indexes and renders both fields with localized behavior text', async () => {
         expect(findConfigFieldById('antigravitySensitiveWords')).toMatchObject({
-            sectionId: 'advanced',
-            yamlKeys: ['antigravity', 'sensitive-words'],
-        })
+                                                                                   sectionId: 'advanced',
+                                                                                   yamlKeys: [
+                                                                                       'antigravity',
+                                                                                       'sensitive-words',
+                                                                                   ],
+                                                                               })
         expect(findConfigFieldById('devinSensitiveWords')).toMatchObject({
-            sectionId: 'advanced',
-            yamlKeys: ['devin', 'sensitive-words'],
-        })
+                                                                             sectionId: 'advanced',
+                                                                             yamlKeys: ['devin', 'sensitive-words'],
+                                                                         })
 
         const editorSource = readSource('../src/components/config/VisualConfigEditor.tsx')
         for (const field of ['antigravitySensitiveWords', 'devinSensitiveWords']) {
@@ -145,7 +144,7 @@ describe('visual config provider sensitive words', () => {
                     }
                 }
             }
-            const system = messages.config_management.visual.sections.system
+            const system   = messages.config_management.visual.sections.system
             for (const provider of ['antigravity', 'devin']) {
                 expect(system[`${provider}_sensitive_words`]).toBeTruthy()
                 expect(system[`${provider}_sensitive_words_desc`]).toBeTruthy()

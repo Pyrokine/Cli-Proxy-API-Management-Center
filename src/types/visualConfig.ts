@@ -7,6 +7,7 @@ export type PayloadParamValidationErrorCode =
     | 'payload_invalid_number'
     | 'payload_invalid_boolean'
     | 'payload_invalid_json'
+    | 'payload_invalid_headers'
 
 export type VisualConfigFieldPath =
     | 'port'
@@ -36,6 +37,10 @@ export type VisualConfigFieldPath =
     | 'maxRetryInterval'
     | 'quotaRefreshInterval'
     | 'quotaRefreshMaxInterval'
+    | 'oauthModelAliasText'
+    | 'oauthSettingsText'
+    | 'oauthRequestScopedErrorsText'
+    | 'oauthExcludedModelsText'
     | 'transientErrorCooldownSeconds'
     | 'streaming.keepaliveSeconds'
     | 'streaming.bootstrapRetries'
@@ -55,6 +60,16 @@ export type VisualConfigValidationErrorCode =
     | 'integer_range_1_3600'
     | 'quota_refresh_interval_range'
     | 'quota_refresh_max_interval_range'
+    | 'oauth_alias_invalid'
+    | 'oauth_alias_empty'
+    | 'oauth_alias_self'
+    | 'oauth_alias_conflict'
+    | 'oauth_alias_cycle'
+    | 'oauth_exclusions_invalid'
+    | 'oauth_rules_shape'
+    | 'oauth_settings_invalid'
+    | 'oauth_settings_integer'
+    | 'oauth_error_rules_invalid'
 
 export type VisualConfigValidationErrors = Partial<Record<VisualConfigFieldPath, VisualConfigValidationErrorCode>>
 
@@ -94,13 +109,23 @@ export type PayloadParamEntry = {
     value: string
 }
 
+export type PayloadHeaderEntry = {
+    id: string
+    name: string
+    value: string
+}
+
 export type PayloadModelEntry = {
     id: string
     sourceYaml?: string
     name: string
     protocol?: string
+    fromProtocol?: string
+    headers?: PayloadHeaderEntry[]
     match?: PayloadParamEntry[]
     notMatch?: PayloadParamEntry[]
+    exist?: string[]
+    notExist?: string[]
     extra?: Record<string, unknown>
 }
 
@@ -273,6 +298,9 @@ export type VisualConfigValues = {
     providerConfigText: string
     oauthExcludedModelsText: string
     oauthModelAliasText: string
+    clientCodexEnableApplyPatch: boolean
+    oauthSettingsText: string
+    oauthRequestScopedErrorsText: string
     codexIdentityConfuse: boolean
     codexOptimizeMultiAgentV2: boolean
     codexDisableCloaking: boolean
@@ -387,6 +415,9 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     providerConfigText: '',
     oauthExcludedModelsText: '',
     oauthModelAliasText: '',
+    clientCodexEnableApplyPatch: false,
+    oauthSettingsText: '',
+    oauthRequestScopedErrorsText: '',
     codexIdentityConfuse: false,
     codexOptimizeMultiAgentV2: false,
     codexDisableCloaking: false,

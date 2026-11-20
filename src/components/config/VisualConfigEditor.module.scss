@@ -19,7 +19,6 @@
     }
 
     :global(.input) {
-        min-height: 48px;
         border-radius: 16px;
         background: color-mix(in srgb, var(--bg-secondary) 68%, var(--bg-primary));
         border-color: color-mix(in srgb, var(--border-primary) 76%, transparent);
@@ -1035,7 +1034,6 @@
     width: 100%;
 
     button {
-        min-height: 48px;
         border-radius: 16px;
         background: color-mix(in srgb, var(--bg-secondary) 68%, var(--bg-primary));
         border-color: color-mix(in srgb, var(--border-primary) 76%, transparent);
@@ -1255,6 +1253,17 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+}
+
+.payloadStringEditor {
+    display: flex;
+    gap: $spacing-sm;
+    min-width: 0;
+
+    > input {
+        min-width: 0;
+        flex: 1;
+    }
 }
 
 .payloadJsonInput {

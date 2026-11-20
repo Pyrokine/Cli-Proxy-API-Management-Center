@@ -350,6 +350,8 @@
         $font-weight-semibold
     );
     max-width: min(280px, 46vw);
+    min-width: 0;
+    flex-shrink: 1;
     overflow: hidden;
     text-align: center;
     text-overflow: ellipsis;
@@ -408,7 +410,8 @@
     }
 
     .floatingStatus {
-        display: none;
+        max-width: min(160px, 40vw);
+        padding: 0 8px;
     }
 
     .floatingActionButton {

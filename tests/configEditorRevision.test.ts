@@ -1,8 +1,8 @@
-import {describe, expect, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
+import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
 
 import {ConfigEditorRevisionState} from '@/pages/configEditorRevision'
-import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
+import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
 import {parse} from 'yaml'
 
 describe('config editor request revisions', () => {
@@ -59,7 +59,10 @@ describe('config editor request revisions', () => {
 
     test('confirmed reload fetches the latest revision before discarding a dirty draft', () => {
         const page = readFileSync(new URL('../src/pages/ConfigPage.tsx', import.meta.url), 'utf8')
-        const load = page.slice(page.indexOf('const loadConfig = useCallback'), page.indexOf('useEffect(() => {\n        queueMicrotask'))
+        const load = page.slice(
+            page.indexOf('const loadConfig = useCallback'),
+            page.indexOf('useEffect(() => {\n        queueMicrotask'),
+        )
         expect(load).toContain('const snapshot = await configFileApi.fetchConfigYaml()')
         expect(load).toContain('if (isDirtyRef.current && !discardDraft)')
         expect(load.indexOf('const snapshot = await configFileApi.fetchConfigYaml()'))
@@ -71,7 +74,7 @@ describe('config editor request revisions', () => {
         revisions.acceptServerRevision()
         revisions.resetSource('version: A\n')
         revisions.markDraftChanged()
-        const draft = revisions.snapshot()
+        const draft   = revisions.snapshot()
         const pending = revisions.beginLoad()
         expect(revisions.snapshot()).toEqual(draft)
         expect(revisions.isCurrentRequest(pending)).toBe(true)
@@ -113,12 +116,12 @@ describe('config editor request revisions', () => {
     })
 
     test('visual/source viewing round trips retain visual dirty changes and merge the latest server', () => {
-        const source = 'debug: false\nproxy-url: old\n'
+        const source    = 'debug: false\nproxy-url: old\n'
         const revisions = new ConfigEditorRevisionState()
         revisions.resetSource(source)
         const decoded = decodeVisualConfigYaml(source)
-        const next = { ...decoded.values, debug: true }
-        const apply = (yaml: string) => encodeVisualConfigYaml(yaml, next, decoded.values, decoded.apiKeysStorage)
+        const next    = { ...decoded.values, debug: true }
+        const apply   = (yaml: string) => encodeVisualConfigYaml(yaml, next, decoded.values, decoded.apiKeysStorage)
         for (let i = 0; i < 3; i++) {
             const viewed = revisions.materializeSource(apply)
             expect(parse(viewed).debug).toBe(true)
@@ -133,7 +136,7 @@ describe('config editor request revisions', () => {
     })
 
     test('source edits remain intact across server changes and cannot enter visual-origin saving', () => {
-        const source = 'debug: false\nproxy-url: old\n'
+        const source    = 'debug: false\nproxy-url: old\n'
         const revisions = new ConfigEditorRevisionState()
         revisions.acceptServerRevision()
         revisions.resetSource(source)
@@ -143,11 +146,11 @@ describe('config editor request revisions', () => {
         expect(revisions.sourceDirty).toBe(true)
         expect(revisions.sourceNeedsReload).toBe(true)
         const decoded = decodeVisualConfigYaml(draft)
-        const next = { ...decoded.values, debug: true }
-        const apply = (yaml: string) => encodeVisualConfigYaml(yaml, next, decoded.values, decoded.apiKeysStorage)
+        const next    = { ...decoded.values, debug: true }
+        const apply   = (yaml: string) => encodeVisualConfigYaml(yaml, next, decoded.values, decoded.apiKeysStorage)
         expect(() => revisions.buildSaveDraft('debug: false\nremote: changed\n', 'visual', apply))
             .toThrow('Unsaved source edits must be saved or discarded before visual editing')
-        const before = revisions.buildSaveDraft('debug: false\n', 'source', apply)
+        const before  = revisions.buildSaveDraft('debug: false\n', 'source', apply)
         const request = revisions.beginSave()
         revisions.observeServerRevision()
         expect(revisions.isCurrentRequest(request)).toBe(false)
@@ -171,20 +174,20 @@ describe('config editor request revisions', () => {
 
     test('restoring a visual draft after reverting to server source remains dirty', () => {
         const source = 'debug: false\n'
-        const state = new ConfigEditorRevisionState()
+        const state  = new ConfigEditorRevisionState()
         state.resetSource(source)
-        let decoded = decodeVisualConfigYaml(source)
+        let decoded  = decodeVisualConfigYaml(source)
         let baseline = decoded.values
-        let next = {...baseline, debug: true}
-        const apply = (yaml: string) => encodeVisualConfigYaml(yaml, next, baseline, decoded.apiKeysStorage)
-        const view = state.materializeSource(apply)
+        let next     = { ...baseline, debug: true }
+        const apply  = (yaml: string) => encodeVisualConfigYaml(yaml, next, baseline, decoded.apiKeysStorage)
+        const view   = state.materializeSource(apply)
         const change = (yaml: string) => {
             state.editSource(yaml)
             state.markDraftChanged()
             if (!state.sourceDirty && state.sourceNeedsReload) {
-                decoded = decodeVisualConfigYaml(yaml)
+                decoded  = decodeVisualConfigYaml(yaml)
                 baseline = structuredClone(decoded.values)
-                next = decoded.values
+                next     = decoded.values
                 state.acceptVisualSource()
             }
         }
@@ -215,11 +218,14 @@ describe('config editor request revisions', () => {
 
     test('keeps source drafts in source mode until saved or discarded', () => {
         const page = readFileSync(new URL('../src/pages/ConfigPage.tsx', import.meta.url), 'utf8')
-        expect(page).toContain("if (tab === 'visual' && revisionStateRef.current.sourceDirty)")
-        expect(page).toContain("if (activeTab === 'visual' && revisionStateRef.current.sourceDirty)")
-        expect(page).toContain("t('config_management.source_changes_before_visual')")
+        expect(page).toContain('if (tab === \'visual\' && revisionStateRef.current.sourceDirty)')
+        expect(page).toContain('if (activeTab === \'visual\' && revisionStateRef.current.sourceDirty)')
+        expect(page).toContain('t(\'config_management.source_changes_before_visual\')')
         for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW']) {
-            const strings = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8'))
+            const strings = JSON.parse(readFileSync(
+                new URL(`../src/i18n/locales/${locale}.json`, import.meta.url),
+                'utf8',
+            ))
             expect(strings.config_management.source_changes_before_visual).toBeTruthy()
         }
     })

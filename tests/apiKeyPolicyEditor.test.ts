@@ -1,9 +1,9 @@
-import {describe, expect, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
 import i18n from '@/i18n'
 import {type ApiKeyModelRule, EMPTY_API_KEY_MODEL_RULE} from '@/types/visualConfig'
 
 import {type ApiKeyPolicyValidationErrorCode, parseGoDuration, validateApiKeyPolicyDraft} from '@/utils/apiKeyPolicy'
+import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
 
 const LOCALES = ['en', 'zh-CN', 'zh-TW', 'ru'] as const
 
@@ -72,14 +72,23 @@ describe('API key policy editor', () => {
         expect(parseGoDuration(`${'0s'.repeat(64)}9223372036854775808ns`)).toBeNull()
         expect(parseGoDuration(`-${'0s'.repeat(64)}9223372036854775809ns`)).toBeNull()
         expect(parseGoDuration(`${'0s'.repeat(64)}1d`)).toBeNull()
-        const result = validateApiKeyPolicyDraft(policyRule({reservationTtl: '1ns'.repeat(43)}), [],
-            [{window: `${'0s'.repeat(64)}30s`, requests: '1', tokens: '', costMicro: ''}])
+        const result = validateApiKeyPolicyDraft(
+            policyRule({ reservationTtl: '1ns'.repeat(43) }), [],
+            [
+                {
+                    window: `${'0s'.repeat(64)}30s`,
+                    requests: '1',
+                    tokens: '',
+                    costMicro: '',
+                },
+            ],
+        )
         expect(result.error).toBeUndefined()
         expect(result.rule?.reservationTtl).toBe('1ns'.repeat(43))
         expect(result.rule?.limits[0]?.window).toBe(`${'0s'.repeat(64)}30s`)
         expect(validateApiKeyPolicyDraft(policyRule(), [], [
-            {window: '1ns'.repeat(43), requests: '1', tokens: '', costMicro: ''},
-            {window: '43ns', requests: '1', tokens: '', costMicro: ''},
+            { window: '1ns'.repeat(43), requests: '1', tokens: '', costMicro: '' },
+            { window: '43ns', requests: '1', tokens: '', costMicro: '' },
         ]).error).toBe('window_duplicate')
     })
 
@@ -98,8 +107,8 @@ describe('API key policy editor', () => {
 
     test('rejects windows that become equal after Go fractional rounding', () => {
         expect(validateApiKeyPolicyDraft(policyRule(), [], [
-            {window: '0.9999999999999999999s', requests: '1', tokens: '', costMicro: ''},
-            {window: '1s', requests: '2', tokens: '', costMicro: ''},
+            { window: '0.9999999999999999999s', requests: '1', tokens: '', costMicro: '' },
+            { window: '1s', requests: '2', tokens: '', costMicro: '' },
         ]).error).toBe('window_duplicate')
     })
 

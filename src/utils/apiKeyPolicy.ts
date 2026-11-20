@@ -78,8 +78,8 @@ export function parseGoDuration(value: string): bigint | null {
         return 0n
     }
     GO_DURATION_PART.lastIndex = 0
-    let total = 0n
-    let index = 0
+    let total                  = 0n
+    let index                  = 0
     for (; ;) {
         const match = GO_DURATION_PART.exec(duration)
         if (!match) {
@@ -94,9 +94,9 @@ export function parseGoDuration(value: string): bigint | null {
         if (factor === undefined) {
             return null
         }
-        const whole = BigInt(wholeRaw || '0')
+        const whole        = BigInt(wholeRaw || '0')
         let fractionDigits = 0n
-        let fractionScale = 1
+        let fractionScale  = 1
         for (const digit of fractionRaw) {
             if (fractionDigits > MAX_POLICY_LIMIT / 10n) {
                 break
