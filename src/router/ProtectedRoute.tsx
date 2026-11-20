@@ -1,7 +1,7 @@
 import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import {useAuthStore} from '@/stores'
 import {type ReactElement, useEffect, useState} from 'react'
-import {Navigate, useLocation} from 'react-router-dom'
+import {Navigate, useLocation} from 'react-router'
 
 export function ProtectedRoute({ children }: { children: ReactElement }) {
     const location                = useLocation()

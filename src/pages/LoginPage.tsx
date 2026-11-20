@@ -10,10 +10,11 @@ import {useAuthStore, useLanguageStore, useNotificationStore} from '@/stores'
 import type {ApiError} from '@/types'
 import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
+import {formatDateTime} from '@/utils/format'
 import {isSupportedLanguage} from '@/utils/language'
 import React, {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Navigate, useLocation, useNavigate} from 'react-router-dom'
+import {Navigate, useLocation, useNavigate} from 'react-router'
 import styles from './LoginPage.module.scss'
 
 /**
@@ -63,7 +64,7 @@ const appendBackendDetail = (baseMessage: string, detail: string) => {
     return `${baseMessage}: ${detail}`
 }
 
-type Translate = (key: string, options?: Record<string, unknown>) => string
+type Translate = (key: string) => string
 
 const rateLimitDeadlineFromError = (error: unknown): number | null => {
     const apiError = error as Partial<ApiError>
@@ -310,7 +311,7 @@ export function LoginPage() {
                         t('notifications.security_failed_login_notice', {
                             count: failedLoginCount,
                             sources: failedLoginNotices.length,
-                            latest: latestFailure ? new Date(latestFailure).toLocaleString() : '-',
+                            latest: latestFailure ? formatDateTime(new Date(latestFailure)) : '-',
                         }),
                         'warning',
                         'security',
@@ -461,6 +462,8 @@ export function LoginPage() {
                              <Input
                                  autoFocus
                                  label={t('login.management_key_label')}
+                                 name='management-key'
+                                 autoComplete='current-password'
                                  placeholder={t('login.management_key_placeholder')}
                                  type={showKey ? 'text' : 'password'}
                                  value={managementKey}

@@ -1,11 +1,8 @@
-import {afterEach, beforeEach, describe, expect, test} from 'bun:test'
-import {fileURLToPath} from 'node:url'
 import {secureStorage} from '@/services/storage/secureStorage'
 import {encryptData} from '@/utils/encryption'
-import {
-    installMemoryStorageEnvironment,
-    type MemoryStorageWindow,
-} from './fixtures/memoryStorage'
+import {afterEach, beforeEach, describe, expect, test} from 'bun:test'
+import {fileURLToPath} from 'node:url'
+import {installMemoryStorageEnvironment, type MemoryStorageWindow} from './fixtures/memoryStorage'
 
 const originalDescriptors = new Map(
     ['window', 'localStorage', 'sessionStorage'].map((name) => [
@@ -219,10 +216,11 @@ describe('secure storage lifecycle', () => {
         const restoreCrypto  = installSubtleCrypto(originalCrypto, subtle)
 
         try {
-            expect(await secureStorage.getItemResult<string>('secret', { persistent: true })).toEqual({
-                                                                                                          status: 'unreadable',
-                                                                                                          value: null,
-                                                                                                      })
+            expect(await secureStorage.getItemResult<string>('secret', { persistent: true })).toEqual(
+                {
+                    status: 'unreadable',
+                    value: null,
+                })
             expect(localStorage.getItem('secret')).toBe(encrypted)
         } finally {
             restoreCrypto()
@@ -232,18 +230,20 @@ describe('secure storage lifecycle', () => {
     test('migrates a legacy plaintext value exactly once', async () => {
         localStorage.setItem('legacy', `plain::${JSON.stringify('legacy-secret')}`)
 
-        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual({
-                                                                                                      status: 'value',
-                                                                                                      value: 'legacy-secret',
-                                                                                                  })
+        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual(
+            {
+                status: 'value',
+                value: 'legacy-secret',
+            })
         const migrated = localStorage.getItem('legacy')
         expect(migrated?.startsWith('enc::v2::')).toBe(true)
         expect(migrated?.includes('plain::')).toBe(false)
 
-        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual({
-                                                                                                      status: 'value',
-                                                                                                      value: 'legacy-secret',
-                                                                                                  })
+        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual(
+            {
+                status: 'value',
+                value: 'legacy-secret',
+            })
         expect(localStorage.getItem('legacy')).toBe(migrated)
     })
 
@@ -288,10 +288,11 @@ describe('secure storage lifecycle', () => {
         const encrypted               = localStorage.getItem('secret')
         browserWindow.isSecureContext = false
 
-        expect(await secureStorage.getItemResult<string>('secret', { persistent: true })).toEqual({
-                                                                                                      status: 'unreadable',
-                                                                                                      value: null,
-                                                                                                  })
+        expect(await secureStorage.getItemResult<string>('secret', { persistent: true })).toEqual(
+            {
+                status: 'unreadable',
+                value: null,
+            })
         expect(localStorage.getItem('secret')).toBe(encrypted)
     })
 
@@ -342,6 +343,17 @@ describe('secure storage lifecycle', () => {
         }
     })
 
+    for (const scenario of [
+        'snapshot', 'cookie-only', 'same-connection', 'same-connection-failure', 'cross-tab', 'shared-cookie-host',
+        'no-locks', 'lock-failure', 'timeout', 'queued-timeout', 'superseded-wait', 'aba-wait',
+        'late-success', 'late-401', 'late-rejection', 'unsupported', 'unexpected-success',
+    ]) {
+        test(`revokes plugin resource sessions without replacing a new login: ${scenario}`, async () => {
+            const fixture = fileURLToPath(new URL('./fixtures/pluginSessionLogout.ts', import.meta.url))
+            expect(await runFixture(fixture, [scenario])).toBe(`plugin-session-logout:${scenario}=PASS`)
+        })
+    }
+
     test('keeps unavailable storage in memory and clears persisted credentials after a 401', async () => {
         const fixture = fileURLToPath(new URL('./fixtures/secureStorageAuthLifecycle.ts', import.meta.url))
         expect(await runFixture(fixture)).toBe('secure-storage-auth-lifecycle=PASS')
@@ -375,6 +387,7 @@ describe('secure storage lifecycle', () => {
             'remember-switch',
             'tombstone',
             'clear-failure',
+            'failed-intent-after-shared-commit',
             'lock-request-failure',
             'lock-unavailable',
             'transient-denial-reload',
@@ -386,6 +399,13 @@ describe('secure storage lifecycle', () => {
             scenarios.map((scenario) => `secure-storage-auth-recovery:${scenario}=PASS`),
         )
     })
+
+    for (const scenario of ['failed-intent-new-shared-commit', 'no-locks-new-shared-commit']) {
+        test(`preserves a newer shared transaction after an older memory-only login: ${scenario}`, async () => {
+            const fixture = fileURLToPath(new URL('./fixtures/secureStorageAuthRecovery.ts', import.meta.url))
+            expect(await runFixture(fixture, [scenario])).toBe(`secure-storage-auth-recovery:${scenario}=PASS`)
+        })
+    }
 
     test('keeps the committed credential snapshot after a non-401 login failure', async () => {
         const fixture  = fileURLToPath(new URL('./fixtures/secureStorageAuthRecovery.ts', import.meta.url))

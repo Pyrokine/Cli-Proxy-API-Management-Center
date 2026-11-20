@@ -1,9 +1,3 @@
-import {describe, expect, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-import {fileURLToPath, URL} from 'node:url'
-
-import {expectSourceToContain} from './sourceContractAssertions'
-
 import {usageSummaryRequestKey} from '@/components/usage/hooks/useUsageSummary'
 import {
     createUsageEventExport,
@@ -14,6 +8,11 @@ import {apiClient, parseRetryAfterSeconds} from '@/services/api/client'
 import {logsApi} from '@/services/api/logs'
 import {updateApi} from '@/services/api/update'
 import {usageApi} from '@/services/api/usage'
+import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
+import {fileURLToPath, URL} from 'node:url'
+
+import {expectSourceToContain} from './sourceContractAssertions'
 
 const logsPageSource     = readFileSync(
     fileURLToPath(new URL('../src/pages/LogsPage.tsx', import.meta.url)),
@@ -39,17 +38,23 @@ const apiClientSource    = readFileSync(
 describe('request cancellation contracts', () => {
     test('requires an accepted installation acknowledgement without retrying the POST', async () => {
         const originalPost = apiClient.post
-        const calls: {url: string; data: unknown; validateStatus?: ((status: number) => boolean) | null}[] = []
-        apiClient.post = (async (url: string, data?: unknown, options?: {validateStatus?: ((status: number) => boolean) | null}) => {
-            calls.push({url, data, validateStatus: options?.validateStatus})
-            return {status: 'downloading', attempt_id: 'f'.repeat(32), target_version: 'v8.0.23-aug.4'}
-        }) as typeof apiClient.post
+
+        const calls: { url: string; data: unknown; validateStatus?: ((status: number) => boolean) | null }[] = []
+        apiClient.post                                                                                       =
+            (async (
+                url: string,
+                data?: unknown,
+                options?: { validateStatus?: ((status: number) => boolean) | null },
+            ) => {
+                calls.push({ url, data, validateStatus: options?.validateStatus })
+                return { status: 'downloading', attempt_id: 'f'.repeat(32), target_version: 'v8.0.23-aug.4' }
+            }) as typeof apiClient.post
         try {
             const attemptID = 'a'.repeat(32)
-            const result = await updateApi.trigger('v8.0.23-aug.4', attemptID)
+            const result    = await updateApi.trigger('v8.0.23-aug.4', attemptID)
             expect(calls).toHaveLength(1)
             expect(calls[0]?.url).toBe('/update')
-            expect(calls[0]?.data).toEqual({version: 'v8.0.23-aug.4', attempt_id: attemptID})
+            expect(calls[0]?.data).toEqual({ version: 'v8.0.23-aug.4', attempt_id: attemptID })
             const validateStatus = calls[0]?.validateStatus
             expect(typeof validateStatus).toBe('function')
             expect(validateStatus?.(202)).toBe(true)
@@ -139,9 +144,10 @@ describe('request cancellation contracts', () => {
             features: { plugins: boolean }
         }
         const pending: Array<{ resolve: (value: VersionResponse) => void }> = []
-        const mockGet                                                       = () => new Promise<VersionResponse>((resolve) => pending.push(
+
+        const mockGet = () => new Promise<VersionResponse>((resolve) => pending.push(
             { resolve }))
-        apiClient.get                                                       = mockGet as typeof apiClient.get
+        apiClient.get = mockGet as typeof apiClient.get
 
         try {
             apiClient.setConfig({ apiBase: 'https://server-a.example', managementKey: 'key-a' })
@@ -189,7 +195,10 @@ describe('request cancellation contracts', () => {
         expect(versionModalSource).not.toContain('setInterval(async')
         expect(versionModalSource).toContain('UPDATE_POLL_RECONNECT_TIMEOUT')
         expect(versionModalSource).toContain('clearTimeout(reconnectTimer)')
-        expect(versionModalSource).toContain('updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})')
+        expectSourceToContain(
+            versionModalSource,
+            'updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})',
+        )
         expect(eventsCardSource).toContain('.getEvents(eventsParams, { signal: controller.signal })')
         expect(eventsCardSource).toContain('document.visibilityState === \'visible\'')
         expect(eventsCardSource).toContain('Boolean(eventsRequestControllerRef.current)')
@@ -200,17 +209,18 @@ describe('request cancellation contracts', () => {
 describe('request log lifecycle contracts', () => {
     test('only exposes log actions for available artifacts', () => {
         expect(eventsCardSource).toContain('row.requestLogState === \'available\'')
-        expect(eventsCardSource).toContain('previewRequestLog(row.requestId, row.requestLogHomeIp)')
+        expect(eventsCardSource).toContain('previewRequestLog(row.requestId, row.requestLogHomeIp, row)')
         expect(eventsCardSource).toContain('downloadRequestLog(row.requestId, row.requestLogHomeIp)')
         expect(eventsCardSource).not.toContain('requestLogEnabled || row.failed')
     })
 
     test('renders the complete request ID on its own wrapping line', () => {
-        expect(eventsCardSource).toContain(
-            '<span className={styles.requestEventsRequestId} title={row.requestId}>{row.requestId}</span>',
+        expectSourceToContain(
+            eventsCardSource,
+            '<span className={styles.requestEventsRequestId}>{row.requestId}</span>',
         )
         const requestIdRule = eventsCardStyles.match(
-            /\.requestEventsRequestId\s*\{(?<body>[\s\S]*?)\n\}/,
+            /\.requestEventsRequestId\s*\{(?<body>[\s\S]*?)\n}/,
         )?.groups?.body ?? ''
         expect(requestIdRule).toContain('display: block')
         expect(requestIdRule).toContain('width: 100%')
@@ -222,7 +232,7 @@ describe('request log lifecycle contracts', () => {
         expect(requestIdRule).not.toContain('max-width: 150px')
 
         const actionsRule = eventsCardStyles.match(
-            /\.requestLogActions\s*\{(?<body>[\s\S]*?)\n\}/,
+            /\.requestLogActions\s*\{(?<body>[\s\S]*?)\n}/,
         )?.groups?.body ?? ''
         expect(actionsRule).toContain('flex-direction: column')
         expect(actionsRule).toContain('align-items: flex-start')
@@ -295,17 +305,34 @@ describe('usage request and export contracts', () => {
         expect(eventsCardSource).toContain('resolveUsageTokenMetrics(event.tokens)')
         expect(eventsCardSource).toContain('tokenMetrics.cacheHitTokens')
         expectSourceToContain(eventsCardSource, 'const pricingReceipt = event.pricing_receipt')
-        expect(eventsCardSource).toContain('formatPricingReceiptTitle(pricingReceipt, cost, lang, t)')
-        expect(eventsCardSource).toContain('row.pricingReceiptTitle || undefined')
+        expectSourceToContain(
+            eventsCardSource,
+            'formatPricingReceiptTitle(pricingReceipt, event.cost_status === \'unpriced\' ? null : cost, lang, t)',
+        )
+        expectSourceToContain(
+            eventsCardSource,
+            '{row.costReason && <p className={styles.requestEventsCostReason}>{row.costReason}</p>}',
+        )
+        expectSourceToContain(
+            eventsCardSource,
+            '<div className={styles.requestPricingReceipt}>{row.pricingReceiptTitle}</div>',
+        )
         expect(eventsCardSource).toContain('styles.requestEventsSubline')
         expect(eventsCardSource).toContain('row.costLabel')
-        expect(eventsCardSource).not.toContain('costStatus')
-        expect(eventsCardSource).not.toContain('costReason')
+        expectSourceToContain(
+            eventsCardSource,
+            'costLabel: event.cost_status === \'unpriced\' ' +
+            '? t(\'usage_stats.request_events_pricing_unpriced\') : formatEventCost(cost, lang)',
+        )
+        expect(eventsCardSource).toContain('row.costReason')
         expect(eventsCardSource).toContain('\'cache_read_tokens\'')
         expect(eventsCardSource).toContain('\'cache_write_tokens\'')
-        expect(eventsCardSource).toContain('\'cost\'')
-        expect(eventsCardSource).not.toContain('\'cost_status\'')
-        expect(eventsCardSource).not.toContain('\'cost_reason\'')
+        expectSourceToContain(
+            eventsCardSource,
+            '\'cost\', \'cost_status\', \'cost_reason\', \'billing_metadata\', \'pricing_receipt\'',
+        )
+        expectSourceToContain(eventsCardSource, 'row.cost, event.cost_status ?? \'\', event.cost_reason ?? \'\'')
+        expect(eventsCardSource).not.toContain('row.costStatusLabel')
     })
 
     test('uses compact events for the table while keeping export pages full', async () => {

@@ -10,6 +10,24 @@ export interface ApiClientConfig {
     timeout?: number
 }
 
+export interface ManagementMutationResult {
+    mutation_id: string
+    request_id: string
+    outcome: 'succeeded' | 'rejected' | 'partial' | 'uncertain'
+    confirmed_effect: boolean
+    effects: Array<{ kind: string; target: string }>
+    audit_available: boolean
+}
+
+export interface ManagementMutationReceipt {
+    mutation_id: string
+    request_id?: string
+    authGeneration: number
+    metadata_present: boolean
+    result?: ManagementMutationResult
+    recovery?: 'unknown' | 'unavailable'
+}
+
 // API 错误
 export type ApiError = Error & {
     status?: number
@@ -19,4 +37,6 @@ export type ApiError = Error & {
     rateLimitUntil?: string
     details?: unknown
     data?: unknown
+    requestId?: string
+    mutation?: ManagementMutationReceipt
 }

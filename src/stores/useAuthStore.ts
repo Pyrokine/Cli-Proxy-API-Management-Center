@@ -4,7 +4,9 @@
  */
 
 import {clearAuthFileModelsCache} from '@/features/authFiles/authFileModelsCache'
+import i18n from '@/i18n'
 import {apiClient} from '@/services/api/client'
+import {pluginsApi} from '@/services/api/plugins'
 import {type ServerFeatureFlags, versionApi} from '@/services/api/version'
 import {secureStorage} from '@/services/storage/secureStorage'
 import type {ApiError, AuthState, ConnectionStatus, LoginCredentials} from '@/types'
@@ -15,6 +17,7 @@ import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
 import {useAuthFilesSummaryStore} from './useAuthFilesSummaryStore'
 import {useConfigStore} from './useConfigStore'
 import {useModelsStore} from './useModelsStore'
+import {useNotificationStore} from './useNotificationStore'
 import {useQuotaStore} from './useQuotaStore'
 import {useUsageStatsStore} from './useUsageStatsStore'
 
@@ -40,6 +43,7 @@ type AuthStorageTransaction = {
     persistent: boolean
     lockAvailable: boolean
     superseded: boolean
+    previousSharedTransactionId: string | null | undefined
 }
 
 type AuthStorageLockResult<T> =
@@ -495,11 +499,14 @@ async function beginAuthStorageTransaction(
     persistent: boolean,
     expectedTransactionId?: string | null,
 ): Promise<AuthStorageTransaction> {
+    const previousSharedTransaction           = readAuthStorageTransaction(true)
     const transaction: AuthStorageTransaction = {
         id: createAuthStorageTransactionId(),
         persistent,
         lockAvailable: false,
         superseded: false,
+        previousSharedTransactionId: previousSharedTransaction.status === 'unreadable' ?
+                                     undefined : previousSharedTransaction.value,
     }
     activeAuthStorageTransaction              = transaction
     const initialized                         = await withAuthStorageLock((): 'ready' | 'failed' | 'superseded' => {
@@ -564,13 +571,25 @@ function clearStoredAuthenticationUnlocked(): boolean {
     return clearBrowserInvalidationBarrier()
 }
 
-async function clearStoredAuthentication(): Promise<boolean> {
-    const result = await withAuthStorageLock(clearStoredAuthenticationUnlocked)
+async function clearStoredAuthentication(transaction?: AuthStorageTransaction): Promise<boolean> {
+    const canClearShared = () => !transaction ||
+                                 matchAuthStorageIntent(true, transaction.id) ===
+                                 'match' ||
+                                 transaction.previousSharedTransactionId !==
+                                 undefined &&
+                                 matchExpectedAuthStorageState(true, transaction.previousSharedTransactionId) ===
+                                 'match'
+    const clear          = () => canClearShared() ?
+                                 clearStoredAuthenticationUnlocked() : clearCurrentSessionAuthentication()
+    const result         = await withAuthStorageLock(clear)
     if (result.status === 'acquired') {
         return result.value
     }
     if (result.status === 'unsupported') {
-        return clearStoredAuthenticationUnlocked()
+        return clear()
+    }
+    if (!canClearShared()) {
+        return clearCurrentSessionAuthentication()
     }
     setBrowserInvalidationBarrier()
     clearCurrentSessionAuthentication()
@@ -672,7 +691,7 @@ async function storeAuthentication(
     if (!transaction.lockAvailable) {
         return {
             status: 'memory-only',
-            clearFailed: !(await clearStoredAuthentication()),
+            clearFailed: !(await clearStoredAuthentication(transaction)),
         }
     }
 
@@ -734,7 +753,7 @@ async function storeAuthentication(
     }
     return {
         status: 'memory-only',
-        clearFailed: !(await clearStoredAuthentication()),
+        clearFailed: !(await clearStoredAuthentication(transaction)),
     }
 }
 
@@ -911,20 +930,21 @@ async function readLegacyCredentialPair(
         shouldCommit,
         validate: isStringStorageValue,
     }
-    const [apiBaseResult, apiUrlResult, managementKeyResult] = await Promise.all([
-                                                                                     secureStorage.getItemResult<string>(
-                                                                                         'apiBase',
-                                                                                         options,
-                                                                                     ),
-                                                                                     secureStorage.getItemResult<string>(
-                                                                                         'apiUrl',
-                                                                                         options,
-                                                                                     ),
-                                                                                     secureStorage.getItemResult<string>(
-                                                                                         'managementKey',
-                                                                                         options,
-                                                                                     ),
-                                                                                 ])
+    const [apiBaseResult, apiUrlResult, managementKeyResult] = await Promise.all(
+        [
+            secureStorage.getItemResult<string>(
+                'apiBase',
+                options,
+            ),
+            secureStorage.getItemResult<string>(
+                'apiUrl',
+                options,
+            ),
+            secureStorage.getItemResult<string>(
+                'managementKey',
+                options,
+            ),
+        ])
     const results                                            = [apiBaseResult, apiUrlResult, managementKeyResult]
     for (const status of ['cancelled', 'invalid', 'unreadable'] as const) {
         if (results.some((result) => result.status === status)) {
@@ -1242,7 +1262,9 @@ export const useAuthStore = create<AuthStoreState>()(
                 )
 
                 try {
-                    if (storageTransaction.superseded) {
+                    // 等待撤销响应处理完 cookie，再允许新登录创建资源会话
+                    await pluginsApi.waitForResourceSessionRevocation(apiBase)
+                    if (storageTransaction.superseded || storageWriteGeneration !== authStorageWriteGeneration) {
                         // noinspection ExceptionCaughtLocallyJS
                         throw new AuthStorageSupersededError('Login storage operation was superseded')
                     }
@@ -1258,10 +1280,10 @@ export const useAuthStore = create<AuthStoreState>()(
 
                     // 配置 API 客户端
                     useConfigStore.getState().clearCache()
-                    apiClient.setConfig({
-                                            apiBase,
-                                            managementKey,
-                                        })
+                    await apiClient.setConfig({
+                                                  apiBase,
+                                                  managementKey,
+                                              }, true)
 
                     // 测试连接 - 获取配置
                     await useConfigStore.getState().fetchConfig(undefined, true)
@@ -1356,6 +1378,15 @@ export const useAuthStore = create<AuthStoreState>()(
 
             // 登出
             logout: () => {
+                const { apiBase, managementKey } = get()
+                if (apiBase) {
+                    void pluginsApi.revokeResourceSession({ apiBase, managementKey }).catch((error: unknown) => {
+                        useNotificationStore.getState().showNotification(i18n.t('login.plugin_session_revoke_failed', {
+                            server: apiBase,
+                            error: error instanceof Error ? error.message : String(error),
+                        }), 'warning')
+                    })
+                }
                 restoreSessionPromise  = null
                 const storageCleanup   = invalidateStoredAuthentication()
                 const logoutGeneration = authStorageWriteGeneration

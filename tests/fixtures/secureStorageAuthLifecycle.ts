@@ -4,14 +4,23 @@ import {installTestLockManager} from './browserLockManager'
 import {installMemoryStorageEnvironment} from './memoryStorage'
 
 installTestLockManager()
+globalThis.fetch = Object.assign(async () => new Response(null, { status: 204 }), {
+    preconnect: () => {
+    },
+})
 
 const browserWindow = installMemoryStorageEnvironment(false)
 
-const [{ secureStorage }, { useAuthStore }, { useConfigStore }] = await Promise.all([
-                                                                                        import('../../src/services/storage/secureStorage'),
-                                                                                        import('../../src/stores/useAuthStore'),
-                                                                                        import('../../src/stores/useConfigStore'),
-                                                                                    ])
+const [{ secureStorage }, { useAuthStore }, { useConfigStore }] =
+          await Promise.all(
+              [
+                  import(
+                      '../../src/services/storage/secureStorage'),
+                  import(
+                      '../../src/stores/useAuthStore'),
+                  import(
+                      '../../src/stores/useConfigStore'),
+              ])
 await useAuthStore.persist.rehydrate()
 const originalFetchConfig          = useConfigStore.getState().fetchConfig
 const originalRefreshServerVersion = useAuthStore.getState().refreshServerVersion

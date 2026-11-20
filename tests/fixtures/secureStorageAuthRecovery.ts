@@ -3,6 +3,10 @@ import {AUTH_STORAGE_TEST_LOCK_NAME, installTestLockManager} from './browserLock
 import {installMemoryStorageEnvironment} from './memoryStorage'
 
 const testLockManager = installTestLockManager()
+globalThis.fetch      = Object.assign(async () => new Response(null, { status: 204 }), {
+    preconnect: () => {
+    },
+})
 
 const browserWindow       = installMemoryStorageEnvironment(true)
 const localStorageValue   = globalThis.localStorage
@@ -724,10 +728,11 @@ async function runPendingCrossTabLoginBlocksRestoreScenario(): Promise<void> {
 }
 
 async function runCrossTabRestoreClaimScenario(): Promise<void> {
-    const [{ secureStorage }, { encryptData }] = await Promise.all([
-                                                                       import('../../src/services/storage/secureStorage'),
-                                                                       import('../../src/utils/encryption'),
-                                                                   ])
+    const [{ secureStorage }, { encryptData }] = await Promise.all(
+        [
+            import('../../src/services/storage/secureStorage'),
+            import('../../src/utils/encryption'),
+        ])
     const restoredTransactionId                = 'cross-tab-restored-login'
     localStorage.setItem('cli-proxy-auth:intent', restoredTransactionId)
     localStorage.setItem('cli-proxy-auth:transaction', restoredTransactionId)
@@ -791,18 +796,20 @@ async function runCrossTabRestoreClaimScenario(): Promise<void> {
 }
 
 async function runCrossTabDelayedLoginScenario(): Promise<void> {
-    const [{ secureStorage }, { encryptData }] = await Promise.all([
-                                                                       import('../../src/services/storage/secureStorage'),
-                                                                       import('../../src/utils/encryption'),
-                                                                   ])
+    const [{ secureStorage }, { encryptData }] = await Promise.all(
+        [
+            import('../../src/services/storage/secureStorage'),
+            import('../../src/utils/encryption'),
+        ])
     const { useAuthStore }                     = await loadAuthStore()
     const currentTransactionId                 = 'cross-tab-current-login'
-    const currentCiphertext                    = await encryptData(JSON.stringify({
-                                                                                      version: 1,
-                                                                                      apiBase: 'https://current.test',
-                                                                                      managementKey: 'current-key',
-                                                                                      transactionId: currentTransactionId,
-                                                                                  }))
+    const currentCiphertext                    = await encryptData(JSON.stringify(
+        {
+            version: 1,
+            apiBase: 'https://current.test',
+            managementKey: 'current-key',
+            transactionId: currentTransactionId,
+        }))
     const originalSetItem                      = localStorage.setItem
     let currentCommit: Promise<void> | null    = null
     let injected                               = false
@@ -845,10 +852,11 @@ async function runCrossTabDelayedLoginScenario(): Promise<void> {
 }
 
 async function runCrossTabStale401Scenario(): Promise<ReloadPayload> {
-    const [{ secureStorage }, { encryptData }] = await Promise.all([
-                                                                       import('../../src/services/storage/secureStorage'),
-                                                                       import('../../src/utils/encryption'),
-                                                                   ])
+    const [{ secureStorage }, { encryptData }] = await Promise.all(
+        [
+            import('../../src/services/storage/secureStorage'),
+            import('../../src/utils/encryption'),
+        ])
     const { useAuthStore }                     = await loadAuthStore()
     await useAuthStore.getState().login({
                                             apiBase: 'https://old.test',
@@ -947,10 +955,11 @@ async function runCrossTabStale401ReloadScenario(payload: ReloadPayload): Promis
 }
 
 async function runCrossTabLogoutOrderingScenario(): Promise<void> {
-    const [{ secureStorage }, { encryptData }] = await Promise.all([
-                                                                       import('../../src/services/storage/secureStorage'),
-                                                                       import('../../src/utils/encryption'),
-                                                                   ])
+    const [{ secureStorage }, { encryptData }] = await Promise.all(
+        [
+            import('../../src/services/storage/secureStorage'),
+            import('../../src/utils/encryption'),
+        ])
     const { useAuthStore }                     = await loadAuthStore()
     await useAuthStore.getState().login({
                                             apiBase: 'https://old.test',
@@ -1472,6 +1481,63 @@ async function runOtherPortCookieScenario(payload: ReloadPayload): Promise<void>
     assert.equal(useAuthStore.getState().isAuthenticated, true)
 }
 
+async function runFailedIntentWithNewSharedCommitScenario(withoutLocks: boolean): Promise<void> {
+    const { secureStorage } = await import('../../src/services/storage/secureStorage')
+    const connected         = Promise.withResolvers<void>()
+    const release           = Promise.withResolvers<void>()
+    const { useAuthStore }  = await loadAuthStore(async () => {
+        connected.resolve()
+        await release.promise
+    })
+    const originalSetItem   = sessionStorage.setItem
+    if (withoutLocks) {
+        Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined })
+    } else {
+        sessionStorage.setItem = (key, value) => {
+            if (key === 'cli-proxy-auth:intent') {
+                throw new Error('session intent write denied')
+            }
+            originalSetItem(key, value)
+        }
+    }
+    const olderLogin = useAuthStore.getState().login({
+                                                         apiBase: 'https://older.test',
+                                                         managementKey: 'older-key',
+                                                         rememberPassword: true,
+                                                     })
+    await connected.promise
+    const transactionId = 'synthetic-newer-other-tab-transaction'
+    await testLockManager.request(AUTH_STORAGE_TEST_LOCK_NAME, async () => {
+        localStorage.setItem('cli-proxy-auth:intent', transactionId)
+        assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
+            version: 1, apiBase: 'https://newer.test', managementKey: 'newer-key', transactionId,
+        }, { persistent: true }), 'stored')
+        localStorage.setItem('cli-proxy-auth:transaction', transactionId)
+        localStorage.setItem('isLoggedIn', 'true')
+    })
+    const ciphertext = localStorage.getItem('cli-proxy-auth:credentials')
+    release.resolve()
+    try {
+        await olderLogin
+    } finally {
+        sessionStorage.setItem = originalSetItem
+    }
+    assert.equal(localStorage.getItem('cli-proxy-auth:intent'), transactionId)
+    assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), transactionId)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), ciphertext)
+    assert.equal(localStorage.getItem('isLoggedIn'), 'true')
+    assert.equal(useAuthStore.getState().isAuthenticated, true)
+    assert.equal(useAuthStore.getState().managementKey, 'older-key')
+    assert.equal(useAuthStore.getState().storagePersistenceFailed, true)
+    assert.equal(useAuthStore.getState().rememberPassword, false)
+    assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
+    assert.equal(
+        [...cookies].some(([name, value]) => name.startsWith('cpam_auth_invalidated_') && value === '1'),
+        false,
+    )
+    assert.equal(await useAuthStore.getState().restoreSession(), true)
+}
+
 async function runLockRequestFailureScenario(): Promise<void> {
     const { secureStorage } = await import('../../src/services/storage/secureStorage')
     const transactionId     = 'stored-before-lock-failure'
@@ -1604,6 +1670,57 @@ async function runTransientDenialReloadScenario(): Promise<void> {
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
 }
 
+async function runFailedIntentAfterSharedCommitScenario(): Promise<void> {
+    const { secureStorage } = await import('../../src/services/storage/secureStorage')
+    const connected         = Promise.withResolvers<void>()
+    const release           = Promise.withResolvers<void>()
+    const { useAuthStore }  = await loadAuthStore(async () => {
+        connected.resolve()
+        await release.promise
+    })
+    const originalSetItem   = sessionStorage.setItem
+    sessionStorage.setItem  = (key, value) => {
+        if (key === 'cli-proxy-auth:intent') {
+            throw new Error('synthetic session intent failure')
+        }
+        originalSetItem(key, value)
+    }
+    const pending           = useAuthStore.getState().login({
+                                                                apiBase: 'https://older.test',
+                                                                managementKey: 'older-key',
+                                                                rememberPassword: true,
+                                                            })
+    try {
+        await connected.promise
+        const transactionId = 'synthetic-newer-other-tab-transaction'
+        await testLockManager.request(AUTH_STORAGE_TEST_LOCK_NAME, async () => {
+            localStorage.setItem('cli-proxy-auth:intent', transactionId)
+            localStorage.setItem('cli-proxy-auth:transaction', transactionId)
+            assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
+                version: 1, apiBase: 'https://newer.test', managementKey: 'newer-key', transactionId,
+            }, { persistent: true }), 'stored')
+            localStorage.setItem('isLoggedIn', 'true')
+        })
+        const ciphertext = localStorage.getItem('cli-proxy-auth:credentials')
+        release.resolve()
+        await pending
+        assert.equal(localStorage.getItem('cli-proxy-auth:intent'), transactionId)
+        assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), transactionId)
+        assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), ciphertext)
+        assert.equal(localStorage.getItem('isLoggedIn'), 'true')
+        assert.equal(
+            [...cookies].some(([name, value]) => name.startsWith('cpam_auth_invalidated_') && value === '1'),
+            false,
+        )
+        assert.equal(useAuthStore.getState().isAuthenticated, true)
+        assert.equal(useAuthStore.getState().storagePersistenceFailed, true)
+        assert.equal(useAuthStore.getState().rememberPassword, false)
+    } finally {
+        sessionStorage.setItem = originalSetItem
+        release.resolve()
+    }
+}
+
 const scenario = process.argv[2]
 let output     = `secure-storage-auth-recovery:${scenario}=PASS`
 switch (scenario) {
@@ -1721,6 +1838,13 @@ switch (scenario) {
         break
     case 'clear-failure':
         await runClearFailureScenario()
+        break
+    case 'failed-intent-new-shared-commit':
+    case 'no-locks-new-shared-commit':
+        await runFailedIntentWithNewSharedCommitScenario(scenario === 'no-locks-new-shared-commit')
+        break
+    case 'failed-intent-after-shared-commit':
+        await runFailedIntentAfterSharedCommitScenario()
         break
     case 'lock-request-failure':
         await runLockRequestFailureScenario()
