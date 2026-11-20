@@ -1,5 +1,5 @@
 import {modelPricesApi} from '@/services/api/modelPrices'
-import {usageApi} from '@/services/api/usage'
+import {type RequestSpeed, usageApi} from '@/services/api/usage'
 import {USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore} from '@/stores'
 import type {NotificationType} from '@/types'
 import {downloadBlob} from '@/utils/download'
@@ -22,7 +22,9 @@ export interface ExportFilters {
     to?: string
     model?: string
     api_key?: string | readonly string[]
+    api_key_identity?: 'canonical'
     credential?: string
+    speed?: RequestSpeed | ''
 }
 
 export interface PriceSaveFeedback {
@@ -215,7 +217,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         let payload: unknown
         try {
             const text = await file.text()
-            payload    = JSON.parse(text)
+            payload    = /\.csv$/i.test(file.name) ? text : JSON.parse(text)
         } catch {
             showNotification(t('usage_stats.import_invalid'), 'error')
             return
@@ -224,7 +226,9 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         // Count records for confirmation
         const exportPayload = payload as Record<string, unknown>
         const usageData     = exportPayload?.usage as Record<string, unknown> | undefined
-        let recordCount     = 0
+        let recordCount     = typeof payload === 'string'
+                              ? Math.max(0, (payload.match(/(?:[^"\r\n]|"(?:[^"]|"")*")+/g)?.length ?? 0) - 1)
+                              : Array.isArray(payload) ? payload.length : 0
         if (usageData && typeof usageData === 'object') {
             for (const dateEntries of Object.values(usageData)) {
                 if (Array.isArray(dateEntries)) {

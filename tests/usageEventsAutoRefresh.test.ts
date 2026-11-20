@@ -1,18 +1,24 @@
-import {describe, expect, it} from 'bun:test'
 import {
     MIN_USAGE_EVENTS_AUTO_REFRESH_MS,
     resolveUsageEventsAutoRefreshMs,
     shouldRefreshUsageEvents,
     USAGE_EVENTS_AUTO_REFRESH_INTERVALS,
 } from '@/utils/autoRefresh'
+import {describe, expect, it} from 'bun:test'
 
 describe('usage events auto refresh', () => {
-    it('keeps every configured interval at or above 30 seconds', () => {
-        expect(resolveUsageEventsAutoRefreshMs(undefined)).toBe(MIN_USAGE_EVENTS_AUTO_REFRESH_MS)
-        expect(resolveUsageEventsAutoRefreshMs(3)).toBe(MIN_USAGE_EVENTS_AUTO_REFRESH_MS)
-        expect(resolveUsageEventsAutoRefreshMs(30)).toBe(MIN_USAGE_EVENTS_AUTO_REFRESH_MS)
-        expect(resolveUsageEventsAutoRefreshMs(60)).toBe(60_000)
-        expect(USAGE_EVENTS_AUTO_REFRESH_INTERVALS.map((option) => option.value)).toEqual(['30000', '60000'])
+    it('shares all six intervals with a 3-second default and minimum', () => {
+        expect(MIN_USAGE_EVENTS_AUTO_REFRESH_MS).toBe(3000)
+        expect(resolveUsageEventsAutoRefreshMs(undefined)).toBe(3000)
+        expect(resolveUsageEventsAutoRefreshMs(0)).toBe(3000)
+        expect(resolveUsageEventsAutoRefreshMs(3)).toBe(3000)
+        expect(resolveUsageEventsAutoRefreshMs(5)).toBe(5000)
+        expect(resolveUsageEventsAutoRefreshMs(8)).toBe(8000)
+        expect(resolveUsageEventsAutoRefreshMs(15)).toBe(15000)
+        expect(resolveUsageEventsAutoRefreshMs(30)).toBe(30000)
+        expect(resolveUsageEventsAutoRefreshMs(60)).toBe(60000)
+        expect(USAGE_EVENTS_AUTO_REFRESH_INTERVALS.map((option) => option.value))
+            .toEqual(['3000', '5000', '8000', '15000', '30000', '60000'])
     })
 
     it('allows refresh only for a visible first-page 24-hour timestamp view', () => {

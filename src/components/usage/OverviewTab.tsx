@@ -99,6 +99,7 @@ export function OverviewTab({
                         chartDimension={chartDimension}
                         isMobile={isMobile}
                         metric={metric}
+                        aliases={aliases}
                     />
                 ))}
             </div>
@@ -142,7 +143,8 @@ export function OverviewTab({
                 />
             )}
 
-            <TokenBreakdownChart summary={summary ?? null} loading={loading} isMobile={isMobile} />
+            <TokenBreakdownChart summary={summary ?? null} liveSummary={liveSummary} error={summaryError}
+                                 loading={loading} isMobile={isMobile} />
         </>
     )
 }

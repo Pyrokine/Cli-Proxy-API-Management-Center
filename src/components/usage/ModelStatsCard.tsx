@@ -39,12 +39,19 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
         [modelStats],
     )
 
-    const { status }     = useDataStatus({
-                                             loading,
-                                             data: rows,
-                                             isEmpty: (data) => data.length === 0,
-                                         })
-    const hasLatencyData = rows.some((row) => row.latencySampleCount > 0)
+    const { status }       = useDataStatus({
+                                               loading,
+                                               data: rows,
+                                               isEmpty: (data) => data.length === 0,
+                                           })
+    const measuredRows     = rows.filter((row) => row.latencySampleCount > 0 && row.averageLatencyMs !== null)
+    const latencySamples   = measuredRows.reduce((sum, row) => sum + row.latencySampleCount, 0)
+    const totalLatencyMs   = measuredRows.length > 0 && measuredRows.every((row) => row.totalLatencyMs != null)
+                             ? measuredRows.reduce((sum, row) => sum + row.totalLatencyMs!, 0) : null
+    const averageLatencyMs = latencySamples > 0 ? (totalLatencyMs ?? measuredRows.reduce(
+        (sum, row) => sum + row.averageLatencyMs! * row.latencySampleCount, 0,
+    )) / latencySamples : null
+    const hasLatencyData   = latencySamples > 0
 
     const columns = useMemo<SheetColumn<ModelStatWithRate>[]>(() => {
         const items: SheetColumn<ModelStatWithRate>[] = [
@@ -110,19 +117,32 @@ export function ModelStatsCard({ modelStats, loading, hasPrices, nameHeader, car
     }, [hasPrices, i18n.language, latencyHint, nameHeader, t])
 
     return (
-        <Card title={cardTitle ?? t('usage_stats.models')} className={styles.detailsFixedCard}>
+        <Card
+            title={cardTitle ?? t('usage_stats.models')}
+            className={styles.detailsFixedCard}
+            extra={loading && rows.length > 0 ? (
+                <span className={styles.refreshingHint} role='status'>{t('common.loading')}</span>
+            ) : undefined}
+        >
             <Sheet
                 rows={rows}
                 columns={columns}
-                rowKey={(row) => row.model}
+                rowKey={(row) => row.key ?? row.model}
+                tableWrapClassName={styles.statsTableWrapper}
                 status={status}
                 emptyText={t('usage_stats.no_data')}
                 loadingText={t('common.loading')}
                 defaultSortKey='requests'
                 defaultSortDir='desc'
-                summaryContent={hasLatencyData ? <span title={latencyHint}>{latencyHint}</span> : null}
-                refreshing={loading && rows.length > 0}
-                refreshingText={t('common.loading')}
+                summaryContent={hasLatencyData ?
+                                <span title={latencyHint}>{t('usage_stats.avg_time')}: {formatDurationMs(
+                                    averageLatencyMs,
+                                    { locale: i18n.language },
+                                )} · {t('usage_stats.total_time')}: {formatDurationMs(
+                                    totalLatencyMs,
+                                    { locale: i18n.language },
+                                )}</span> :
+                                null}
             />
         </Card>
     )

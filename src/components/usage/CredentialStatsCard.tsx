@@ -47,8 +47,10 @@ function capitalizeProvider(name: string): string {
     return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
 }
 
-function formatCredentialDisplay(provider: string, source: string, aliases?: Record<string, string>): string {
-    const aliasOrSource = aliases?.[source] || source
+function formatCredentialDisplay(
+    provider: string, source: string, aliases?: Record<string, string>, aliasKey = source,
+): string {
+    const aliasOrSource = aliases?.[aliasKey]?.trim() || aliases?.[source]?.trim() || source
     if (provider) {
         return `[${capitalizeProvider(provider)}] ${aliasOrSource}`
     }
@@ -66,7 +68,7 @@ function formatCredentialDisplayFromAuthFile(
 
     const provider = file.type || inferProviderFromAuthFileName(file.name)
     const source   = formatAuthFileDisplayName(file.name) || fallbackSource
-    return formatCredentialDisplay(provider, source, aliases)
+    return formatCredentialDisplay(provider, source, aliases, file.rawName || file.name)
 }
 
 interface CredentialRow {
@@ -238,7 +240,12 @@ export function CredentialStatsCard({
             rowKey: string,
         ) => {
             const bucket = sumCandidates(buildCandidateUsageSourceIds({ apiKey, prefix }), type)
-            pushRowIfNonEmpty(bucket, rowKey, name, type)
+            pushRowIfNonEmpty(
+                bucket,
+                rowKey,
+                aliases?.[apiKey]?.trim() || aliases?.[prefix ?? '']?.trim() || name,
+                type,
+            )
         }
 
         // Provider rows — one row per config, stats merged across all its candidate source IDs
@@ -322,12 +329,17 @@ export function CredentialStatsCard({
                 return
             }
             const inferredProvider = entry.provider || inferProviderFromAuthFileName(entry.source)
-            const normalizedSource = inferredProvider
+            const normalizedSource = entry.source.toLowerCase().endsWith('.json')
                                      ? formatAuthFileDisplayName(entry.source) || entry.source
                                      : entry.source
             result.push({
                             key: entry.filterKey,
-                            displayName: formatCredentialDisplay(inferredProvider, normalizedSource, aliases),
+                            displayName: formatCredentialDisplay(
+                                inferredProvider,
+                                normalizedSource,
+                                aliases,
+                                entry.source,
+                            ),
                             type: '',
                             success: entry.success,
                             failure: entry.failure,
@@ -425,18 +437,23 @@ export function CredentialStatsCard({
     )
 
     return (
-        <Card title={t('usage_stats.credential_stats')} className={styles.detailsFixedCard}>
+        <Card
+            title={t('usage_stats.credential_stats')}
+            className={styles.detailsFixedCard}
+            extra={loading && rows.length > 0 ? (
+                <span className={styles.refreshingHint} role='status'>{t('common.loading')}</span>
+            ) : undefined}
+        >
             <Sheet
                 rows={rows}
                 columns={columns}
                 rowKey={(row) => row.key}
+                tableWrapClassName={styles.statsTableWrapper}
                 status={status}
                 emptyText={t('usage_stats.no_data')}
                 loadingText={t('common.loading')}
                 defaultSortKey='total'
                 defaultSortDir='desc'
-                refreshing={loading && rows.length > 0}
-                refreshingText={t('common.loading')}
             />
         </Card>
     )

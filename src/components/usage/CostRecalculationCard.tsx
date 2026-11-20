@@ -5,9 +5,11 @@ import {formatUsd} from '@/utils/usage'
 import {useEffect, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './CostRecalculationCard.module.scss'
+import {MaintenanceTaskTimes} from './MaintenanceTaskTimes'
 
 interface CostRecalculationCardProps {
     refreshKey?: number
+    embedded?: boolean
 }
 
 function progressValue(status: CostRecalculationStatus): number {
@@ -28,7 +30,7 @@ function phaseLabel(status: CostRecalculationStatus, t: ReturnType<typeof useTra
     return t('usage_stats.recalculate_phase_events')
 }
 
-export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardProps) {
+export function CostRecalculationCard({ refreshKey = 0, embedded = false }: CostRecalculationCardProps) {
     const { t }                              = useTranslation()
     const [status, setStatus]                = useState<CostRecalculationStatus | null>(null)
     const [loading, setLoading]              = useState(true)
@@ -41,6 +43,7 @@ export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardP
         let timer: ReturnType<typeof setTimeout> | null = null
 
         const poll = async () => {
+            let interval = 5000
             try {
                 const next = await modelPricesApi.getRecalculationStatus({ signal: controller.signal })
                 if (controller.signal.aborted) {
@@ -48,18 +51,17 @@ export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardP
                 }
                 setStatus(next)
                 setRequestError('')
-                if (next.running) {
-                    timer = setTimeout(() => {
-                        void poll()
-                    }, 1500)
-                }
+                interval = next.running ? 1500 : 5000
             } catch (err: unknown) {
                 if (!controller.signal.aborted) {
-                    setRequestError(err instanceof Error ? err.message : '')
+                    setRequestError(t('usage_stats.maintenance_status_failed', {
+                        error: err instanceof Error ? err.message : String(err),
+                    }))
                 }
             } finally {
                 if (!controller.signal.aborted) {
                     setLoading(false)
+                    timer = setTimeout(() => void poll(), interval)
                 }
             }
         }
@@ -67,20 +69,23 @@ export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardP
         void poll()
         return () => {
             controller.abort()
-            if (timer) {
+            if (timer !== null) {
                 clearTimeout(timer)
             }
         }
-    }, [localRefreshKey, refreshKey])
+    }, [localRefreshKey, refreshKey, t])
 
     const start = async () => {
         setStarting(true)
         try {
             const next = await modelPricesApi.startRecalculation()
             setStatus(next)
+            setRequestError('')
             setLocalRefresh((value) => value + 1)
         } catch (err: unknown) {
-            setRequestError(err instanceof Error ? err.message : '')
+            setRequestError(`${t('usage_stats.recalculate_failed')}: ${err instanceof Error ?
+                                                                       err.message :
+                                                                       String(err)}`)
         } finally {
             setStarting(false)
         }
@@ -92,31 +97,29 @@ export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardP
     const processedEvents = status?.processed_events ?? 0
     const progress        = progressValue(status ?? { status: 'idle', running: false })
 
-    return (
-        <Card
-            title={t('usage_stats.recalculate_title')}
-            extra={
-                <Button
-                    variant='secondary'
-                    size='sm'
-                    onClick={() => void start()}
-                    loading={starting}
-                    disabled={running || loading}
-                >
-                    {resumable ? t('usage_stats.recalculate_resume') : t('usage_stats.recalculate_button')}
-                </Button>
-            }
+    const action  = (
+        <Button
+            variant='secondary'
+            size='sm'
+            onClick={() => void start()}
+            loading={starting}
+            disabled={running || loading}
         >
-            <div className={styles.content}>
-                <p className={styles.description}>{t('usage_stats.recalculate_desc')}</p>
-                {loading ? (
-                    <span className={styles.hint}>{t('common.loading')}</span>
-                ) : requestError ? (
-                    <span className={styles.error} role='status'>{requestError}</span>
-                ) : status && status.status !== 'idle' ? (
+            {resumable ? t('usage_stats.recalculate_resume') : t('usage_stats.recalculate_button')}
+        </Button>
+    )
+    const content = (
+        <div className={styles.content}>
+            <p className={styles.description}>{t('usage_stats.recalculate_desc')}</p>
+            {requestError && <span className={styles.error} role='alert'>{requestError}</span>}
+            {loading && !status ? (
+                <span className={styles.hint}>{t('common.loading')}</span>
+            ) : status && status.status !== 'idle' ? (
+                <>
                     <div className={styles.progress} role='status'>
                         <div className={styles.progressHeader}>
-                            <span>{phaseLabel(status, t)}</span>
+                                <span>{t(running ? 'usage_stats.recalculate_current_task' :
+                                         'usage_stats.recalculate_latest_task')} · {phaseLabel(status, t)}</span>
                             <strong>{progress.toFixed(1)}%</strong>
                         </div>
                         <div
@@ -148,19 +151,28 @@ export function CostRecalculationCard({ refreshKey = 0 }: CostRecalculationCardP
                             })}</span>
                         ) : null}
                         {status.status !== 'ok' && status.error ?
-                         <span className={styles.error}>{status.error}</span> :
-                         null}
+                         <span className={styles.error}>{status.error}</span> : null}
                         {status.resumed ?
-                         <span className={styles.hint}>{t('usage_stats.recalculate_resumed')}</span> :
-                         null}
+                         <span className={styles.hint}>{t('usage_stats.recalculate_resumed')}</span> : null}
                         {status.status !== 'ok' && status.restart_reason ?
-                         <span className={styles.hint}>{status.restart_reason}</span> :
-                         null}
+                         <span className={styles.hint}>{status.restart_reason}</span> : null}
                     </div>
-                ) : (
-                        <span className={styles.hint}>{t('usage_stats.recalculate_idle')}</span>
-                    )}
-            </div>
-        </Card>
+                    <MaintenanceTaskTimes running={running} startedAt={status.started_at}
+                                          completedAt={status.completed_at} />
+                </>
+            ) : status?.status === 'idle' ? (
+                <span className={styles.hint}>{t('usage_stats.recalculate_idle')}</span>
+            ) : null}
+        </div>
     )
+
+    return embedded ? (
+        <section className={styles.taskSection}>
+            <div className={styles.taskHeader}>
+                <h3 className={styles.taskTitle}>{t('usage_stats.recalculate_title')}</h3>
+                {action}
+            </div>
+            {content}
+        </section>
+    ) : <Card title={t('usage_stats.recalculate_title')} extra={action}>{content}</Card>
 }

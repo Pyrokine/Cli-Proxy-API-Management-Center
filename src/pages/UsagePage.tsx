@@ -15,7 +15,7 @@ import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useMediaQuery} from '@/hooks/useMediaQuery'
 import {apiKeyAliasApi} from '@/services/api/apiKeys'
 import {providersApi} from '@/services/api/providers'
-import {usageApi} from '@/services/api/usage'
+import {type RequestSpeed, usageApi} from '@/services/api/usage'
 import {useConfigStore} from '@/stores'
 import type {OpenAIProviderConfig} from '@/types'
 import {toLocalDateTimeString} from '@/utils/format'
@@ -92,6 +92,7 @@ export function UsagePage() {
     const [selectedCredentials, setSelectedCredentials]         = useState<string[]>([])
     const [selectedApiKeys, setSelectedApiKeys]                 = useState<string[]>([])
     const [selectedEventStatus, setSelectedEventStatus]         = useState('')
+    const [selectedEventSpeed, setSelectedEventSpeed]           = useState<RequestSpeed | ''>('')
     const [aliases, setAliases]                                 = useState<Record<string, string>>({})
     const [activeTab, setActiveTabState]                        = useState<UsageTab>(() => initActiveTab())
     const usageStatsTabActive                                   = activeTab !== 'settings'
@@ -212,8 +213,8 @@ export function UsagePage() {
     const handleRefresh = useCallback(() => {
         const refreshAnchorMs = Date.now()
         setLiveWindowAnchorMs(refreshAnchorMs)
-        let shouldReloadSummary = false
-        let shouldReloadEvents  = false
+        const shouldReloadSummary = !['24h', '7d', '30d'].includes(dateRange.preset)
+        const shouldReloadEvents  = activeTab === 'events'
 
         setDateRange((prev) => {
             const now    = new Date(refreshAnchorMs)
@@ -240,8 +241,6 @@ export function UsagePage() {
                 case 'all':
                     return { ...prev, to: nowStr }
                 default:
-                    shouldReloadSummary = true
-                    shouldReloadEvents  = activeTab === 'events'
                     return prev
             }
         })
@@ -256,7 +255,7 @@ export function UsagePage() {
         if (shouldReloadEvents) {
             setEventsRefreshToken((prev) => prev + 1)
         }
-    }, [activeTab, loadUsage, needsRawUsage])
+    }, [activeTab, dateRange.preset, loadUsage, needsRawUsage])
 
     const isAllPreset                                     = dateRange.preset === 'all'
     const allSummaryResolutionKey                         = useMemo(
@@ -272,6 +271,7 @@ export function UsagePage() {
            from: '',
            resolved: false,
        })
+    const [allSummaryFailure, setAllSummaryFailure]       = useState<{ key: string; message: string } | null>(null)
     const [allSummaryResolving, setAllSummaryResolving]   = useState(false)
     const allSummaryResolved                              =
               isAllPreset && allSummaryResolution.key === allSummaryResolutionKey && allSummaryResolution.resolved
@@ -314,6 +314,7 @@ export function UsagePage() {
                     to: effectiveDateTo,
                     page: 1,
                     page_size: 1,
+                    api_key_identity: 'canonical',
                     model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
                     source: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
                     api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
@@ -327,6 +328,7 @@ export function UsagePage() {
                 if (cancelled) {
                     return
                 }
+                setAllSummaryFailure(null)
                 const timestamp    = response.events[0]?.timestamp
                 const resolvedFrom = timestamp ? toLocalDateTimeString(new Date(timestamp)) : ''
                 setAllSummaryResolution((prev) =>
@@ -339,9 +341,16 @@ export function UsagePage() {
                                             : { key: allSummaryResolutionKey, from: resolvedFrom, resolved: true },
                 )
             })
-            .catch(() => {
+            .catch((failure: unknown) => {
+                if (!cancelled) {
+                    setAllSummaryFailure({
+                                             key: allSummaryResolutionKey,
+                                             message: failure instanceof Error ? failure.message : String(failure),
+                                         })
+                }
             })
             .finally(() => {
+                cancelAnimationFrame(frameId)
                 if (!cancelled) {
                     setAllSummaryResolving(false)
                 }
@@ -353,6 +362,7 @@ export function UsagePage() {
             cancelAnimationFrame(frameId)
         }
     }, [
+                  summaryRefreshToken,
                   isAllPreset,
                   allSummaryResolved,
                   allSummaryResolutionKey,
@@ -370,6 +380,7 @@ export function UsagePage() {
             from: effectiveDateFrom,
             to: effectiveDateTo,
             granularity: summaryGranularity,
+            api_key_identity: 'canonical' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
             api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
@@ -394,26 +405,17 @@ export function UsagePage() {
         enabled: usageStatsTabActive && effectiveRangeReady,
     })
 
-    const liveSummaryRange = useMemo(() => {
-        const fromMs = new Date(effectiveDateFrom).getTime()
-        const toMs   = new Date(effectiveDateTo).getTime()
-        if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
-            return {
-                from: toLocalDateTimeString(new Date(liveWindowAnchorMs - 60 * 60 * 1000)),
-                to: toLocalDateTimeString(new Date(liveWindowAnchorMs)),
-            }
-        }
-        return {
-            from: toLocalDateTimeString(new Date(Math.max(fromMs, toMs - 60 * 60 * 1000))),
-            to: toLocalDateTimeString(new Date(toMs)),
-        }
-    }, [effectiveDateFrom, effectiveDateTo, liveWindowAnchorMs])
+    const liveSummaryRange = useMemo(() => ({
+        from: new Date(liveWindowAnchorMs - 60 * 60 * 1000).toISOString(),
+        to: new Date(liveWindowAnchorMs).toISOString(),
+    }), [liveWindowAnchorMs])
 
     const liveSummaryParams   = useMemo(
         () => ({
             from: liveSummaryRange.from,
             to: liveSummaryRange.to,
             granularity: 'hourly' as const,
+            api_key_identity: 'canonical' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
             api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
@@ -425,12 +427,14 @@ export function UsagePage() {
     const {
               summary: requestedLiveSummary,
               loading: requestedLiveSummaryLoading,
+              error: requestedLiveSummaryError,
               reload: reloadLiveSummary,
           }                   = useUsageSummary(liveSummaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady && !reuseSummaryForLive,
     })
     const liveSummary         = reuseSummaryForLive ? summary : requestedLiveSummary
     const liveSummaryLoading  = reuseSummaryForLive ? summaryLoading : requestedLiveSummaryLoading
+    const liveSummaryError    = reuseSummaryForLive ? summaryError : requestedLiveSummaryError
 
     // Filtered usage: date range → model/credential selection
     const timeFilteredUsage = useMemo(
@@ -456,6 +460,7 @@ export function UsagePage() {
             from: effectiveDateFrom,
             to: effectiveDateTo,
             granularity: summaryGranularity,
+            api_key_identity: 'canonical' as const,
             groups: 'none' as const,
         }),
         [effectiveDateFrom, effectiveDateTo, summaryGranularity],
@@ -472,6 +477,7 @@ export function UsagePage() {
             from: effectiveDateFrom,
             to: effectiveDateTo,
             granularity: 'hourly' as const,
+            api_key_identity: 'canonical' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
             api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
             credential: selectedCredentials.length > 0 ? selectedCredentials.join(',') : undefined,
@@ -539,9 +545,12 @@ export function UsagePage() {
     }, [])
 
     const combinedSummaryLoading  = (usageStatsTabActive && rangeResolutionLoading) || summaryLoading
-    const combinedSummaryError    = summaryError
+    const rangeResolutionError    = isAllPreset && allSummaryFailure?.key === allSummaryResolutionKey ?
+                                    allSummaryFailure.message :
+                                    undefined
+    const combinedSummaryError    = rangeResolutionError ?? summaryError
     const combinedHeatmapLoading  = (usageStatsTabActive && rangeResolutionLoading) || heatmapSummaryLoading
-    const combinedHeatmapError    = heatmapSummaryError
+    const combinedHeatmapError    = rangeResolutionError ?? heatmapSummaryError
     const resolvedOpenaiProviders = openaiProvidersForUsage ?? config?.openaiCompatibility ?? []
 
     const dateFromMs = useMemo(() => {
@@ -598,6 +607,8 @@ export function UsagePage() {
                     onSelectedApiKeysChange={setSelectedApiKeys}
                     selectedStatus={activeTab === 'events' ? selectedEventStatus : undefined}
                     onSelectedStatusChange={activeTab === 'events' ? setSelectedEventStatus : undefined}
+                    selectedSpeed={activeTab === 'events' ? selectedEventSpeed : undefined}
+                    onSelectedSpeedChange={activeTab === 'events' ? setSelectedEventSpeed : undefined}
                     summary={summary}
                     optionsSummary={hasSelectionFilters ? filterOptionsSummary : summary}
                     aliases={aliases}
@@ -608,9 +619,11 @@ export function UsagePage() {
                                          to: effectiveDateTo,
                                          model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
                                          api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
+                                         api_key_identity: 'canonical',
                                          credential: selectedCredentials.length > 0 ?
                                                      selectedCredentials.join(',') :
                                                      undefined,
+                                         speed: activeTab === 'events' ? selectedEventSpeed : undefined,
                                      })
                     }
                     onImport={handleImport}
@@ -625,18 +638,26 @@ export function UsagePage() {
             <input
                 ref={importInputRef}
                 type='file'
-                accept='.json,application/json'
+                accept='.json,.csv,application/json,text/csv'
                 style={{ display: 'none' }}
                 onChange={handleImportChange}
             />
 
             {error && <div className={styles.errorBox}>{error}</div>}
+            {rangeResolutionError && <div className={styles.errorBox} role='alert'>
+                {t('notification.load_failed')}: {rangeResolutionError}
+                <button type='button' className='btn btn-secondary' onClick={handleRefresh}>{t('common.retry')}</button>
+            </div>}
+            {liveSummaryError && !reuseSummaryForLive && <div className={styles.errorBox} role='alert'>
+                {t('usage_stats.unified_latest_label')}: {liveSummaryError}
+                <button type='button' className='btn btn-secondary' onClick={handleRefresh}>{t('common.retry')}</button>
+            </div>}
 
             {activeTab === 'overview' && (
                 <OverviewTab
                     usage={filteredUsage}
                     loading={combinedSummaryLoading}
-                    usageLoading={loading || rangeResolutionLoading}
+                    usageLoading={loading || rangeResolutionLoading || combinedSummaryLoading}
                     summaryError={combinedSummaryError}
                     heatmapLoading={combinedHeatmapLoading}
                     heatmapError={combinedHeatmapError}
@@ -683,6 +704,8 @@ export function UsagePage() {
                     selectedApiKeys={selectedApiKeys}
                     selectedStatus={selectedEventStatus}
                     onSelectedStatusChange={setSelectedEventStatus}
+                    selectedSpeed={selectedEventSpeed}
+                    onSelectedSpeedChange={setSelectedEventSpeed}
                 />
             )}
 

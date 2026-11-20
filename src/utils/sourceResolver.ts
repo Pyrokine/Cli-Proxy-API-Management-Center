@@ -14,10 +14,17 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
     const map = new Map<string, SourceInfo>()
 
     const registerSource = (sourceId: string, displayName: string, type: string) => {
-        if (!sourceId || !displayName || map.has(sourceId)) {
+        if (!sourceId || !displayName) {
             return
         }
-        map.set(sourceId, { displayName, type })
+        const info = { displayName, type }
+        if (!map.has(sourceId)) {
+            map.set(sourceId, info)
+        }
+        const qualifiedId = `${type}:${sourceId}`
+        if (!map.has(qualifiedId)) {
+            map.set(qualifiedId, info)
+        }
     }
 
     const registerCandidates = (displayName: string, type: string, candidates: string[]) => {
@@ -54,7 +61,12 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
         ;(provider.apiKeyEntries || []).forEach((entry) => {
             buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id))
         })
-        registerCandidates(displayName, 'openai', Array.from(candidates))
+        const sourceIds = Array.from(candidates)
+        registerCandidates(displayName, 'openai', sourceIds)
+        const providerType = provider.name?.trim().toLowerCase()
+        if (providerType && providerType !== 'openai') {
+            registerCandidates(displayName, providerType, sourceIds)
+        }
     })
 
     return map
@@ -65,28 +77,30 @@ export function resolveSourceDisplay(
     authIndex: unknown,
     sourceInfoMap: Map<string, SourceInfo>,
     authFileMap: Map<string, CredentialInfo>,
+    providerRaw = '',
 ): SourceInfo {
-    const source  = sourceRaw.trim()
-    const matched = sourceInfoMap.get(source)
-    if (matched) {
+    const source   = sourceRaw.trim()
+    const provider = providerRaw.trim().toLowerCase()
+    const matched  = (provider ? sourceInfoMap.get(`${provider}:${source}`) : undefined) ?? sourceInfoMap.get(source)
+    if (matched && (!provider || matched.type.trim().toLowerCase() === provider)) {
         return matched
     }
 
     const sourceInfo = authFileMap.get(source)
-    if (sourceInfo) {
-        return { displayName: sourceInfo.name || source, type: sourceInfo.type }
+    if (sourceInfo && (!provider || sourceInfo.type.trim().toLowerCase() === provider)) {
+        return { displayName: sourceInfo.name || source, type: provider || sourceInfo.type }
     }
 
     const authIndexKey = normalizeAuthIndex(authIndex)
     if (authIndexKey) {
         const authInfo = authFileMap.get(authIndexKey)
-        if (authInfo) {
-            return { displayName: authInfo.name || authIndexKey, type: authInfo.type }
+        if (authInfo && (!provider || authInfo.type.trim().toLowerCase() === provider)) {
+            return { displayName: authInfo.name || authIndexKey, type: provider || authInfo.type }
         }
     }
 
     return {
         displayName: source.startsWith('t:') ? source.slice(2) : source || '-',
-        type: '',
+        type: provider,
     }
 }

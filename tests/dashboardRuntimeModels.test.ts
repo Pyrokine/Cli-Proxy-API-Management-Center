@@ -1,34 +1,52 @@
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
-import {runInNewContext} from 'node:vm'
+import {sourceCallback} from './sourceCallbacks'
 
 const source = readFileSync(new URL('../src/pages/DashboardPage.tsx', import.meta.url), 'utf8')
-const start = source.indexOf('const fetchModels = useCallback(')
-const end = source.indexOf('\n    useEffect(', start)
-if (start < 0 || end < 0) {
-    throw new Error('Dashboard model request callback not found')
-}
-const callbackSource = new Bun.Transpiler({loader: 'ts'}).transformSync(source.slice(start, end))
 
 function createHarness(connectionStatus = 'connected', pageLayerStatus = 'current') {
-    const calls: unknown[][] = []
-    const loading: boolean[] = []
-    let keyReads = 0
-    const modelsRequestGeneration = {current: 0}
+    const calls: unknown[][]      = []
+    const loading: boolean[]      = []
+    let keyReads                  = 0
+    let authGeneration            = 1
+    const modelsRequestGeneration = { current: 0 }
     let complete: (() => void) | undefined
-    const pending = new Promise<void>((resolve) => { complete = resolve })
-    const context = {
+    let reject: ((error: Error) => void) | undefined
+    const pending                 = new Promise<void>((resolve, fail) => {
+        complete = resolve;
+        reject   = fail
+    })
+    const context                 = {
+        apiClient: { getAuthGeneration: () => authGeneration },
         connectionStatus,
         pageLayerStatus,
         apiBase: 'https://management.example.invalid',
         modelsRequestGeneration,
         useCallback: (callback: () => Promise<void>) => callback,
-        setModelsRequestLoading: (value: boolean) => loading.push(value),
-        resolveApiKeys: async () => { ++keyReads; return ['synthetic-client-key'] },
-        fetchModelsFromStore: (...args: unknown[]) => { calls.push(args); return pending },
+        // noinspection JSUnusedGlobalSymbols
+        'setModelsRequestLoading': (value: boolean) => loading.push(value),
+        // noinspection JSUnusedGlobalSymbols
+        'resolveApiKeys': async () => {
+            ++keyReads;
+            return ['synthetic-client-key']
+        },
+        // noinspection JSUnusedGlobalSymbols
+        'fetchModelsFromStore': (...args: unknown[]) => {
+            calls.push(args);
+            return pending
+        },
     }
-    const fetchModels = runInNewContext(`${callbackSource}\nfetchModels`, context) as () => Promise<void>
-    return {fetchModels, calls, loading, modelsRequestGeneration, complete: () => complete?.(), keyReads: () => keyReads}
+    const fetchModels             = sourceCallback<(force?: boolean) => Promise<void>>(
+        'pages/DashboardPage.tsx',
+        'fetchModels',
+        context,
+    )
+    return {
+        fetchModels, calls, loading, modelsRequestGeneration, complete: () => complete?.(), keyReads: () => keyReads,
+        changeConnection: () => {
+            ++authGeneration
+        }, fail: () => reject?.(new Error('synthetic model failure')),
+    }
 }
 
 describe('dashboard runtime model inventory', () => {
@@ -45,7 +63,7 @@ describe('dashboard runtime model inventory', () => {
         const request = harness.fetchModels()
         await Promise.resolve()
         expect(harness.keyReads()).toBe(0)
-        expect(harness.calls).toEqual([['https://management.example.invalid']])
+        expect(harness.calls).toEqual([['https://management.example.invalid', false]])
         harness.complete()
         await request
         expect(harness.loading).toEqual([true, false])
@@ -58,6 +76,25 @@ describe('dashboard runtime model inventory', () => {
             expect(harness.calls).toEqual([])
             expect(harness.keyReads()).toBe(0)
         }
+    })
+
+    test('explicit header refresh forces the management inventory and reports its current failure', async () => {
+        const harness = createHarness()
+        const request = harness.fetchModels(true)
+        expect(harness.calls).toEqual([['https://management.example.invalid', true]])
+        harness.fail()
+        expect(request).rejects.toThrow('synthetic model failure')
+        expect(harness.loading).toEqual([true, false])
+        expect(harness.keyReads()).toBe(0)
+    })
+
+    test('model completion from an older connection cannot change current loading', async () => {
+        const harness = createHarness()
+        const request = harness.fetchModels()
+        harness.changeConnection()
+        harness.complete()
+        await request
+        expect(harness.loading).toEqual([true])
     })
 
     test('late completion cannot clear a newer loading state', async () => {

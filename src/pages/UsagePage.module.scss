@@ -3,7 +3,8 @@
 
 .container {
     width: 100%;
-    min-height: 100%;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -37,6 +38,11 @@
     border: 1px solid var(--error-color);
     border-radius: $radius-sm;
     color: var(--error-color);
+    font-size: $font-size-sm;
+}
+
+.refreshingHint {
+    color: var(--text-secondary);
     font-size: $font-size-sm;
 }
 
@@ -101,10 +107,24 @@
 
 // API List (80%比例)
 
-// Detail cards — content flows naturally within the page scroll.
+// Summary cards keep their table height within the page scroll.
 .detailsFixedCard {
     display: flex;
     flex-direction: column;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.statsTableWrapper {
+    max-height: 28rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
 }
 
 // Table (80%比例)

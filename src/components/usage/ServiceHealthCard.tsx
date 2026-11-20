@@ -26,7 +26,7 @@ function calculateServiceHealthFromSummary(
     const MAX_COLS = 200 // 8 × 200 = 1600 cells — keeps render snappy
 
     // Align edges to whole-hour boundaries so cell counts are stable.
-    const alignedEnd   = Math.floor(toMs / HOUR_MS) * HOUR_MS
+    const alignedEnd   = Math.ceil(toMs / HOUR_MS) * HOUR_MS
     const alignedStart = Math.floor(fromMs / HOUR_MS) * HOUR_MS
     const span         = Math.max(alignedEnd - alignedStart, HOUR_MS * MIN_COLS * ROWS)
 

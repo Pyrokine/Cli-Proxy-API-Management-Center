@@ -3,11 +3,11 @@ import {DateRangePicker} from '@/components/ui/DateRangePicker'
 import {MultiSelect} from '@/components/ui/MultiSelect'
 import {Select} from '@/components/ui/Select'
 import {formatAuthFileDisplayName, inferProviderFromAuthFileName} from '@/features/authFiles/constants'
-import type {UsageSummary} from '@/services/api/usage'
+import {REQUEST_SPEEDS, type RequestSpeed, type UsageSummary} from '@/services/api/usage'
 import type {CredentialInfo} from '@/types/sourceInfo'
 import {formatDateTime} from '@/utils/format'
 import {getCredentialSourcesFromUsage, getModelNamesFromUsage, getSummaryDataStart} from '@/utils/usage'
-import {summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
+import {summaryToApiKeyStats, summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
 import {useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './FilterBar.module.scss'
@@ -38,8 +38,9 @@ function formatCredentialOptionLabel(
     source: string,
     sourceKind: 'api_key' | 'identity' | '',
     aliases?: Record<string, string>,
+    aliasKey = source,
 ): string {
-    const aliasOrMasked = aliases?.[source] || maskSensitiveKey(source)
+    const aliasOrMasked = aliases?.[aliasKey]?.trim() || aliases?.[source]?.trim() || maskSensitiveKey(source)
     const kindLabel     = sourceKind === 'api_key' ? 'API key' : sourceKind === 'identity' ? 'Identity' : ''
     const display       = kindLabel ? `${aliasOrMasked} · ${kindLabel}` : aliasOrMasked
     if (provider) {
@@ -58,10 +59,12 @@ function normalizeCredentialOption(
     aliases?: Record<string, string>,
 ): { value: string; label: string } {
     const inferredProvider = entry.provider || inferProviderFromAuthFileName(entry.source)
-    const normalizedSource = inferredProvider ? formatAuthFileDisplayName(entry.source) || entry.source : entry.source
+    const normalizedSource = entry.source.toLowerCase().endsWith('.json')
+                             ? formatAuthFileDisplayName(entry.source) || entry.source
+                             : entry.source
     return {
         value: entry.filterKey,
-        label: formatCredentialOptionLabel(inferredProvider, normalizedSource, entry.sourceKind, aliases),
+        label: formatCredentialOptionLabel(inferredProvider, normalizedSource, entry.sourceKind, aliases, entry.source),
     }
 }
 
@@ -131,6 +134,8 @@ interface FilterBarProps {
     onSelectedApiKeysChange?: (keys: string[]) => void
     selectedStatus?: string
     onSelectedStatusChange?: (status: string) => void
+    selectedSpeed?: RequestSpeed | ''
+    onSelectedSpeedChange?: (speed: RequestSpeed | '') => void
     summary?: UsageSummary | null
     // Separate summary without filter params, used to populate option lists.
     // Without this, selecting one option would collapse the dropdown to just that option.
@@ -160,6 +165,8 @@ export function FilterBar({
                               onSelectedApiKeysChange,
                               selectedStatus,
                               onSelectedStatusChange,
+                              selectedSpeed,
+                              onSelectedSpeedChange,
                               summary,
                               optionsSummary,
                               aliases,
@@ -207,7 +214,7 @@ export function FilterBar({
                 const source   = formatAuthFileDisplayName(rawName) || info.name
                 result.push({
                                 value: rawName,
-                                label: formatCredentialOptionLabel(provider, source, '', aliases),
+                                label: formatCredentialOptionLabel(provider, source, '', aliases, rawName),
                                 sortKey: `${normalizeCredentialProviderForDisplay(provider)}::${source.toLowerCase()}`,
                             })
                 return result
@@ -229,16 +236,15 @@ export function FilterBar({
         // "(none)" 是后端给 OAuth 行分配的 synthetic bucket,保证 by_api_key
         // 守恒等于 totals，允许用户选它来定向看 OAuth 流量,后端 inClause
         // 已支持 NULL 分支(IS NULL OR IN ...)，
-        return Object.keys(sourceSummary.by_api_key)
-                     .filter((k) => k.trim().length > 0)
-                     .sort()
-                     .map((k) => ({
-                         value: k,
-                         label:
-                             k === NONE_API_KEY_SENTINEL
-                             ? t('usage_stats.filter_api_key_none', { defaultValue: '(无 API Key / OAuth)' })
-                             : aliases?.[k] || maskSensitiveKey(k),
-                     }))
+        return summaryToApiKeyStats(sourceSummary.by_api_key, aliases)
+            .filter((row) => row.key?.trim())
+            .sort((a, b) => a.model.localeCompare(b.model) || a.key!.localeCompare(b.key!))
+            .map((row) => ({
+                value: row.key!,
+                label: row.key === NONE_API_KEY_SENTINEL
+                       ? t('usage_stats.filter_api_key_none', { defaultValue: '(无 API Key / OAuth)' })
+                       : row.model,
+            }))
     }, [optionsSummary, summary, aliases, t])
 
     const statusOptions = useMemo(
@@ -290,7 +296,7 @@ export function FilterBar({
                                 allLabel={t('usage_stats.filter_all')}
                                 fullWidth={false}
                                 ariaLabel={t('usage_stats.credential_name')}
-                                className={styles.filterSelect}
+                                className={`${styles.filterSelect} ${styles.credentialSelect}`}
                             />
                         </div>
                     )}
@@ -305,6 +311,25 @@ export function FilterBar({
                                 fullWidth={false}
                                 ariaLabel='API Key'
                                 className={styles.filterSelect}
+                            />
+                        </div>
+                    )}
+                    {selectedSpeed !== undefined && onSelectedSpeedChange && (
+                        <div className={styles.filterItem}>
+                            <span className={styles.filterLabel}>{t('usage_stats.request_events_actual_speed')}</span>
+                            <Select
+                                value={selectedSpeed}
+                                options={[
+                                    { value: '', label: t('usage_stats.filter_all') },
+                                    ...REQUEST_SPEEDS.map((speed) => ({
+                                        value: speed,
+                                        label: t(`usage_stats.request_events_speed_${speed}`),
+                                    })),
+                                ]}
+                                onChange={(speed) => onSelectedSpeedChange(speed as RequestSpeed | '')}
+                                fullWidth={false}
+                                ariaLabel={t('usage_stats.request_events_actual_speed')}
+                                className={styles.statusSelect}
                             />
                         </div>
                     )}

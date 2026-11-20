@@ -9,6 +9,7 @@ interface UsageSummaryParams {
     granularity?: Granularity
     model?: string
     api_key?: string | readonly string[]
+    api_key_identity?: 'canonical'
     credential?: string
     groups?: 'none' | 'all'
 }
@@ -30,6 +31,7 @@ export function usageSummaryRequestKey(params: UsageSummaryParams = {}): string 
                               api_key: typeof params.api_key === 'string' ?
                                        params.api_key :
                                   [...(params.api_key ?? [])],
+                              api_key_identity: params.api_key_identity ?? '',
                               credential: params.credential ?? '',
                               groups: params.groups ?? '',
                           })

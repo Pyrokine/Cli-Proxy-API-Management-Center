@@ -1,5 +1,35 @@
 @use '../../styles/variables' as *;
 
+.taskSection {
+    min-width: 0;
+
+    & + & {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border-color);
+    }
+}
+
+.taskHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.taskTitle {
+    margin: 0 0 8px;
+    color: var(--text-primary);
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    line-height: $line-height-base;
+
+    .taskHeader & {
+        margin-bottom: 0;
+    }
+}
+
 .content,
 .progress {
     display: flex;
@@ -55,4 +85,29 @@
     border-radius: inherit;
     background: var(--primary-color);
     transition: width 180ms ease-out;
+}
+
+.taskTimes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin: 0;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    > div {
+        flex: 1 1 180px;
+        min-width: 0;
+    }
+
+    dt {
+        color: var(--text-secondary);
+    }
+
+    dd {
+        margin: 4px 0 0;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+    }
 }

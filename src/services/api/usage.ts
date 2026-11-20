@@ -2,6 +2,7 @@
  * 使用统计相关 API
  */
 
+import i18n from '@/i18n'
 import {apiClient} from './client'
 
 const USAGE_TIMEOUT_MS = 60 * 1000
@@ -49,6 +50,13 @@ function appendQueryValues(
     }
 }
 
+function validateSpeedFilter(payload: unknown, speed: RequestSpeed | '' | undefined): void {
+    if (speed && (payload === null || typeof payload !== 'object' ||
+                  !('speed_filter' in payload) || payload.speed_filter !== speed)) {
+        throw new Error(i18n.t('usage_stats.request_events_speed_filter_unsupported'))
+    }
+}
+
 interface UsageImportResponse {
     added?: number
     skipped?: number
@@ -62,6 +70,18 @@ export interface UsageRetention {
     days: number
     max_db_size_mb?: number
     warning_threshold_pct?: number
+}
+
+export interface UsageStorageUpgradeStatus {
+    status: 'idle' | 'running' | 'complete' | 'error'
+    running: boolean
+    processed_events?: number
+    total_events?: number
+    percent?: number
+    started_at?: string
+    updated_at?: string
+    completed_at?: string
+    error?: string
 }
 
 interface TrimResponse {
@@ -142,6 +162,8 @@ export interface SummaryCredentialStats {
 }
 
 export interface SummaryApiKeyStats {
+    alias?: string
+    display_name?: string
     requests: number
     success: number
     failure: number
@@ -215,11 +237,17 @@ export type RequestLogState =
 export type RequestLogLocation = 'local' | 'home'
 export type UsageCostStatus = 'complete' | 'partial' | 'unpriced'
 
+export const REQUEST_SPEEDS = ['standard', 'fast', 'ultrafast', 'flex', 'batch', 'unknown'] as const
+export type RequestSpeed = typeof REQUEST_SPEEDS[number]
+export type RequestSpeedSource = 'response_speed' | 'response_service_tier' | 'unknown'
+
 type PricingLineItemCategory =
     | 'uncached_input'
     | 'cache_read'
     | 'cache_write_5m'
     | 'cache_write_1h'
+    | 'cache_write_30m'
+    | 'cache_write_12h'
     | 'cache_write_unknown'
     | 'output'
     | 'reasoning'
@@ -230,6 +258,8 @@ export interface PricingCoverage {
     cache_read_tokens?: number | string
     cache_write_5m_tokens?: number | string
     cache_write_1h_tokens?: number | string
+    cache_write_30m_tokens?: number | string
+    cache_write_12h_tokens?: number | string
     cache_write_unknown_tokens?: number | string
     output_tokens?: number | string
     reasoning_tokens?: number | string
@@ -239,10 +269,35 @@ export interface PricingCoverage {
     total_tokens: number | string
 }
 
+export interface UsageBillingMetadata {
+    schema_version: number
+    context_input_tokens?: number | string | null
+    region?: string
+    region_source?: string
+    modalities?: Array<{ category: string; modality: string; tokens: number | string }>
+    charges?: Array<{ kind: string; unit: string; quantity: number; resolution?: string }>
+    charges_reported: boolean
+}
+
+export interface PricingAdditionalLineItem {
+    kind: string
+    unit: string
+    quantity: number
+    resolution?: string
+    price?: number
+    per_units?: number
+    rate_source: string
+    cost_micro: number | string
+    priced: boolean
+}
+
 export interface PricingLineItem {
     category: PricingLineItemCategory
+    modality?: string
     tokens: number | string
     rate_per_million?: number
+    base_rate_per_million?: number
+    speed_multiplier?: number
     rate_source: string
     cost_micro: number | string
     priced: boolean
@@ -260,14 +315,28 @@ export interface PricingReceipt {
     currency: string
     effective_from?: string
     effective_until?: string
+    speed?: RequestSpeed
+    speed_source?: RequestSpeedSource
+    speed_multiplier?: number
+    speed_rate_source?: string
+    speed_effective_from?: string
+    speed_effective_until?: string
     cost_micro: number | string
     cost_status: UsageCostStatus
     cost_reason?: string
     coverage: PricingCoverage
     line_items: PricingLineItem[]
+    billing_metadata?: UsageBillingMetadata | null
+    cache_read_reported?: boolean | null
+    cache_write_reported?: boolean | null
+    condition_ids?: string[]
+    additional_line_items?: PricingAdditionalLineItem[]
 }
 
 export interface UsageEvent {
+    /** Opaque canonical backup data; re-import requires the key used for export. */
+    import_data?: string
+    raw_api_key?: string
     timestamp: string
     model: string
     source: string
@@ -289,6 +358,26 @@ export interface UsageEvent {
     completed?: boolean | null
     metadata_recorded?: boolean | null
     reasoning_effort?: string | null
+    service_tier?: string | null
+    speed?: RequestSpeed | null
+    request_service_tier?: string | null
+    response_service_tier?: string | null
+    executor_type?: string | null
+    request_speed?: string | null
+    response_speed?: string | null
+    cache_read_reported?: boolean | null
+    cache_write_reported?: boolean | null
+    billing_metadata?: UsageBillingMetadata | null
+    client_model?: string | null
+    upstream_url?: string | null
+    response_url?: string | null
+    response_url_source?: string | null
+    response_url_status?: string | null
+    upstream_next_hop_status?: string | null
+    upstream_model?: string | null
+    response_model?: string | null
+    response_provider?: string | null
+    response_provider_source?: string | null
     thinking?: UsageThinking | null
     tokens: EventTokens
     cost?: number
@@ -299,6 +388,8 @@ export interface UsageEvent {
 }
 
 export interface EventsParams {
+    /** Include canonical data only for the explicit download action. */
+    export?: boolean
     from?: string
     to?: string
     page?: number
@@ -306,7 +397,9 @@ export interface EventsParams {
     model?: string
     source?: string
     api_key?: string | readonly string[]
+    api_key_identity?: 'canonical'
     status?: 'success' | 'failure' | ''
+    speed?: RequestSpeed | ''
     search?: string
     sort?: string
     order?: 'asc' | 'desc'
@@ -314,6 +407,7 @@ export interface EventsParams {
 }
 
 export interface EventsResponse {
+    speed_filter?: RequestSpeed
     events: UsageEvent[]
     total: number
     page: number
@@ -322,6 +416,9 @@ export interface EventsResponse {
 }
 
 export const usageApi = {
+    getStorageUpgradeStatus: (options: { signal?: AbortSignal } = {}) =>
+        apiClient.get<UsageStorageUpgradeStatus>('/usage/storage-upgrade', options),
+
     /**
      * 获取使用统计原始数据
      */
@@ -331,12 +428,14 @@ export const usageApi = {
      * 导出使用统计快照,可选筛选
      * 不传 filters 或全部为空 = 导出全量
      */
-    exportUsage: (filters?: {
+    exportUsage: async (filters?: {
         from?: string
         to?: string
         model?: string
         api_key?: string | readonly string[]
+        api_key_identity?: 'canonical'
         credential?: string
+        speed?: RequestSpeed | ''
     }, options?: { signal?: AbortSignal }) => {
         const params = new URLSearchParams()
         if (filters) {
@@ -351,24 +450,49 @@ export const usageApi = {
                 params.set('model', rest.model)
             }
             appendQueryValues(params, 'api_key', rest.api_key)
+            if (rest.api_key_identity) {
+                params.set('api_key_identity', rest.api_key_identity)
+            }
             if (rest.credential?.trim()) {
                 params.set('credential', rest.credential)
             }
+            if (rest.speed) {
+                params.set('speed', rest.speed)
+            }
         }
-        const qs  = params.toString()
-        const url = qs ? `/usage/export?${qs}` : '/usage/export'
-        return apiClient.getRaw(url, {
+        const qs       = params.toString()
+        const url      = qs ? `/usage/export?${qs}` : '/usage/export'
+        const response = await apiClient.getRaw(url, {
             timeout: USAGE_TIMEOUT_MS,
             responseType: 'blob',
             signal: options?.signal,
         })
+        if (filters?.speed) {
+            let payload: unknown = response.data
+            const text           = payload instanceof Blob ?
+                                   await payload.text() :
+                                   typeof payload === 'string' ? payload : null
+            if (text !== null) {
+                try {
+                    payload = JSON.parse(text)
+                } catch {
+                    throw new Error(i18n.t('usage_stats.request_events_speed_filter_unsupported'))
+                }
+            }
+            validateSpeedFilter(payload, filters.speed)
+        }
+        return response
     },
 
     /**
      * 导入使用统计快照
      */
     importUsage: (payload: unknown) =>
-        apiClient.post<UsageImportResponse>('/usage/import', payload, { timeout: USAGE_TIMEOUT_MS }),
+        apiClient.post<UsageImportResponse>('/usage/import', payload, {
+            timeout: USAGE_TIMEOUT_MS,
+            headers: typeof payload === 'string' ? { 'Content-Type': 'text/csv' } : undefined,
+            mutationReadback: () => usageApi.getDBSize(),
+        }),
 
     /**
      * 获取数据保留配置
@@ -379,7 +503,11 @@ export const usageApi = {
      * 更新数据保留配置
      */
     putRetention: (retention: Partial<UsageRetention>) =>
-        apiClient.put<UsageRetention & { status: string }>('/usage-retention', retention),
+        apiClient.put<UsageRetention & { status: string }>(
+            '/usage-retention',
+            retention,
+            { mutationReadback: () => usageApi.getRetention() },
+        ),
 
     /**
      * 预览即将清理的数据（不实际删除）
@@ -389,7 +517,11 @@ export const usageApi = {
     /**
      * 手动触发数据清理
      */
-    triggerTrim: () => apiClient.post<TrimResponse>('/usage-retention/trim', {}),
+    triggerTrim: () => apiClient.post<TrimResponse>(
+        '/usage-retention/trim',
+        {},
+        { mutationReadback: () => usageApi.getDBSize() },
+    ),
 
     /**
      * 获取数据库文件大小(events.db + WAL + SHM)
@@ -415,6 +547,7 @@ export const usageApi = {
             api_key?: string | readonly string[]
             credential?: string
             groups?: 'none' | 'all'
+            api_key_identity?: 'canonical'
             auth_index_groups?: boolean
             auth_index_granularity?: '10m' | 'hourly' | 'daily'
         },
@@ -440,6 +573,9 @@ export const usageApi = {
         if (params?.groups) {
             searchParams.set('groups', params.groups)
         }
+        if (params?.api_key_identity) {
+            searchParams.set('api_key_identity', params.api_key_identity)
+        }
         if (params?.auth_index_groups) {
             searchParams.set('auth_index_groups', 'true')
         }
@@ -456,7 +592,7 @@ export const usageApi = {
     /**
      * 获取分页事件明细（支持筛选、排序）
      */
-    getEvents: (params?: EventsParams, options?: { signal?: AbortSignal }) => {
+    getEvents: async (params?: EventsParams, options?: { signal?: AbortSignal }) => {
         const searchParams = new URLSearchParams()
         if (params?.from) {
             searchParams.set('from', localToIsoUtc(params.from))
@@ -477,8 +613,17 @@ export const usageApi = {
             searchParams.set('source', params.source)
         }
         appendQueryValues(searchParams, 'api_key', params?.api_key)
+        if (params?.api_key_identity) {
+            searchParams.set('api_key_identity', params.api_key_identity)
+        }
         if (params?.status) {
             searchParams.set('status', params.status)
+        }
+        if (params?.speed) {
+            searchParams.set('speed', params.speed)
+        }
+        if (params?.export) {
+            searchParams.set('export', 'true')
         }
         if (params?.search) {
             searchParams.set('search', params.search)
@@ -492,10 +637,14 @@ export const usageApi = {
         if (params?.view) {
             searchParams.set('view', params.view)
         }
-        const qs = searchParams.toString()
-        return apiClient.get<EventsResponse>(`/usage/events${qs ? `?${qs}` : ''}`, {
+        const qs   = searchParams.toString()
+        const data = await apiClient.get<EventsResponse>(`/usage/events${qs ? `?${qs}` : ''}`, {
             timeout: USAGE_TIMEOUT_MS,
             signal: options?.signal,
         })
+        if (params?.speed) {
+            validateSpeedFilter(data, params.speed)
+        }
+        return data
     },
 }

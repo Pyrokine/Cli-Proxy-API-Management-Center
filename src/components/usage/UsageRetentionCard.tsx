@@ -2,6 +2,8 @@ import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {Input} from '@/components/ui/Input'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {parseVisualConfigInteger, VISUAL_INTEGER_FIELDS} from '@/hooks/visualConfigCodec'
+import {apiClient} from '@/services/api/client'
 import {usageApi, type UsageRetention} from '@/services/api/usage'
 import {useNotificationStore} from '@/stores'
 import {formatFileSize} from '@/utils/format'
@@ -27,16 +29,27 @@ function toDraft(r: UsageRetention): RetentionDraft {
     }
 }
 
-function toPayload(d: RetentionDraft): Partial<UsageRetention> {
-    return {
-        days: d.daysEnabled ? Math.max(1, parseInt(d.days, 10) || 1) : -1,
-        max_db_size_mb: Math.max(0, parseInt(d.maxDbSizeMb, 10) || 0),
-        warning_threshold_pct: Math.min(100, Math.max(1, parseInt(d.warningThresholdPct, 10) || 80)),
+function toPayload(d: RetentionDraft): Partial<UsageRetention> | null {
+    if ((d.daysEnabled && !d.days.trim()) || !d.maxDbSizeMb.trim() || !d.warningThresholdPct.trim()) {
+        return null
+    }
+    try {
+        const limit = VISUAL_INTEGER_FIELDS.usageRetentionMaxDbSizeMb
+        return {
+            days: d.daysEnabled ? parseVisualConfigInteger(d.days, 1, Number.MAX_SAFE_INTEGER) : -1,
+            max_db_size_mb: parseVisualConfigInteger(d.maxDbSizeMb, limit.minimum, limit.maximum),
+            warning_threshold_pct: parseVisualConfigInteger(d.warningThresholdPct, 0, 100),
+        }
+    } catch {
+        return null
     }
 }
 
 function hasChanged(draft: RetentionDraft, retention: UsageRetention): boolean {
     const payload = toPayload(draft)
+    if (!payload) {
+        return false
+    }
     return payload.days !== retention.days ||
            payload.max_db_size_mb !== (retention.max_db_size_mb ?? 0) ||
            payload.warning_threshold_pct !== (retention.warning_threshold_pct ?? 80)
@@ -50,6 +63,7 @@ export function UsageRetentionCard() {
     const [dbMaxSize, setDbMaxSize]              = useState<number | null>(null)
     const [dbSizeWarning, setDbSizeWarning]      = useState(false)
     const [dbSizeCapped, setDbSizeCapped]        = useState(false)
+    const [loadError, setLoadError]              = useState<string | null>(null)
     const [loading, setLoading]                  = useState(false)
     const [saving, setSaving]                    = useState(false)
     const [trimming, setTrimming]                = useState(false)
@@ -60,31 +74,36 @@ export function UsageRetentionCard() {
                                                                                 warningThresholdPct: '80',
                                                                             })
 
+    const validPayload = toPayload(draft)
+
     const loadRetention = useCallback(async () => {
         setLoading(true)
+        setLoadError(null)
         try {
-            const [data, sizeRes] = await Promise.all([
-                                                          usageApi.getRetention(),
-                                                          usageApi.getDBSize().catch(() => ({
-                                                              size_bytes: 0,
-                                                              max_size_bytes: 0,
-                                                              warning_threshold_pct: 80,
-                                                              warning: false,
-                                                              capped: false,
-                                                          })),
-                                                      ])
+            const [data, sizeRes] = await Promise.all(
+                [
+                    usageApi.getRetention(),
+                    usageApi.getDBSize().catch((error: unknown) => {
+                        setLoadError(`${t('notification.load_failed')}: ${error instanceof
+                                                                          Error ?
+                                                                          error.message :
+                                                                          String(
+                                                                              error)}`)
+                        return null
+                    }),
+                ])
             setRetention(data)
             setDraft(toDraft(data))
-            setDbSize(sizeRes.size_bytes ?? 0)
-            setDbMaxSize(sizeRes.max_size_bytes ?? null)
-            setDbSizeWarning(Boolean(sizeRes.warning))
-            setDbSizeCapped(Boolean(sizeRes.capped))
-        } catch {
-            // Retention API may not be available
+            setDbSize(sizeRes?.size_bytes ?? null)
+            setDbMaxSize(sizeRes?.max_size_bytes ?? null)
+            setDbSizeWarning(Boolean(sizeRes?.warning))
+            setDbSizeCapped(Boolean(sizeRes?.capped))
+        } catch (error: unknown) {
+            setLoadError(`${t('notification.load_failed')}: ${error instanceof Error ? error.message : String(error)}`)
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [t])
 
     useEffect(() => {
         queueMicrotask(() => {
@@ -93,18 +112,33 @@ export function UsageRetentionCard() {
     }, [loadRetention])
 
     const handleSave = async () => {
+        if (!validPayload) {
+            showNotification(t('usage_stats.retention_invalid'), 'error');
+            return
+        }
         setSaving(true)
         try {
-            const payload                 = toPayload(draft)
-            const result                  = await usageApi.putRetention(payload)
+            const result                  = await usageApi.putRetention(validPayload)
             const updated: UsageRetention = {
                 days: result.days ?? retention?.days ?? 0,
                 max_db_size_mb: result.max_db_size_mb ?? retention?.max_db_size_mb ?? 0,
                 warning_threshold_pct: result.warning_threshold_pct ?? retention?.warning_threshold_pct ?? 80,
             }
             setRetention(updated)
-            setDraft(toDraft(updated))
+            setDraft((current) => current === draft ? toDraft(updated) : current)
             showNotification(t('usage_stats.retention_saved'), 'success')
+            try {
+                const size = await usageApi.getDBSize()
+                setDbSize(size.size_bytes)
+                setDbMaxSize(size.max_size_bytes ?? null)
+                setDbSizeWarning(Boolean(size.warning))
+                setDbSizeCapped(Boolean(size.capped))
+                setLoadError(null)
+            } catch (error: unknown) {
+                setLoadError(t('usage_stats.retention_saved_size_failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                }))
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : ''
             showNotification(`${t('usage_stats.retention_save_failed')}${message ? `: ${message}` : ''}`, 'error')
@@ -114,9 +148,13 @@ export function UsageRetentionCard() {
     }
 
     const handleTrim = async () => {
+        const generation = apiClient.getAuthGeneration()
         setTrimming(true)
         try {
             const preview = await usageApi.trimPreview()
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
             if (preview.files_count === 0) {
                 showNotification(t('usage_stats.trim_confirm_empty'), 'info')
                 return
@@ -137,7 +175,13 @@ export function UsageRetentionCard() {
                                  confirmText: t('usage_stats.retention_trim'),
                                  cancelText: t('common.cancel'),
                                  onConfirm: async () => {
+                                     if (generation !== apiClient.getAuthGeneration()) {
+                                         return
+                                     }
                                      await usageApi.triggerTrim()
+                                     if (generation !== apiClient.getAuthGeneration()) {
+                                         return
+                                     }
                                      showNotification(t('usage_stats.trim_success'), 'success')
                                  },
                              })
@@ -164,6 +208,10 @@ export function UsageRetentionCard() {
                 </Button>
             }
         >
+            {loadError && <div className='error-box' role='alert'>{loadError}</div>}
+            {retention &&
+             !validPayload &&
+             <div className='error-box' role='alert'>{t('usage_stats.retention_invalid')}</div>}
             {loading ? (
                 <div className={styles.hint}>{t('common.loading')}</div>
             ) : !retention ? (
@@ -259,7 +307,7 @@ export function UsageRetentionCard() {
                                 size='sm'
                                 onClick={handleSave}
                                 loading={saving}
-                                disabled={!hasChanged(draft, retention) || trimming}
+                                disabled={!validPayload || !hasChanged(draft, retention) || trimming}
                             >
                                 {t('usage_stats.retention_save')}
                             </Button>

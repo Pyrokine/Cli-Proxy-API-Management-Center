@@ -15,6 +15,8 @@ import {
     type EventsResponse,
     type PricingReceipt,
     type RequestLogState,
+    type RequestSpeed,
+    type RequestSpeedSource,
     usageApi,
     type UsageEvent,
     type UsageThinking,
@@ -40,8 +42,9 @@ import {
     normalizeUsageThinking,
     resolveUsageTokenMetrics,
 } from '@/utils/usage'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
+import {Link} from 'react-router'
 import styles from './RequestEventsDetailsCard.module.scss'
 import {
     createUsageEventExport,
@@ -55,6 +58,25 @@ const DEFAULT_PAGE_SIZE      = 50
 const USAGE_EVENT_CSV_HEADER = [
     'timestamp',
     'model',
+    'speed',
+    'speed_observation_source',
+    'service_tier',
+    'request_service_tier',
+    'response_service_tier',
+    'request_speed',
+    'response_speed',
+    'client_model',
+    'upstream_url',
+    'response_url',
+    'response_url_source',
+    'response_url_status',
+    'upstream_next_hop_status',
+    'cache_read_reported',
+    'cache_write_reported',
+    'upstream_model',
+    'response_model',
+    'response_provider',
+    'response_provider_source',
     'source',
     'auth_index',
     'provider',
@@ -80,13 +102,18 @@ const USAGE_EVENT_CSV_HEADER = [
     'cached_tokens',
     'total_tokens',
     'cost',
+    'cost_status',
+    'cost_reason',
+    'billing_metadata',
+    'pricing_receipt',
+    'raw_api_key',
+    'import_data',
 ]
 
 function formatRequestThinkingLabel(
     thinking: UsageThinking | null,
-    reasoningTokens: number | null,
+    reasoningEffort: string | null | undefined,
     lang: string,
-    t: ReturnType<typeof useTranslation>['t'],
     notRecordedLabel: string,
 ): string {
     if (thinking) {
@@ -95,21 +122,34 @@ function formatRequestThinkingLabel(
             return label
         }
     }
-    if (reasoningTokens !== null && reasoningTokens > 0) {
-        return t('usage_stats.request_events_thinking_recorded', { defaultValue: 'Recorded' })
-    }
-    if (reasoningTokens === 0) {
-        return t('usage_stats.request_events_reasoning_zero', { defaultValue: '0 reasoning tokens' })
-    }
-    return notRecordedLabel
+    return reasoningEffort?.trim() || notRecordedLabel
 }
 
 type RequestEventRow = {
     id: string
+    detailsId: string
     timestamp: string
     timestampMs: number
     timestampLabel: string
     model: string
+    clientModel: string
+    upstreamUrl: string
+    responseUrl: string
+    responseUrlLabel: string
+    responseUrlSourceLabel: string
+    upstreamNextHopLabel: string
+    upstreamModel: string
+    responseModel: string
+    responseProvider: string
+    responseProviderSource: string
+    requestServiceTier: string
+    responseServiceTier: string
+    requestSpeed: string
+    responseSpeed: string
+    speed: RequestSpeed
+    speedLabel: string
+    speedSource: 'speed' | RequestSpeedSource
+    speedSourceLabel: string
     modelAliasRelations: string[]
     sourceRaw: string
     source: string
@@ -154,7 +194,7 @@ type RequestEventRow = {
     totalTokensLabel: string
     cost: number
     costLabel: string
-    pricingReceiptLabel: string
+    costReason: string
     pricingReceiptTitle: string
 }
 
@@ -180,6 +220,8 @@ interface RequestEventsDetailsCardProps {
     selectedApiKeys?: string[]
     selectedStatus?: string
     onSelectedStatusChange?: (status: string) => void
+    selectedSpeed?: RequestSpeed | ''
+    onSelectedSpeedChange?: (speed: RequestSpeed | '') => void
 }
 
 const encodeCsv = (value: string | number): string => {
@@ -280,7 +322,9 @@ function applyFilters(
     selectedApiKeys: readonly string[],
     searchQuery: string,
     statusFilter: string,
+    speedFilter: RequestSpeed | '' = '',
 ): void {
+    params.api_key_identity = 'canonical'
     if (from) {
         params.from = from
     }
@@ -301,6 +345,9 @@ function applyFilters(
     }
     if (statusFilter === 'success' || statusFilter === 'failure') {
         params.status = statusFilter
+    }
+    if (speedFilter) {
+        params.speed = speedFilter
     }
 }
 
@@ -386,37 +433,68 @@ function pricingLineItemLabel(
     return t(`usage_stats.request_events_pricing_category_${category}`, { defaultValue: category })
 }
 
+function formatPricingReason(reason: string | undefined, t: ReturnType<typeof useTranslation>['t']): string {
+    if (!reason) {
+        return ''
+    }
+    let translated = false
+    const parts    = reason.split(';').map((part) => {
+        switch (part.trim()) {
+            case 'billing region was not reported':
+            case 'The actual processing geography required for this model was not reported':
+                translated = true
+                return t('usage_stats.request_events_pricing_region_missing')
+            case 'Additional billable operations were not fully reported for this request':
+            case 'additional billing quantities or rates are incomplete':
+                translated = true
+                return t('usage_stats.request_events_pricing_charges_incomplete')
+            default:
+                return part.trim()
+        }
+    })
+    return translated ? [...new Set(parts.filter(Boolean))].join('\n') : reason
+}
+
 function formatPricingReceiptTitle(
     receipt: PricingReceipt,
-    currentCost: number,
+    currentCost: number | null,
     lang: string,
     t: ReturnType<typeof useTranslation>['t'],
 ): string {
     const receiptCostMicro = nonNegativeNumber(receipt.cost_micro) ?? 0
     const receiptCost      = receiptCostMicro / 1_000_000
     const currency         = receipt.currency || 'USD'
-    const lines            = [
-        t('usage_stats.request_events_pricing_receipt', { defaultValue: 'Request-time pricing receipt' }),
-        `${t('usage_stats.request_events_pricing_provider', { defaultValue: 'Provider' })}: ${receipt.provider || '-'}`,
-        `${t('usage_stats.request_events_pricing_model', { defaultValue: 'Model' })}: ${receipt.model ||
-                                                                                        '-'} → ${receipt.canonical_model ||
-                                                                                                 '-'}`,
-        `${t('usage_stats.request_events_pricing_source', { defaultValue: 'Source' })}: ${receipt.source || '-'}`,
-        `${t('usage_stats.request_events_pricing_revision', { defaultValue: 'Revision' })}: ${receipt.price_revision ||
-                                                                                              '-'}`,
-        `${t(
-            'usage_stats.request_events_pricing_request_cost',
-            { defaultValue: 'Request-time cost' },
-        )}: ${formatEventCost(receiptCost, lang, currency)} (${receipt.cost_status})`,
-        `${t(
-            'usage_stats.request_events_pricing_current_cost',
-            { defaultValue: 'Current-catalog cost' },
-        )}: ${formatEventCost(currentCost, lang)}`,
-        `${t('usage_stats.request_events_pricing_coverage', { defaultValue: 'Coverage' })}: ${formatNumber(
-            numberFromValue(receipt.coverage.priced_tokens) ?? 0,
-            lang,
-        )} / ${formatNumber(numberFromValue(receipt.coverage.total_tokens) ?? 0, lang)}`,
-    ]
+    const lines            =
+              [
+                  `${t(
+                      'usage_stats.request_events_pricing_provider',
+                      { defaultValue: 'Provider' },
+                  )}: ${receipt.provider || '-'}`,
+                  `${t('usage_stats.request_events_pricing_model', { defaultValue: 'Model' })}: ${
+                      receipt.model ||
+                      '-'} → ${
+                      receipt.canonical_model ||
+                      '-'}`,
+                  `${t('usage_stats.request_events_pricing_source', { defaultValue: 'Source' })}: ${receipt.source ||
+                                                                                                    '-'}`,
+                  `${t(
+                      'usage_stats.request_events_pricing_revision',
+                      { defaultValue: 'Revision' },
+                  )}: ${receipt.price_revision ||
+                        '-'}`,
+                  `${t(
+                      'usage_stats.request_events_pricing_request_cost',
+                      { defaultValue: 'Request-time cost' },
+                  )}: ${receipt.cost_status === 'unpriced'
+                        ? t('usage_stats.request_events_pricing_unpriced')
+                        : formatEventCost(receiptCost, lang, currency)}`,
+                  `${t(
+                      'usage_stats.request_events_pricing_current_cost',
+                      { defaultValue: 'Current cost' },
+                  )}: ${currentCost === null
+                        ? t('usage_stats.request_events_pricing_unpriced')
+                        : formatEventCost(currentCost, lang)}`,
+              ]
     const effectiveRange   = [receipt.effective_from, receipt.effective_until].filter(Boolean).join(' → ')
     if (effectiveRange) {
         lines.push(`${t(
@@ -424,26 +502,83 @@ function formatPricingReceiptTitle(
             { defaultValue: 'Effective' },
         )}: ${effectiveRange}`)
     }
+    lines.push(
+        `${t('usage_stats.request_events_actual_speed')}: ${t(
+            `usage_stats.request_events_speed_${receipt.speed ?? 'unknown'}`,
+        )}`,
+        `${t('usage_stats.request_events_pricing_speed_source')}: ${receipt.speed_source
+                                                                    ?
+                                                                    t(`usage_stats.request_events_speed_source_${receipt.speed_source}`)
+                                                                    :
+                                                                    t('usage_stats.request_events_not_recorded')}`,
+        `${t('usage_stats.request_events_pricing_speed_multiplier')}: ${typeof receipt.speed_multiplier === 'number'
+                                                                        ?
+                                                                        `×${receipt.speed_multiplier}`
+                                                                        :
+                                                                        t('usage_stats.request_events_not_recorded')}`,
+    )
+    if (receipt.speed_rate_source) {
+        lines.push(`${t('usage_stats.request_events_pricing_speed_rate_source')}: ${receipt.speed_rate_source}`)
+    }
+    const speedEffectiveRange = [receipt.speed_effective_from, receipt.speed_effective_until].filter(Boolean)
+                                                                                             .join(' → ')
+    if (speedEffectiveRange) {
+        lines.push(`${t('usage_stats.request_events_pricing_speed_effective')}: ${speedEffectiveRange}`)
+    }
+    const contextInputTokens = numberFromValue(receipt.billing_metadata?.context_input_tokens)
+    if (contextInputTokens !== null) {
+        lines.push(`${t('usage_stats.request_events_pricing_context_input')}: ${formatNumber(
+            contextInputTokens,
+            lang,
+        )}`)
+    }
+    if (receipt.billing_metadata?.region) {
+        lines.push(`${t('usage_stats.request_events_pricing_region')}: ${receipt.billing_metadata.region}`)
+    }
     receipt.line_items.forEach((item) => {
-        const tokens    = numberFromValue(item.tokens) ?? 0
-        const itemCost  = (numberFromValue(item.cost_micro) ?? 0) / 1_000_000
-        const rateLabel = item.priced && typeof item.rate_per_million === 'number'
-                          ?
-                          `${item.rate_per_million}/${t(
-                              'usage_stats.request_events_pricing_million_tokens',
-                              { defaultValue: 'MTok' },
-                          )}`
-                          :
-                          t('usage_stats.request_events_pricing_unpriced', { defaultValue: 'Unpriced' })
+        const tokens      = numberFromValue(item.tokens) ?? 0
+        const itemCost    = (numberFromValue(item.cost_micro) ?? 0) / 1_000_000
+        const rateLabel   = item.priced && typeof item.rate_per_million === 'number'
+                            ?
+                            `${item.rate_per_million}/${t(
+                                'usage_stats.request_events_pricing_million_tokens',
+                                { defaultValue: 'MTok' },
+                            )}`
+                            :
+                            t('usage_stats.request_events_pricing_unpriced', { defaultValue: 'Unpriced' })
+        const rateDetails = [
+            typeof item.base_rate_per_million === 'number'
+            ? `${t('usage_stats.request_events_pricing_base_rate')}: ${item.base_rate_per_million}`
+            : '',
+            typeof item.speed_multiplier === 'number'
+            ? `${t('usage_stats.request_events_pricing_speed_multiplier')}: ×${item.speed_multiplier}`
+            : '',
+        ].filter(Boolean).join(' · ')
+        const modality    = item.modality ? t(
+            `usage_stats.request_events_pricing_modality_${item.modality.toLowerCase()}`,
+            { defaultValue: item.modality },
+        ) : ''
+        const label       = `${pricingLineItemLabel(item.category, t)}${modality ? ` (${modality})` : ''}`
+        const costLabel   = item.priced ? formatEventCost(itemCost, lang, currency)
+                                        : t('usage_stats.request_events_pricing_unpriced')
         lines.push(
-            `${pricingLineItemLabel(item.category, t)}: ${formatNumber(
-                tokens,
-                lang,
-            )} × ${rateLabel} = ${formatEventCost(itemCost, lang, currency)} [${item.rate_source}]`,
+            `${label}: ${formatNumber(tokens, lang)} × ${rateLabel} = ${costLabel} [${item.rate_source}]` +
+            (rateDetails ? ` (${rateDetails})` : ''),
         )
     })
+    receipt.additional_line_items?.forEach((item) => {
+        const kind = t(`usage_stats.request_events_pricing_charge_${item.kind}`, { defaultValue: item.kind })
+        const unit = t(`usage_stats.request_events_pricing_unit_${item.unit}`, { defaultValue: item.unit })
+        const rate = item.priced && typeof item.price === 'number' && typeof item.per_units === 'number'
+                     ? `${formatEventCost(item.price, lang, currency)} / ${formatNumber(item.per_units, lang)} ${unit}`
+                     : t('usage_stats.request_events_pricing_unpriced')
+        const cost = item.priced ? formatEventCost((numberFromValue(item.cost_micro) ?? 0) / 1_000_000, lang, currency)
+                                 : t('usage_stats.request_events_pricing_unpriced')
+        lines.push(`${kind}${item.resolution ? ` (${item.resolution})` : ''}: ` +
+                   `${formatNumber(item.quantity, lang)} ${unit} × ${rate} = ${cost} [${item.rate_source}]`)
+    })
     if (receipt.cost_reason) {
-        lines.push(receipt.cost_reason)
+        lines.push(formatPricingReason(receipt.cost_reason, t))
     }
     return lines.join('\n')
 }
@@ -451,34 +586,6 @@ function formatPricingReceiptTitle(
 function nonNegativeNumber(value: number | string | null | undefined): number | null {
     const parsed = numberFromValue(value)
     return parsed === null ? null : Math.max(parsed, 0)
-}
-
-function backendMaskedApiKey(key: string): string {
-    if (key.length > 8) {
-        return `${key.slice(0, 4)}...${key.slice(-4)}`
-    }
-    if (key.length > 4) {
-        return `${key.slice(0, 2)}...${key.slice(-2)}`
-    }
-    if (key.length > 2) {
-        return `${key.slice(0, 1)}...${key.slice(-1)}`
-    }
-    return key
-}
-
-function resolveApiKeyAlias(apiKey: string, aliases?: Record<string, string>): string {
-    if (!apiKey || !aliases) {
-        return ''
-    }
-    if (aliases[apiKey]) {
-        return aliases[apiKey]
-    }
-    for (const [rawKey, alias] of Object.entries(aliases)) {
-        if (backendMaskedApiKey(rawKey) === apiKey || maskApiKey(rawKey) === apiKey) {
-            return alias
-        }
-    }
-    return ''
 }
 
 function displayApiKey(apiKey: string, alias: string, noApiKeyLabel: string): string {
@@ -538,6 +645,191 @@ function safeRequestLogFilename(requestId: string): string {
     return `request-${requestId.replace(/[^a-zA-Z0-9_.-]/g, '_')}.log`
 }
 
+function sanitizeUpstreamUrl(value: string | null | undefined): string {
+    if (!value?.trim()) {
+        return ''
+    }
+    try {
+        const url = new URL(value)
+        if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) {
+            return ''
+        }
+        url.username        = ''
+        url.password        = ''
+        url.hash            = ''
+        const sensitiveName = /authorization|api[-_]?key|token|secret|credential|password|passwd|cookie|signature/i
+        const sensitivePart = /(?:^|[-_])(key|code|state|sig)(?:$|[-_])/i
+        for (const key of Array.from(url.searchParams.keys())) {
+            const normalized = key.replace(/([a-z])([A-Z])/g, '$1_$2')
+            if (sensitiveName.test(normalized) || sensitivePart.test(normalized)) {
+                url.searchParams.set(key, '***')
+            }
+        }
+        return url.toString()
+    } catch {
+        return ''
+    }
+}
+
+function observedRequestSpeed(event: UsageEvent): Pick<RequestEventRow, 'speed' | 'speedSource'> {
+    // Match the server's strings.TrimSpace, including U+0085 and excluding U+FEFF.
+    const normalize                            = (value: string | null | undefined) => (value ?? '').replace(
+        /^[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g,
+        '',
+    ).toLowerCase()
+    const speeds: Record<string, RequestSpeed> = Object.assign(Object.create(null), {
+        standard: 'standard', fast: 'fast', ultrafast: 'ultrafast', flex: 'flex', batch: 'batch',
+    })
+    if (event.speed != null) {
+        return { speed: speeds[event.speed] ?? 'unknown', speedSource: 'speed' }
+    }
+    const responseSpeed = normalize(event.response_speed)
+    const usesSpeed     = normalize(event.provider) === 'claude' ||
+                          normalize(event.executor_type) === 'claudeexecutor' ||
+                          normalize(event.request_speed) !== '' || responseSpeed !== ''
+    const value         = usesSpeed ? responseSpeed : normalize(event.response_service_tier)
+    if (!usesSpeed) {
+        speeds.priority = 'fast'
+        speeds.default  = 'standard'
+    }
+    const speed = speeds[value]
+    return speed
+           ? { speed, speedSource: usesSpeed ? 'response_speed' : 'response_service_tier' }
+           : { speed: 'unknown', speedSource: 'unknown' }
+}
+
+const REQUEST_OBSERVATION_GROUPS = [
+    {
+        title: 'usage_stats.request_events_cpa_observed',
+        fallback: 'Observed by CPA',
+        fields: [
+            ['clientModel', 'usage_stats.request_events_client_model', 'Client-requested model'],
+            ['upstreamUrl', 'usage_stats.request_events_upstream_url', 'CPA request target'],
+            ['responseUrlLabel', 'usage_stats.request_events_redirect_target', 'Final response URL'],
+            ['responseUrlSourceLabel', 'usage_stats.request_events_response_url_source', 'Response URL source'],
+            ['upstreamModel', 'usage_stats.request_events_upstream_model', 'Forwarded model'],
+            ['requestServiceTier', 'usage_stats.request_events_requested_tier', 'Requested tier'],
+            ['requestSpeed', 'usage_stats.request_events_requested_speed', 'Requested speed'],
+        ],
+    },
+    {
+        title: 'usage_stats.request_events_upstream_reported',
+        fallback: 'Reported by upstream',
+        fields: [
+            ['responseModel', 'usage_stats.request_events_response_model', 'Returned model'],
+            ['responseProvider', 'usage_stats.request_events_response_provider', 'Reported channel'],
+            ['responseProviderSource', 'usage_stats.request_events_response_provider_source', 'Channel source'],
+            ['responseServiceTier', 'usage_stats.request_events_returned_tier', 'Returned tier'],
+            ['responseSpeed', 'usage_stats.request_events_returned_speed', 'Returned speed'],
+            ['upstreamNextHopLabel', 'usage_stats.request_events_next_hop', 'Upstream next hop'],
+        ],
+    },
+] as const
+
+function RequestObservationDetails({ row, t, children }: {
+    row: RequestEventRow
+    t: ReturnType<typeof useTranslation>['t']
+    children?: ReactNode
+}) {
+    const unknown    = t('usage_stats.request_events_observation_unknown', { defaultValue: 'Unknown' })
+    const completion = row.completed === null
+                       ?
+                       t('usage_stats.request_events_not_recorded')
+                       :
+                       t(row.completed ?
+                         'usage_stats.request_events_completed' :
+                         'usage_stats.request_events_incomplete')
+    const groups     = [
+        {
+            title: t('usage_stats.request_events_identity'),
+            fields: [
+                [t('usage_stats.request_events_timestamp'), row.timestampLabel],
+                [t('usage_stats.model_name'), row.model],
+                [t('usage_stats.credential_name'), row.user],
+                [t('usage_stats.request_events_provider'), row.sourceType || unknown],
+                [t('usage_stats.request_events_api_key'), row.apiKeyMasked],
+                [t('usage_stats.request_events_auth_index'), row.authIndex],
+                [t('usage_stats.request_events_thinking_column'), row.thinkingLabel],
+            ],
+        },
+        {
+            title: t('usage_stats.tokens_count'),
+            fields: [
+                [t('usage_stats.total_tokens'), row.totalTokensLabel],
+                [t('usage_stats.input_tokens'), row.inputTokensLabel],
+                [t('usage_stats.output_tokens'), row.outputTokensLabel],
+                [t('usage_stats.reasoning_tokens'), row.reasoningTokensLabel],
+                [t('usage_stats.cached_tokens'), row.cachedTokensLabel],
+                [t('usage_stats.request_events_cache_read_short'), row.cacheReadTokensLabel],
+                [t('usage_stats.request_events_cache_write_short'), row.cacheWriteTokensLabel],
+                [t('usage_stats.request_events_cache_hit_rate'), row.cacheHitRateLabel],
+            ],
+        },
+        {
+            title: t('usage_stats.request_events_duration'),
+            fields: [
+                [
+                    t('usage_stats.request_events_result'),
+                    `${t(row.failed ? 'stats.failure' : 'stats.success')} · ${completion}`,
+                ],
+                [t('usage_stats.request_events_total_duration'), row.totalDurationLabel],
+                [t('usage_stats.request_events_recorded_latency'), row.latencyLabel],
+                [t('usage_stats.request_events_ttfb'), row.timeToFirstByteLabel],
+                [t('usage_stats.request_events_throughput'), row.throughputLabel],
+            ],
+        },
+    ]
+    return (
+        <div className={styles.requestObservationDetails}>
+            {groups.map(({ title, fields }) => (
+                <section key={title}>
+                    <h3>{title}</h3>
+                    <dl>
+                        {fields.map(([label, value]) => (
+                            <Fragment key={label}>
+                                <dt>{label}</dt>
+                                <dd>{value}</dd>
+                            </Fragment>
+                        ))}
+                    </dl>
+                </section>
+            ))}
+            <section>
+                <h3>{t('usage_stats.request_events_actual_speed')}</h3>
+                <span className={row.speed === 'unknown'
+                                 ?
+                                 styles.requestEventsPlainMissing :
+                                 styles.requestEventsThinkingBadge}>{row.speedLabel}</span>
+                <p className={styles.requestEventsSubline}>{row.speedSourceLabel}</p>
+                {row.modelAliasRelations.map((relation) => <p key={relation}>{relation}</p>)}
+            </section>
+            {REQUEST_OBSERVATION_GROUPS.map(({ title, fallback, fields }) => (
+                <section key={title}>
+                    <h3>{t(title, { defaultValue: fallback })}</h3>
+                    <dl>
+                        {fields.map(([field, key, label]) => (
+                            <Fragment key={key}>
+                                <dt>{t(key, { defaultValue: label })}</dt>
+                                <dd>{row[field] || unknown}</dd>
+                            </Fragment>
+                        ))}
+                    </dl>
+                </section>
+            ))}
+            <section className={styles.requestPricingSection}>
+                <h3>{t('usage_stats.request_events_cost')}</h3>
+                <div className={styles.requestEventsMetricPrimary}>{row.costLabel}</div>
+                {row.costReason && <p className={styles.requestEventsCostReason}>{row.costReason}</p>}
+                <h3>{t('usage_stats.request_events_pricing_receipt')}</h3>
+                {row.pricingReceiptTitle
+                 ? <div className={styles.requestPricingReceipt}>{row.pricingReceiptTitle}</div>
+                 : <span>{t('usage_stats.request_events_pricing_receipt_missing')}</span>}
+            </section>
+            {children}
+        </div>
+    )
+}
+
 /** Map a UsageEvent from backend to a RequestEventRow */
 function eventToRow(
     event: UsageEvent,
@@ -551,86 +843,139 @@ function eventToRow(
     t: ReturnType<typeof useTranslation>['t'],
     aliases?: Record<string, string>,
 ): RequestEventRow {
-    const timestampMs         = Date.parse(event.timestamp)
-    const date                = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
-    const sourceRaw           = event.source || ''
-    const authIndex           = event.auth_index || '-'
-    const sourceInfo          = resolveSourceDisplay(sourceRaw, event.auth_index, sourceInfoMap, authFileMap)
-    const rawApiKey           = event.api_key || ''
-    const alias               = 'api_key_alias' in event
-                                ? (event.api_key_alias || '').trim()
-                                : resolveApiKeyAlias(rawApiKey, aliases)
-    const sourceDisplay       = sourceInfo.displayName.trim()
-    const hasSourceDisplay    = sourceDisplay !== '' && sourceDisplay !== '-'
-    const maskedApiKey        = displayApiKey(rawApiKey, alias, noApiKeyLabel)
-    const sourceBase          =
+    const timestampMs                                   = Date.parse(event.timestamp)
+    const date                                          = Number.isNaN(timestampMs) ? null : new Date(timestampMs)
+    const sourceRaw                                     = event.source || ''
+    const authIndex                                     = event.auth_index || '-'
+    const sourceInfo                                    = resolveSourceDisplay(
+        sourceRaw,
+        event.auth_index,
+        sourceInfoMap,
+        authFileMap,
+        event.provider,
+    )
+    const rawApiKey                                     = event.api_key || ''
+    const alias                                         = event.api_key_alias?.trim() ||
+                                                          aliases?.[rawApiKey]?.trim() ||
+                                                          ''
+    const sourceDisplay                                 = aliases?.[sourceRaw]?.trim() ||
+                                                          aliases?.[sourceInfo.displayName]?.trim() ||
+                                                          sourceInfo.displayName.trim()
+    const hasSourceDisplay                              = sourceDisplay !== '' && sourceDisplay !== '-'
+    const maskedApiKey                                  = displayApiKey(rawApiKey, alias, noApiKeyLabel)
+    const sourceBase                                    =
               hasSourceDisplay && sourceDisplay !== maskedApiKey ?
               sourceDisplay :
               alias || sourceDisplay || noApiKeyLabel
-    const providerLabel       = (sourceInfo.type || event.provider || '').trim()
-    const providerDisplay     = providerLabel ? channelLabel(providerLabel) : ''
-    const latencyMs           = extractLatencyMs(event)
-    const timeToFirstByteMs   = numberFromValue(event.time_to_first_byte_ms)
-    const totalDurationMs     = numberFromValue(event.total_duration_ms)
-    const requestId           = typeof event.request_id === 'string' ? event.request_id.trim() : ''
-    const requestLogState     = normalizeRequestLogState(event.request_log_state)
-    const requestLogHomeIp    = typeof event.request_log_home_ip === 'string' ? event.request_log_home_ip.trim() : ''
-    const tokenMetrics        = resolveUsageTokenMetrics(event.tokens)
-    const inputTokens         = tokenMetrics.inputTokens
-    const outputTokens        = tokenMetrics.outputTokens
-    const reasoningTokens     = tokenMetrics.reasoningTokens
-    const cachedTokens        = tokenMetrics.cachedTokens
-    const cacheReadTokens     = tokenMetrics.cacheReadTokens
-    const cacheWriteTokens    = tokenMetrics.cacheWriteTokens
-    const totalTokens         = tokenMetrics.totalTokens
-    const cacheHitRate        = inputTokens !== null && tokenMetrics.cacheHitTokens !== null && inputTokens > 0
-                                ? (tokenMetrics.cacheHitTokens / inputTokens) * 100
-                                : null
-    const throughputTokens    =
+    const providerLabel                                 = (event.provider?.trim() || sourceInfo.type || '').trim()
+    const providerDisplay                               = providerLabel ? channelLabel(providerLabel) : ''
+    const latencyMs                                     = extractLatencyMs(event)
+    const timeToFirstByteMs                             = numberFromValue(event.time_to_first_byte_ms)
+    const totalDurationMs                               = numberFromValue(event.total_duration_ms)
+    const requestId                                     = typeof event.request_id === 'string' ?
+                                                          event.request_id.trim() :
+                                                          ''
+    const requestLogState                               = normalizeRequestLogState(event.request_log_state)
+    const requestLogHomeIp                              = typeof event.request_log_home_ip === 'string' ?
+                                                          event.request_log_home_ip.trim() :
+                                                          ''
+    const tokenMetrics                                  = resolveUsageTokenMetrics(event.tokens)
+    const inputTokens                                   = tokenMetrics.inputTokens
+    const outputTokens                                  = tokenMetrics.outputTokens
+    const reasoningTokens                               = tokenMetrics.reasoningTokens
+    const cachedTokens                                  = event.cache_read_reported ===
+                                                          false ||
+                                                          event.cache_write_reported ===
+                                                          false
+                                                          ? null : tokenMetrics.cachedTokens
+    const cacheReadTokens                               = event.cache_read_reported === false ?
+                                                          null :
+                                                          tokenMetrics.cacheReadTokens
+    const cacheWriteTokens                              = event.cache_write_reported === false ?
+                                                          null :
+                                                          tokenMetrics.cacheWriteTokens
+    const totalTokens                                   = tokenMetrics.totalTokens
+    const cacheHitTokens                                = event.cache_read_reported === false ?
+                                                          null :
+                                                          tokenMetrics.cacheHitTokens
+    const cacheHitRate                                  = inputTokens !==
+                                                          null &&
+                                                          cacheHitTokens !==
+                                                          null &&
+                                                          inputTokens >
+                                                          0
+                                                          ? (cacheHitTokens / inputTokens) * 100
+                                                          : null
+    const throughputTokens                              =
               totalDurationMs !== null && totalDurationMs > 0 && outputTokens !== null
               ? outputTokens / (totalDurationMs / 1000)
               : null
-    const cost                = nonNegativeNumber(event.cost) ?? 0
-    const pricingReceipt      = event.pricing_receipt
-    const requestTimeCost     = pricingReceipt
-                                ? (nonNegativeNumber(pricingReceipt.cost_micro) ?? 0) / 1_000_000
-                                : null
-    const receiptCurrency     = pricingReceipt?.currency || 'USD'
-    const pricingChanged      = requestTimeCost !== null && receiptCurrency === 'USD' &&
-                                Math.abs(requestTimeCost - cost) >= 0.0000005
-    const pricingReceiptLabel = pricingReceipt && requestTimeCost !== null
-                                ?
-                                `${t(
-                                    'usage_stats.request_events_pricing_request_short',
-                                    { defaultValue: 'At request' },
-                                )}: ${formatEventCost(requestTimeCost, lang, receiptCurrency)}${pricingChanged ?
-                                                                                                ` · ${t(
-                                                                                                    'usage_stats.request_events_pricing_recalculated',
-                                                                                                    { defaultValue: 'Recalculated' },
-                                                                                                )}` :
-                                                                                                ''}`
-                                :
-                                ''
-    const pricingReceiptTitle = pricingReceipt
-                                ? formatPricingReceiptTitle(pricingReceipt, cost, lang, t)
-                                : ''
-    const thinking            = normalizeUsageThinking(event.thinking)
-    const hasRequestMetadata  =
+    const cost                                          = nonNegativeNumber(event.cost) ?? 0
+    const pricingReceipt                                = event.pricing_receipt
+    const pricingReceiptTitle                           = pricingReceipt
+                                                          ? formatPricingReceiptTitle(
+            pricingReceipt, event.cost_status === 'unpriced' ? null : cost, lang, t,
+        )
+                                                          : ''
+    const thinking                                      = normalizeUsageThinking(event.thinking)
+    const { speed, speedSource }                        = observedRequestSpeed(event)
+    const speedLabel                                    = t(
+        `usage_stats.request_events_speed_${speed}`,
+        { defaultValue: speed },
+    )
+    const speedSourceLabel                              = t(`usage_stats.request_events_speed_source_${speedSource}`)
+    const hasRequestMetadata                            =
               event.metadata_recorded === true &&
               (requestId !== '' ||
                timeToFirstByteMs !== null ||
                totalDurationMs !== null ||
                typeof event.completed === 'boolean')
+    const responseUrl                                   = sanitizeUpstreamUrl(event.response_url)
+    const responseUrlStatusKeys: Record<string, string> = {
+        observed: 'usage_stats.request_events_response_url_unavailable',
+        no_response: 'usage_stats.request_events_response_url_no_response',
+        unavailable: 'usage_stats.request_events_response_url_unavailable',
+        not_provided: 'usage_stats.request_events_response_url_not_provided',
+        connection_reused: 'usage_stats.request_events_response_url_connection_reused',
+    }
+    const responseUrlSourceKeys: Record<string, string> = {
+        http_response_request_url: 'usage_stats.request_events_response_url_source_http',
+        ws_handshake_request_url: 'usage_stats.request_events_response_url_source_websocket',
+        ws_connection_handshake_url: 'usage_stats.request_events_response_url_source_connection',
+        bridge_final_url: 'usage_stats.request_events_response_url_source_bridge',
+    }
+    const responseUrlStatusKey                          = responseUrlStatusKeys[event.response_url_status ?? '']
+    const responseUrlSourceKey                          = responseUrlSourceKeys[event.response_url_source ?? '']
 
     return {
         id: `${requestId || event.timestamp}-${event.model}-${sourceRaw}-${authIndex}-${index}`,
+        detailsId: `usage-request-details-${index}`,
         timestamp: event.timestamp,
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
         timestampLabel: date ? formatDateTime(date, lang) : event.timestamp || '-',
         model: event.model || '-',
+        clientModel: event.client_model?.trim() || '',
+        upstreamUrl: sanitizeUpstreamUrl(event.upstream_url),
+        responseUrl,
+        responseUrlLabel: responseUrl || (responseUrlStatusKey ? t(responseUrlStatusKey) : notRecordedLabel),
+        responseUrlSourceLabel: responseUrlSourceKey ? t(responseUrlSourceKey) : notRecordedLabel,
+        upstreamNextHopLabel: event.upstream_next_hop_status === 'not_reported'
+                              ? t('usage_stats.request_events_next_hop_not_reported') : notRecordedLabel,
+        upstreamModel: event.upstream_model?.trim() || '',
+        responseModel: event.response_model?.trim() || '',
+        responseProvider: event.response_provider?.trim() || '',
+        responseProviderSource: event.response_provider_source?.trim() || '',
+        requestServiceTier: event.request_service_tier?.trim() || event.service_tier?.trim() || '',
+        responseServiceTier: event.response_service_tier?.trim() || '',
+        requestSpeed: event.request_speed?.trim() || '',
+        responseSpeed: event.response_speed?.trim() || '',
+        speed,
+        speedLabel,
+        speedSource,
+        speedSourceLabel,
         modelAliasRelations: resolveModelAliasRelations(event.model || '', modelAliasLookup),
         sourceRaw: sourceRaw || '-',
-        source: sourceInfo.displayName,
+        source: sourceDisplay,
         sourceType: providerDisplay,
         sourceLabel: sourceBase,
         authIndex,
@@ -648,12 +993,14 @@ function eventToRow(
         totalDurationLabel: formatDurationMs(totalDurationMs, { locale: lang, invalidText: notRecordedLabel }),
         completed: hasRequestMetadata && typeof event.completed === 'boolean' ? event.completed : null,
         cacheHitRate,
-        cacheHitRateLabel: formatPercent(cacheHitRate, lang, notRecordedLabel),
+        cacheHitRateLabel: event.cache_read_reported === false
+                           ? t('usage_stats.request_events_cache_not_reported')
+                           : formatPercent(cacheHitRate, lang, notRecordedLabel),
         throughputTokensPerSecond: throughputTokens,
         throughputLabel: formatThroughput(throughputTokens, lang, notRecordedLabel),
         thinking,
-        thinkingLabel: formatRequestThinkingLabel(thinking, reasoningTokens, lang, t, notRecordedLabel),
-        thinkingRecorded: Boolean(thinking || reasoningTokens !== null),
+        thinkingLabel: formatRequestThinkingLabel(thinking, event.reasoning_effort, lang, notRecordedLabel),
+        thinkingRecorded: Boolean(thinking || event.reasoning_effort?.trim()),
         thinkingNone: isNoThinkingUsage(thinking),
         failed: event.failed,
         inputTokens,
@@ -663,16 +1010,27 @@ function eventToRow(
         reasoningTokens,
         reasoningTokensLabel: formatTokenValue(reasoningTokens, lang, notRecordedLabel),
         cachedTokens,
-        cachedTokensLabel: formatTokenValue(cachedTokens, lang, notRecordedLabel),
+        cachedTokensLabel: event.cache_read_reported === false
+                           ? t('usage_stats.request_events_cache_not_reported')
+                           : event.cache_write_reported === false
+                             ? t('usage_stats.request_events_cache_write_not_reported')
+                             : formatTokenValue(cachedTokens, lang, notRecordedLabel),
         cacheReadTokens,
-        cacheReadTokensLabel: formatTokenValue(cacheReadTokens, lang, notRecordedLabel),
+        cacheReadTokensLabel: event.cache_read_reported === false
+                              ? t('usage_stats.request_events_cache_not_reported')
+                              : formatTokenValue(cacheReadTokens, lang, notRecordedLabel),
         cacheWriteTokens,
-        cacheWriteTokensLabel: formatTokenValue(cacheWriteTokens, lang, notRecordedLabel),
+        cacheWriteTokensLabel: event.cache_write_reported === false
+                               ? t('usage_stats.request_events_cache_write_not_reported')
+                               : formatTokenValue(cacheWriteTokens, lang, notRecordedLabel),
         totalTokens,
         totalTokensLabel: formatTokenValue(totalTokens, lang, notRecordedLabel),
         cost,
-        costLabel: formatEventCost(cost, lang),
-        pricingReceiptLabel,
+        costLabel: event.cost_status === 'unpriced' ?
+                   t('usage_stats.request_events_pricing_unpriced') :
+                   formatEventCost(cost, lang),
+        costReason: formatPricingReason(event.cost_reason, t),
+
         pricingReceiptTitle,
     }
 }
@@ -697,19 +1055,20 @@ export function RequestEventsDetailsCard({
                                              selectedApiKeys,
                                              selectedStatus,
                                              onSelectedStatusChange,
+                                             selectedSpeed,
+                                             onSelectedSpeedChange,
                                          }: RequestEventsDetailsCardProps) {
     const { t, i18n }      = useTranslation()
     const config           = useConfigStore((state) => state.config)
     const showNotification = useNotificationStore((state) => state.showNotification)
 
-    // Model / credential / api-key filters come from the top FilterBar via props;
-    // only the result (status) filter and free-text search remain local since the
-    // top bar has no equivalents for those.
+    // Shared filters come from FilterBar; free-text search is specific to this table.
     const topModels      = useMemo(() => selectedModels ?? [], [selectedModels])
     const topCredentials = useMemo(() => selectedCredentials ?? [], [selectedCredentials])
     const topApiKeys     = useMemo(() => selectedApiKeys ?? [], [selectedApiKeys])
 
     const statusFilter                  = selectedStatus ?? STATUS_ALL
+    const speedFilter                   = selectedSpeed ?? ''
     const [searchInput, setSearchInput] = useState('')
     const searchQuery                   = useDebounce(searchInput, 300)
     const [sortField, setSortField]     = useState<SortField>('timestampMs')
@@ -739,7 +1098,9 @@ export function RequestEventsDetailsCard({
                                                                                content: string
                                                                                truncated: boolean
                                                                                totalLines: number
+                                                                               observations?: RequestEventRow
                                                                            } | null>(null)
+    const [requestDetails, setRequestDetails]                   = useState<RequestEventRow | null>(null)
     const [requestLogError, setRequestLogError]                 = useState('')
     const [requestLogPreviewing, setRequestLogPreviewing]       = useState<Set<string>>(() => new Set())
     const [requestLogDownloading, setRequestLogDownloading]     = useState<Set<string>>(() => new Set())
@@ -816,12 +1177,12 @@ export function RequestEventsDetailsCard({
         topCredentials.join(','),
         topApiKeys.join(','),
         statusFilter,
+        speedFilter,
         searchQuery,
         sortField,
         sortDir,
         dateRange.from,
         dateRange.to,
-        String(refreshToken),
     ].join('|')
     const [prevPageResetSig, setPrevPageResetSig] = useState(pageResetSignature)
     if (prevPageResetSig !== pageResetSignature) {
@@ -829,7 +1190,7 @@ export function RequestEventsDetailsCard({
         setPage(1)
     }
 
-    const eventsParams           = useMemo<EventsParams>(() => {
+    const eventsParams                                            = useMemo<EventsParams>(() => {
         const params: EventsParams = {
             page,
             page_size: pageSize,
@@ -846,22 +1207,32 @@ export function RequestEventsDetailsCard({
             topApiKeys,
             searchQuery,
             statusFilter,
+            speedFilter,
         )
         return params
     }, [
-                                                             page,
-                                                             pageSize,
-                                                             sortField,
-                                                             sortDir,
-                                                             effectiveDateRange.from,
-                                                             effectiveDateRange.to,
-                                                             topModels,
-                                                             topCredentials,
-                                                             topApiKeys,
-                                                             statusFilter,
-                                                             searchQuery,
-                                                         ])
-    const eventsRequestSignature = useMemo(() => JSON.stringify(eventsParams), [eventsParams])
+                                                                                              page,
+                                                                                              pageSize,
+                                                                                              sortField,
+                                                                                              sortDir,
+                                                                                              effectiveDateRange.from,
+                                                                                              effectiveDateRange.to,
+                                                                                              topModels,
+                                                                                              topCredentials,
+                                                                                              topApiKeys,
+                                                                                              statusFilter,
+                                                                                              speedFilter,
+                                                                                              searchQuery,
+                                                                                          ])
+    const eventsRequestSignature                                  = useMemo(
+        () => JSON.stringify([eventsParams, refreshToken]),
+        [eventsParams, refreshToken],
+    )
+    const [previousDetailsSignature, setPreviousDetailsSignature] = useState(eventsRequestSignature)
+    if (previousDetailsSignature !== eventsRequestSignature) {
+        setPreviousDetailsSignature(eventsRequestSignature)
+        setRequestDetails(null)
+    }
 
     // Fetch events from backend
     useEffect(() => {
@@ -914,12 +1285,12 @@ export function RequestEventsDetailsCard({
                                                               pageVisible: true,
                                                               busy: false,
                                                           })
-        if (!scheduleEligible || requestLogPreview !== null || exportingFormat !== null) {
+        if (!scheduleEligible || requestLogPreview !== null || requestDetails !== null || exportingFormat !== null) {
             return
         }
         const intervalId = window.setInterval(() => {
             const busy = Boolean(eventsRequestControllerRef.current) ||
-                         requestLogPreview !== null ||
+                         requestLogPreview !== null || requestDetails !== null ||
                          exportingFormat !== null
             if (shouldRefreshUsageEvents({
                                              activePreset,
@@ -942,6 +1313,7 @@ export function RequestEventsDetailsCard({
                   exportingFormat,
                   page,
                   requestLogPreview,
+                  requestDetails,
                   sortDir,
                   sortField,
               ])
@@ -950,7 +1322,7 @@ export function RequestEventsDetailsCard({
         () => () => {
             exportControllerRef.current?.abort()
         },
-        [],
+        [pageResetSignature],
     )
 
     const noApiKeyLabel        = t('usage_stats.filter_api_key_none')
@@ -1004,6 +1376,7 @@ export function RequestEventsDetailsCard({
 
     const hasActiveFilters =
               statusFilter !== STATUS_ALL ||
+              speedFilter !== '' ||
               searchInput.trim() !== '' ||
               topModels.length > 0 ||
               topCredentials.length > 0 ||
@@ -1011,6 +1384,7 @@ export function RequestEventsDetailsCard({
 
     const handleClearFilters = () => {
         onSelectedStatusChange?.(STATUS_ALL)
+        onSelectedSpeedChange?.('')
         setSearchInput('')
     }
 
@@ -1031,10 +1405,21 @@ export function RequestEventsDetailsCard({
                 topApiKeys,
                 searchQuery,
                 statusFilter,
+                speedFilter,
             )
             return params
         },
-        [effectiveDateRange, topModels, topCredentials, topApiKeys, statusFilter, searchQuery, sortField, sortDir],
+        [
+            effectiveDateRange,
+            topModels,
+            topCredentials,
+            topApiKeys,
+            statusFilter,
+            speedFilter,
+            searchQuery,
+            sortField,
+            sortDir,
+        ],
     )
 
     const exportEvents = useCallback(
@@ -1063,7 +1448,7 @@ export function RequestEventsDetailsCard({
                                                               signal: controller.signal,
                                                               csvHeader: USAGE_EVENT_CSV_HEADER,
                                                               fetchPage: (page, signal) => usageApi.getEvents(
-                                                                  buildExportParams(page),
+                                                                  { ...buildExportParams(page), export: true },
                                                                   { signal },
                                                               ),
                                                               formatCsvRow: (event, index) => {
@@ -1071,10 +1456,33 @@ export function RequestEventsDetailsCard({
                                                                   return [
                                                                       event.timestamp,
                                                                       event.model,
+                                                                      row.speed,
+                                                                      row.speedSource,
+                                                                      event.service_tier ?? '',
+                                                                      row.requestServiceTier,
+                                                                      row.responseServiceTier,
+                                                                      row.requestSpeed,
+                                                                      row.responseSpeed,
+                                                                      row.clientModel,
+                                                                      row.upstreamUrl,
+                                                                      row.responseUrl,
+                                                                      event.response_url_source ?? '',
+                                                                      event.response_url_status ?? '',
+                                                                      event.upstream_next_hop_status ?? '',
+                                                                      typeof event.cache_read_reported === 'boolean' ?
+                                                                      String(event.cache_read_reported) :
+                                                                      '',
+                                                                      typeof event.cache_write_reported === 'boolean' ?
+                                                                      String(event.cache_write_reported) :
+                                                                      '',
+                                                                      row.upstreamModel,
+                                                                      row.responseModel,
+                                                                      row.responseProvider,
+                                                                      row.responseProviderSource,
                                                                       event.source,
                                                                       event.auth_index ?? '',
                                                                       event.provider ?? '',
-                                                                      row.apiKeyMasked,
+                                                                      event.api_key,
                                                                       row.user,
                                                                       row.requestId,
                                                                       event.failed ? 'failed' : 'success',
@@ -1098,16 +1506,33 @@ export function RequestEventsDetailsCard({
                                                                       row.cachedTokens ?? '',
                                                                       row.totalTokens ?? '',
                                                                       row.cost,
+                                                                      event.cost_status ?? '',
+                                                                      event.cost_reason ?? '',
+                                                                      event.billing_metadata ?
+                                                                      JSON.stringify(event.billing_metadata) :
+                                                                      '',
+                                                                      event.pricing_receipt ?
+                                                                      JSON.stringify(event.pricing_receipt) :
+                                                                      '',
+                                                                      event.raw_api_key ?? '',
+                                                                      event.import_data ?? '',
                                                                   ]
                                                                       .map((value) => encodeCsv(value))
                                                                       .join(',')
                                                               },
-                                                              formatJsonEvent: (event, index) => {
-                                                                  const safeEvent = { ...event } as Record<string, unknown>
-                                                                  delete safeEvent.raw_api_key
+                                                              formatJsonEvent: (event) => {
+                                                                  const { speed, speedSource } = observedRequestSpeed(
+                                                                      event)
                                                                   return {
-                                                                      ...safeEvent,
-                                                                      api_key: formatRow(event, index).apiKeyMasked,
+                                                                      ...event,
+                                                                      speed,
+                                                                      speed_observation_source: speedSource,
+                                                                      upstream_url:
+                                                                          sanitizeUpstreamUrl(event.upstream_url) ||
+                                                                          undefined,
+                                                                      response_url:
+                                                                          sanitizeUpstreamUrl(event.response_url) ||
+                                                                          undefined,
                                                                       thinking: normalizeUsageThinking(event.thinking) ??
                                                                                 undefined,
                                                                   }
@@ -1175,13 +1600,17 @@ export function RequestEventsDetailsCard({
         })
     }, [])
 
-    const previewRequestLog = useCallback(async (requestId: string, homeIp: string) => {
+    const previewRequestLog = useCallback(async (
+        requestId: string,
+        homeIp: string,
+        observations?: RequestEventRow,
+    ) => {
         if (!requestId) {
             return
         }
         const seq                          = ++requestLogPreviewSeqRef.current
         activeRequestLogPreviewRef.current = requestId
-        setRequestLogPreview({ id: requestId, homeIp, content: '', truncated: false, totalLines: 0 })
+        setRequestLogPreview({ id: requestId, homeIp, content: '', truncated: false, totalLines: 0, observations })
         setRequestLogError('')
         setRequestLogPreviewing((prev) => new Set(prev).add(requestId))
         try {
@@ -1193,6 +1622,7 @@ export function RequestEventsDetailsCard({
                                          content: redactSensitiveText(preview.content),
                                          truncated: preview.truncated,
                                          totalLines: preview.total_lines,
+                                         observations,
                                      })
             }
         } catch (err) {
@@ -1246,36 +1676,114 @@ export function RequestEventsDetailsCard({
         </button>
     ), [handleSort, sortDir, sortField])
 
+    const renderRequestLog = useCallback((row: RequestEventRow) => {
+        if (!row.requestId) {
+            return <span className={styles.requestEventsPlainMissing}
+                         title={missingMetadataTitle}>{notRecordedLabel}</span>
+        }
+        const stateLabel = requestLogStateLabel(row.requestLogState, t)
+        return (
+            <div className={styles.requestLogActions}>
+                <span className={styles.requestEventsRequestId}>{row.requestId}</span>
+                {row.requestLogState === 'available' ? (
+                    <div className={styles.requestLogButtonRow}>
+                        <Button variant='secondary' size='sm'
+                                loading={requestLogPreviewing.has(row.requestId)}
+                                onClick={() => void previewRequestLog(row.requestId, row.requestLogHomeIp, row)}>
+                            {t('usage_stats.request_events_log_preview')}
+                        </Button>
+                        <Button variant='ghost' size='sm'
+                                loading={requestLogDownloading.has(row.requestId)}
+                                onClick={() => void downloadRequestLog(row.requestId, row.requestLogHomeIp)}>
+                            {t('common.download')}
+                        </Button>
+                    </div>
+                ) : <span className={styles.requestEventsLogDisabled}>{stateLabel}</span>}
+            </div>
+        )
+    }, [
+                                             downloadRequestLog,
+                                             missingMetadataTitle,
+                                             notRecordedLabel,
+                                             previewRequestLog,
+                                             requestLogDownloading,
+                                             requestLogPreviewing,
+                                             t,
+                                         ])
+
     const requestEventColumns = useMemo<SheetColumn<RequestEventRow>[]>(
         () => [
             {
                 key: 'timestamp',
                 header: renderSortableHeader('timestampMs', t('usage_stats.request_events_timestamp')),
-                headerClassName: styles.sortableHeader,
+                headerClassName: `${styles.sortableHeader} ${styles.requestEventsTimestamp}`,
                 className: styles.requestEventsTimestamp,
-                cell: (row) => <span title={row.timestamp}>{row.timestampLabel}</span>,
+                cell: (row) => <time dateTime={row.timestamp}>{row.timestampLabel}</time>,
             },
             {
                 key: 'model',
-                header: renderSortableHeader('model', t('usage_stats.model_name')),
-                headerClassName: styles.sortableHeader,
+                header: renderSortableHeader('model', t('usage_stats.request_events_request_summary')),
+                headerClassName: `${styles.sortableHeader} ${styles.requestEventsModelCell}`,
                 className: styles.requestEventsModelCell,
                 cell: (row) => (
-                    <div title={[row.model, ...row.modelAliasRelations].join('\n')}>
+                    <div className={styles.requestEventsSummaryStack}>
                         <div className={styles.requestEventsModelPrimary}>{row.model}</div>
-                        {row.modelAliasRelations.slice(0, 2).map((relation) => (
-                            <div key={relation} className={styles.requestEventsModelAlias}>{relation}</div>
-                        ))}
+                        {row.clientModel && row.clientModel !== row.model && (
+                            <div className={styles.requestEventsSubline}>
+                                {t('usage_stats.request_events_client_model')}: {row.clientModel}
+                            </div>
+                        )}
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_thinking_column')}: {row.thinkingLabel}
+                        </div>
+                        <div className={styles.requestEventsResultLine}>
+                            <span className={styles.requestEventsSubline}>
+                                {t('usage_stats.request_events_service_class')}
+                            </span>
+                            <span title={row.speedSourceLabel} className={row.speed === 'unknown'
+                                                                          ?
+                                                                          styles.requestEventsPlainMissing :
+                                                                          styles.requestEventsThinkingBadge}>
+                                {row.speedLabel}
+                            </span>
+                            {(row.requestSpeed || row.requestServiceTier) &&
+                             (row.requestSpeed ? row.requestSpeed !== row.responseSpeed
+                                               : row.requestServiceTier !== row.responseServiceTier) && (
+                                 <span className={styles.requestEventsSubline}>
+                                        {t(row.requestSpeed ? 'usage_stats.request_events_requested_speed'
+                                                            : 'usage_stats.request_events_requested_tier')}:
+                                     {' '}{row.requestSpeed || row.requestServiceTier}
+                                    </span>
+                             )}
+                        </div>
+                        {row.upstreamUrl && <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_upstream_url')}: {new URL(row.upstreamUrl).host}
+                        </div>}
+                        {row.responseUrl && row.responseUrl !== row.upstreamUrl && (
+                            <div className={styles.requestEventsSubline}>
+                                {t('usage_stats.request_events_redirect_target')}: {new URL(row.responseUrl).host}
+                            </div>
+                        )}
+                        {row.upstreamModel && row.upstreamModel !== row.model && (
+                            <div className={styles.requestEventsSubline}>
+                                {t('usage_stats.request_events_upstream_model')}: {row.upstreamModel}
+                            </div>
+                        )}
+                        {row.responseModel && row.responseModel !== (row.upstreamModel || row.model) && (
+                            <div className={styles.requestEventsSubline}>
+                                {t('usage_stats.request_events_response_model')}: {row.responseModel}
+                            </div>
+                        )}
                     </div>
                 ),
             },
             {
                 key: 'identity',
                 header: `${identityLabel} / ${apiKeyLabel}`,
+                headerClassName: styles.requestEventsCallerCell,
                 className: styles.requestEventsCallerCell,
                 cell: (row) => (
-                    <div className={styles.requestEventsIdentityStack}
-                         title={`${row.user}\n${apiKeyLabel}: ${row.apiKeyMasked}`}>
+                    <div className={styles.requestEventsIdentityStack}>
                         <div className={styles.requestEventsIdentityLine}>
                             {row.sourceType &&
                              <span className={styles.requestEventsProviderChip}>{row.sourceType}</span>}
@@ -1290,187 +1798,119 @@ export function RequestEventsDetailsCard({
             },
             {
                 key: 'result',
-                header: t('usage_stats.request_events_result'),
+                header: t('usage_stats.request_events_result_duration'),
+                headerClassName: styles.requestEventsResultCell,
                 className: styles.requestEventsResultCell,
                 cell: (row) => (
-                    <div className={styles.requestEventsResultStack}>
-                    <span className={row.failed ? styles.requestEventsResultFailed : styles.requestEventsResultSuccess}>
-                        {row.failed ? t('stats.failure') : t('stats.success')}
-                    </span>
-                        <div className={styles.requestEventsResultSubline}
-                             title={row.completed === null ? missingMetadataTitle : undefined}>
-                            {row.completed === null
-                             ? notRecordedLabel
-                             : row.completed
-                               ? t('usage_stats.request_events_completed', { defaultValue: 'Completed' })
-                               : t('usage_stats.request_events_incomplete', { defaultValue: 'Incomplete' })}
+                    <div className={styles.requestEventsSummaryStack}>
+                        <div className={styles.requestEventsResultLine}>
+                            <span className={row.failed ?
+                                             styles.requestEventsResultFailed :
+                                             styles.requestEventsResultSuccess}>
+                                {row.failed ? t('stats.failure') : t('stats.success')}
+                            </span>
+                            <span className={styles.requestEventsSubline}>
+                                {row.completed === null ? notRecordedLabel : t(row.completed
+                                                                               ?
+                                                                               'usage_stats.request_events_completed' :
+                                                                               'usage_stats.request_events_incomplete')}
+                            </span>
+                        </div>
+                        <div className={styles.requestEventsSubline}>
+                            {row.totalDurationMs !== null
+                             ? `${t('usage_stats.request_events_total_duration')}: ${row.totalDurationLabel}`
+                             : row.latencyMs !== null
+                               ? `${t('usage_stats.request_events_recorded_latency')}: ${row.latencyLabel}`
+                               : notRecordedLabel}
+                        </div>
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_ttfb')}: {row.timeToFirstByteLabel}
+                        </div>
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_throughput')}: {row.throughputLabel}
                         </div>
                     </div>
                 ),
             },
             {
                 key: 'tokens',
-                header: renderSortableHeader('totalTokens', t('usage_stats.total_tokens')),
-                headerClassName: `${styles.sortableHeader} ${styles.requestEventsNumericHeader}`,
-                className: `${styles.requestEventsNumericCell} ${styles.requestEventsTokenCell}`,
-                cell: (row) => row.failed && row.totalTokens === 0 ? (
-                    <div className={styles.requestEventsNoUsage}>{renderFailedNoUsage(t)}</div>
-                ) : (
-                                   <>
-                                       <div className={styles.requestEventsMetricPrimary}>{row.totalTokensLabel}</div>
-                                       <div className={styles.requestEventsSubline}>
-                                           {t(
-                                               'usage_stats.request_events_input_short',
-                                               { defaultValue: '输入' },
-                                           )} {row.inputTokensLabel} · {t(
-                                           'usage_stats.request_events_output_short',
-                                           { defaultValue: '输出' },
-                                       )} {row.outputTokensLabel} · {t(
-                                           'usage_stats.request_events_reasoning_short',
-                                           { defaultValue: '思考' },
-                                       )} {row.reasoningTokensLabel} · {t(
-                                           'usage_stats.request_events_cache_read_short',
-                                           { defaultValue: '缓存读取' },
-                                       )} {row.cacheReadTokensLabel} · {t(
-                                           'usage_stats.request_events_cache_write_short',
-                                           { defaultValue: '缓存写入' },
-                                       )} {row.cacheWriteTokensLabel}
-                                       </div>
-                                   </>
-                               ),
-            },
-            {
-                key: 'cost',
-                header: t('usage_stats.request_events_cost', { defaultValue: '费用' }),
-                headerClassName: styles.requestEventsNumericHeader,
-                className: `${styles.requestEventsNumericCell} ${styles.requestEventsCostCell}`,
+                header: renderSortableHeader('totalTokens', t('usage_stats.request_events_usage_cost')),
+                headerClassName: `${styles.sortableHeader} ${styles.requestEventsTokenCell}`,
+                className: styles.requestEventsTokenCell,
                 cell: (row) => (
-                    <div title={row.pricingReceiptTitle || undefined}>
-                        <div className={styles.requestEventsMetricPrimary}>{row.costLabel}</div>
-                        {row.pricingReceiptLabel && (
-                            <div className={styles.requestEventsSubline}>{row.pricingReceiptLabel}</div>
-                        )}
+                    <div className={styles.requestEventsSummaryStack}>
+                        <div className={styles.requestEventsResultLine}>
+                            <span className={styles.requestEventsMetricPrimary}>{row.costLabel}</span>
+                        </div>
+                        {row.failed && row.totalTokens === 0
+                         ? <span className={styles.requestEventsNoUsage}>{renderFailedNoUsage(t)}</span>
+                         : <span className={styles.requestEventsMetricPrimary}>
+                                {t('usage_stats.total_tokens')}: {row.totalTokensLabel}
+                            </span>}
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_input_short')}: {row.inputTokensLabel}
+                            {' · '}{t('usage_stats.request_events_output_short')}: {row.outputTokensLabel}
+                            {' · '}{t('usage_stats.request_events_reasoning_short')}: {row.reasoningTokensLabel}
+                        </div>
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_cache_read_short')}: {row.cacheReadTokensLabel}
+                            {' · '}{t('usage_stats.request_events_cache_write_short')}: {row.cacheWriteTokensLabel}
+                        </div>
+                        <div className={styles.requestEventsSubline}>
+                            {t('usage_stats.request_events_cache_hit_rate')}: {row.cacheHitRateLabel}
+                        </div>
                     </div>
                 ),
             },
             {
-                key: 'duration',
-                header: t('usage_stats.request_events_duration', { defaultValue: 'Duration' }),
-                headerClassName: styles.requestEventsNumericHeader,
-                className: `${styles.requestEventsNumericCell} ${styles.requestEventsDurationCell}`,
+                key: 'details',
+                header: t('usage_stats.request_events_observation_details'),
+                headerClassName: styles.requestEventsDetailsCell,
+                className: styles.requestEventsDetailsCell,
                 cell: (row) => (
-                    <>
-                        {row.totalDurationMs !== null ? (
-                            <div className={styles.requestEventsMetricPrimary}>{t(
-                                'usage_stats.request_events_total_duration')}: {row.totalDurationLabel}</div>
-                        ) : row.latencyMs !== null ? (
-                            <div className={styles.requestEventsMetricPrimary}>{t(
-                                'usage_stats.request_events_recorded_latency',
-                                { defaultValue: 'Recorded' },
-                            )}: {row.latencyLabel}</div>
-                        ) : (
-                                <div className={styles.requestEventsMetricPrimary}
-                                     title={missingMetadataTitle}>{notRecordedLabel}</div>
-                            )}
-                        <div className={styles.requestEventsSubline}>
-                            {t(
-                                'usage_stats.request_events_ttfb',
-                                { defaultValue: 'First byte' },
-                            )}: {row.timeToFirstByteLabel} · {t(
-                            'usage_stats.request_events_throughput',
-                            { defaultValue: 'Throughput' },
-                        )}: {row.throughputLabel}
-                        </div>
-                    </>
+                    <Button variant='ghost' size='sm'
+                            aria-expanded={requestDetails?.id === row.id}
+                            aria-controls={row.detailsId}
+                            aria-label={`${t('usage_stats.request_events_observation_details')} · ${row.model} · ${row.timestampLabel}`}
+                            onClick={() => setRequestDetails((current) => current?.id === row.id ? null : row)}>
+                        {t(requestDetails?.id === row.id ? 'common.collapse' : 'common.expand')}
+                    </Button>
                 ),
             },
-            {
-                key: 'cacheHit',
-                header: t('usage_stats.request_events_cache_hit_rate', { defaultValue: 'Cache hit' }),
-                headerClassName: styles.requestEventsNumericHeader,
-                className: styles.requestEventsNumericCell,
-                cell: (row) => row.cacheHitRateLabel,
-            },
-            {
-                key: 'thinking',
-                header: t('usage_stats.request_events_thinking_column', { defaultValue: 'Thinking record' }),
-                className: styles.requestEventsThinkingCell,
-                cell: (row) => row.thinkingRecorded ? (
-                    <span className={`${styles.requestEventsThinkingBadge} ${row.thinkingNone ?
-                                                                             styles.requestEventsThinkingNone :
-                                                                             ''}`}>{row.thinkingLabel}</span>
-                ) : (
-                                   <span className={styles.requestEventsPlainMissing}
-                                         title={missingMetadataTitle}>{notRecordedLabel}</span>
-                               ),
-            },
-            {
-                key: 'requestLog',
-                header: requestLogLabel,
-                cell: (row) => {
-                    if (!row.requestId) {
-                        return (
-                            <span className={styles.requestEventsPlainMissing}
-                                  title={missingMetadataTitle}>{notRecordedLabel}</span>
-                        )
-                    }
-                    const stateLabel = requestLogStateLabel(row.requestLogState, t)
-                    return (
-                        <div className={styles.requestLogActions}>
-                            <span className={styles.requestEventsRequestId} title={row.requestId}>{row.requestId}</span>
-                            {row.requestLogState === 'available' ? (
-                                <div className={styles.requestLogButtonRow}>
-                                    <Button
-                                        variant='secondary'
-                                        size='xs'
-                                        loading={requestLogPreviewing.has(row.requestId)}
-                                        onClick={() => void previewRequestLog(row.requestId, row.requestLogHomeIp)}
-                                    >
-                                        {t('usage_stats.request_events_log_preview', { defaultValue: 'View log' })}
-                                    </Button>
-                                    <Button
-                                        variant='ghost'
-                                        size='xs'
-                                        loading={requestLogDownloading.has(row.requestId)}
-                                        onClick={() => void downloadRequestLog(row.requestId, row.requestLogHomeIp)}
-                                    >
-                                        {t('common.download')}
-                                    </Button>
-                                </div>
-                            ) : (
-                                 <span
-                                     className={styles.requestEventsLogDisabled}
-                                     title={stateLabel}
-                                 >
-                                     {stateLabel}
-                                 </span>
-                             )}
-                        </div>
-                    )
-                },
-            },
         ],
-        [
-            apiKeyLabel,
-            downloadRequestLog,
-            identityLabel,
-            missingMetadataTitle,
-            notRecordedLabel,
-            previewRequestLog,
-            renderSortableHeader,
-            requestLogDownloading,
-            requestLogLabel,
-            requestLogPreviewing,
-            t,
-        ],
+        [apiKeyLabel, identityLabel, notRecordedLabel, renderSortableHeader, requestDetails, t],
     )
+
+    const renderRequestEventRow = useCallback((row: RequestEventRow) => (
+        <Fragment>
+            <tr>
+                {requestEventColumns.map((column) => (
+                    <td key={column.key} className={column.className}>{column.cell(row)}</td>
+                ))}
+            </tr>
+            {requestDetails?.id === row.id && (
+                <tr className={styles.requestEventsDetailsRow}>
+                    <td colSpan={requestEventColumns.length}>
+                        <div id={row.detailsId}>
+                            <RequestObservationDetails row={row} t={t}>
+                                <section className={styles.requestLogSection}>
+                                    <h3>{requestLogLabel}</h3>
+                                    {renderRequestLog(row)}
+                                </section>
+                            </RequestObservationDetails>
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </Fragment>
+    ), [renderRequestLog, requestDetails, requestEventColumns, requestLogLabel, t])
 
     // First-load skeleton: page=1 + no data + still fetching = haven't shown
     // anything yet. Re-fetches (page change, filter change with prior data)
     // keep the table visible.
     if (isInitialLoading) {
         return (
-            <Card title={t('usage_stats.request_events_title')}>
+            <Card title={t('usage_stats.request_events_title')} className={styles.eventsCard}>
                 <CardSkeleton variant='rows' rowCount={6} />
             </Card>
         )
@@ -1478,6 +1918,7 @@ export function RequestEventsDetailsCard({
 
     return (
         <Card
+            className={styles.eventsCard}
             title={t('usage_stats.request_events_title')}
             extra={
                 <div className={styles.requestEventsActions}>
@@ -1535,6 +1976,21 @@ export function RequestEventsDetailsCard({
                 </div>
             </div>
 
+            <div className={styles.requestEventsGuide}>
+                <details>
+                    <summary>{t('usage_stats.request_events_field_guide_title')}</summary>
+                    <p>{t('usage_stats.request_events_metric_guide')}</p>
+                    <p>{t('usage_stats.request_events_speed_hint')}</p>
+                    <p>{t('usage_stats.request_events_cost_guide')}</p>
+                </details>
+                <p>
+                    {t(config?.requestLog
+                       ? 'usage_stats.request_events_log_enabled_guide'
+                       : 'usage_stats.request_events_log_disabled_guide')}{' '}
+                    <Link to='/logs'>{t('logs.title')}</Link>
+                </p>
+            </div>
+
             {modelAliasError && (
                 <div className='error-box'>
                     {t('usage_stats.request_events_alias_load_failed')}: {modelAliasError}
@@ -1560,6 +2016,7 @@ export function RequestEventsDetailsCard({
                 />
             ) : (
                     <div className={styles.cardLoadingShell}>
+                        {fetchError && <div className='error-box' role='alert'>{fetchError}</div>}
                         <div className={styles.requestEventsMeta}>
                             <span>{t('usage_stats.request_events_count', { count: totalCount })}</span>
                             <span className={styles.requestEventsLimitHint}>
@@ -1579,9 +2036,11 @@ export function RequestEventsDetailsCard({
                         </div>
 
                         <Sheet
+                            className={styles.eventsSheet}
                             rows={rows}
                             columns={requestEventColumns}
                             rowKey={(row) => row.id}
+                            renderRow={renderRequestEventRow}
                             status='ready'
                             tableWrapClassName={styles.requestEventsTableWrapper}
                             tableClassName={styles.table}
@@ -1641,6 +2100,9 @@ export function RequestEventsDetailsCard({
                     </>
                 }
             >
+                {requestLogPreview?.observations && (
+                    <RequestObservationDetails row={requestLogPreview.observations} t={t} />
+                )}
                 {requestLogError && <div className={styles.requestLogError}>{requestLogError}</div>}
                 {requestLogPreviewing.size > 0 && !requestLogPreview?.content ? (
                     <div className={styles.hint}>{t('common.loading')}</div>

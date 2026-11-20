@@ -1,3 +1,4 @@
+import type {RequestSpeed} from '@/services/api/usage'
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
 import type {CredentialInfo} from '@/types/sourceInfo'
 import {RequestEventsDetailsCard} from './RequestEventsDetailsCard'
@@ -22,6 +23,8 @@ interface EventsTabProps {
     selectedApiKeys?: string[]
     selectedStatus?: string
     onSelectedStatusChange?: (status: string) => void
+    selectedSpeed?: RequestSpeed | ''
+    onSelectedSpeedChange?: (speed: RequestSpeed | '') => void
 }
 
 export function EventsTab({
@@ -44,6 +47,8 @@ export function EventsTab({
                               selectedApiKeys,
                               selectedStatus,
                               onSelectedStatusChange,
+                              selectedSpeed,
+                              onSelectedSpeedChange,
                           }: EventsTabProps) {
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -67,6 +72,8 @@ export function EventsTab({
                 selectedApiKeys={selectedApiKeys}
                 selectedStatus={selectedStatus}
                 onSelectedStatusChange={onSelectedStatusChange}
+                selectedSpeed={selectedSpeed}
+                onSelectedSpeedChange={onSelectedSpeedChange}
             />
         </div>
     )

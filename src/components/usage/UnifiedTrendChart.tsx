@@ -2,6 +2,7 @@ import {BusyOverlay} from '@/components/common/BusyOverlay'
 import {CardSkeleton} from '@/components/common/CardSkeleton'
 import pageStyles from '@/pages/UsagePage.module.scss'
 import type {UsageSummary} from '@/services/api/usage'
+import {useTimezoneStore} from '@/stores/useTimezoneStore'
 import {formatUnixTimestamp} from '@/utils/format'
 import {
     buildChartDataFromSummary,
@@ -10,11 +11,13 @@ import {
     formatCompactNumber,
     formatUsd,
     getSummaryDataStart,
+    METRIC_COLORS,
     type TokenCategory,
 } from '@/utils/usage'
 import {buildChartOptions, getHourChartMinWidth} from '@/utils/usage/chartConfig'
+import {summaryToApiKeyStats} from '@/utils/usage/summaryHelpers'
 import type {ChartOptions} from 'chart.js'
-import {useCallback, useMemo, useState} from 'react'
+import {type CSSProperties, useCallback, useMemo, useState} from 'react'
 import {Line} from 'react-chartjs-2'
 import {useTranslation} from 'react-i18next'
 import styles from './UnifiedTrendChart.module.scss'
@@ -24,6 +27,7 @@ type Metric = 'requests' | 'tokens' | 'cost' | 'token_breakdown'
 interface UnifiedTrendChartProps {
     summary: UsageSummary | null
     liveSummary?: UsageSummary | null
+    aliases?: Record<string, string>
     loading: boolean
     error?: string
     chartDimension: ChartDimension
@@ -32,43 +36,42 @@ interface UnifiedTrendChartProps {
     metric?: Metric
 }
 
-// Per-metric accent: border tints the dot in the metric title and feeds the
-// soft radial backdrop so side-by-side cards are visually distinguishable at a
-// glance. Colors come from upstream commit 2bcaf15 where the three-card
-// layout was introduced.
+// 同一指标的曲线、标题圆点与背景共用配色
 const METRIC_ACCENTS: Record<Metric, { border: string; soft: string; labelKey: string }> = {
-    requests: { border: '#8b8680', soft: 'rgba(139, 134, 128, 0.14)', labelKey: 'usage_stats.requests_trend' },
-    tokens: { border: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.14)', labelKey: 'usage_stats.tokens_trend' },
-    cost: { border: '#f59e0b', soft: 'rgba(245, 158, 11, 0.14)', labelKey: 'usage_stats.cost_trend' },
-    token_breakdown: { border: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.14)', labelKey: 'usage_stats.token_breakdown' },
+    requests: { ...METRIC_COLORS.requests, labelKey: 'usage_stats.requests_trend' },
+    tokens: { ...METRIC_COLORS.tokens, labelKey: 'usage_stats.tokens_trend' },
+    cost: { ...METRIC_COLORS.cost, labelKey: 'usage_stats.cost_trend' },
+    token_breakdown: { ...METRIC_COLORS.tokens, labelKey: 'usage_stats.token_breakdown' },
 }
 
 export function UnifiedTrendChart({
                                       summary,
                                       liveSummary,
+                                      aliases,
                                       loading,
                                       error,
                                       chartDimension,
                                       isMobile = false,
                                       metric: fixedMetric,
                                   }: UnifiedTrendChartProps) {
+    const timezone                            = useTimezoneStore((state) => state.timezone)
     const { t, i18n }                         = useTranslation()
     const [internalMetric, setInternalMetric] = useState<Metric>('requests')
     const metric                              = fixedMetric ?? internalMetric
-    const [hiddenIndices, setHiddenIndices]   = useState<Set<number>>(new Set())
+    const [hiddenSeries, setHiddenSeries]     = useState<Set<string>>(new Set())
 
     const handleMetricChange = useCallback((next: Metric) => {
         setInternalMetric(next)
-        setHiddenIndices(new Set())
+        setHiddenSeries(new Set())
     }, [])
 
-    const toggleDataset = useCallback((index: number) => {
-        setHiddenIndices((prev) => {
+    const toggleDataset = useCallback((key: string) => {
+        setHiddenSeries((prev) => {
             const next = new Set(prev)
-            if (next.has(index)) {
-                next.delete(index)
+            if (next.has(key)) {
+                next.delete(key)
             } else {
-                next.add(index)
+                next.add(key)
             }
             return next
         })
@@ -95,10 +98,14 @@ export function UnifiedTrendChart({
                 cached: t('usage_stats.cached_tokens'),
                 reasoning: t('usage_stats.reasoning_tokens'),
             }
-            return buildTokenBreakdownChartData(summary, categoryLabels)
+            return buildTokenBreakdownChartData(summary, categoryLabels, timezone || undefined)
         }
-        return buildChartDataFromSummary(summary, metric, chartDimension)
-    }, [summary, metric, chartDimension, t])
+        const keyLabels = Object.fromEntries(summaryToApiKeyStats(summary.by_api_key ?? {}, aliases)
+                                                 .map((row) => [row.key!, row.model]))
+        return buildChartDataFromSummary(summary, metric, chartDimension, {
+            ...aliases, ...keyLabels,
+        }, timezone || undefined)
+    }, [summary, metric, chartDimension, t, aliases, timezone])
 
     const summaryValues = useMemo(() => {
         const zero = metric === 'cost' ? formatUsd(0) : formatCompactNumber(0)
@@ -118,33 +125,10 @@ export function UnifiedTrendChart({
             return totals.cost
         }
 
-        const ts  = summary?.time_series ?? []
-        const val = (pt: (typeof ts)[number]) => {
-            if (!pt) {
-                return 0
-            }
-            if (metric === 'requests') {
-                return pt.requests
-            }
-            if (metric === 'tokens' || metric === 'token_breakdown') {
-                return typeof pt.tokens === 'number' ? pt.tokens : (pt.tokens?.total ?? 0)
-            }
-            return pt.cost ?? 0
+        return {
+            total: summary ? fmt(totalOf(summary)) : zero,
+            live: liveSummary ? fmt(totalOf(liveSummary)) : '--',
         }
-
-        let liveSum = totalOf(liveSummary)
-        if (!liveSummary && ts.length) {
-            const oneHourAgoMs = Date.now() - 3600_000
-            for (let i = ts.length - 1; i >= 0; --i) {
-                const ptTime = new Date(ts[i].time).getTime()
-                if (ptTime < oneHourAgoMs) {
-                    break
-                }
-                liveSum += val(ts[i])
-            }
-        }
-
-        return { total: summary ? fmt(totalOf(summary)) : zero, live: fmt(liveSum) }
     }, [summary, liveSummary, metric])
 
     // "Data starts at": earliest point in the series, shown in the card header
@@ -181,12 +165,27 @@ export function UnifiedTrendChart({
                     ...base.scales?.y,
                     ticks: {
                         ...(base.scales?.y && 'ticks' in base.scales.y ? base.scales.y.ticks : {}),
-                        callback: (value: string | number) => formatUsd(Number(value)),
+                        callback: (value: string | number, _index: number, ticks: { value: number }[]) => {
+                            const steps  = ticks.slice(1)
+                                                .map((tick, index) => Math.abs(tick.value - ticks[index].value))
+                                                .filter((step) => step > 0)
+                            const step   = Math.min(...steps)
+                            const digits = Number.isFinite(step) ?
+                                           Math.min(20, Math.max(2, Math.ceil(-Math.log10(step)))) :
+                                           2
+                            return `$${Number(value).toLocaleString(
+                                i18n.language,
+                                {
+                                    minimumFractionDigits: digits,
+                                    maximumFractionDigits: digits,
+                                },
+                            )}`
+                        },
                     },
                 },
             },
         }
-    }, [period, chartData.labels, isMobile, metric])
+    }, [period, chartData.labels, isMobile, metric, i18n.language])
 
     // Empty series renders a flat zero line so the card keeps its visual rhythm
     // instead of collapsing. spanGaps:false draws real gaps for null points.
@@ -197,6 +196,7 @@ export function UnifiedTrendChart({
                 labels: ['', ''],
                 datasets: [
                     {
+                        id: 'empty',
                         label: '',
                         data: [0, 0],
                         borderColor: accent.border,
@@ -211,13 +211,14 @@ export function UnifiedTrendChart({
         }
         return {
             labels: chartData.labels,
-            datasets: chartData.datasets.map((ds, i) => ({
+            datasets: chartData.datasets.map((ds) => ({
                 ...ds,
-                hidden: hiddenIndices.has(i),
+                id: ds.id ?? ds.label,
+                hidden: hiddenSeries.has(ds.id ?? ds.label),
                 spanGaps: false,
             })),
         }
-    }, [chartData, hiddenIndices, metric])
+    }, [chartData, hiddenSeries, metric])
 
     const metricTabs: Array<{ key: Exclude<Metric, 'token_breakdown'>; label: string }> = [
         { key: 'requests', label: t('usage_stats.requests_trend') },
@@ -236,7 +237,7 @@ export function UnifiedTrendChart({
         return (
             <div className={styles.container}>
                 <div className={styles.headerFixed}>
-                    <span className={styles.metricTitle} style={{ color: accent.border }}>
+                    <span className={styles.metricTitle} style={{ '--metric-accent': accent.border } as CSSProperties}>
                         {metricLabel}
                     </span>
                 </div>
@@ -283,7 +284,7 @@ export function UnifiedTrendChart({
                 </div>
             ) : (
                  <div className={styles.headerFixed}>
-                    <span className={styles.metricTitle} style={{ color: accent.border }}>
+                    <span className={styles.metricTitle} style={{ '--metric-accent': accent.border } as CSSProperties}>
                         {metricLabel}
                     </span>
                      {dataStartLabel && (
@@ -301,9 +302,7 @@ export function UnifiedTrendChart({
                         <span className={styles.summaryTotal}>
                             {summaryValues.total}
                             <span className={styles.summaryLabel}>
-                                {metric === 'cost'
-                                 ? t('usage_stats.cost_reference_amount')
-                                 : t('usage_stats.unified_total_label')}
+                                {t('usage_stats.unified_total_label')}
                             </span>
                         </span>
                         <span className={styles.summaryLive}>
@@ -319,18 +318,20 @@ export function UnifiedTrendChart({
                                 <div className={pageStyles.chartLegend} aria-label='Chart legend'>
                                     {chartData.datasets.map((dataset, index) => (
                                         <div
-                                            key={`${dataset.label}-${index}`}
+                                            key={dataset.id ?? `${dataset.label}-${index}`}
                                             className={`${pageStyles.legendItem} ${
-                                                hiddenIndices.has(index) ? pageStyles.legendItemHidden : ''
+                                                hiddenSeries.has(dataset.id ?? dataset.label) ?
+                                                pageStyles.legendItemHidden :
+                                                ''
                                             }`}
                                             title={dataset.label}
                                             role='button'
                                             tabIndex={0}
-                                            onClick={() => toggleDataset(index)}
+                                            onClick={() => toggleDataset(dataset.id ?? dataset.label)}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter' || e.key === ' ') {
                                                     e.preventDefault()
-                                                    toggleDataset(index)
+                                                    toggleDataset(dataset.id ?? dataset.label)
                                                 }
                                             }}
                                         >
@@ -353,7 +354,7 @@ export function UnifiedTrendChart({
                                             : undefined
                                         }
                                     >
-                                        <Line data={visibleChartData} options={chartOptions} />
+                                        <Line data={visibleChartData} options={chartOptions} datasetIdKey='id' />
                                     </div>
                                 </div>
                             </div>

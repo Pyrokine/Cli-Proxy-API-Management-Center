@@ -5,17 +5,21 @@ import {UnifiedTrendChart} from './UnifiedTrendChart'
 
 interface TokenBreakdownChartProps {
     summary: UsageSummary | null
+    liveSummary?: UsageSummary | null
+    error?: string
     loading: boolean
     isMobile: boolean
 }
 
-export function TokenBreakdownChart({ summary, loading, isMobile }: TokenBreakdownChartProps) {
+export function TokenBreakdownChart({ summary, liveSummary, error, loading, isMobile }: TokenBreakdownChartProps) {
     const { t } = useTranslation()
 
     return (
         <Card title={t('usage_stats.token_breakdown')}>
             <UnifiedTrendChart
                 summary={summary}
+                liveSummary={liveSummary}
+                error={error}
                 loading={loading}
                 chartDimension='total'
                 isMobile={isMobile}

@@ -8,17 +8,60 @@
     padding: 16px;
 }
 
+.eventsCard {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+
+    > :global(.empty-state),
+    > .hint {
+        flex: 1;
+    }
+}
+
+.requestEventsGuide {
+    margin-bottom: $spacing-sm;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    summary {
+        cursor: pointer;
+        color: var(--text-primary);
+    }
+
+    p {
+        margin: $spacing-xs 0 0;
+    }
+}
+
 .cardLoadingShell {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.eventsSheet {
+    flex: 1;
 }
 
 .table {
     @include data-table-base;
+    table-layout: fixed;
+    min-width: 56rem;
+
+    th {
+        white-space: normal;
+    }
 }
 
 .sortableHeader {
     @include sortable-header;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .sortHeaderButton {
@@ -146,39 +189,116 @@
 }
 
 .requestEventsTimestamp {
-    white-space: nowrap;
-    min-width: 160px;
+    width: 11%;
+    font-variant-numeric: tabular-nums;
+    line-height: $line-height-base;
 }
 
 .requestEventsModelCell {
-    min-width: 170px;
-    max-width: 260px;
-    overflow: hidden;
+    width: 20%;
     color: var(--text-primary);
-    line-height: 1.35;
+    line-height: $line-height-base;
 }
 
 .requestEventsModelPrimary {
-    overflow: hidden;
     font-weight: $font-weight-semibold;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
-.requestEventsModelAlias {
-    margin-top: 3px;
-    overflow: hidden;
-    color: var(--text-tertiary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-normal;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.requestEventsSummaryStack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.requestEventsDetailsCell {
+    width: 8%;
+
+    :global(.btn) {
+        white-space: normal;
+    }
+}
+
+.requestEventsDetailsRow {
+    background: var(--bg-secondary);
+
+    > td {
+        padding: 20px;
+    }
+}
+
+.requestObservationDetails {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+
+    section {
+        min-width: 0;
+    }
+
+    p {
+        margin: $spacing-sm 0;
+        overflow-wrap: anywhere;
+    }
+
+    h3 {
+        margin: 0 0 $spacing-sm;
+        font-size: $font-size-sm;
+        font-weight: $font-weight-semibold;
+    }
+
+    dl {
+        display: grid;
+        grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr);
+        gap: $spacing-xs $spacing-md;
+        margin: 0;
+    }
+
+    dt {
+        color: var(--text-secondary);
+    }
+
+    dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+    }
+
+    @include mobile {
+        grid-template-columns: minmax(0, 1fr);
+
+        dl {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        dd {
+            margin-bottom: $spacing-xs;
+        }
+    }
+}
+
+.requestPricingReceipt {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+}
+
+.requestPricingSection,
+.requestLogSection {
+    grid-column: 1 / -1;
+
+    h3:not(:first-child) {
+        margin-top: $spacing-md;
+    }
 }
 
 .requestEventsCallerCell {
-    min-width: 260px;
-    max-width: 340px;
-    line-height: 1.35;
+    width: 24%;
+    line-height: $line-height-base;
 }
 
 .requestEventsIdentityStack {
@@ -191,7 +311,8 @@
 .requestEventsIdentityLine,
 .requestEventsApiKeyLine {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: baseline;
     min-width: 0;
     gap: 6px;
 }
@@ -204,7 +325,7 @@
 
 .requestEventsApiKeyLine {
     color: var(--text-secondary);
-    font-size: $font-size-xs;
+    font-size: $font-size-sm;
 }
 
 .requestEventsProviderChip {
@@ -222,9 +343,7 @@
 .requestEventsSourceText,
 .requestEventsApiKeyValue {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .requestEventsApiKeyLabel {
@@ -259,21 +378,9 @@
     overflow-wrap: anywhere;
 }
 
-.requestEventsNumericHeader,
-.requestEventsNumericCell {
-    text-align: right;
+.requestEventsTokenCell {
+    width: 19%;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-.requestEventsTokenCell,
-.requestEventsDurationCell {
-    min-width: 220px;
-    max-width: 280px;
-}
-
-.requestEventsCostCell {
-    min-width: 108px;
 }
 
 .requestEventsMetricPrimary {
@@ -283,33 +390,36 @@
 }
 
 .requestEventsSubline {
-    margin-top: 6px;
     color: var(--text-secondary);
-    font-size: $font-size-xs;
+    font-size: $font-size-sm;
     font-weight: $font-weight-normal;
     line-height: $line-height-base;
     white-space: normal;
+    overflow-wrap: anywhere;
 }
 
-.requestEventsResultCell,
-.requestEventsThinkingCell {
-    min-width: 112px;
-    text-align: center;
+.requestEventsCostReason {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .requestEventsResultCell {
-    .requestEventsSubline {
-        margin-top: 6px;
-    }
+    width: 18%;
+    font-variant-numeric: tabular-nums;
+}
+
+.requestEventsResultLine {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
 }
 
 .requestEventsNoUsage {
     display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
-    max-width: 180px;
     color: var(--warning-text);
-    font-size: $font-size-xs;
+    font-size: $font-size-sm;
     line-height: $line-height-base;
     white-space: normal;
 }
@@ -319,17 +429,14 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
-    width: 260px;
-    min-width: 230px;
-    max-width: 280px;
+    max-width: 100%;
 }
 
 .requestLogButtonRow {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    flex-wrap: nowrap;
-    white-space: nowrap;
+    flex-wrap: wrap;
 
     :global(.btn),
     :global(.btn-content) {
@@ -399,24 +506,6 @@
 .requestEventsResultFailed,
 .requestEventsThinkingBadge {
     @include token-base(24px, 8px);
-}
-
-.requestEventsResultStack {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-}
-
-.requestEventsResultSubline {
-    width: 100%;
-    color: var(--text-tertiary);
-    font-size: $font-size-xs;
-    font-weight: $font-weight-medium;
-    line-height: $line-height-heading;
-    text-align: center;
-    white-space: nowrap;
 }
 
 .requestEventsThinkingBadge {

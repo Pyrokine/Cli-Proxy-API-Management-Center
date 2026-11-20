@@ -1,7 +1,7 @@
-import {describe, expect, test} from 'bun:test'
 import type {UsageSummary} from '@/services/api/usage'
 
 import {buildChartDataFromSummary, resolveUsageTokenMetrics} from '@/utils/usage'
+import {describe, expect, test} from 'bun:test'
 
 describe('canonical usage token metrics', () => {
     test('uses canonical cache buckets without double-counting totals or cache hits', () => {

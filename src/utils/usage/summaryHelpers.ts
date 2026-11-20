@@ -1,7 +1,9 @@
 import type {SummaryApiKeyStats, SummaryCredentialStats, SummaryModelStats} from '@/services/api/usage'
+import {maskApiKey} from '@/utils/format'
 import {normalizeUsageSourceId} from '@/utils/usage'
 
 export interface ModelStat {
+    key?: string
     model: string
     requests: number
     successCount: number
@@ -9,6 +11,7 @@ export interface ModelStat {
     tokens: number
     cost: number
     averageLatencyMs: number | null
+    totalLatencyMs?: number | null
     latencySampleCount: number
 }
 
@@ -94,27 +97,27 @@ export function summaryToModelStats(byModel: Record<string, SummaryModelStats>):
         tokens: stats.tokens.total,
         cost: stats.cost,
         averageLatencyMs: stats.average_latency_ms ?? null,
+        totalLatencyMs: stats.total_latency_ms ?? null,
         latencySampleCount: stats.latency_sample_count ?? 0,
     }))
 }
 
-/** Convert summary by_api_key to ModelStat[]. Reuses the ModelStat shape so
- *  the existing ModelStatsCard can render API-key rows with a different header.
- *  The alias map lets us show human-friendly names while keeping raw keys as
- *  the lookup id; falling back to the raw key preserves stability when an
- *  alias is missing. */
+/** Keep API key identity separate from the server-provided alias or safe display. */
 export function summaryToApiKeyStats(
     byApiKey: Record<string, SummaryApiKeyStats>,
     aliases?: Record<string, string>,
 ): ModelStat[] {
     return Object.entries(byApiKey).map(([key, stats]) => ({
-        model: aliases?.[key] || key,
+        key,
+        model: stats.alias?.trim() || aliases?.[key]?.trim() || stats.display_name?.trim() ||
+               (key === '(none)' || key.includes('...') || key.includes('****') ? key : maskApiKey(key)),
         requests: stats.requests,
         successCount: stats.success,
         failureCount: stats.failure,
         tokens: stats.tokens.total,
         cost: stats.cost,
         averageLatencyMs: stats.average_latency_ms ?? null,
+        totalLatencyMs: stats.total_latency_ms ?? null,
         latencySampleCount: stats.latency_sample_count ?? 0,
     }))
 }

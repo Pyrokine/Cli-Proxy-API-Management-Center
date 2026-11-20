@@ -62,6 +62,7 @@ export function useAuthFileMap(enabled = true) {
             .catch(() => {
             })
             .finally(() => {
+                cancelAnimationFrame(raf)
                 if (!cancelled) {
                     setAuthFileMapLoading(false)
                 }

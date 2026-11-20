@@ -1,11 +1,14 @@
 import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
+import {buildManualKeyCardItems} from '@/components/credentials/apiKeyStatus'
 import {IconBot, IconKey, IconSatellite} from '@/components/ui/icons'
-import {apiKeysApi, authFilesApi, providersApi} from '@/services/api'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {apiClient, apiKeysApi, authFilesApi, providersApi} from '@/services/api'
 import {useAuthStore, useConfigStore, useModelsStore} from '@/stores'
+import {useTimezoneStore} from '@/stores/useTimezoneStore'
 import {formatDateTime} from '@/utils/format'
 import {type ReactNode, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Link} from 'react-router-dom'
+import {Link} from 'react-router'
 import styles from './DashboardPage.module.scss'
 
 interface QuickStat {
@@ -18,6 +21,9 @@ interface QuickStat {
 }
 
 interface ProviderStats {
+    interactions: number | null
+    vertex: number | null
+    xai: number | null
     gemini: number | null
     codex: number | null
     meta: number | null
@@ -43,6 +49,7 @@ function getTimeOfDay(): TimeOfDay {
 
 export function DashboardPage() {
     const { t, i18n }      = useTranslation()
+    const timezone         = useTimezoneStore((state) => state.timezone) || undefined
     const transitionLayer  = usePageTransitionLayer()
     const pageLayerStatus  = transitionLayer?.status ?? 'current'
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
@@ -65,6 +72,9 @@ export function DashboardPage() {
        })
 
     const [providerStats, setProviderStats] = useState<ProviderStats>({
+                                                                          interactions: null,
+                                                                          vertex: null,
+                                                                          xai: null,
                                                                           gemini: null,
                                                                           codex: null,
                                                                           meta: null,
@@ -77,8 +87,10 @@ export function DashboardPage() {
     const [timeOfDay, setTimeOfDay]                       = useState<TimeOfDay>(getTimeOfDay)
     const [currentTime, setCurrentTime]                   = useState(() => new Date())
 
+    const statsRequestGeneration  = useRef(0)
     const modelsRequestGeneration = useRef(0)
-    const invalidateModelsRequest = useCallback(() => {
+    const invalidateRequests      = useCallback(() => {
+        ++statsRequestGeneration.current
         ++modelsRequestGeneration.current
     }, [])
 
@@ -90,8 +102,9 @@ export function DashboardPage() {
         return () => window.clearInterval(id)
     }, [])
 
-    const fetchModels = useCallback(async () => {
+    const fetchModels = useCallback(async (forceRefresh = false) => {
         const requestGeneration = ++modelsRequestGeneration.current
+        const authGeneration    = apiClient.getAuthGeneration()
         if (pageLayerStatus !== 'current') {
             return
         }
@@ -102,55 +115,103 @@ export function DashboardPage() {
 
         setModelsRequestLoading(true)
         try {
-            await fetchModelsFromStore(apiBase)
-        } catch {
+            await fetchModelsFromStore(apiBase, forceRefresh)
+        } catch (error) {
             // 共享状态保存的请求错误会显示在模型统计卡片中
+            if (forceRefresh &&
+                requestGeneration ===
+                modelsRequestGeneration.current &&
+                authGeneration ===
+                apiClient.getAuthGeneration()) {
+                throw error
+            }
         } finally {
-            if (requestGeneration === modelsRequestGeneration.current) {
+            if (requestGeneration ===
+                modelsRequestGeneration.current &&
+                authGeneration ===
+                apiClient.getAuthGeneration()) {
                 setModelsRequestLoading(false)
             }
         }
     }, [pageLayerStatus, connectionStatus, apiBase, fetchModelsFromStore])
 
-    useEffect(() => {
-        let cancelled    = false
-        const fetchStats = async () => {
-            setLoading(true)
-            try {
-                const results = await Promise.allSettled([
-                                                             apiKeysApi.list(),
-                                                             authFilesApi.list(),
-                                                             providersApi.getGeminiKeys(),
-                                                             providersApi.getCodexConfigs(),
-                                                             providersApi.getMetaConfigs(),
-                                                             providersApi.getClaudeConfigs(),
-                                                             providersApi.getOpenAIProviders(),
-                                                         ])
-
-                const [keysRes, filesRes, geminiRes, codexRes, metaRes, claudeRes, openaiRes] = results
-
-                setStats({
-                             apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
-                             authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null,
-                         })
-
-                setProviderStats({
-                                     gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
-                                     codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
-                                     meta: metaRes.status === 'fulfilled' ? metaRes.value.length : null,
-                                     claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
-                                     openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null,
-                                 })
-            } finally {
+    const fetchStats = useCallback(async (forceRefresh = false) => {
+        const requestGeneration = ++statsRequestGeneration.current
+        const authGeneration    = apiClient.getAuthGeneration()
+        if (pageLayerStatus !== 'current' || connectionStatus !== 'connected' || !apiBase) {
+            return
+        }
+        const isCurrent = () => requestGeneration ===
+                                statsRequestGeneration.current &&
+                                authGeneration ===
+                                apiClient.getAuthGeneration()
+        setLoading(true)
+        setStats({ apiKeys: null, authFiles: null })
+        try {
+            const results = await Promise.allSettled([
+                                                         apiKeysApi.list(),
+                                                         authFilesApi.list(),
+                                                         providersApi.getGeminiKeys(),
+                                                         providersApi.getCodexConfigs(),
+                                                         providersApi.getMetaConfigs(),
+                                                         providersApi.getClaudeConfigs(),
+                                                         providersApi.getOpenAIProviders(),
+                                                         providersApi.getInteractionsKeys(),
+                                                         providersApi.getVertexConfigs(),
+                                                         providersApi.getXAIConfigs(),
+                                                     ])
+            if (!isCurrent()) {
+                return
+            }
+            const [
+                      keysRes, filesRes, geminiRes, codexRes, metaRes, claudeRes, openaiRes, interactionsRes,
+                      vertexRes, xaiRes,
+                  ] = results
+            setStats({
+                         apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
+                         authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null,
+                     })
+            setProviderStats({
+                                 gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
+                                 codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
+                                 meta: metaRes.status === 'fulfilled' ? metaRes.value.length : null,
+                                 claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
+                                 openai: openaiRes.status === 'fulfilled' ?
+                                         buildManualKeyCardItems('openai', openaiRes.value).length :
+                                         null,
+                                 interactions: interactionsRes.status === 'fulfilled' ?
+                                               interactionsRes.value.length :
+                                               null,
+                                 vertex: vertexRes.status === 'fulfilled' ? vertexRes.value.length : null,
+                                 xai: xaiRes.status === 'fulfilled' ? xaiRes.value.length : null,
+                             })
+            const failure = results.find((result) => result.status === 'rejected')
+            if (forceRefresh && failure?.status === 'rejected') {
+                throw failure.reason
+            }
+        } finally {
+            if (isCurrent()) {
                 setLoading(false)
             }
         }
+    }, [apiBase, connectionStatus, pageLayerStatus])
 
+    const handleRefresh = useCallback(async () => {
+        const results = await Promise.allSettled([fetchStats(true), fetchModels(true)])
+        const failure = results.find((result) => result.status === 'rejected')
+        if (failure?.status === 'rejected') {
+            throw failure.reason
+        }
+    }, [fetchStats, fetchModels])
+    useHeaderRefresh(pageLayerStatus === 'current' ? handleRefresh : null)
+
+    useEffect(() => {
+        let cancelled = false
         queueMicrotask(() => {
             if (cancelled || pageLayerStatus !== 'current') {
                 return
             }
-            if (connectionStatus === 'connected') {
+            if (connectionStatus === 'connected' && apiBase) {
                 void fetchStats()
                 void fetchModels()
             } else {
@@ -159,17 +220,18 @@ export function DashboardPage() {
         })
         return () => {
             cancelled = true
-            invalidateModelsRequest()
+            invalidateRequests()
         }
-    }, [connectionStatus, fetchModels, invalidateModelsRequest, pageLayerStatus])
+    }, [apiBase, connectionStatus, fetchStats, fetchModels, invalidateRequests, pageLayerStatus])
 
     const providerCounts     = Object.values(providerStats)
     const providerStatsReady = providerCounts.every((count) => count !== null)
-    const hasProviderStats   = providerCounts.some((count) => count !== null)
     const totalProviderKeys  = providerStatsReady
                                ? providerCounts.reduce((total, count) => total + (count ?? 0), 0)
                                : 0
-    const totalCredentials   = totalProviderKeys + (stats.authFiles ?? 0)
+    const totalCredentials   = providerStatsReady && stats.authFiles !== null ?
+                               totalProviderKeys + stats.authFiles :
+                               null
 
     const quickStats: QuickStat[] = [
         {
@@ -182,12 +244,12 @@ export function DashboardPage() {
         },
         {
             label: t('dashboard.total_credentials'),
-            value: loading ? '-' : totalCredentials,
+            value: loading || totalCredentials === null ? '-' : totalCredentials,
             icon: <IconBot size={24} />,
             path: '/credentials',
             loading: loading,
             sublabel:
-                hasProviderStats || stats.authFiles !== null
+                totalCredentials !== null
                 ? t('dashboard.credentials_detail', {
                     apiKeys: totalProviderKeys,
                     authFiles: stats.authFiles ?? 0,
@@ -230,12 +292,14 @@ export function DashboardPage() {
     const greetingKey               = `dashboard.greeting_${timeOfDay}`
     const caringKey                 = `dashboard.caring_${timeOfDay}`
     const formattedDate             = currentTime.toLocaleDateString(i18n.language, {
+        timeZone: timezone,
         weekday: 'long',
         year: 'numeric',
         month: 'long',
         day: 'numeric',
     })
     const formattedTime             = currentTime.toLocaleTimeString(i18n.language, {
+        timeZone: timezone,
         hour: '2-digit',
         minute: '2-digit',
     })

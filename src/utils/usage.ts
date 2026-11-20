@@ -2,7 +2,6 @@
  * 使用统计相关工具
  * 迁移自基线 modules/usage.js 的纯逻辑部分
  */
-
 import i18n from '@/i18n'
 import type {PutModelPricesResponse} from '@/services/api/modelPrices'
 import type {ModelCatalogPrice} from '@/services/api/models'
@@ -13,6 +12,7 @@ import type {
     UsageSummary as ApiUsageSummary,
     UsageThinking,
 } from '@/services/api/usage'
+import {getEffectiveTimezone} from '@/stores/useTimezoneStore'
 import type {RecentRequestBucket} from '@/types/authFile'
 import type {ScriptableContext} from 'chart.js'
 import {formatKeyDisplay} from './format'
@@ -294,6 +294,7 @@ const USAGE_SOURCE_PREFIX_KEY    = 'k:'
 const USAGE_SOURCE_PREFIX_MASKED = 'm:'
 const USAGE_SOURCE_PREFIX_TEXT   = 't:'
 
+// noinspection SpellCheckingInspection
 const KEY_LIKE_TOKEN_REGEX    = new RegExp(
     [
         'sk-[A-Za-z0-9-_]{6,}',
@@ -791,27 +792,36 @@ export async function saveModelPrices(prices: Record<string, ModelPrice>): Promi
 /**
  * 格式化小时标签
  */
-function formatHourLabel(date: Date): string {
-    const month = (date.getMonth() + 1).toString().padStart(2, '0')
-    const day   = date.getDate().toString().padStart(2, '0')
-    const hour  = date.getHours().toString().padStart(2, '0')
-    return `${month}-${day} ${hour}:00`
+function formatHourLabel(date: Date, timeZone = getEffectiveTimezone()): string {
+    const parts = new Intl.DateTimeFormat(
+        'en-GB',
+        {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hourCycle: 'h23',
+            timeZone,
+        },
+    ).formatToParts(date)
+    const value = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+    return `${value('month')}-${value('day')} ${value('hour')}:00`
 }
 
-/**
- * 格式化日期标签
- */
-function formatDayLabel(date: Date): string {
-    const year  = date.getFullYear()
-    const month = (date.getMonth() + 1).toString().padStart(2, '0')
-    const day   = date.getDate().toString().padStart(2, '0')
-    return `${year}-${month}-${day}`
+function formatDayLabel(date: Date, timeZone = getEffectiveTimezone()): string {
+    const parts = new Intl.DateTimeFormat(
+        'en-GB',
+        { year: 'numeric', month: '2-digit', day: '2-digit', timeZone },
+    ).formatToParts(date)
+    const value = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+    return `${value('year')}-${value('month')}-${value('day')}`
 }
 
 export type ChartDimension = 'total' | 'model' | 'credential' | 'api_key'
 export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning'
 
 interface ChartDataset {
+    id?: string
     label: string
     data: Array<number | null>
     borderColor: string
@@ -839,6 +849,12 @@ const CHART_COLORS = [
     { borderColor: '#84cc16', backgroundColor: 'rgba(132, 204, 22, 0.15)' },
     { borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.15)' },
 ]
+
+export const METRIC_COLORS = {
+    requests: { border: '#0891b2', soft: 'rgba(8, 145, 178, 0.14)' },
+    tokens: { border: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.14)' },
+    cost: { border: '#b45309', soft: 'rgba(180, 83, 9, 0.14)' },
+}
 
 const TOKEN_BREAKDOWN_COLORS: Record<TokenCategory, { borderColor: string; backgroundColor: string }> = {
     input: { borderColor: '#8b8680', backgroundColor: 'rgba(139, 134, 128, 0.25)' },
@@ -952,6 +968,7 @@ function buildMultiGroupChartData(
 export function buildTokenBreakdownChartData(
     summary: ApiUsageSummary,
     categoryLabels: Record<TokenCategory, string>,
+    timeZone = getEffectiveTimezone(),
 ): ChartData {
     const points = summary.time_series
     if (!points || points.length === 0) {
@@ -965,7 +982,7 @@ export function buildTokenBreakdownChartData(
         }
         const d       = new Date(parsed)
         const hasHour = iso.includes('T') && !iso.endsWith('T00:00:00Z')
-        return hasHour ? formatHourLabel(d) : formatDayLabel(d)
+        return hasHour ? formatHourLabel(d, timeZone) : formatDayLabel(d, timeZone)
     }
 
     return {
@@ -1019,6 +1036,8 @@ export function buildChartDataFromSummary(
     summary: ApiUsageSummary,
     metric: 'requests' | 'tokens' | 'cost',
     dimension: ChartDimension = 'total',
+    aliases?: Record<string, string>,
+    timeZone                  = getEffectiveTimezone(),
 ): ChartData {
     const extractValue = (pt: SummaryTimePoint): number | null => {
         if (metric === 'requests') {
@@ -1038,7 +1057,7 @@ export function buildChartDataFromSummary(
         const d       = new Date(parsed)
         // 根据时间点间隔自动选择标签格式
         const hasHour = iso.includes('T') && !iso.endsWith('T00:00:00Z')
-        return hasHour ? formatHourLabel(d) : formatDayLabel(d)
+        return hasHour ? formatHourLabel(d, timeZone) : formatDayLabel(d, timeZone)
     }
 
     if (dimension === 'model') {
@@ -1046,11 +1065,32 @@ export function buildChartDataFromSummary(
     }
 
     if (dimension === 'credential') {
-        return buildMultiGroupChartData(summary.time_series_by_credential ?? {}, extractValue, formatLabel)
+        const data = buildMultiGroupChartData(summary.time_series_by_credential ?? {}, extractValue, formatLabel)
+        return {
+            ...data,
+            datasets: data.datasets.map((dataset) => {
+                const credential  = summary.by_credential?.[dataset.label]
+                const sourceAlias = credential?.source ? aliases?.[credential.source]?.trim() : ''
+                const label       = aliases?.[dataset.label]?.trim() || (sourceAlias
+                                                                         ?
+                                                                         (credential?.provider ?
+                                                                          `${credential.provider}: ${sourceAlias}` :
+                                                                          sourceAlias)
+                                                                         :
+                                                                         dataset.label)
+                return { ...dataset, id: dataset.label, label }
+            }),
+        }
     }
 
     if (dimension === 'api_key') {
-        return buildMultiGroupChartData(summary.time_series_by_api_key ?? {}, extractValue, formatLabel)
+        const data = buildMultiGroupChartData(summary.time_series_by_api_key ?? {}, extractValue, formatLabel)
+        return {
+            ...data,
+            datasets: data.datasets.map((dataset) => ({
+                ...dataset, id: dataset.label, label: formatKeyDisplay(dataset.label, aliases),
+            })),
+        }
     }
 
     // total 维度
@@ -1061,7 +1101,7 @@ export function buildChartDataFromSummary(
 
     const labels                  = points.map((pt) => formatLabel(pt.time))
     const data: (number | null)[] = points.map(extractValue)
-    const style                   = CHART_COLORS[0]
+    const style                   = METRIC_COLORS[metric]
 
     return {
         labels,
@@ -1069,10 +1109,10 @@ export function buildChartDataFromSummary(
             {
                 label: 'All Models',
                 data,
-                borderColor: style.borderColor,
-                backgroundColor: (ctx) => buildAreaGradient(ctx, style.borderColor, style.backgroundColor),
-                pointBackgroundColor: style.borderColor,
-                pointBorderColor: style.borderColor,
+                borderColor: style.border,
+                backgroundColor: (ctx) => buildAreaGradient(ctx, style.border, style.soft),
+                pointBackgroundColor: style.border,
+                pointBorderColor: style.border,
                 pointRadius: 0,
                 fill: true,
                 tension: 0.3,
