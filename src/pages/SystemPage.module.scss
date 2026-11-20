@@ -475,6 +475,22 @@
     }
 }
 
+.catalogErrorDetails {
+    summary {
+        cursor: pointer;
+    }
+
+    pre {
+        margin: $spacing-sm 0 0;
+        font-family: $font-mono;
+        font-size: $font-size-xs;
+        line-height: $line-height-base;
+        text-align: left;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+}
+
 .inlineSourceLink {
     color: inherit;
     text-decoration: underline;
@@ -512,40 +528,58 @@
     }
 }
 
-.rateLimitTable {
-    width: 100%;
-    border-collapse: collapse;
+.rateLimitScroll {
+    max-height: 360px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
 }
 
-.rateLimitRow {
-    border-top: 1px solid var(--border-primary);
+.rateLimitTableWrap {
+    min-width: 720px;
+    overflow: visible;
+}
 
+.rateLimitTable {
+    width: 100%;
+    table-layout: fixed;
+    font-size: $font-size-xs;
+    font-variant-numeric: tabular-nums;
+
+    th,
     td {
-        padding: $spacing-sm $spacing-xs;
-        vertical-align: middle;
+        padding: 8px 12px;
+        overflow-wrap: anywhere;
     }
 
-    &:first-child {
-        border-top: none;
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        white-space: normal;
     }
 }
 
 .rateLimitIP {
     font-family: $font-mono;
-    font-size: $font-size-sm;
-    font-weight: $font-weight-semibold;
+    font-weight: $font-weight-medium;
 }
 
-.rateLimitExpiry {
-    font-size: $font-size-sm;
-    color: var(--text-secondary);
-    flex: 1;
-    text-align: left;
-    padding-left: $spacing-md;
+.rateLimitIPColumn {
+    width: 240px;
+}
 
-    > div + div {
-        margin-top: 4px;
-    }
+.rateLimitTimeColumn {
+    width: 184px;
+}
+
+.rateLimitCountColumn {
+    width: 110px;
+}
+
+.rateLimitActionColumn {
+    width: 124px;
 }
 
 .rateLimitHistory {
@@ -555,7 +589,7 @@
 }
 
 .rateLimitHistoryTitle {
-    margin-bottom: $spacing-sm;
+    margin: 0 0 $spacing-sm;
     font-size: $font-size-sm;
     font-weight: $font-weight-semibold;
     color: var(--text-primary);

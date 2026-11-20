@@ -1,6 +1,3 @@
-import {describe, expect, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-import {fileURLToPath, URL} from 'node:url'
 import {hasImageArtifactCacheChanges} from '@/hooks/useVisualConfig'
 import {normalizePluginReleaseVersions} from '@/pages/pluginReleaseVersions'
 import {getPluginLogo} from '@/pages/pluginResources'
@@ -9,6 +6,10 @@ import {modelsApi} from '@/services/api/models'
 import {buildPluginStoreReleasesPath, type PluginEntry, type PluginStoreEntry} from '@/services/api/plugins'
 import {useModelsStore} from '@/stores/useModelsStore'
 import {summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
+import {describe, expect, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
+import {fileURLToPath, URL} from 'node:url'
+import {expectSourceToContain} from './sourceContractAssertions'
 
 const systemPagePath        = fileURLToPath(new URL('../src/pages/SystemPage.tsx', import.meta.url))
 const systemPageSource      = readFileSync(systemPagePath, 'utf8')
@@ -180,12 +181,14 @@ describe('management authentication lifecycle', () => {
         expect(vendorSectionSource).toContain('useAuthFilesPrefixProxyEditor')
         expect(vendorSectionSource).toContain('deriveAuthFileIdentity')
         expect(vendorSectionSource).toContain('uploadInFlight')
-        expect(vendorSectionSource).not.toContain('AuthFileModelsModal')
+        expect(vendorSectionSource).toContain('AuthFileModelsModal')
+        expect(vendorSectionSource).toContain('onModels={() => setModelsFileName(file.name)}')
     })
 })
 
 describe('usage credential filters', () => {
     test('keeps colliding source kinds as separate filter options', () => {
+        // noinspection SpellCheckingInspection
         expect(summaryToCredentialEntries({
                                               'test:abcd...tail [api_key]': {
                                                   success: 1,
@@ -257,45 +260,68 @@ describe('visual config concurrent edits', () => {
     })
 })
 
-describe('plugin release versions', () => {
-    test('uses the authenticated plugin-store endpoint and normalizes its response', () => {
-        expect(buildPluginStoreReleasesPath('sample-provider', 'private-source')).toBe(
-            '/plugin-store/sample-provider/releases?source=private-source',
+describe(
+    'plugin release versions',
+    () => {
+        test(
+            'uses the authenticated plugin-store endpoint and normalizes its response',
+            () => {
+                expect(buildPluginStoreReleasesPath('sample-provider', 'private-source')).toBe(
+                    '/plugin-store/sample-provider/releases?source=private-source',
+                )
+                expect(normalizePluginReleaseVersions([
+                                                          {
+                                                              tag_name: 'v1.2.3',
+                                                              name: 'Version 1.2.3',
+                                                              published_at: '2026-07-31T00:00:00Z',
+                                                              prerelease: false,
+                                                              html_url: (
+                                                                  'https://github.com/example/sample/releases/tag/v1.' +
+                                                                  '2.3'
+                                                              ),
+                                                              asset_names: ['sample_1.2.3_linux_amd64.zip'],
+                                                          },
+                                                      ])).toEqual(
+                    [
+                        {
+                            tagName: 'v1.2.3',
+                            name: 'Version 1.2.3',
+                            publishedAt: '2026-07-31T00:00:00Z',
+                            prerelease: false,
+                            htmlUrl:
+                                'https://github.com/example/sample/releases/tag/v1.2.3',
+                            assetNames: ['sample_1.2.3_linux_amd64.zip'],
+                        },
+                    ])
+            },
         )
-        expect(normalizePluginReleaseVersions([
-                                                  {
-                                                      tag_name: 'v1.2.3',
-                                                      name: 'Version 1.2.3',
-                                                      published_at: '2026-07-31T00:00:00Z',
-                                                      prerelease: false,
-                                                      html_url: 'https://github.com/example/sample/releases/tag/v1.2.3',
-                                                      asset_names: ['sample_1.2.3_linux_amd64.zip'],
-                                                  },
-                                              ])).toEqual([
-                                                              {
-                                                                  tagName: 'v1.2.3',
-                                                                  name: 'Version 1.2.3',
-                                                                  publishedAt: '2026-07-31T00:00:00Z',
-                                                                  prerelease: false,
-                                                                  htmlUrl: 'https://github.com/example/sample/releases/tag/v1.2.3',
-                                                                  assetNames: ['sample_1.2.3_linux_amd64.zip'],
-                                                              },
-                                                          ])
-    })
 
-    test('fills installed plugin logos only from an unambiguous matching store entry', () => {
-        const plugin = {
-            id: 'sample', logo: '', metadata: {logo: '', github_repository: 'Example/Sample.git'},
-        } as PluginEntry
-        const first = {id: 'sample', repository: 'https://github.com/example/sample', logo: '/sample.svg'} as PluginStoreEntry
-        const other = {id: 'sample', repository: 'https://github.com/other/sample', logo: '/other.svg'} as PluginStoreEntry
-        expect(getPluginLogo(plugin, [first, other])).toBe('/sample.svg')
-        expect(getPluginLogo({...plugin, metadata: {...plugin.metadata!, github_repository: ''}}, [first, other])).toBe('')
-        expect(getPluginLogo({...plugin, logo: '/installed.svg'}, [first])).toBe('/installed.svg')
-        expect(getPluginLogo({...plugin, metadata: null}, [first])).toBe('/sample.svg')
-        const page = readFileSync(new URL('../src/pages/PluginManagementPage.tsx', import.meta.url), 'utf8')
-        expect(page).toContain('pluginStoreApi.list({signal: controller.signal, timeout: 15_000})')
-        expect(page).toContain('resolvePluginAssetURL(getPluginLogo(plugin, logoEntries), apiBase)')
-        expect(page).toContain('currentStoreLogos?.error')
-    })
-})
+        test('fills installed plugin logos only from an unambiguous matching store entry', () => {
+            const plugin = {
+                id: 'sample', logo: '', metadata: { logo: '', github_repository: 'Example/Sample.git' },
+            } as PluginEntry
+            const first  = {
+                id: 'sample',
+                repository: 'https://github.com/example/sample',
+                logo: '/sample.svg',
+            } as PluginStoreEntry
+            const other  = {
+                id: 'sample',
+                repository: 'https://github.com/other/sample',
+                logo: '/other.svg',
+            } as PluginStoreEntry
+            expect(getPluginLogo(plugin, [first, other])).toBe('/sample.svg')
+            expect(getPluginLogo(
+                { ...plugin, metadata: { ...plugin.metadata!, github_repository: '' } },
+                [first, other],
+            ))
+                .toBe('')
+            expect(getPluginLogo({ ...plugin, logo: '/installed.svg' }, [first])).toBe('/installed.svg')
+            expect(getPluginLogo({ ...plugin, metadata: null }, [first])).toBe('/sample.svg')
+            const page = readFileSync(new URL('../src/pages/PluginManagementPage.tsx', import.meta.url), 'utf8')
+            expectSourceToContain(page, 'pluginStoreApi.list({signal: controller.signal, timeout: 15_000})')
+            expect(page).toContain('resolvePluginAssetURL(getPluginLogo(plugin, logoEntries), apiBase)')
+            expect(page).toContain('currentStoreLogos?.error')
+        })
+    },
+)

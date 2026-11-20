@@ -1,6 +1,7 @@
 import {Button} from '@/components/ui/Button'
-import {IconChevronLeft, IconDownload, IconExternalLink} from '@/components/ui/icons'
+import {IconDownload, IconExternalLink} from '@/components/ui/icons'
 import {Modal} from '@/components/ui/Modal'
+import {Pagination} from '@/components/ui/Pagination'
 import {apiClient} from '@/services/api/client'
 import type {Release, ReleasesTarget} from '@/services/api/releases'
 import {releasesApi} from '@/services/api/releases'
@@ -19,25 +20,32 @@ const OFFICIAL_REPOSITORIES: Record<ReleasesTarget, string> = {
     cpa: 'Pyrokine/CLIProxyAPI',
     panel: 'Pyrokine/Cli-Proxy-API-Management-Center',
 }
-const BREAKING_PATTERN                                      = /\b(?:breaking|migration|migrate|incompatible)\b|⚠/i
-const NON_BREAKING_PATTERN                                  = new RegExp(
+
+const BREAKING_PATTERN = /\b(?:breaking|migration|migrate|incompatible)\b|不兼容|不相容|破坏性变更|破壞性變更|⚠/i
+
+const NON_BREAKING_PATTERN = new RegExp(
     String.raw`\b(?:non[- ]breaking|(?:no|without)\s+(?:a\s+)?(?:(?:schema|database|data)\s+)?` +
     String.raw`(?:migrations?(?!\s+(?:path|support))|breaking\s+changes?|incompatibility|incompatibilities)|` +
     String.raw`(?:does\s+not|doesn't)\s+(?:add|require|introduce)\s+(?:a\s+)?` +
     String.raw`(?:(?:schema|database|data)\s+)?migration|` +
     String.raw`(?:(?:schema|database|data)\s+)?migration\s+(?:is\s+)?not\s+(?:required|needed)|` +
-    String.raw`not\s+incompatible)\b`,
+    String.raw`not\s+incompatible)\b|` +
+    '(?:无|無|没有|沒有)(?:不兼容|不相容|破坏性|破壞性)(?:变更|變更)',
     'gi',
 )
-const COMPATIBILITY_PATTERN                                 = new RegExp(
+
+const COMPATIBILITY_PATTERN = new RegExp(
     String.raw`\b(?:required|requires|compatible|compatibility|` +
     String.raw`incompatible|incompatibility|breaking|migration|migrate)\b|` +
     '要求|兼容|相容|不兼容|迁移|遷移|⚠',
     'i',
 )
-const UPDATE_POLL_INTERVAL                                  = 2000
-const UPDATE_POLL_RECONNECT_TIMEOUT                         = 120000
-const PAGE_SIZE                                             = 10
+
+const UPDATE_POLL_INTERVAL = 2000
+
+const UPDATE_POLL_RECONNECT_TIMEOUT = 120000
+
+const PAGE_SIZE = 10
 
 /* ---------- types ---------- */
 
@@ -86,8 +94,34 @@ function extractBreakingHints(body: string): string[] {
     if (!body) {
         return []
     }
-    const lines = body.split('\n')
-    return lines.filter((line) => BREAKING_PATTERN.test(line.replace(NON_BREAKING_PATTERN, ''))).map((l) => l.trim())
+    const hints: string[]            = []
+    let breakingLevel: number | null = null
+    for (const raw of body.split('\n')) {
+        const line = raw.trim()
+        if (!line) {
+            continue
+        }
+        const statement = line.replace(NON_BREAKING_PATTERN, '')
+        const breaking  = BREAKING_PATTERN.test(statement)
+        const heading   = line.match(/^(?<markers>#{1,6})\s+(?<heading>.+)/)
+        if (heading) {
+            if (breakingLevel !== null && heading[1].length <= breakingLevel) {
+                breakingLevel = null
+            }
+            // noinspection PointlessBooleanExpressionJS
+            if (breaking && breakingLevel === null) {
+                breakingLevel = heading[1].length
+            }
+            if (breaking && /[:：]\s*\S/.test(heading[2])) {
+                hints.push(line)
+            }
+            continue
+        }
+        if (breaking || (breakingLevel !== null && statement === line)) {
+            hints.push(line)
+        }
+    }
+    return hints
 }
 
 /** Classify a release body line into features / fixes / other for side-by-side display. */
@@ -100,10 +134,10 @@ interface ReleaseSections {
 const FEATURE_SECTION_PATTERN = new RegExp(
     String.raw`^(?:#+\s*)?(?:features?|enhancements?|` +
     String.raw`新增|特性|功能|added|new|what's changed|whats changed|` +
-    String.raw`更新内容|变更)\b`,
+    String.raw`更新内容|更新內容|变更|變更)(?=$|[\s:：])`,
     'i',
 )
-const FIX_SECTION_PATTERN     = /^(?:#+\s*)?(?:fix(?:es)?|bug\s*fix(?:es)?|修复|bugs?)\b/i
+const FIX_SECTION_PATTERN     = /^(?:#+\s*)?(?:fix(?:es)?|bug\s*fix(?:es)?|修复|修復|bugs?)(?=$|[\s:：])/i
 
 function classifyReleaseBody(body: string): ReleaseSections {
     const sections: ReleaseSections = { features: [], fixes: [], other: [] }
@@ -193,7 +227,16 @@ function extractRequiredServerVersion(body: string): string | null {
     if (!body) {
         return null
     }
-    const patterns = [
+    const plainBody = body.replace(/`/g, '')
+    const patterns  = [
+        // noinspection LongLine
+        new RegExp(
+            '\\bminimum\\s+(?:backend|server)\\s+version(?:\\s+for\\s+the\\s+' +
+            'management\\s+panel)?\\s*(?:remains|is|[:：])\\s*v?(?<version>[0-' +
+            '9][\\w.-]*)',
+            'i',
+        ),
+        /最低(?:后端|後端)版本\s*(?:保持|为|為|是|[:：])\s*v?(?<version>[0-9][\w.-]*)/i,
         /Required\s+server\s*[:：]\s*(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
         /requires\s+(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
         /要求的后端版本\s*[:：]\s*(?:CLIProxyAPI\s*)?v?(?<version>[0-9][\w.-]*)/i,
@@ -201,7 +244,7 @@ function extractRequiredServerVersion(body: string): string | null {
         /要求.*(?:后端|後端|server|CLIProxyAPI).*v?(?<version>[0-9][\w.-]*)/i,
     ]
     for (const pattern of patterns) {
-        const match = body.match(pattern)
+        const match = plainBody.match(pattern)
         if (match?.groups?.version) {
             return `v${match.groups.version.replace(/^v/i, '')}`
         }
@@ -227,33 +270,45 @@ function formatDate(iso: string, locale: string): string {
 /* ---------- component ---------- */
 
 export function VersionHistoryModal({ open, onClose, currentVersion, target, repository }: VersionHistoryModalProps) {
-    const { t, i18n }                            = useTranslation()
-    const { showConfirmation, showNotification } = useNotificationStore()
-    const serverVersion                          = useAuthStore((state) => state.serverVersion)
-    const refreshServerVersion                   = useAuthStore((state) => state.refreshServerVersion)
-    const authGeneration                         = apiClient.getAuthGeneration()
+    const { t, i18n } = useTranslation()
 
-    const [releases, setReleases]   = useState<Release[]>([])
-    const [loading, setLoading]     = useState(false)
-    const [error, setError]         = useState<string | null>(null)
+    const { showConfirmation, showNotification, addPersistentNotification } = useNotificationStore()
+
+    const serverVersion = useAuthStore((state) => state.serverVersion)
+
+    const refreshServerVersion = useAuthStore((state) => state.refreshServerVersion)
+
+    const authGeneration = apiClient.getAuthGeneration()
+
+    const [releases, setReleases] = useState<Release[]>([])
+
+    const [loading, setLoading] = useState(false)
+
+    const [error, setError] = useState<string | null>(null)
+
     const [pageIndex, setPageIndex] = useState(0)
 
     // Update progress
-    const [updateStatus, setUpdateStatus]       = useState<UpdateStatus | null>(null)
+    const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+
     const [updatingVersion, setUpdatingVersion] = useState<string | null>(null)
+
     const [checkingVersion, setCheckingVersion] = useState<string | null>(null)
-    const [pollingReady, setPollingReady]       = useState(false)
-    const [pollError, setPollError]             = useState<string | null>(null)
+
+    const [pollingReady, setPollingReady] = useState(false)
+
+    const [pollError, setPollError] = useState<string | null>(null)
 
     // Fetch releases when modal opens
     const viewGeneration = useRef(0)
+
     const submittedUpdate = useRef<{
-        authGeneration: number
-        visible: boolean
-        status: UpdateStatus
-        pollError: string | null
-        pollingReady: boolean
-    } | null>(null)
+                                       authGeneration: number
+                                       visible: boolean
+                                       status: UpdateStatus
+                                       pollError: string | null
+                                       pollingReady: boolean
+                                   } | null>(null)
     if (submittedUpdate.current) {
         if (submittedUpdate.current.authGeneration !== authGeneration) {
             submittedUpdate.current = null
@@ -265,14 +320,21 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         viewGeneration.current += 1
         submittedUpdate.current = null
     }, [])
-    const [previousView, setPreviousView] = useState({open: false, target, authGeneration})
-    if (open !== previousView.open || target !== previousView.target || authGeneration !== previousView.authGeneration) {
+    const [previousView, setPreviousView] = useState({ open: false, target, authGeneration })
+    if (open !==
+        previousView.open ||
+        target !==
+        previousView.target ||
+        authGeneration !==
+        previousView.authGeneration) {
         viewGeneration.current += 1
-        setPreviousView({open, target, authGeneration})
+        setPreviousView({ open, target, authGeneration })
         const retained = open && target === 'cpa' ? submittedUpdate.current : null
         setCheckingVersion(null)
         setUpdateStatus(retained?.status ?? null)
-        setUpdatingVersion(retained && !['done', 'error', 'idle'].includes(retained.status.status) ? retained.status.target_version : null)
+        setUpdatingVersion(retained && !['done', 'error', 'idle'].includes(retained.status.status) ?
+                           retained.status.target_version :
+                           null)
         setPollError(retained?.pollError ?? null)
         setPollingReady(open && target === 'cpa' && (retained?.pollingReady ?? true))
         if (open) {
@@ -287,13 +349,42 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         }
         let cancelled = false
 
-        releasesApi
-            .list(1, 100, target)
+        const loadReleases = async () => {
+            const releases: Release[] = []
+            const seen                = new Set<string>()
+            let page                  = 1
+            while (true) {
+                const response = await releasesApi.list(page, 100, target)
+                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
+                    return null
+                }
+                if (!Array.isArray(response.releases) || response.page !== page || response.per_page !== 100 ||
+                    !Number.isSafeInteger(response.total) || response.total < 0 ||
+                    response.releases.some((release) => !release.tag_name || seen.has(release.tag_name))) {
+                    throw new Error(t('version_history.pagination_incomplete'))
+                }
+                for (const release of response.releases) {
+                    seen.add(release.tag_name);
+                    releases.push(release)
+                }
+                if (releases.length >= response.total) {
+                    return releases
+                }
+                if (response.releases.length === 0) {
+                    throw new Error(t('version_history.pagination_incomplete'))
+                }
+                page += 1
+            }
+        }
+        loadReleases()
             .then((res) => {
                 if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
                     return
                 }
-                setReleases(res.releases ?? [])
+                if (res === null) {
+                    return
+                }
+                setReleases(res)
                 setPageIndex(0)
             })
             .catch((err) => {
@@ -311,7 +402,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         return () => {
             cancelled = true
         }
-    }, [authGeneration, open, target])
+    }, [authGeneration, open, target, t])
 
     // Flat sorted list of all non-draft releases (newest first)
     const sortedReleases = useMemo(() => {
@@ -328,7 +419,8 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
     }, [releases])
 
     const totalPages    = Math.max(1, Math.ceil(sortedReleases.length / PAGE_SIZE))
-    const pageReleases  = sortedReleases.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE)
+    const safePageIndex = Math.min(pageIndex, totalPages - 1)
+    const pageReleases  = sortedReleases.slice(safePageIndex * PAGE_SIZE, (safePageIndex + 1) * PAGE_SIZE)
     const totalReleases = sortedReleases.length
 
     const currentParsed = useMemo(() => parseVersion(currentVersion), [currentVersion])
@@ -387,129 +479,163 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
               updateStatus?.status === 'draining' ||
               updateStatus?.status === 'replacing'
 
-    useEffect(() => {
-        if (!open || target !== 'cpa' || !pollingReady) {
-            return
-        }
-
-        const controller = new AbortController()
-        const expectedAttemptID = updateStatus?.attempt_id
-        const expectedVersion = updateStatus?.target_version ?? updatingVersion
-        const attempt = submittedUpdate.current
-        if (attempt) {
-            attempt.pollingReady = true
-        }
-        let timer: ReturnType<typeof setTimeout> | null = null
-        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-        let active = true
-        const isCurrent = () => active && !controller.signal.aborted && authGeneration === apiClient.getAuthGeneration() &&
-                                submittedUpdate.current === attempt
-
-        const poll = async () => {
-            if (!isCurrent()) {
+    useEffect(
+        () => {
+            if (!open || target !== 'cpa' || !pollingReady) {
                 return
             }
-            try {
-                const status = await updateApi.status({signal: controller.signal, attemptID: expectedAttemptID})
+
+            const controller        = new AbortController()
+            const expectedAttemptID = updateStatus?.attempt_id
+            const expectedVersion   = updateStatus?.target_version ?? updatingVersion
+            const attempt           = submittedUpdate.current
+            if (attempt) {
+                attempt.pollingReady = true
+            }
+            let timer: ReturnType<typeof setTimeout> | null          = null
+            let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+            let active                                               = true
+            const isCurrent                                          = () => active &&
+                                                                             !controller.signal.aborted &&
+                                                                             authGeneration ===
+                                                                             apiClient.getAuthGeneration() &&
+                                                                             submittedUpdate.current ===
+                                                                             attempt
+
+            const poll = async () => {
                 if (!isCurrent()) {
                     return
                 }
-                if (expectedAttemptID && (status.attempt_id !== expectedAttemptID ||
-                    status.target_version !== expectedVersion || status.status === 'idle' || status.state_available === false)) {
-                    throw new Error(t('version_history.status_attempt_unconfirmed'))
-                }
-                if (reconnectTimer !== null) {
-                    clearTimeout(reconnectTimer)
-                    reconnectTimer = null
-                }
-                if (attempt) {
-                    attempt.status = status
-                    attempt.pollError = null
-                    attempt.pollingReady = !['done', 'error', 'idle'].includes(status.status)
-                }
-                setPollError(null)
-                setUpdateStatus(status)
-                if (status.status === 'done') {
-                    try {
-                        await refreshServerVersion()
-                    } catch (err) {
-                        if (isCurrent()) {
-                            showNotification(t('version_history.status_version_refresh_failed', {
-                                error: err instanceof Error ? err.message : String(err),
-                            }), 'error')
-                        }
-                    }
+                try {
+                    const status = await updateApi.status({ signal: controller.signal, attemptID: expectedAttemptID })
                     if (!isCurrent()) {
                         return
                     }
-                }
-                if (status.status === 'done' || status.status === 'error' || status.status === 'idle') {
-                    setPollingReady(false)
-                    setUpdatingVersion(null)
-                    if (updatingVersion && status.status === 'done') {
-                        showNotification(status.message, 'success')
-                    } else if (updatingVersion && status.status === 'error') {
-                        showNotification(status.message, 'error')
+                    if (expectedAttemptID && (status.attempt_id !==
+                                              expectedAttemptID ||
+                                              status.target_version !==
+                                              expectedVersion ||
+                                              status.status ===
+                                              'idle' ||
+                                              status.state_available ===
+                                              false)) {
+                        // noinspection ExceptionCaughtLocallyJS
+                        throw new Error(t('version_history.status_attempt_unconfirmed'))
                     }
-                    return
-                }
-            } catch (err: unknown) {
-                if (!isCurrent()) {
-                    return
-                }
-                const message = err instanceof Error ? err.message : String(err)
-                if (attempt) {
-                    attempt.pollError = message
-                }
-                setPollError(message)
-                if (err instanceof Error && 'status' in err && (err.status === 401 || err.status === 403)) {
+                    if (reconnectTimer !== null) {
+                        clearTimeout(reconnectTimer)
+                        reconnectTimer = null
+                    }
                     if (attempt) {
-                        attempt.pollingReady = false
+                        attempt.status       = status
+                        attempt.pollError    = null
+                        attempt.pollingReady = !['done', 'error', 'idle'].includes(status.status)
                     }
-                    setPollingReady(false)
-                    return
-                }
-                if (reconnectTimer === null) {
-                    reconnectTimer = setTimeout(() => {
+                    setPollError(null)
+                    setUpdateStatus(status)
+                    if (status.status === 'done') {
+                        try {
+                            await refreshServerVersion()
+                        } catch (err) {
+                            if (isCurrent()) {
+                                showNotification(t('version_history.status_version_refresh_failed', {
+                                    error: err instanceof Error ? err.message : String(err),
+                                }), 'error')
+                            }
+                        }
                         if (!isCurrent()) {
                             return
                         }
+                    }
+                    if (status.status === 'done' || status.status === 'error' || status.status === 'idle') {
+                        setPollingReady(false)
+                        setUpdatingVersion(null)
+                        if (updatingVersion && status.status === 'done') {
+                            showNotification(status.message, 'success')
+                            addPersistentNotification(status.message, 'success', 'release')
+                        } else if (updatingVersion && status.status === 'error') {
+                            const message = status.result_code === 'data_compatibility_failed'
+                                            ? t('version_history.status_data_compatibility_failed') : status.message
+                            showNotification(message, 'error')
+                            addPersistentNotification(message, 'error', 'release')
+                        }
+                        return
+                    }
+                } catch (err: unknown) {
+                    if (!isCurrent()) {
+                        return
+                    }
+                    const message = err instanceof Error ? err.message : String(err)
+                    if (attempt) {
+                        attempt.pollError = message
+                    }
+                    setPollError(message)
+                    if (err instanceof Error && 'status' in err && (err.status === 401 || err.status === 403)) {
                         if (attempt) {
                             attempt.pollingReady = false
                         }
                         setPollingReady(false)
-                        controller.abort()
-                        if (timer !== null) {
-                            clearTimeout(timer)
-                        }
-                    }, UPDATE_POLL_RECONNECT_TIMEOUT)
+                        return
+                    }
+                    if (reconnectTimer === null) {
+                        reconnectTimer = setTimeout(() => {
+                            if (!isCurrent()) {
+                                return
+                            }
+                            if (attempt) {
+                                attempt.pollingReady = false
+                            }
+                            setPollingReady(false)
+                            controller.abort()
+                            if (timer !== null) {
+                                clearTimeout(timer)
+                            }
+                        }, UPDATE_POLL_RECONNECT_TIMEOUT)
+                    }
                 }
+                timer = setTimeout(() => {
+                    void poll()
+                }, UPDATE_POLL_INTERVAL)
             }
+
             timer = setTimeout(() => {
                 void poll()
             }, UPDATE_POLL_INTERVAL)
-        }
 
-        timer = setTimeout(() => {
-            void poll()
-        }, UPDATE_POLL_INTERVAL)
-
-        return () => {
-            active = false
-            controller.abort()
-            if (timer !== null) {
-                clearTimeout(timer)
+            return () => {
+                active = false
+                controller.abort()
+                if (timer !== null) {
+                    clearTimeout(timer)
+                }
+                if (reconnectTimer !== null) {
+                    clearTimeout(reconnectTimer)
+                }
             }
-            if (reconnectTimer !== null) {
-                clearTimeout(reconnectTimer)
-            }
-        }
-    }, [authGeneration, open, pollingReady, refreshServerVersion, showNotification, t, target, updateStatus?.attempt_id, updateStatus?.target_version, updatingVersion])
+        },
+        [
+            addPersistentNotification,
+            authGeneration,
+            open,
+            pollingReady,
+            refreshServerVersion,
+            showNotification,
+            t,
+            target,
+            updateStatus?.attempt_id,
+            updateStatus?.target_version,
+            updatingVersion,
+        ],
+    )
 
     const handleUpdate = async (tag: string) => {
         const submittedView = viewGeneration.current
-        const isCurrent = () => open && submittedView === viewGeneration.current && authGeneration === apiClient.getAuthGeneration()
-        const direction = getUpdateDirection(tag)
+        const isCurrent     = () => open &&
+                                    submittedView ===
+                                    viewGeneration.current &&
+                                    authGeneration ===
+                                    apiClient.getAuthGeneration()
+        const direction     = getUpdateDirection(tag)
         if (!direction || checkingVersion || isUpdating || pollingReady || pollError || !isCurrent()) {
             return
         }
@@ -602,160 +728,199 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                 target: targetLabel,
             })
 
-            showConfirmation({
-                                 title: t(`version_history.${direction}`),
-                                 message: (
-                                     <div className={styles.updateConfirm}>
-                                         <p className={styles.confirmIntro}>{confirmTitle}</p>
-                                         {direction === 'install' && (
-                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
-                                                 {t('version_history.confirm_development_version', {
-                                                     version: currentVersion,
-                                                 })}
-                                             </div>
-                                         )}
-                                         <div className={styles.confirmRows}>
-                                             {rows.map((row) => (
-                                                 <div key={row.label} className={styles.confirmRow}>
-                                                     <span className={styles.confirmLabel}>{row.label}</span>
-                                                     <span className={styles.confirmValue}>{row.value}</span>
-                                                 </div>
-                                             ))}
-                                         </div>
-                                         {target === 'cpa' && compatibility?.requires_restart && (
-                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
-                                                 {t('version_history.confirm_requires_restart')}
-                                             </div>
-                                         )}
-                                         {compatibilityMessages.length > 0 && (
-                                             <div
-                                                 className={`${styles.confirmNotice} ${
-                                                     confirmDisabled ? styles.confirmDanger : styles.confirmInfo
-                                                 }`}
-                                             >
-                                                 <div className={styles.confirmNoticeTitle}>
-                                                     {t('version_history.confirm_compatibility')}
-                                                 </div>
-                                                 <ul className={styles.confirmList}>
-                                                     {compatibilityMessages.map((item, idx) => (
-                                                         <li key={idx}>{item}</li>
-                                                     ))}
-                                                 </ul>
-                                             </div>
-                                         )}
-                                         {compatibilityTips.length > 0 && (
-                                             <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
-                                                 <div className={styles.confirmNoticeTitle}>
-                                                     {t('version_history.confirm_release_notes')}
-                                                 </div>
-                                                 <ul className={styles.confirmList}>
-                                                     {compatibilityTips.map((item, idx) => (
-                                                         <li key={idx}>{item}</li>
-                                                     ))}
-                                                 </ul>
-                                             </div>
-                                         )}
-                                         {breakingHints.length > 0 && (
-                                             <div className={`${styles.confirmNotice} ${styles.confirmDanger}`}>
-                                                 <div className={styles.confirmNoticeTitle}>
-                                                     {t('version_history.downgrade_risk')}
-                                                 </div>
-                                                 <ul className={styles.confirmList}>
-                                                     {breakingHints.slice(0, 5).map((item, idx) => (
-                                                         <li key={idx}>{cleanReleaseLine(item)}</li>
-                                                     ))}
-                                                 </ul>
-                                             </div>
-                                         )}
-                                     </div>
-                                 ),
-                                 variant: isDowngrade ? 'danger' : 'primary',
-                                 confirmDisabled,
-                                 confirmText: t(`version_history.confirm_${direction}_to`, {version: tag}),
-                                 onConfirm: async () => {
-                                     if (!isCurrent()) {
-                                         return
-                                     }
-                                     if (target === 'cpa' && submittedUpdate.current &&
-                                         !['done', 'error', 'idle'].includes(submittedUpdate.current.status.status)) {
-                                         return
-                                     }
-                                     const attemptID = crypto.randomUUID().replace(/-/g, '')
-                                     const status: UpdateStatus = {
-                                         status: 'downloading', message: '', target_version: tag, percent: 0,
-                                         current_version: currentVersion, attempt_id: attemptID,
-                                     }
-                                     const attempt = {authGeneration, visible: true, status, pollError: null as string | null, pollingReady: false}
-                                     if (target === 'cpa') {
-                                         submittedUpdate.current = attempt
-                                     }
-                                     const ownsAttempt = () => submittedUpdate.current === attempt && authGeneration === apiClient.getAuthGeneration()
-                                     setUpdatingVersion(tag)
-                                     setPollingReady(false)
-                                     setPollError(null)
-                                     setUpdateStatus(status)
-                                     try {
-                                         if (target === 'panel') {
-                                             await updateApi.panelUpdate(tag)
-                                             if (!isCurrent()) {
-                                                 return
-                                             }
-                                             setUpdatingVersion(null)
-                                             setUpdateStatus({
-                                                                 status: 'done',
-                                                                 message: t(
-                                                                     'version_switcher.panel_updated',
-                                                                     { version: tag },
-                                                                 ),
-                                                                 target_version: tag,
-                                                                 percent: 100,
-                                                                 current_version: currentVersion,
-                                                             })
-                                             showNotification(
-                                                 t('version_switcher.panel_updated', { version: tag }),
-                                                 'success',
-                                             )
-                                             return
-                                         }
-                                         const result = await updateApi.trigger(tag, attemptID)
-                                         if (!ownsAttempt()) {
-                                             return
-                                         }
-                                         if (result.target_version !== tag || !/^[a-f0-9]{32}$/.test(result.attempt_id) ||
-                                             (compatibility?.supports_client_attempt_id === true && result.attempt_id !== attemptID)) {
-                                             throw new Error(t('version_history.status_attempt_unconfirmed'))
-                                         }
-                                         attempt.status = {...status, attempt_id: result.attempt_id}
-                                         attempt.pollingReady = true
-                                     } catch (err) {
-                                         if (target === 'cpa' ? !ownsAttempt() : !isCurrent()) {
-                                             return
-                                         }
-                                         const msg = err instanceof Error ? err.message : String(err)
-                                         const responseStatus = err instanceof Error && 'status' in err ? err.status : undefined
-                                         const explicitlyRejected = typeof responseStatus === 'number' && responseStatus >= 400 && responseStatus < 500 &&
-                                                                    ![408, 425, 429].includes(responseStatus)
-                                         if (target === 'cpa' && !explicitlyRejected) {
-                                             attempt.pollError = msg
-                                             attempt.pollingReady = true
-                                         } else {
-                                             attempt.status = {...status, status: 'error', message: msg}
-                                         }
-                                     }
-                                     if (target === 'cpa' ? !ownsAttempt() || !attempt.visible : !isCurrent()) {
-                                         return
-                                     }
-                                     setUpdateStatus(attempt.status)
-                                     setPollError(attempt.pollError)
-                                     setPollingReady(attempt.pollingReady)
-                                     if (attempt.status.status === 'error') {
-                                         setUpdatingVersion(null)
-                                         showNotification(attempt.status.message, 'error')
-                                     } else {
-                                         setUpdatingVersion(tag)
-                                     }
-                                 },
-                             })
+            showConfirmation(
+                {
+                    title: t(`version_history.${direction}`),
+                    message: (
+                        <div className={styles.updateConfirm}>
+                            <p className={styles.confirmIntro}>{confirmTitle}</p>
+                            {direction === 'install' && (
+                                <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                    {t('version_history.confirm_development_version', {
+                                        version: currentVersion,
+                                    })}
+                                </div>
+                            )}
+                            <div className={styles.confirmRows}>
+                                {rows.map((row) => (
+                                    <div key={row.label} className={styles.confirmRow}>
+                                        <span className={styles.confirmLabel}>{row.label}</span>
+                                        <span className={styles.confirmValue}>{row.value}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            {target === 'cpa' && compatibility?.requires_restart && (
+                                <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                    {t('version_history.confirm_requires_restart')}
+                                </div>
+                            )}
+                            {compatibilityMessages.length > 0 && (
+                                <div
+                                    className={`${styles.confirmNotice} ${
+                                        confirmDisabled ? styles.confirmDanger : styles.confirmInfo
+                                    }`}
+                                >
+                                    <div className={styles.confirmNoticeTitle}>
+                                        {t('version_history.confirm_compatibility')}
+                                    </div>
+                                    <ul className={styles.confirmList}>
+                                        {compatibilityMessages.map((item, idx) => (
+                                            <li key={idx}>{item}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {compatibilityTips.length > 0 && (
+                                <div className={`${styles.confirmNotice} ${styles.confirmWarning}`}>
+                                    <div className={styles.confirmNoticeTitle}>
+                                        {t('version_history.confirm_release_notes')}
+                                    </div>
+                                    <ul className={styles.confirmList}>
+                                        {compatibilityTips.map((item, idx) => (
+                                            <li key={idx}>{item}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {breakingHints.length > 0 && (
+                                <div className={`${styles.confirmNotice} ${styles.confirmDanger}`}>
+                                    <div className={styles.confirmNoticeTitle}>
+                                        {t('version_history.downgrade_risk')}
+                                    </div>
+                                    <ul className={styles.confirmList}>
+                                        {breakingHints.slice(0, 5).map((item, idx) => (
+                                            <li key={idx}>{cleanReleaseLine(item)}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    ),
+                    variant: isDowngrade ? 'danger' : 'primary',
+                    confirmDisabled,
+                    confirmText: t(`version_history.confirm_${direction}_to`, { version: tag }),
+                    onConfirm: async () => {
+                        if (!isCurrent()) {
+                            return
+                        }
+                        if (target === 'cpa' && submittedUpdate.current &&
+                            !['done', 'error', 'idle'].includes(submittedUpdate.current.status.status)) {
+                            return
+                        }
+                        const attemptID            = Array.from(
+                            crypto.getRandomValues(new Uint8Array(16)),
+                            (byte) => byte.toString(16).padStart(2, '0'),
+                        ).join('')
+                        const status: UpdateStatus = {
+                            status: 'downloading', message: '', target_version: tag, percent: 0,
+                            current_version: currentVersion, attempt_id: attemptID,
+                        }
+                        const attempt              = {
+                            authGeneration,
+                            visible: true,
+                            status,
+                            pollError: null as string | null,
+                            pollingReady: false,
+                        }
+                        if (target === 'cpa') {
+                            submittedUpdate.current = attempt
+                        }
+                        const ownsAttempt = () => submittedUpdate.current ===
+                                                  attempt &&
+                                                  authGeneration ===
+                                                  apiClient.getAuthGeneration()
+                        setUpdatingVersion(tag)
+                        setPollingReady(false)
+                        setPollError(null)
+                        setUpdateStatus(status)
+                        try {
+                            if (target === 'panel') {
+                                const result = await updateApi.panelUpdate(tag)
+                                if (!isCurrent()) {
+                                    return
+                                }
+                                const panelMessage = result?.alreadyCurrent
+                                                     ?
+                                                     `${t(
+                                                         'common.mutation_target_reached',
+                                                         { version: tag },
+                                                     )} ${t(
+                                                         'common.mutation_identity',
+                                                         {
+                                                             mutationId: result.mutation?.mutation_id ??
+                                                                         '—',
+                                                             requestId: result.mutation?.request_id ??
+                                                                        '—',
+                                                         },
+                                                     )}${result.mutation?.recovery ?
+                                                         ` ${t(`common.mutation_${result.mutation.recovery}`)}` :
+                                                         ''}`
+                                                     :
+                                                     t('version_switcher.panel_updated', { version: tag })
+                                setUpdatingVersion(null)
+                                setUpdateStatus({
+                                                    status: 'done',
+                                                    message: panelMessage,
+                                                    target_version: tag,
+                                                    percent: 100,
+                                                    current_version: currentVersion,
+                                                })
+                                showNotification(panelMessage, 'success')
+                                addPersistentNotification(panelMessage, 'success', 'release')
+                                return
+                            }
+                            const result = await updateApi.trigger(tag, attemptID)
+                            if (!ownsAttempt()) {
+                                return
+                            }
+                            if (result.target_version !==
+                                tag ||
+                                !/^[a-f0-9]{32}$/.test(result.attempt_id) ||
+                                (compatibility?.supports_client_attempt_id ===
+                                 true &&
+                                 result.attempt_id !==
+                                 attemptID)) {
+                                // noinspection ExceptionCaughtLocallyJS
+                                throw new Error(t('version_history.status_attempt_unconfirmed'))
+                            }
+                            attempt.status       = { ...status, attempt_id: result.attempt_id }
+                            attempt.pollingReady = true
+                        } catch (err) {
+                            if (target === 'cpa' ? !ownsAttempt() : !isCurrent()) {
+                                return
+                            }
+                            const msg                = err instanceof Error ? err.message : String(err)
+                            const responseStatus     = err instanceof Error && 'status' in err ?
+                                                       err.status :
+                                                       undefined
+                            const explicitlyRejected = typeof responseStatus ===
+                                                       'number' &&
+                                                       responseStatus >=
+                                                       400 &&
+                                                       responseStatus <
+                                                       500 &&
+                                                       ![408, 425, 429].includes(responseStatus)
+                            if (target === 'cpa' && !explicitlyRejected) {
+                                attempt.pollError    = msg
+                                attempt.pollingReady = true
+                            } else {
+                                attempt.status = { ...status, status: 'error', message: msg }
+                            }
+                        }
+                        if (target === 'cpa' ? !ownsAttempt() || !attempt.visible : !isCurrent()) {
+                            return
+                        }
+                        setUpdateStatus(attempt.status)
+                        setPollError(attempt.pollError)
+                        setPollingReady(attempt.pollingReady)
+                        if (attempt.status.status === 'error') {
+                            setUpdatingVersion(null)
+                            showNotification(attempt.status.message, 'error')
+                        } else {
+                            setUpdatingVersion(tag)
+                        }
+                    },
+                })
         } catch (err) {
             if (isCurrent()) {
                 const msg = err instanceof Error ? err.message : String(err)
@@ -766,10 +931,6 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                 setCheckingVersion(null)
             }
         }
-    }
-
-    const goPage = (delta: number) => {
-        setPageIndex((prev) => Math.max(0, Math.min(totalPages - 1, prev + delta)))
     }
 
     return (
@@ -804,14 +965,22 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     <div className={styles.updateInfo}>
                         <span className={styles.updateLabel}>
                             {pollError
-                             ? t(pollingReady ? 'version_history.status_reconnecting' : 'version_history.status_unconfirmed')
-                             : t(`version_history.status_${updateStatus?.status}`)}
+                             ?
+                             t(pollingReady ?
+                               'version_history.status_reconnecting' :
+                               'version_history.status_unconfirmed')
+                             :
+                             t(`version_history.status_${updateStatus?.status}`)}
                         </span>
                         {pollError
-                         ? <span className={styles.updateMessage}>
-                             {t(pollingReady ? 'version_history.status_poll_reconnecting' : 'version_history.status_poll_failed')}: {pollError}
+                         ?
+                         <span className={styles.updateMessage}>
+                             {t(pollingReady ?
+                                'version_history.status_poll_reconnecting' :
+                                'version_history.status_poll_failed')}: {pollError}
                          </span>
-                         : updateStatus?.message && <span className={styles.updateMessage}>{updateStatus.message}</span>}
+                         :
+                         updateStatus?.message && <span className={styles.updateMessage}>{updateStatus.message}</span>}
                         {pollError && !pollingReady && (
                             <Button variant='secondary' size='sm' onClick={() => setPollingReady(true)}>
                                 {t('version_history.status_poll_retry')}
@@ -977,7 +1146,10 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                                             <Button
                                                 variant={direction === 'downgrade' ? 'danger' : 'primary'}
                                                 size='sm'
-                                                disabled={isUpdating || pollingReady || Boolean(pollError) || Boolean(checkingVersion)}
+                                                disabled={isUpdating ||
+                                                          pollingReady ||
+                                                          Boolean(pollError) ||
+                                                          Boolean(checkingVersion)}
                                                 loading={isThisUpdating || isChecking}
                                                 onClick={() => handleUpdate(release.tag_name)}
                                             >
@@ -994,20 +1166,12 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                     {/* Pagination */}
                     {totalPages > 1 && (
                         <div className={styles.pager}>
-                            <Button variant='secondary' size='sm' disabled={pageIndex <= 0} onClick={() => goPage(-1)}>
-                                <IconChevronLeft size={14} />
-                            </Button>
-                            <div className={styles.pagerInfo}>
-                                {pageIndex + 1} / {totalPages}
-                            </div>
-                            <Button
-                                variant='secondary'
-                                size='sm'
-                                disabled={pageIndex >= totalPages - 1}
-                                onClick={() => goPage(1)}
-                            >
-                                <IconChevronLeft size={14} style={{ transform: 'rotate(180deg)' }} />
-                            </Button>
+                            <Pagination
+                                total={totalReleases}
+                                page={safePageIndex + 1}
+                                pageSize={PAGE_SIZE}
+                                onPageChange={(page) => setPageIndex(page - 1)}
+                            />
                         </div>
                     )}
                 </>

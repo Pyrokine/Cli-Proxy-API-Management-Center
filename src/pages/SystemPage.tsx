@@ -13,6 +13,7 @@ import iconOpenaiLight from '@/assets/icons/openai-light.svg'
 import iconQwen from '@/assets/icons/qwen.svg'
 import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
 import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {VersionHistoryModal} from '@/components/system/VersionHistoryModal'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
@@ -25,12 +26,14 @@ import {type Release, releasesApi} from '@/services/api/releases'
 import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useThemeStore} from '@/stores'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
 import {formatDateTime} from '@/utils/format'
+import {getErrorMessage} from '@/utils/helpers'
 import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
 import {classifyModels, getLocalizedOtherLabel} from '@/utils/models'
+import {redactSensitiveText} from '@/utils/redaction'
 import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Link} from 'react-router-dom'
+import {Link} from 'react-router'
 import styles from './SystemPage.module.scss'
 
 const MODEL_CATEGORY_ICONS: Record<string, string | { light: string; dark: string }> = {
@@ -61,65 +64,124 @@ const compareVersions = (latest?: string | null, current?: string | null) => {
 }
 
 export function SystemPage() {
-    const { t, i18n }                            = useTranslation()
+    const { t, i18n } = useTranslation()
+
     const { showNotification, showConfirmation } = useNotificationStore()
-    const addPersistentNotification              = useNotificationStore((s) => s.addPersistentNotification)
-    const resolvedTheme                          = useThemeStore((state) => state.resolvedTheme)
-    const transitionLayer                        = usePageTransitionLayer()
-    const pageLayerStatus                        = transitionLayer?.status ?? 'current'
-    const auth                                   = useAuthStore()
-    const config                                 = useConfigStore((state) => state.config)
-    const fetchConfig                            = useConfigStore((state) => state.fetchConfig)
 
-    const models                      = useModelsStore((state) => state.runtimeModels)
-    const modelsLoading               = useModelsStore((state) => state.runtimeLoading)
-    const modelsError                 = useModelsStore((state) => state.runtimeError)
+    const addPersistentNotification = useNotificationStore((s) => s.addPersistentNotification)
+
+    const resolvedTheme = useThemeStore((state) => state.resolvedTheme)
+
+    const transitionLayer = usePageTransitionLayer()
+
+    const pageLayerStatus = transitionLayer?.status ?? 'current'
+
+    const auth = useAuthStore()
+
+    const config = useConfigStore((state) => state.config)
+
+    const fetchConfig = useConfigStore((state) => state.fetchConfig)
+
+    const models = useModelsStore((state) => state.runtimeModels)
+
+    const modelsLoading = useModelsStore((state) => state.runtimeLoading)
+
+    const modelsError = useModelsStore((state) => state.runtimeError)
+
     const fetchRuntimeModelsFromStore = useModelsStore((state) => state.fetchRuntimeModels)
-    const modelsCache                 = useModelsStore((state) => state.runtimeCache)
 
-    const [modelStatus, setModelStatus]                                     = useState<{
+    const modelsCache = useModelsStore((state) => state.runtimeCache)
+
+    const [modelsCachePreference, setModelsCachePreference] = useState(() => {
+        try {
+            return { value: localStorage.getItem('cpa-models-cache-expiry') || '30000', error: '' }
+        } catch (error: unknown) {
+            return { value: '30000', error: getErrorMessage(error) }
+        }
+    })
+
+    const changeModelsCacheExpiry = (value: string) => {
+        try {
+            localStorage.setItem('cpa-models-cache-expiry', value)
+            setModelsCachePreference({ value, error: '' })
+            window.location.reload()
+        } catch (error: unknown) {
+            setModelsCachePreference((current) => ({ ...current, error: getErrorMessage(error) }))
+        }
+    }
+
+    const [modelStatus, setModelStatus] = useState<{
         type: 'success' | 'warning' | 'error' | 'muted'
         message: string
     }>()
-    const [modelRequestLoading, setModelRequestLoading]                     = useState(false)
-    const [checkingVersion, setCheckingVersion]                             = useState(false)
-    const [versionHistoryTarget, setVersionHistoryTarget]                   = useState<'panel' | 'cpa' | null>(null)
-    const [latestPanelVersion, setLatestPanelVersion]                       = useState<string | null>(null)
-    const [latestPanelBuildTime, setLatestPanelBuildTime]                   = useState<string | null>(null)
-    const [latestCpaVersion, setLatestCpaVersion]                           = useState<string | null>(null)
-    const [latestCpaBuildTime, setLatestCpaBuildTime]                       = useState<string | null>(null)
-    const [lastCheckTime, setLastCheckTime]                                 = useState<number | null>(null)
-    const [catalogMeta, setCatalogMeta]                                     = useState<ModelCatalogRefreshMeta | null>(
-        null)
-    const [catalogMetaError, setCatalogMetaError]                           = useState<string | null>(null)
-    const [catalogRefreshing, setCatalogRefreshing]                         = useState(false)
-    const [bannedIPs, setBannedIPs]                                         = useState<BannedIPEntry[]>([])
-    const [rateLimitEvents, setRateLimitEvents]                             = useState<RateLimitEventEntry[]>([])
-    const [rateLimitLoading, setRateLimitLoading]                           = useState(false)
-    const [rateLimitLoadState, setRateLimitLoadState]                       = useState<'loading' | 'loaded' | 'unavailable'>(
-        'loading')
-    const [rateLimitStale, setRateLimitStale]                               = useState(false)
-    const [rateLimitError, setRateLimitError]                               = useState('')
-    const [rateLimitClientIP, setRateLimitClientIP]                         = useState('')
-    const [rateLimitClientSource, setRateLimitClientSource]                 = useState('')
-    const [rateLimitPersistenceAvailable, setRateLimitPersistenceAvailable] = useState<boolean | null>(null)
-    const [unbanning, setUnbanning]                                         = useState<string | null>(null)
 
-    const modelsRequestGeneration    = useRef(0)
-    const versionCheckInFlight       = useRef<Promise<void> | null>(null)
+    const [modelRequestLoading, setModelRequestLoading] = useState(false)
+
+    const [checkingVersion, setCheckingVersion] = useState(false)
+
+    const [versionHistoryTarget, setVersionHistoryTarget] = useState<'panel' | 'cpa' | null>(null)
+
+    const [latestPanelVersion, setLatestPanelVersion] = useState<string | null>(null)
+
+    const [latestPanelBuildTime, setLatestPanelBuildTime] = useState<string | null>(null)
+
+    const [latestCpaVersion, setLatestCpaVersion] = useState<string | null>(null)
+
+    const [latestCpaBuildTime, setLatestCpaBuildTime] = useState<string | null>(null)
+
+    const [lastCheckTime, setLastCheckTime] = useState<number | null>(null)
+
+    const [catalogMeta, setCatalogMeta] = useState<ModelCatalogRefreshMeta | null>(
+        null)
+
+    const [catalogMetaError, setCatalogMetaError] = useState<string | null>(null)
+
+    const [catalogRefreshing, setCatalogRefreshing] = useState(false)
+
+    const [bannedIPs, setBannedIPs] = useState<BannedIPEntry[]>([])
+
+    const [rateLimitEvents, setRateLimitEvents] = useState<RateLimitEventEntry[]>([])
+
+    const [rateLimitLoading, setRateLimitLoading] = useState(false)
+
+    const [rateLimitLoadState, setRateLimitLoadState] = useState<'loading' | 'loaded' | 'unavailable'>(
+        'loading')
+
+    const [rateLimitStale, setRateLimitStale] = useState(false)
+
+    const [rateLimitError, setRateLimitError] = useState('')
+
+    const [rateLimitClientIP, setRateLimitClientIP] = useState('')
+
+    const [rateLimitClientSource, setRateLimitClientSource] = useState('')
+
+    const [rateLimitPersistenceAvailable, setRateLimitPersistenceAvailable] = useState<boolean | null>(null)
+
+    const [unbanning, setUnbanning] = useState<string | null>(null)
+
+    const modelsRequestGeneration = useRef(0)
+
+    const versionCheckInFlight = useRef<Promise<void> | null>(null)
+
     const notifiedRateLimitEventKeys = useRef<Set<string>>(new Set())
-    const rateLimitLoaded            = useRef(false)
-    const invalidateModelsRequest    = useCallback(() => {
+
+    const rateLimitLoaded = useRef(false)
+
+    const invalidateModelsRequest = useCallback(() => {
         ++modelsRequestGeneration.current
     }, [])
 
-    const otherLabel     = useMemo(() => getLocalizedOtherLabel(t), [t])
-    const groupedModels  = useMemo(() => classifyModels(models, { otherLabel, t }), [models, otherLabel, t])
+    const otherLabel = useMemo(() => getLocalizedOtherLabel(t), [t])
+
+    const groupedModels = useMemo(() => classifyModels(models, { otherLabel, t }), [models, otherLabel, t])
+
     const catalogSources = useMemo(() => {
-        if (!catalogMeta || catalogMeta.source === 'embed') {
+        if (!catalogMeta) {
             return []
         }
-        return Array.from(new Set([catalogMeta.source, ...catalogMeta.sources].filter((source) => source.trim())))
+        return Array.from(new Set([catalogMeta.source, ...catalogMeta.sources].filter((source) => source !==
+                                                                                                  'embed' &&
+                                                                                                  source.trim())))
     }, [catalogMeta])
 
     const renderCatalogSources = (sources: string[]) => {
@@ -142,40 +204,55 @@ export function SystemPage() {
         })
     }
 
-    const appVersion           = __APP_VERSION__ || t('system_info.version_unknown')
-    const apiVersion           = auth.serverVersion || t('system_info.version_unknown')
+    const appVersion = __APP_VERSION__ || t('system_info.version_unknown')
+
+    const apiVersion = auth.serverVersion || t('system_info.version_unknown')
+
     const requiredPanelVersion = auth.serverMinPanelVersion || '-'
-    const panelBuildTime       =
+
+    const panelBuildTime =
               typeof __BUILD_TIME__ === 'string' && __BUILD_TIME__ ? formatDateTime(__BUILD_TIME__, i18n.language) : '-'
-    const serverBuildTime      = auth.serverBuildDate ? formatDateTime(auth.serverBuildDate, i18n.language) : '-'
-    const panelReleaseStatus   =
+
+    const serverBuildTime = auth.serverBuildDate ? formatDateTime(auth.serverBuildDate, i18n.language) : '-'
+
+    const panelReleaseStatus =
               compareVersions(latestPanelVersion, appVersion) === 0
               ? t('system_info.latest_remote_current', { defaultValue: '已是线上最新' })
               : (latestPanelVersion ?? '-')
-    const cpaReleaseStatus     =
+
+    const cpaReleaseStatus =
               compareVersions(latestCpaVersion, apiVersion) === 0
               ? t('system_info.latest_remote_current', { defaultValue: '已是线上最新' })
               : (latestCpaVersion ?? '-')
 
-    const remoteManagement         = config?.remoteManagement
-    const remoteManagementLoaded   = config !== null
-    const panelRepository          =
+    const remoteManagement = config?.remoteManagement
+
+    const remoteManagementLoaded = config !== null
+
+    const panelRepository =
               remoteManagement?.panelGithubRepository || 'https://github.com/Pyrokine/Cli-Proxy-API-Management-Center'
-    const cpaRepository            = remoteManagement?.cpaGithubRepository || 'https://github.com/Pyrokine/CLIProxyAPI'
-    const autoCheckUpdateEnabled   = !remoteManagementLoaded ? null : (remoteManagement?.autoCheckUpdate ?? false)
-    const autoUpdatePanelEnabled   = !remoteManagementLoaded ? null : (remoteManagement?.autoUpdatePanel ?? true)
-    const autoUpdateCPAEnabled     = !remoteManagementLoaded ? null : (remoteManagement?.autoUpdateCPA ?? false)
+
+    const cpaRepository = remoteManagement?.cpaGithubRepository || 'https://github.com/Pyrokine/CLIProxyAPI'
+
+    const autoCheckUpdateEnabled = !remoteManagementLoaded ? null : (remoteManagement?.autoCheckUpdate ?? false)
+
+    const autoUpdatePanelEnabled = !remoteManagementLoaded ? null : (remoteManagement?.autoUpdatePanel ?? true)
+
+    const autoUpdateCPAEnabled = !remoteManagementLoaded ? null : (remoteManagement?.autoUpdateCPA ?? false)
+
     const autoCheckIntervalMinutes = !remoteManagementLoaded
                                      ? null
                                      : typeof remoteManagement?.checkInterval === 'number' &&
                                        remoteManagement.checkInterval >= MIN_UPDATE_CHECK_INTERVAL_MINUTES
                                        ? remoteManagement.checkInterval
                                        : DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES
-    const autoCheckIntervalLabel   =
+
+    const autoCheckIntervalLabel =
               autoCheckIntervalMinutes === null
               ? t('common.not_set')
               : t('system_info.check_interval_minutes', { count: autoCheckIntervalMinutes })
-    const getIconForCategory       = (categoryId: string): string | null => {
+
+    const getIconForCategory = (categoryId: string): string | null => {
         const iconEntry = MODEL_CATEGORY_ICONS[categoryId]
         if (!iconEntry) {
             return null
@@ -340,6 +417,69 @@ export function SystemPage() {
         [showConfirmation, showNotification, fetchRateLimitStatus, t],
     )
 
+    const bannedIPColumns: SheetColumn<BannedIPEntry>[] = [
+        {
+            key: 'ip',
+            header: t('system_info.rate_limit_column_ip'),
+            className: styles.rateLimitIP,
+            headerClassName: styles.rateLimitIPColumn,
+            cell: (entry) => entry.ip,
+        },
+        {
+            key: 'expires',
+            header: t('system_info.rate_limit_ban_expires'),
+            cell: (entry) => formatDateTime(entry.banned_until),
+        },
+        {
+            key: 'count',
+            header: t('system_info.rate_limit_column_count'),
+            headerClassName: styles.rateLimitCountColumn,
+            cell: (entry) => entry.ban_count ?? 0,
+        },
+        {
+            key: 'action',
+            header: t('common.action'),
+            headerClassName: styles.rateLimitActionColumn,
+            cell: (entry) => (
+                <Button
+                    variant='danger'
+                    size='xs'
+                    onClick={() => handleUnban(entry.ip)}
+                    disabled={unbanning === entry.ip}
+                >
+                    {t('system_info.rate_limit_unban')}
+                </Button>
+            ),
+        },
+    ]
+
+    const rateLimitEventColumns: SheetColumn<RateLimitEventEntry>[] = [
+        {
+            key: 'time',
+            header: t('system_info.rate_limit_column_time'),
+            headerClassName: styles.rateLimitTimeColumn,
+            cell: (entry) => formatDateTime(entry.occurred_at),
+        },
+        {
+            key: 'ip',
+            header: t('system_info.rate_limit_column_ip'),
+            className: styles.rateLimitIP,
+            headerClassName: styles.rateLimitIPColumn,
+            cell: (entry) => entry.ip,
+        },
+        {
+            key: 'type',
+            header: t('system_info.rate_limit_column_event'),
+            cell: (entry) => t(`system_info.rate_limit_event_${entry.type}`),
+        },
+        {
+            key: 'count',
+            header: t('system_info.rate_limit_column_count'),
+            headerClassName: styles.rateLimitCountColumn,
+            cell: (entry) => entry.ban_count ?? 0,
+        },
+    ]
+
     const handleClearLoginStorage = () => {
         showConfirmation({
                              title: t('system_info.clear_login_title', { defaultValue: 'Clear Login Storage' }),
@@ -456,16 +596,18 @@ export function SystemPage() {
             setCatalogMeta(meta)
             setCatalogMetaError(null)
             showNotification(t('system_info.catalog_refresh_success'), 'success')
+            addPersistentNotification(t('system_info.catalog_refresh_success'), 'success', 'model-update')
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error ?? '')
-            const suffix  = message ? `: ${message}` : ''
             setCatalogMetaError(message || 'failed')
-            showNotification(`${t('system_info.catalog_refresh_failed')}${suffix}`, 'error')
+            console.warn('Model catalog refresh failed:', redactSensitiveText(message || 'failed'))
+            showNotification(t('system_info.catalog_refresh_failed'), 'error')
+            addPersistentNotification(t('system_info.catalog_refresh_failed'), 'error', 'model-update')
             await fetchCatalogMeta()
         } finally {
             setCatalogRefreshing(false)
         }
-    }, [fetchCatalogMeta, showNotification, t])
+    }, [addPersistentNotification, fetchCatalogMeta, showNotification, t])
 
     useEffect(() => {
         if (pageLayerStatus !== 'current') {
@@ -735,11 +877,8 @@ export function SystemPage() {
                                     {t('system_info.models_cache_label', { defaultValue: '页面缓存' })}
                                 </span>
                                 <Select
-                                    value={localStorage.getItem('cpa-models-cache-expiry') || '30000'}
-                                    onChange={(val) => {
-                                        localStorage.setItem('cpa-models-cache-expiry', val)
-                                        window.location.reload()
-                                    }}
+                                    value={modelsCachePreference.value}
+                                    onChange={changeModelsCacheExpiry}
                                     options={[
                                         {
                                             value: '0',
@@ -776,6 +915,11 @@ export function SystemPage() {
                     }
                 >
                     <p className={styles.sectionDescription}>{t('system_info.models_desc')}</p>
+                    {modelsCachePreference.error &&
+                     <div className='error-box' role='alert'>{t(
+                         'system_info.models_cache_storage_error',
+                         { error: modelsCachePreference.error },
+                     )}</div>}
                     {modelsCache?.timestamp && (
                         <div className={styles.modelsRuntimeMeta}>
                             <p className={`${styles.sectionDescription} ${styles.cacheRefreshHint}`}>
@@ -789,7 +933,7 @@ export function SystemPage() {
                                     defaultValue: 'Page cache expires in {{time}}',
                                     time: (() => {
                                         const expiryMs = Number(
-                                            localStorage.getItem('cpa-models-cache-expiry') || '30000',
+                                            modelsCachePreference.value,
                                         )
                                         if (expiryMs <= 0) {
                                             return t('system_info.models_cache_off', { defaultValue: 'No cache' })
@@ -864,8 +1008,11 @@ export function SystemPage() {
                      card) so operators see the backend sync state alongside the
                      model list it feeds. */}
                     {catalogMetaError && (
-                        <div className='error-box' style={{ marginTop: 12 }}>
-                            {catalogMetaError}
+                        <div className='error-box' style={{ marginTop: 12 }} role='alert'>
+                            <details className={styles.catalogErrorDetails}>
+                                <summary>{t('system_info.catalog_meta_failed')}</summary>
+                                <pre>{redactSensitiveText(catalogMetaError)}</pre>
+                            </details>
                         </div>
                     )}
                     {catalogMeta && (
@@ -916,7 +1063,12 @@ export function SystemPage() {
                             {catalogMeta.last_error && (
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.catalog_last_error')}</span>
-                                    <span className={styles.metaValue}>{catalogMeta.last_error}</span>
+                                    <div className={styles.metaValue}>
+                                        <details className={styles.catalogErrorDetails}>
+                                            <summary>{t('system_info.catalog_refresh_failed')}</summary>
+                                            <pre>{redactSensitiveText(catalogMeta.last_error)}</pre>
+                                        </details>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1007,18 +1159,22 @@ export function SystemPage() {
                 >
                     <p className={styles.sectionDescription}>{t('system_info.rate_limit_desc')}</p>
                     {rateLimitLoadState === 'unavailable' ? (
-                        <div className={styles.emptyStatePanel}>
+                        <div className={styles.emptyStatePanel} role='alert'>
                             <div className={styles.emptyStateTitle}>{t('system_info.rate_limit_unavailable')}</div>
-                            {rateLimitError ? <p className={styles.emptyStateText}>{rateLimitError}</p> : null}
+                            {rateLimitError ?
+                             <p className={styles.emptyStateText}>{redactSensitiveText(rateLimitError)}</p> :
+                             null}
                         </div>
                     ) : rateLimitLoadState === 'loading' ? null : (
                         <>
                             {rateLimitStale ? (
-                                <div className={styles.emptyStatePanel}>
+                                <div className={styles.emptyStatePanel} role='alert'>
                                     <div className={styles.emptyStateTitle}>
                                         {t('system_info.rate_limit_stale')}
                                     </div>
-                                    {rateLimitError ? <p className={styles.emptyStateText}>{rateLimitError}</p> : null}
+                                    {rateLimitError ?
+                                     <p className={styles.emptyStateText}>{redactSensitiveText(rateLimitError)}</p> :
+                                     null}
                                 </div>
                             ) : null}
                             <div className={styles.rateLimitHistory}>
@@ -1037,78 +1193,42 @@ export function SystemPage() {
                                     </p>
                                 ) : null}
                             </div>
-                            {bannedIPs.length === 0 ? (
-                                <div className={styles.emptyStatePanel}>
-                                    <div className={styles.emptyStateTitle}>
-                                        {t('system_info.rate_limit_no_banned')}
-                                    </div>
-                                </div>
-                            ) : (
-                                 <table className={styles.rateLimitTable}>
-                                     <tbody>
-                                     {bannedIPs.map((entry) => (
-                                         <tr key={entry.ip} className={styles.rateLimitRow}>
-                                             <td className={styles.rateLimitIP}>{entry.ip}</td>
-                                             <td className={styles.rateLimitExpiry}>
-                                                 <div>
-                                                     {t('system_info.rate_limit_ban_expires')}: {formatDateTime(
-                                                     entry.banned_until)}
-                                                 </div>
-                                                 <div>
-                                                     {t('system_info.rate_limit_ban_count', {
-                                                         count: entry.ban_count ?? 0,
-                                                     })}
-                                                 </div>
-                                             </td>
-                                             <td>
-                                                 <Button
-                                                     variant='danger'
-                                                     size='sm'
-                                                     onClick={() => handleUnban(entry.ip)}
-                                                     disabled={unbanning === entry.ip}
-                                                 >
-                                                     {t('system_info.rate_limit_unban')}
-                                                 </Button>
-                                             </td>
-                                         </tr>
-                                     ))}
-                                     </tbody>
-                                 </table>
-                             )}
-                            <div className={styles.rateLimitHistory}>
-                                <div className={styles.rateLimitHistoryTitle}>
-                                    {t('system_info.rate_limit_event_history')}
-                                </div>
-                                {rateLimitEvents.length === 0 ? (
-                                    <p className={styles.emptyStateText}>
-                                        {t('system_info.rate_limit_no_events')}
-                                    </p>
-                                ) : (
-                                     <table className={styles.rateLimitTable}>
-                                         <tbody>
-                                         {rateLimitEvents.map((entry) => (
-                                             <tr
-                                                 key={`${entry.type}-${entry.ip}-${entry.occurred_at}`}
-                                                 className={styles.rateLimitRow}
-                                             >
-                                                 <td className={styles.rateLimitIP}>{entry.ip}</td>
-                                                 <td className={styles.rateLimitExpiry}>
-                                                     <div>
-                                                         {t(`system_info.rate_limit_event_${entry.type}`)}
-                                                     </div>
-                                                     <div>{formatDateTime(entry.occurred_at)}</div>
-                                                     <div>
-                                                         {t('system_info.rate_limit_ban_count', {
-                                                             count: entry.ban_count ?? 0,
-                                                         })}
-                                                     </div>
-                                                 </td>
-                                             </tr>
-                                         ))}
-                                         </tbody>
-                                     </table>
-                                 )}
-                            </div>
+                            <section className={styles.rateLimitHistory} aria-labelledby='rate-limit-active-title'>
+                                <h3 id='rate-limit-active-title' className={styles.rateLimitHistoryTitle}>
+                                    {t('system_info.rate_limit_active')} ({bannedIPs.length})
+                                </h3>
+                                <Sheet
+                                    rows={bannedIPs}
+                                    columns={bannedIPColumns}
+                                    rowKey={(entry) => entry.ip}
+                                    status={bannedIPs.length > 0 ? 'ready' : 'empty'}
+                                    emptyText={t('system_info.rate_limit_no_banned')}
+                                    scrollClassName={styles.rateLimitScroll}
+                                    tableWrapClassName={styles.rateLimitTableWrap}
+                                    tableClassName={styles.rateLimitTable}
+                                    pagination
+                                    defaultPageSize={25}
+                                    pageSizeOptions={[25, 50, 100]}
+                                />
+                            </section>
+                            <section className={styles.rateLimitHistory} aria-labelledby='rate-limit-history-title'>
+                                <h3 id='rate-limit-history-title' className={styles.rateLimitHistoryTitle}>
+                                    {t('system_info.rate_limit_event_history')} ({rateLimitEvents.length})
+                                </h3>
+                                <Sheet
+                                    rows={rateLimitEvents}
+                                    columns={rateLimitEventColumns}
+                                    rowKey={(entry, index) => `${entry.type}-${entry.ip}-${entry.occurred_at}-${index}`}
+                                    status={rateLimitEvents.length > 0 ? 'ready' : 'empty'}
+                                    emptyText={t('system_info.rate_limit_no_events')}
+                                    scrollClassName={styles.rateLimitScroll}
+                                    tableWrapClassName={styles.rateLimitTableWrap}
+                                    tableClassName={styles.rateLimitTable}
+                                    pagination
+                                    defaultPageSize={25}
+                                    pageSizeOptions={[25, 50, 100]}
+                                />
+                            </section>
                         </>
                     )}
                 </Card>

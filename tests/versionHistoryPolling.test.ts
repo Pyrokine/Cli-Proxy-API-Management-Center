@@ -1,38 +1,60 @@
+import type {UpdateStatus} from '@/services/api/update'
 import {describe, expect, mock, test} from 'bun:test'
-import type {UpdateStatus} from '../src/services/api/update'
+import {readFileSync} from 'node:fs'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
-const file = 'components/system/VersionHistoryModal.tsx'
-const interval = sourceInitializer<number>(file, 'UPDATE_POLL_INTERVAL', {})
-const reconnectTimeout = sourceInitializer<number>(file, 'UPDATE_POLL_RECONNECT_TIMEOUT', {})
+const file                    = 'components/system/VersionHistoryModal.tsx'
+const interval                = sourceInitializer<number>(file, 'UPDATE_POLL_INTERVAL', {})
+const reconnectTimeout        = sourceInitializer<number>(file, 'UPDATE_POLL_RECONNECT_TIMEOUT', {})
 const replacing: UpdateStatus = {
     status: 'replacing', message: 'Restarting', target_version: 'v8.0.23-aug.3',
     current_version: '8.0.23-aug.2', percent: 80,
 }
-const done: UpdateStatus = {...replacing, status: 'done', message: 'Health checks passed', current_version: '8.0.23-aug.3', percent: 100}
+const done: UpdateStatus      = {
+    ...replacing,
+    status: 'done',
+    message: 'Health checks passed',
+    current_version: '8.0.23-aug.3',
+    percent: 100,
+}
 
 type StatusReply = UpdateStatus | Error | Promise<UpdateStatus>
 
 function harness(replies: StatusReply[], {
     open = true, target = 'cpa', initialStatus = replacing as UpdateStatus | null,
-    updatingVersion = replacing.target_version as string | null, versionError = false,
+    updatingVersion = replacing.target_version as string | null, versionError = false, locale,
 }: {
     open?: boolean
     target?: string
     initialStatus?: UpdateStatus | null
     updatingVersion?: string | null
     versionError?: boolean
+    locale?: 'zh-CN' | 'zh-TW' | 'en' | 'ru'
 } = {}) {
-    let now = 0
-    let generation = 0
-    let timerID = 0
-    const timers = new Map<number, {at: number; callback: () => void}>()
-    const state = {status: initialStatus, pollError: null as string | null, pollingReady: true, updatingVersion}
-    const submittedUpdate = {current: initialStatus ? {
-        authGeneration: generation, visible: true, status: initialStatus, pollError: null as string | null, pollingReady: true,
-    } : null}
-    const signals: AbortSignal[] = []
-    const status = mock(async ({signal}: {signal: AbortSignal}) => {
+    let now                         = 0
+    let generation                  = 0
+    let timerID                     = 0
+    const timers                    = new Map<number, { at: number; callback: () => void }>()
+    const state                     = {
+        status: initialStatus,
+        pollError: null as string | null,
+        pollingReady: true,
+        updatingVersion,
+    }
+    const submittedUpdate           = {
+        current: initialStatus ? {
+            authGeneration: generation,
+            visible: true,
+            status: initialStatus,
+            pollError: null as string | null,
+            pollingReady: true,
+        } : null,
+    }
+    const signals: AbortSignal[]    = []
+    const statusGet                 = mock(async (
+        _path: string,
+        { signal }: { signal: AbortSignal; params?: { attempt_id?: string } },
+    ) => {
         signals.push(signal)
         const reply = replies.shift()
         if (reply instanceof Error) {
@@ -41,37 +63,77 @@ function harness(replies: StatusReply[], {
         if (reply === undefined) {
             throw new Error('Unexpected status request')
         }
-        return await reply
+        return reply
     })
-    const refreshServerVersion = mock(async () => {
+    const statusApi                 = sourceInitializer<{
+        status: (options: { signal: AbortSignal; attemptID?: string }) => Promise<UpdateStatus>
+    }>('services/api/update.ts', 'updateApi', { apiClient: { get: statusGet } })
+    const status                    = mock(statusApi.status)
+    const dictionary                = locale ?
+                                      JSON.parse(readFileSync(new URL(
+                                          `../src/i18n/locales/${locale}.json`,
+                                          import.meta.url,
+                                      ), 'utf8')) as {
+                                          version_history: Record<string, string>
+                                      } :
+                                      undefined
+    const addPersistentNotification = mock((_message: string, _type: string, _category: string) => undefined)
+    const refreshServerVersion      = mock(async () => {
         if (versionError) {
             throw new Error('Version unavailable')
         }
     })
-    const trigger = mock(async () => undefined)
-    const panelUpdate = mock(async () => undefined)
-    const showNotification = mock((_message: string, _type: string) => undefined)
-    const effect = sourceCallback<() => (() => void) | undefined>(file, 'useEffect', {
-        open, target, pollingReady: true, isUpdating: initialStatus?.status === 'replacing', updateStatus: initialStatus,
-        currentVersion: replacing.current_version, updatingVersion,
-        UPDATE_POLL_INTERVAL: interval, UPDATE_POLL_RECONNECT_TIMEOUT: reconnectTimeout,
-        AbortController, refreshServerVersion,
-        authGeneration: generation, apiClient: {getAuthGeneration: () => generation}, submittedUpdate,
-        updateApi: {status, trigger, panelUpdate}, showNotification,
-        t: (key: string, values?: {error?: string}) => values?.error ? `${key}: ${values.error}` : key,
-        setUpdateStatus: (value: UpdateStatus | null) => { state.status = value },
-        setPollError: (value: string | null) => { state.pollError = value },
-        setPollingReady: (value: boolean) => { state.pollingReady = value },
-        setUpdatingVersion: (value: string | null) => { state.updatingVersion = value },
+    const trigger                   = mock(async () => undefined)
+    const panelUpdate               = mock(async () => undefined)
+    const showNotification          = mock((_message: string, _type: string) => undefined)
+    const effect                    = sourceCallback<() => (() => void) | undefined>(file, 'useEffect', {
+        open,
+        target,
+        pollingReady: true,
+        isUpdating: initialStatus?.status === 'replacing',
+        updateStatus: initialStatus,
+        currentVersion: replacing.current_version,
+        updatingVersion,
+        UPDATE_POLL_INTERVAL: interval,
+        UPDATE_POLL_RECONNECT_TIMEOUT: reconnectTimeout,
+        AbortController,
+        refreshServerVersion,
+        authGeneration: generation,
+        apiClient: { getAuthGeneration: () => generation },
+        submittedUpdate,
+        updateApi: { status, trigger, panelUpdate },
+        showNotification,
+        addPersistentNotification,
+        t: (key: string, values?: { error?: string }) => {
+            const translated = dictionary?.version_history[key.split('.')[1]]
+            if (translated) {
+                return values?.error ? translated.replace('{{error}}', values.error) : translated
+            }
+            return values?.error ? `${key}: ${values.error}` : key
+        },
+        setUpdateStatus: (value: UpdateStatus | null) => {
+            state.status = value
+        },
+        setPollError: (value: string | null) => {
+            state.pollError = value
+        },
+        setPollingReady: (value: boolean) => {
+            state.pollingReady = value
+        },
+        setUpdatingVersion: (value: string | null) => {
+            state.updatingVersion = value
+        },
         setTimeout: (callback: () => void, delay: number) => {
             const id = ++timerID
-            timers.set(id, {at: now + delay, callback})
+            timers.set(id, { at: now + delay, callback })
             return id
         },
-        clearTimeout: (id: number) => { timers.delete(id) },
+        clearTimeout: (id: number) => {
+            timers.delete(id)
+        },
     }, 'const controller')
-    const cleanup = effect()
-    const advance = async (milliseconds: number) => {
+    const cleanup                   = effect()
+    const advance                   = async (milliseconds: number) => {
         const end = now + milliseconds
         while (true) {
             const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0]
@@ -87,41 +149,117 @@ function harness(replies: StatusReply[], {
         }
         now = end
     }
-    return {state, status, signals, timers, trigger, panelUpdate, showNotification, refreshServerVersion, advance, cleanup, submittedUpdate,
-        changeConnection: () => { ++generation }}
+    return {
+        state,
+        status,
+        statusGet,
+        signals,
+        timers,
+        trigger,
+        panelUpdate,
+        showNotification,
+        addPersistentNotification,
+        refreshServerVersion,
+        advance,
+        cleanup,
+        submittedUpdate,
+        changeConnection: () => {
+            ++generation
+        },
+    }
 }
 
 describe('backend update status recovery', () => {
-    test('keeps installation state through three 502 responses and consumes the recovered terminal result', async () => {
-        const view = harness([new Error('HTTP 502'), new Error('HTTP 502'), new Error('HTTP 502'), done])
+    test.each(['zh-CN', 'zh-TW', 'en', 'ru'] as const)(
+        'shows actionable database compatibility failure in both notification channels for %s',
+        async (locale) => {
+            const pending: UpdateStatus = { ...replacing, status: 'verifying', percent: 35, attempt_id: 'd'.repeat(32) }
+            const failed: UpdateStatus  = {
+                ...pending, status: 'error', guard_phase: 'error', result_code: 'data_compatibility_failed',
+                message: 'target or previous version cannot read the application database',
+            }
+            const view                  = harness([failed], { initialStatus: pending, locale })
+            const dictionary            = JSON.parse(readFileSync(new URL(
+                `../src/i18n/locales/${locale}.json`,
+                import.meta.url,
+            ), 'utf8'))
+            const message               = dictionary.version_history.status_data_compatibility_failed
+            await view.advance(interval * 5)
+            expect(view.statusGet).toHaveBeenCalledTimes(1)
+            expect(view.statusGet).toHaveBeenCalledWith('/update-status', {
+                signal: expect.any(AbortSignal), params: { attempt_id: pending.attempt_id },
+            })
+            expect(view.state.status).toEqual(failed)
+            expect(view.submittedUpdate.current?.status).toEqual(failed)
+            expect(view.state.pollingReady).toBe(false)
+            expect(view.state.updatingVersion).toBeNull()
+            expect(view.state.pollError).toBeNull()
+            expect(message).not.toBe(failed.message)
+            expect(message).not.toContain('version_history.')
+            expect(view.showNotification).toHaveBeenCalledTimes(1)
+            expect(view.showNotification).toHaveBeenCalledWith(message, 'error')
+            expect(view.addPersistentNotification).toHaveBeenCalledTimes(1)
+            expect(view.addPersistentNotification).toHaveBeenCalledWith(message, 'error', 'release')
+            expect(view.refreshServerVersion).not.toHaveBeenCalled()
+            expect(view.trigger).not.toHaveBeenCalled()
+            expect(view.panelUpdate).not.toHaveBeenCalled()
+            expect(view.timers.size).toBe(0)
+            view.cleanup?.()
+        },
+    )
+
+    test('preserves another backend error and its persistent notification', async () => {
+        const failed: UpdateStatus = {
+            ...replacing,
+            status: 'error',
+            guard_phase: 'error',
+            result_code: 'another_failure',
+            message: 'Existing failure detail',
+        }
+        const view                 = harness([failed], { locale: 'en' })
         await view.advance(interval * 3)
-        expect(view.state.status).toEqual(replacing)
-        expect(view.state.pollError).toBe('HTTP 502')
-        expect(view.state.pollingReady).toBe(true)
-        expect(view.showNotification).not.toHaveBeenCalled()
-        await view.advance(interval)
-        expect(view.state.status).toEqual(done)
-        expect(view.state.pollError).toBeNull()
-        expect(view.state.pollingReady).toBe(false)
-        expect(view.refreshServerVersion).toHaveBeenCalledTimes(1)
-        expect(view.showNotification).toHaveBeenCalledWith(done.message, 'success')
-        expect(view.status).toHaveBeenCalledTimes(4)
+        expect(view.showNotification).toHaveBeenCalledWith(failed.message, 'error')
+        expect(view.addPersistentNotification).toHaveBeenCalledWith(failed.message, 'error', 'release')
+        expect(view.refreshServerVersion).not.toHaveBeenCalled()
         expect(view.trigger).not.toHaveBeenCalled()
-        expect(view.panelUpdate).not.toHaveBeenCalled()
+        expect(view.statusGet).toHaveBeenCalledTimes(1)
         expect(view.timers.size).toBe(0)
         view.cleanup?.()
     })
 
+    test(
+        'keeps installation state through three 502 responses and consumes the recovered terminal result',
+        async () => {
+            const view = harness([new Error('HTTP 502'), new Error('HTTP 502'), new Error('HTTP 502'), done])
+            await view.advance(interval * 3)
+            expect(view.state.status).toEqual(replacing)
+            expect(view.state.pollError).toBe('HTTP 502')
+            expect(view.state.pollingReady).toBe(true)
+            expect(view.showNotification).not.toHaveBeenCalled()
+            await view.advance(interval)
+            expect(view.state.status).toEqual(done)
+            expect(view.state.pollError).toBeNull()
+            expect(view.state.pollingReady).toBe(false)
+            expect(view.refreshServerVersion).toHaveBeenCalledTimes(1)
+            expect(view.showNotification).toHaveBeenCalledWith(done.message, 'success')
+            expect(view.status).toHaveBeenCalledTimes(4)
+            expect(view.trigger).not.toHaveBeenCalled()
+            expect(view.panelUpdate).not.toHaveBeenCalled()
+            expect(view.timers.size).toBe(0)
+            view.cleanup?.()
+        },
+    )
+
     test('accepts only the requested attempt and target after a lost initial acknowledgement', async () => {
         const attemptID = '0123456789abcdef0123456789abcdef'
-        const pending = {...replacing, attempt_id: attemptID}
-        const matched = {...done, attempt_id: attemptID}
-        const view = harness([
-            {...done, attempt_id: 'another-attempt'},
-            {...matched, target_version: 'v8.0.23-aug.1'},
-            {...matched, status: 'idle'},
-            matched,
-        ], {initialStatus: pending})
+        const pending   = { ...replacing, attempt_id: attemptID }
+        const matched   = { ...done, attempt_id: attemptID }
+        const view      = harness([
+                                      { ...done, attempt_id: 'another-attempt' },
+                                      { ...matched, target_version: 'v8.0.23-aug.1' },
+                                      { ...matched, status: 'idle' },
+                                      matched,
+                                  ], { initialStatus: pending })
         await view.advance(interval * 3)
         expect(view.state.status).toEqual(pending)
         expect(view.state.pollingReady).toBe(true)
@@ -132,7 +270,7 @@ describe('backend update status recovery', () => {
         expect(view.state.pollingReady).toBe(false)
         expect(view.showNotification).toHaveBeenCalledWith(done.message, 'success')
         for (const [options] of view.status.mock.calls) {
-            expect(options).toMatchObject({attemptID})
+            expect(options).toMatchObject({ attemptID })
         }
         expect(view.trigger).not.toHaveBeenCalled()
         view.cleanup?.()
@@ -140,23 +278,27 @@ describe('backend update status recovery', () => {
 
     test('retains an acknowledged old-server ID and its terminal result for reopening', async () => {
         const attemptID = 'f'.repeat(32)
-        const pending = {...replacing, attempt_id: attemptID}
-        const completed = {...done, attempt_id: attemptID}
-        const view = harness([new Error('HTTP 502'), completed], {initialStatus: pending})
+        const pending   = { ...replacing, attempt_id: attemptID }
+        const completed = { ...done, attempt_id: attemptID }
+        const view      = harness([new Error('HTTP 502'), completed], { initialStatus: pending })
         await view.advance(interval)
-        expect(view.submittedUpdate.current).toMatchObject({status: pending, pollError: 'HTTP 502', pollingReady: true})
+        expect(view.submittedUpdate.current).toMatchObject({
+                                                               status: pending,
+                                                               pollError: 'HTTP 502',
+                                                               pollingReady: true,
+                                                           })
         await view.advance(interval)
-        expect(view.submittedUpdate.current).toMatchObject({status: completed, pollError: null, pollingReady: false})
+        expect(view.submittedUpdate.current).toMatchObject({ status: completed, pollError: null, pollingReady: false })
         for (const [options] of view.status.mock.calls) {
-            expect(options).toMatchObject({attemptID})
+            expect(options).toMatchObject({ attemptID })
         }
         expect(view.trigger).not.toHaveBeenCalled()
         view.cleanup?.()
     })
 
     test('rejects a same-version old-server success without the lost acknowledgement', async () => {
-        const pending = {...replacing, attempt_id: 'a'.repeat(32)}
-        const view = harness([{...done, attempt_id: 'b'.repeat(32)}], {initialStatus: pending})
+        const pending = { ...replacing, attempt_id: 'a'.repeat(32) }
+        const view    = harness([{ ...done, attempt_id: 'b'.repeat(32) }], { initialStatus: pending })
         await view.advance(interval)
         expect(view.state.status).toEqual(pending)
         expect(view.submittedUpdate.current?.status).toEqual(pending)
@@ -168,8 +310,8 @@ describe('backend update status recovery', () => {
     })
 
     test('shows a real rollback error after a temporary connection failure', async () => {
-        const failed: UpdateStatus = {...replacing, status: 'error', message: 'Previous version restored'}
-        const view = harness([new Error('HTTP 502'), failed])
+        const failed: UpdateStatus = { ...replacing, status: 'error', message: 'Previous version restored' }
+        const view                 = harness([new Error('HTTP 502'), failed])
         await view.advance(interval * 2)
         expect(view.state.status).toEqual(failed)
         expect(view.state.pollError).toBeNull()
@@ -181,7 +323,7 @@ describe('backend update status recovery', () => {
 
     test('bounds reconnection, aborts a pending query and keeps the installation result unconfirmed', async () => {
         const pending = new Promise<UpdateStatus>(() => undefined)
-        const view = harness([new Error('HTTP 502'), pending])
+        const view    = harness([new Error('HTTP 502'), pending])
         await view.advance(interval + reconnectTimeout)
         expect(view.state.status).toEqual(replacing)
         expect(view.state.pollError).toBe('HTTP 502')
@@ -205,7 +347,7 @@ describe('backend update status recovery', () => {
     })
 
     test('reads a persisted terminal state when reopened without starting another installation', async () => {
-        const view = harness([done], {initialStatus: null, updatingVersion: null})
+        const view = harness([done], { initialStatus: null, updatingVersion: null })
         await view.advance(interval)
         expect(view.state.status).toEqual(done)
         expect(view.state.pollingReady).toBe(false)
@@ -216,9 +358,9 @@ describe('backend update status recovery', () => {
     })
 
     test('keeps an active persisted attempt associated with its target after reopening', async () => {
-        const pending = {...replacing, attempt_id: '0123456789abcdef0123456789abcdef'}
-        const completed = {...done, attempt_id: pending.attempt_id}
-        const view = harness([completed], {initialStatus: pending, updatingVersion: null})
+        const pending   = { ...replacing, attempt_id: '0123456789abcdef0123456789abcdef' }
+        const completed = { ...done, attempt_id: pending.attempt_id }
+        const view      = harness([completed], { initialStatus: pending, updatingVersion: null })
         await view.advance(interval)
         expect(view.state.status).toEqual(completed)
         expect(view.state.pollingReady).toBe(false)
@@ -228,28 +370,34 @@ describe('backend update status recovery', () => {
     })
 
     test('keeps a confirmed installation successful if version metadata refresh fails', async () => {
-        const view = harness([done], {versionError: true})
+        const view = harness([done], { versionError: true })
         await view.advance(interval)
         expect(view.state.status).toEqual(done)
         expect(view.state.pollError).toBeNull()
         expect(view.state.pollingReady).toBe(false)
-        expect(view.showNotification).toHaveBeenCalledWith('version_history.status_version_refresh_failed: Version unavailable', 'error')
+        expect(view.showNotification).toHaveBeenCalledWith(
+            'version_history.status_version_refresh_failed: Version unavailable',
+            'error',
+        )
         expect(view.showNotification).toHaveBeenCalledWith(done.message, 'success')
         expect(view.timers.size).toBe(0)
         view.cleanup?.()
     })
 
-    test.each([401, 403])('stops status requests after HTTP %s without fabricating an installation failure', async (status) => {
-        const error = Object.assign(new Error(`HTTP ${status}`), {status})
-        const view = harness([error])
-        await view.advance(interval)
-        expect(view.state.status).toEqual(replacing)
-        expect(view.state.pollingReady).toBe(false)
-        expect(view.status).toHaveBeenCalledTimes(1)
-        expect(view.showNotification).not.toHaveBeenCalled()
-        view.cleanup?.()
-        expect(view.timers.size).toBe(0)
-    })
+    test.each([401, 403])(
+        'stops status requests after HTTP %s without fabricating an installation failure',
+        async (status) => {
+            const error = Object.assign(new Error(`HTTP ${status}`), { status })
+            const view  = harness([error])
+            await view.advance(interval)
+            expect(view.state.status).toEqual(replacing)
+            expect(view.state.pollingReady).toBe(false)
+            expect(view.status).toHaveBeenCalledTimes(1)
+            expect(view.showNotification).not.toHaveBeenCalled()
+            view.cleanup?.()
+            expect(view.timers.size).toBe(0)
+        },
+    )
 
     test('clears polling and the reconnection deadline when closed', async () => {
         const view = harness([new Error('HTTP 502')])
@@ -264,11 +412,13 @@ describe('backend update status recovery', () => {
 
     test('ignores a late result after close and permits a fresh status query on reopen', async () => {
         let resolve!: (value: UpdateStatus) => void
-        const pending = new Promise<UpdateStatus>((complete) => { resolve = complete })
+        const pending  = new Promise<UpdateStatus>((complete) => {
+            resolve = complete
+        })
         const previous = harness([pending])
         await previous.advance(interval)
         previous.cleanup?.()
-        const reopened = harness([done], {initialStatus: null, updatingVersion: null})
+        const reopened = harness([done], { initialStatus: null, updatingVersion: null })
         resolve(done)
         await reopened.advance(interval)
         expect(previous.state.status).toEqual(replacing)
@@ -289,8 +439,10 @@ describe('backend update status recovery', () => {
 
     test('ignores a terminal result from a previous connection', async () => {
         let resolve!: (value: UpdateStatus) => void
-        const pending = new Promise<UpdateStatus>((complete) => { resolve = complete })
-        const view = harness([pending])
+        const pending = new Promise<UpdateStatus>((complete) => {
+            resolve = complete
+        })
+        const view    = harness([pending])
         await view.advance(interval)
         view.changeConnection()
         resolve(done)
@@ -304,10 +456,13 @@ describe('backend update status recovery', () => {
         view.cleanup?.()
     })
 
-    test.each([{open: false, target: 'cpa'}, {open: true, target: 'panel'}])('does not query the backend with %j', async (options) => {
-        const view = harness([], options)
-        await view.advance(reconnectTimeout)
-        expect(view.status).not.toHaveBeenCalled()
-        expect(view.timers.size).toBe(0)
-    })
+    test.each([{ open: false, target: 'cpa' }, { open: true, target: 'panel' }])(
+        'does not query the backend with %j',
+        async (options) => {
+            const view = harness([], options)
+            await view.advance(reconnectTimeout)
+            expect(view.status).not.toHaveBeenCalled()
+            expect(view.timers.size).toBe(0)
+        },
+    )
 })

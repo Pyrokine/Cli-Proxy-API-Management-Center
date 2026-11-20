@@ -54,5 +54,11 @@ export const rateLimitsApi = {
         ),
 
     unban: (ip: string): Promise<{ status: string }> =>
-        apiClient.delete<{ status: string }>('/rate-limit/ban', { data: { ip } }),
+        apiClient.delete<{ status: string }>(
+            '/rate-limit/ban',
+            {
+                ...({ data: { ip } }),
+                mutationReadback: () => rateLimitsApi.getStatus(),
+            },
+        ),
 }
