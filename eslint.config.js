@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint';
 
 export default [
     { ignores: ['dist'] },
+    // noinspection JSUnresolvedReference
     js.configs.recommended,
+    // noinspection JSUnresolvedReference
     ...tseslint.configs.recommended,
     {
         files: ['**/*.{ts,tsx}'],

@@ -3,6 +3,24 @@
         "stylelint-config-standard"
     ],
     "customSyntax": "postcss-scss",
+    "overrides": [
+        {
+            "files": [
+                "**/*.scss"
+            ],
+            "rules": {
+                "at-rule-prelude-no-invalid": [
+                    true,
+                    {
+                        "ignoreAtRules": [
+                            "mixin"
+                        ]
+                    }
+                ],
+                "value-no-invalid": null
+            }
+        }
+    ],
     "rules": {
         "alpha-value-notation": null,
         "at-rule-empty-line-before": null,

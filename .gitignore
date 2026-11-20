@@ -22,7 +22,7 @@ management-api*
 # AI tooling
 CLAUDE.md
 AGENTS.md
-.claude/
+.claude
 .idea/
 
 # Project-specific notes

@@ -1,32 +1,37 @@
 name: pr-test-build
 
 on:
-  pull_request:
+    pull_request:
 
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '26.7.0'
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.0'
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Type check
-        run: bun run type-check
-      - name: Lint
-        run: bun run lint
-      - name: Test
-        run: bun test
-      - name: Build
-        run: bun run build
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            -   name: Checkout
+                # noinspection UndefinedAction
+                uses: actions/checkout@v7.0.1
+            -   name: Setup Node.js
+                # noinspection UndefinedAction
+                uses: actions/setup-node@v7.1.0
+                with:
+                    # noinspection UndefinedParamsPresent
+                    node-version: '26.13.1'
+            -   name: Setup Bun
+                # noinspection UndefinedAction
+                uses: oven-sh/setup-bun@v2.2.0
+                with:
+                    # noinspection UndefinedParamsPresent
+                    bun-version: '1.4.4'
+            -   name: Install dependencies
+                run: bun install --frozen-lockfile
+            -   name: Type check
+                run: bun run type-check
+            -   name: Lint
+                run: bun run lint
+            -   name: Test
+                run: bun test
+            -   name: Build
+                run: bun run build
