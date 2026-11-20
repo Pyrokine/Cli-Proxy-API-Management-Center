@@ -14,11 +14,11 @@ export function generateId(): string {
  * Parse a route parameter string to a valid integer index, or null if invalid.
  */
 export const parseIndexParam = (value: string | undefined): number | null => {
-    if (!value) {
+    if (!value || !/^\d+$/.test(value)) {
         return null
     }
-    const parsed = Number.parseInt(value, 10)
-    return Number.isFinite(parsed) ? parsed : null
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 /**

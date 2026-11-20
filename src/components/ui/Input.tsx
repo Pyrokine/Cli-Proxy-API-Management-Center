@@ -1,6 +1,7 @@
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import type {InputHTMLAttributes, ReactNode} from 'react'
 import {useId, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string
@@ -27,11 +28,13 @@ export function Input({
                           style,
                           ...rest
                       }: InputProps) {
-    const generatedId = useId()
-    const inputId = rest.id ?? generatedId
-    const hintId = hint ? `${inputId}-hint` : undefined
-    const errorId = error ? `${inputId}-error` : undefined
-    const describedBy = [rest['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') || undefined
+    const { t }                             = useTranslation()
+    const generatedId                       = useId()
+    const inputId                           = rest.id ?? generatedId
+    const hintId                            = hint ? `${inputId}-hint` : undefined
+    const errorId                           = error ? `${inputId}-error` : undefined
+    const describedBy                       = [rest['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') ||
+                                              undefined
     const [secretVisible, setSecretVisible] = useState(false)
     const resolvedType                      = secret ? (secretVisible ? 'text' : 'password') : type
     const resolvedAutoComplete              = secret ? (autoComplete ?? 'new-password') : autoComplete
@@ -43,7 +46,7 @@ export function Input({
             type='button'
             onClick={() => setSecretVisible((value) => !value)}
             disabled={Boolean(rest.disabled)}
-            aria-label={secretVisible ? 'Hide value' : 'Show value'}
+            aria-label={t(secretVisible ? 'common.hide_value' : 'common.show_value')}
             style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -85,6 +88,8 @@ export function Input({
                     </div>
                 )}
                 <input
+                    data-lpignore={secret ? 'true' : undefined}
+                    data-1p-ignore={secret ? 'true' : undefined}
                     {...rest}
                     id={inputId}
                     aria-describedby={describedBy}

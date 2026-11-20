@@ -1,5 +1,61 @@
 @use '../../styles/variables' as *;
 
+.toolbar {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: $spacing-sm;
+
+    :global(.form-group) {
+        flex: 1;
+        min-width: min(100%, 16rem);
+        margin-bottom: 0;
+    }
+}
+
+.count,
+.empty {
+    color: var(--text-secondary);
+    line-height: $line-height-base;
+}
+
+.count {
+    padding-bottom: $spacing-sm;
+}
+
+.entryList {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    max-height: min(50vh, 32rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+    scrollbar-gutter: stable;
+}
+
+.row {
+    min-width: 0;
+    padding-block: $spacing-sm;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.entryDetails {
+    grid-column: 1 / -1;
+    min-width: 0;
+
+    > summary {
+        width: fit-content;
+        color: var(--text-secondary);
+        cursor: pointer;
+        line-height: $line-height-base;
+    }
+
+    &[open] > summary {
+        margin-bottom: $spacing-sm;
+    }
+}
+
 .metadataFields {
     grid-column: 1 / -1;
     display: grid;
@@ -31,7 +87,7 @@
     gap: $spacing-xs;
     min-width: 0;
 
-    span {
+    > span {
         color: var(--text-secondary);
         font-size: $font-size-xs;
     }

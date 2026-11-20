@@ -2,7 +2,7 @@ import {IconX} from '@/components/ui/icons'
 import {useNotificationStore} from '@/stores'
 import type {Notification} from '@/types'
 import {NOTIFICATION_DURATION_MS} from '@/utils/constants'
-import {useCallback, useEffect, useRef, useState, type RefObject} from 'react'
+import {type RefObject, useCallback, useEffect, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {createNotificationTimer} from './notificationTimer'
 
@@ -12,16 +12,23 @@ interface AnimatedNotification extends Notification {
 
 const ANIMATION_DURATION = 300 // ms
 
-function NotificationCard({notification, onExited, returnFocusRef}: {
+function NotificationCard({ notification, onExited, returnFocusRef }: {
     notification: AnimatedNotification
     onExited: (id: string) => void
     returnFocusRef: RefObject<HTMLElement | null>
 }) {
-    const {t} = useTranslation()
+    const { t } = useTranslation()
+
     const removeNotification = useNotificationStore((state) => state.removeNotification)
-    const {id, type, message, duration = NOTIFICATION_DURATION_MS, isExiting} = notification
+
+    const { id, type, message, duration = NOTIFICATION_DURATION_MS, isExiting } = notification
+
     const cardRef = useRef<HTMLDivElement>(null)
-    const [readableTimer] = useState(() => createNotificationTimer(duration, () => removeNotification(id)))
+
+    const [readableTimer] = useState(() => createNotificationTimer(
+        duration,
+        () => removeNotification(id),
+    ))
 
     useEffect(() => {
         if (isExiting) {
@@ -47,10 +54,10 @@ function NotificationCard({notification, onExited, returnFocusRef}: {
             const buttons = Array.from(card.parentElement?.querySelectorAll<HTMLButtonElement>(
                 '.notification:not(.exiting) .close-btn:not(:disabled)',
             ) ?? [])
-            const index = buttons.indexOf(card.querySelector<HTMLButtonElement>('.close-btn')!)
-            const target = buttons[index + 1] ?? buttons[index - 1] ?? returnFocusRef.current
+            const index   = buttons.indexOf(card.querySelector<HTMLButtonElement>('.close-btn')!)
+            const target  = buttons[index + 1] ?? buttons[index - 1] ?? returnFocusRef.current
             if (target?.isConnected && !target.closest('[inert]') && !target.matches(':disabled')) {
-                target.focus({preventScroll: true})
+                target.focus({ preventScroll: true })
             }
         }
         readableTimer.dispose()
@@ -101,28 +108,34 @@ function NotificationCard({notification, onExited, returnFocusRef}: {
 }
 
 export function NotificationContainer() {
-    const {t} = useTranslation()
-    const notifications = useNotificationStore((state) => state.notifications)
-    const [rendered, setRendered] = useState<{source: Notification[]; items: AnimatedNotification[]}>({
-        source: notifications, items: notifications,
-    })
-    const returnFocusRef = useRef<HTMLElement | null>(null)
+    const { t }                   = useTranslation()
+    const notifications           = useNotificationStore((state) => state.notifications)
+    const [rendered, setRendered] = useState<{ source: Notification[]; items: AnimatedNotification[] }>(
+        {
+            source: notifications,
+            items: notifications,
+        })
+    const returnFocusRef          = useRef<HTMLElement | null>(null)
 
     if (rendered.source !== notifications) {
-        const current = new Map(notifications.map((notification) => [notification.id, notification]))
+        const current     = new Map(notifications.map((notification) => [notification.id, notification]))
         const previousIds = new Set(rendered.items.map((notification) => notification.id))
         setRendered({
-            source: notifications,
-            items: [
-                ...rendered.items.map((notification) => current.get(notification.id) ?? {...notification, isExiting: true}),
-                ...notifications.filter((notification) => !previousIds.has(notification.id)),
-            ],
-        })
+                        source: notifications,
+                        items: [
+                            ...rendered.items.map((notification) => current.get(notification.id) ??
+                                { ...notification, isExiting: true }),
+                            ...notifications.filter((notification) => !previousIds.has(notification.id)),
+                        ],
+                    })
     }
 
     const handleExited = useCallback((id: string) => {
         if (!useNotificationStore.getState().notifications.some((notification) => notification.id === id)) {
-            setRendered((previous) => ({...previous, items: previous.items.filter((notification) => notification.id !== id)}))
+            setRendered((previous) => ({
+                ...previous,
+                items: previous.items.filter((notification) => notification.id !== id),
+            }))
         }
     }, [])
 
@@ -137,7 +150,8 @@ export function NotificationContainer() {
             }}
         >
             {rendered.items.map((notification) => (
-                <NotificationCard key={notification.id} notification={notification} onExited={handleExited} returnFocusRef={returnFocusRef} />
+                <NotificationCard key={notification.id} notification={notification} onExited={handleExited}
+                                  returnFocusRef={returnFocusRef} />
             ))}
         </section>
     )

@@ -29,11 +29,9 @@ export function resolveAutoRefreshMs(seconds?: number | null): number {
     return seconds * 1000
 }
 
-export const MIN_USAGE_EVENTS_AUTO_REFRESH_MS = 30_000
+export const MIN_USAGE_EVENTS_AUTO_REFRESH_MS = DEFAULT_AUTO_REFRESH_MS
 
-export const USAGE_EVENTS_AUTO_REFRESH_INTERVALS = AUTO_REFRESH_INTERVALS.filter(
-    (option) => Number(option.value) >= MIN_USAGE_EVENTS_AUTO_REFRESH_MS,
-)
+export const USAGE_EVENTS_AUTO_REFRESH_INTERVALS = AUTO_REFRESH_INTERVALS
 
 export function resolveUsageEventsAutoRefreshMs(seconds?: number | null): number {
     return Math.max(resolveAutoRefreshMs(seconds), MIN_USAGE_EVENTS_AUTO_REFRESH_MS)

@@ -26,8 +26,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 32px;
-    min-height: 32px;
+    min-width: $control-height-md;
+    min-height: $control-height-md;
     height: auto;
     padding: 0 10px;
     border: 1px solid var(--border-color);
@@ -66,8 +66,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 32px;
-    height: 32px;
+    min-width: $control-height-md;
+    height: $control-height-md;
     color: var(--text-tertiary);
     font-size: $font-size-sm;
     user-select: none;

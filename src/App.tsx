@@ -7,7 +7,8 @@ import {LoginPage} from '@/pages/LoginPage'
 import {ProtectedRoute} from '@/router/ProtectedRoute'
 import {useLanguageStore, useThemeStore} from '@/stores'
 import React, {useEffect} from 'react'
-import {createHashRouter, Outlet, RouterProvider} from 'react-router-dom'
+import {createHashRouter, Outlet} from 'react-router'
+import {RouterProvider} from 'react-router/dom'
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: Error }> {
     state = { hasError: false, error: undefined as Error | undefined }
@@ -78,9 +79,8 @@ function App() {
 
     return (
         <ErrorBoundary>
-            {/* useTransitions=false: bypass startTransition wrapping in React Router v7 + React 19 */}
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <RouterProvider router={router} {...({ useTransitions: false } as any)} />
+            {/* useTransitions=false: bypass startTransition wrapping in React Router + React 19 */}
+            <RouterProvider router={router} useTransitions={false} />
         </ErrorBoundary>
     )
 }

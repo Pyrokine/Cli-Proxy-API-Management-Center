@@ -1,20 +1,33 @@
 import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 
-export function sourceCallback<T>(file: string, name: string, scope: Record<string, unknown>, effectIndex: number | string = 0): T {
+export function sourceCallback<T>(
+    file: string,
+    name: string,
+    scope: Record<string, unknown>,
+    effectIndex: number | string = 0,
+): T {
     const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
-    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const tree   = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     let callback: string | undefined
-    let effect = 0
-    const visit = (node: ts.Node) => {
-        if (name === 'useEffect' && ts.isCallExpression(node) && node.expression.getText(tree) === name) {
+    let effect   = 0
+    const visit  = (node: ts.Node) => {
+        if ((name === 'useEffect' || name === 'useLayoutEffect') &&
+            ts.isCallExpression(node) &&
+            node.expression.getText(tree) ===
+            name) {
             const body = node.arguments[0]?.getText(tree)
-            if (typeof effectIndex === 'string' ? body?.includes(effectIndex) : effect++ === effectIndex) {
+            if (typeof effectIndex === 'string' ?
+                body?.replace(/\s+/g, '').includes(effectIndex.replace(/\s+/g, '')) :
+                effect++ === effectIndex) {
                 callback = body
             }
         } else if (ts.isVariableDeclaration(node) && node.name.getText(tree) === name &&
-            node.initializer && ts.isCallExpression(node.initializer)) {
+                   node.initializer && ts.isCallExpression(node.initializer)) {
             callback = node.initializer.arguments[0]?.getText(tree)
+        } else if (ts.isPropertyAssignment(node) && node.name.getText(tree) === name &&
+                   (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+            callback = node.initializer.getText(tree)
         } else if (ts.isFunctionDeclaration(node) && node.name?.getText(tree) === name) {
             callback = node.getText(tree).replace(/^export\s+(?:default\s+)?/, '')
         }
@@ -24,17 +37,23 @@ export function sourceCallback<T>(file: string, name: string, scope: Record<stri
     if (!callback) {
         throw new Error(`Missing callback ${file}.${name}`)
     }
-    const transpiler = new Bun.Transpiler({loader: 'tsx', tsconfig: {compilerOptions: {jsx: 'react'}}})
-    const code = transpiler.transformSync(`const callback = ${callback}`)
+    const transpiler = new Bun.Transpiler({ loader: 'tsx', tsconfig: { compilerOptions: { jsx: 'react' } } })
+    const code       = transpiler.transformSync(`const callback = ${callback}`)
     return new Function(...Object.keys(scope), `${code}; return callback`)(...Object.values(scope)) as T
 }
 
 export function sourceInitializer<T>(file: string, name: string, scope: Record<string, unknown>): T {
     const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
-    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const tree   = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     let initializer: string | undefined
-    const visit = (node: ts.Node) => {
-        if (ts.isVariableDeclaration(node) && node.name.getText(tree) === name && node.initializer) {
+    const visit  = (node: ts.Node) => {
+        if (ts.isVariableDeclaration(node) && node.initializer &&
+            (node.name.getText(tree) ===
+             name ||
+             (ts.isArrayBindingPattern(node.name) &&
+              node.name.elements.some((element) => ts.isBindingElement(element) &&
+              element.name.getText(tree) ===
+              name)))) {
             initializer = node.initializer.getText(tree)
         }
         ts.forEachChild(node, visit)
@@ -43,6 +62,34 @@ export function sourceInitializer<T>(file: string, name: string, scope: Record<s
     if (!initializer) {
         throw new Error(`Missing initializer ${file}.${name}`)
     }
-    const code = new Bun.Transpiler({loader: 'tsx', tsconfig: {compilerOptions: {jsx: 'react'}}}).transformSync(`const value = ${initializer}`)
+    const code = new Bun.Transpiler({
+                                        loader: 'tsx',
+                                        tsconfig: { compilerOptions: { jsx: 'react' } },
+                                    }).transformSync(`const initializedSourceValue = ${initializer}`)
+    return new Function(...Object.keys(scope), `${code}; return initializedSourceValue`)(...Object.values(scope)) as T
+}
+
+export function sourceExpression<T>(
+    file: string,
+    matches: (node: ts.Node, tree: ts.SourceFile) => boolean,
+    scope: Record<string, unknown>,
+): T {
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+    const tree   = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    let expression: string | undefined
+    const visit  = (node: ts.Node) => {
+        if (expression === undefined && matches(node, tree)) {
+            expression = node.getText(tree)
+        }
+        ts.forEachChild(node, visit)
+    }
+    visit(tree)
+    if (expression === undefined) {
+        throw new Error(`Missing source expression in ${file}`)
+    }
+    const code = new Bun.Transpiler({
+                                        loader: 'tsx',
+                                        tsconfig: { compilerOptions: { jsx: 'react' } },
+                                    }).transformSync(`const value = ${expression}`)
     return new Function(...Object.keys(scope), `${code}; return value`)(...Object.values(scope)) as T
 }

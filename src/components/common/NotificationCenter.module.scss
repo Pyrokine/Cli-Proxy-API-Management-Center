@@ -33,7 +33,6 @@
     right: 0;
     z-index: $z-dropdown;
     width: 360px;
-    max-height: 60vh;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
@@ -71,7 +70,7 @@
 
 .panelBody {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: visible;
     overscroll-behavior: contain;
 }
 

@@ -4,6 +4,8 @@ interface SharedClock {
     subscribe(listener: () => void): () => void
 
     getSnapshot(): number
+
+    getServerSnapshot(): number
 }
 
 interface SharedClockOptions {
@@ -56,11 +58,12 @@ export function createSharedClock(options: SharedClockOptions = {}): TestableSha
         getSnapshot() {
             return current
         },
+        getServerSnapshot: now,
         subscriberCount() {
             return listeners.size
         },
     }
 }
 
-export const SECOND_CLOCK: SharedClock = createSharedClock({intervalMs: SECOND_MS})
+export const SECOND_CLOCK: SharedClock = createSharedClock({ intervalMs: SECOND_MS })
 export const MINUTE_CLOCK: SharedClock = createSharedClock()

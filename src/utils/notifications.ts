@@ -44,7 +44,7 @@ export const PERSISTENT_NOTIFICATION_SOURCES: Record<NotificationSourceId, Notif
     },
     quota: {
         id: 'quota',
-        trigger: 'Quota polling or manual quota refresh result',
+        trigger: 'Explicit manual quota refresh completion or failure',
         defaultType: 'warning',
         labelKey: 'notifications.sources.quota',
     },

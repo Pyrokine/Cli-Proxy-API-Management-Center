@@ -58,12 +58,16 @@
     color: var(--text-secondary);
     flex-shrink: 0;
     transition: transform 0.2s ease;
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
 }
 
 // Shared dropdown panel
 @mixin dropdown-panel($max-height: 240px, $padding: 4px, $gap: 4px, $radius: $radius-md) {
     position: fixed;
-    z-index: $z-dropdown;
+    z-index: $z-modal + 1;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: $radius;
@@ -86,9 +90,8 @@
     color: var(--text-primary);
     cursor: pointer;
     text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
     font-size: $font-size-sm;
     flex-shrink: 0;
 

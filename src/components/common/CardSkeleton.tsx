@@ -1,3 +1,4 @@
+import {useTranslation} from 'react-i18next'
 import styles from './CardSkeleton.module.scss'
 
 export interface CardSkeletonProps {
@@ -8,9 +9,10 @@ export interface CardSkeletonProps {
 }
 
 export function CardSkeleton({ variant = 'rows', rowCount = 3, showTitle = true, className }: CardSkeletonProps) {
-    const cls = `${styles.skeletonRoot} ${className || ''}`.trim()
+    const { t } = useTranslation()
+    const cls   = `${styles.skeletonRoot} ${className || ''}`.trim()
     return (
-        <div className={cls} aria-busy='true' aria-label='loading' role='status'>
+        <div className={cls} aria-busy='true' aria-label={t('common.loading')} role='status'>
             {showTitle && (
                 <div className={styles.skeletonHeader}>
                     <div className={`${styles.skeletonBar} ${styles.skeletonTitle}`} />

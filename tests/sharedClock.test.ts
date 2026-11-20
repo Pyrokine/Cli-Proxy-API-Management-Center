@@ -33,6 +33,21 @@ describe('shared clock', () => {
         expect(clock.subscriberCount()).toBe(0)
     })
 
+    test('reads current server time after an idle minute without starting a timer', () => {
+        let now       = 1000
+        let timers    = 0
+        const clock   = createSharedClock({
+                                              now: () => now,
+                                              setTimer: () => ++timers,
+                                          })
+        const initial = clock.getSnapshot()
+        now += 61_000
+        expect(clock.getServerSnapshot()).toBe(now)
+        expect(clock.getSnapshot()).toBe(initial)
+        expect(clock.subscriberCount()).toBe(0)
+        expect(timers).toBe(0)
+    })
+
     test('keeps the snapshot stable until the shared timer ticks', () => {
         let now     = 1000
         let tick    = () => {

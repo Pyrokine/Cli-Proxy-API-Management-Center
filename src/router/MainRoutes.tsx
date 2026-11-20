@@ -21,20 +21,7 @@ import {PluginResourcePage} from '@/pages/PluginResourcePage'
 import {PluginStorePage} from '@/pages/PluginStorePage'
 import {SystemPage} from '@/pages/SystemPage'
 import {UsagePage} from '@/pages/UsagePage'
-import {type Location, Navigate, useLocation, useParams, useRoutes} from 'react-router-dom'
-
-const LEGACY_PROVIDER_IDS = new Set(['gemini', 'interactions', 'codex', 'meta', 'claude', 'xai', 'vertex', 'openai'])
-
-function LegacyAiProviderRedirect() {
-    const location     = useLocation()
-    const { provider } = useParams<{ provider?: string }>()
-    const normalized   = provider?.trim().toLowerCase() ?? ''
-    const suffix       = location.pathname.replace(/^\/ai-providers\/?/i, '')
-    const target       = normalized && LEGACY_PROVIDER_IDS.has(normalized) && suffix !== normalized
-                         ? `/credentials/${suffix}`
-                         : '/credentials'
-    return <Navigate to={`${target}${location.search}`} replace />
-}
+import {type Location, useRoutes} from 'react-router'
 
 const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
     { path: '/', element: <DashboardPage /> },
@@ -42,8 +29,7 @@ const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
 
     // Unified credentials page
     { path: '/credentials', element: <CredentialsPage /> },
-    { path: '/ai-providers', element: <Navigate to='/credentials' replace /> },
-    { path: '/ai-providers/:provider/*', element: <LegacyAiProviderRedirect /> },
+    { path: '/credentials/oauth-config', element: <ConfigPage key='oauth-config' scope='oauth' /> },
 
     // Credential edit sub-routes
     { path: '/credentials/gemini/new', element: <AiProvidersGeminiEditPage /> },
@@ -92,6 +78,7 @@ const buildMainRoutes = (pluginsFeatureEnabled: boolean) => [
     },
 
     { path: '/models', element: <ModelManagementPage /> },
+    { path: '/models/oauth-aliases', element: <ConfigPage key='oauth-aliases' scope='model-aliases' /> },
     ...(pluginsFeatureEnabled ? [
         { path: '/plugin-store', element: <PluginStorePage /> },
         { path: '/plugins', element: <PluginManagementPage /> },

@@ -15,8 +15,8 @@
     gap: 12px;
     padding: 10px 14px;
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 500;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
     list-style: none;
     cursor: pointer;
     user-select: none;
@@ -44,16 +44,20 @@
 }
 
 .summaryHint {
-    color: var(--muted-foreground);
-    font-size: 12px;
-    font-weight: 400;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    font-weight: $font-weight-normal;
 }
 
 .chevron {
     width: 16px;
     height: 16px;
-    color: var(--muted-foreground);
+    color: var(--text-secondary);
     transition: transform 200ms ease;
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
     flex-shrink: 0;
 
     .root[open] & {

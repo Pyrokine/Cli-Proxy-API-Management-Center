@@ -1,4 +1,4 @@
-const SCROLL_LOCK_CLASS = 'modal-open'
+const SCROLL_LOCK_CLASS   = 'modal-open'
 let activeScrollLockCount = 0
 
 const scrollLockSnapshot = {

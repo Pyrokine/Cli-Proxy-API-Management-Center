@@ -6,12 +6,19 @@ export class TestLockManager {
     private readonly heldLocks = new Set<string>()
     private readonly queues    = new Map<string, Array<() => void>>()
 
-    request<T>(name: string, operation: LockOperation<T>): Promise<T> {
+    request<T>(
+        name: string,
+        optionsOrOperation: LockOperation<T> | { signal?: AbortSignal },
+        callback?: LockOperation<T>,
+    ): Promise<T> {
+        const operation = typeof optionsOrOperation === 'function' ? optionsOrOperation : callback!
+        const signal    = typeof optionsOrOperation === 'function' ? undefined : optionsOrOperation.signal
         return new Promise<T>((resolve, reject) => {
             const run = () => {
                 this.heldLocks.add(name)
                 let result: PromiseLike<T> | T
                 try {
+                    signal?.throwIfAborted()
                     result = operation()
                 } catch (error: unknown) {
                     this.release(name)

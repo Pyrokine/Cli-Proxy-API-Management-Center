@@ -53,7 +53,7 @@ export function formatDateTime(date: string | Date, locale?: string): string {
         return '-'
     }
 
-    const d = typeof date === 'string' ? new Date(date) : date
+    const d = typeof date === 'string' ? new Date(date.replace(/(?<fraction>\.\d{3})\d+/, '$1')) : date
 
     if (isNaN(d.getTime())) {
         return '-'
@@ -73,31 +73,21 @@ export function formatDateTime(date: string | Date, locale?: string): string {
     })
 }
 
-// formatLogTimestamp converts a backend log timestamp ("YYYY-MM-DD HH:MM:SS",
-// always UTC because the cli-proxy-api server runs with TZ=UTC) into a
-// localized string honoring the user's timezone preference. Without the
-// explicit "Z" suffix new Date() would parse the string as the *browser's*
-// local time, double-shifting requests recorded in UTC and leaving the logs
-// view 8 hours behind for users in Asia/Shanghai.
-export function formatLogTimestamp(raw: string | undefined, locale?: string): string {
-    if (!raw) {
-        return ''
-    }
-    const trimmed = raw.trim()
+export function parseLogTimestamp(raw: string | undefined): number {
+    const trimmed = raw?.trim()
     if (!trimmed) {
+        return Number.NaN
+    }
+    const normalized = trimmed.replace(' ', 'T').replace(/(?<fraction>\.\d{3})\d+/, '$1')
+    return Date.parse(/[Zz]$|[+-]\d\d:?\d\d$/.test(normalized) ? normalized : `${normalized}Z`)
+}
+
+export function formatLogTimestamp(raw: string | undefined, locale?: string): string {
+    if (!raw?.trim()) {
         return ''
     }
-    // Already an ISO string with timezone designator? Hand off as-is.
-    if (/[Tt]/.test(trimmed) && (/[Zz]$/.test(trimmed) || /[+-]\d\d:?\d\d$/.test(trimmed))) {
-        return formatDateTime(trimmed, locale)
-    }
-    // "YYYY-MM-DD HH:MM:SS" → treat as UTC.
-    const utc = trimmed.replace(' ', 'T') + 'Z'
-    const d   = new Date(utc)
-    if (isNaN(d.getTime())) {
-        return raw
-    }
-    return formatDateTime(d, locale)
+    const timestamp = parseLogTimestamp(raw)
+    return Number.isFinite(timestamp) ? formatDateTime(new Date(timestamp), locale) : raw
 }
 
 /**
@@ -111,7 +101,7 @@ export function formatUnixTimestamp(value: unknown, locale?: string): string {
     const asNumber = typeof value === 'number' ? value : Number(value)
     const date     = (() => {
         if (!Number.isFinite(asNumber) || Number.isNaN(asNumber)) {
-            return new Date(String(value))
+            return new Date(String(value).replace(/(?<fraction>\.\d{3})\d+/, '$1'))
         }
 
         const abs = Math.abs(asNumber)

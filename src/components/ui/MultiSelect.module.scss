@@ -118,8 +118,9 @@
 }
 
 .optionLabel {
-    @include text-ellipsis;
     min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .highlight {

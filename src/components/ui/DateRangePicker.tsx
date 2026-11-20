@@ -74,9 +74,12 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
 
     const handlePreset = useCallback(
         (preset: DateRangePreset) => {
-            onChange(toLocalDateTimeString(preset.from), toLocalDateTimeString(preset.to), preset.key)
+            const current = presets ?
+                            preset :
+                            buildDefaultPresets(t, earliestDate).find((entry) => entry.key === preset.key)!
+            onChange(toLocalDateTimeString(current.from), toLocalDateTimeString(current.to), current.key)
         },
-        [onChange],
+        [onChange, presets, t, earliestDate],
     )
 
     // R-027:preset==='all' 时把 input 的展示值替换成 summary 真实最早时间,
@@ -114,7 +117,9 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                         type='button'
                         className={activePreset === preset.key ? styles.presetActive : styles.preset}
                         onClick={() => handlePreset(preset)}
-                        title={`${toLocalDateTimeString(preset.from)} ~ ${toLocalDateTimeString(preset.to)}`}
+                        title={activePreset === preset.key
+                               ? displayFrom ? `${displayFrom} ~ ${to}` : preset.label
+                               : `${toLocalDateTimeString(preset.from)} ~ ${toLocalDateTimeString(preset.to)}`}
                     >
                         {preset.label}
                     </button>

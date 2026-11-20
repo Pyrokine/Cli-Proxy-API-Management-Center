@@ -1,12 +1,12 @@
+import {parseRouteDecisionTrace, requestLogStateToRouteDecisionStatus} from '@/pages/hooks/routeDecisionTrace'
+
+import {apiClient} from '@/services/api/client'
+import {logsApi} from '@/services/api/logs'
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {fileURLToPath, URL} from 'node:url'
 
 import {expectSourceToContain} from './sourceContractAssertions'
-import {parseRouteDecisionTrace, requestLogStateToRouteDecisionStatus} from '@/pages/hooks/routeDecisionTrace'
-
-import {apiClient} from '@/services/api/client'
-import {logsApi} from '@/services/api/logs'
 
 const routeDecisionEvent = (overrides: Record<string, unknown> = {}) => ({
     sequence: 4,
@@ -219,14 +219,15 @@ describe('route decision request-log integration', () => {
         })) as typeof apiClient.get
         try {
             // noinspection ES6RedundantAwait
-            await expect(logsApi.previewRequestLogById('request-id', 300, '192.0.2.1')).resolves.toEqual({
-                                                                                                             content: '',
-                                                                                                             truncated: false,
-                                                                                                             total_lines: 0,
-                                                                                                             requestLogState: 'pending',
-                                                                                                             requestLogHomeIp: '192.0.2.1',
-                                                                                                             message: 'request log is still being published',
-                                                                                                         })
+            await expect(logsApi.previewRequestLogById('request-id', 300, '192.0.2.1')).resolves.toEqual(
+                {
+                    content: '',
+                    truncated: false,
+                    total_lines: 0,
+                    requestLogState: 'pending',
+                    requestLogHomeIp: '192.0.2.1',
+                    message: 'request log is still being published',
+                })
         } finally {
             apiClient.get = originalGet
         }
@@ -248,9 +249,10 @@ describe('route decision request-log integration', () => {
             ] as const) {
                 responseState = state
                 // noinspection ES6RedundantAwait
-                await expect(logsApi.previewRequestLogById('request-id')).resolves.toMatchObject({
-                                                                                                     requestLogState: state,
-                                                                                                 })
+                await expect(logsApi.previewRequestLogById('request-id')).resolves.toMatchObject(
+                    {
+                        requestLogState: state,
+                    })
             }
             responseState = 'unexpected'
             // noinspection ES6RedundantAwait

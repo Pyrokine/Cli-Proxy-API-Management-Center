@@ -34,7 +34,7 @@ export function MultiSelect({
                                 fullWidth = true,
                                 allLabel,
                             }: MultiSelectProps) {
-    const { isOpen, pos, wrapRef, dropdownRef, toggle } = useDropdown(options.length, 280, disabled)
+    const { isOpen, pos, wrapRef, dropdownRef, toggle, onKeyDown } = useDropdown(options.length, 280, disabled)
 
     const [search, setSearch] = useState('')
     const searchRef           = useRef<HTMLInputElement | null>(null)
@@ -113,8 +113,8 @@ export function MultiSelect({
             const matched = options.find((o) => o.value === values[0])
             return matched?.label ?? values[0]
         }
-        return `${values.length} selected`
-    }, [values, options, isAllSelected, allLabel, placeholder])
+        return t('multi_select.selected', { count: values.length })
+    }, [values, options, isAllSelected, allLabel, placeholder, t])
 
     const handleClear = (e: MouseEvent) => {
         e.stopPropagation()
@@ -122,7 +122,8 @@ export function MultiSelect({
     }
 
     return (
-        <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}>
+        <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}
+             onKeyDown={onKeyDown}>
             <button
                 type='button'
                 className={styles.trigger}
@@ -142,7 +143,7 @@ export function MultiSelect({
                             role='button'
                             tabIndex={-1}
                             onClick={handleClear}
-                            aria-label='Clear selection'
+                            aria-label={t('multi_select.clear')}
                         >
                             <IconX size={12} />
                         </span>
@@ -182,7 +183,7 @@ export function MultiSelect({
                             onClick={handleSelectAll}
                         >
                             <span className={styles.optionCheck}>{isAllSelected && <IconCheck size={14} />}</span>
-                            <span>{allLabel ?? placeholder ?? 'All'}</span>
+                            <span>{allLabel ?? placeholder ?? t('multi_select.all')}</span>
                         </button>
                     )}
                     {filteredOptions.length === 0 ? (

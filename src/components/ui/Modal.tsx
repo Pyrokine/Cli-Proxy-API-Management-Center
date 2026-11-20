@@ -9,6 +9,7 @@ import {
     useState,
 } from 'react'
 import {createPortal} from 'react-dom'
+import {useTranslation} from 'react-i18next'
 import {IconX} from './icons'
 import {lockScroll, unlockScroll} from './scrollLock'
 
@@ -68,11 +69,13 @@ export function Modal({
                           closeBehavior = 'after-animation',
                           closeOnOverlay = true,
                           closeOnEscape = true,
-                          closeLabel = 'Close',
+                          closeLabel,
                           initialFocusId,
                           returnFocusId,
                           children,
                       }: PropsWithChildren<ModalProps>) {
+    const { t }                     = useTranslation()
+    const resolvedCloseLabel        = closeLabel ?? t('common.close')
     const [isVisible, setIsVisible] = useState(false)
     const [isClosing, setIsClosing] = useState(false)
     const closeTimerRef             = useRef<number | null>(null)
@@ -297,14 +300,14 @@ export function Modal({
                 role='dialog'
                 aria-modal='true'
                 aria-labelledby={title ? titleId : undefined}
-                aria-label={title ? undefined : closeLabel}
+                aria-label={title ? undefined : resolvedCloseLabel}
                 tabIndex={-1}
             >
                 <button
                     type='button'
                     className='modal-close-floating'
                     onClick={handleClose}
-                    aria-label={closeLabel}
+                    aria-label={resolvedCloseLabel}
                     disabled={closeDisabled}
                 >
                     <IconX size={20} />

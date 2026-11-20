@@ -15,11 +15,15 @@ export function usePagination<T>(
     prevPage: () => void
     setPageSize: (size: number) => void
 } {
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize]       = useState(initialPageSize)
+    const [storedPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize]      = useState(initialPageSize)
 
-    const totalItems = items.length
-    const totalPages = Math.ceil(totalItems / pageSize) || 1
+    const totalItems  = items.length
+    const totalPages  = Math.ceil(totalItems / pageSize) || 1
+    const currentPage = Math.min(storedPage, totalPages)
+    if (currentPage !== storedPage) {
+        setCurrentPage(currentPage)
+    }
 
     const currentItems = useMemo(() => {
         const start = (currentPage - 1) * pageSize

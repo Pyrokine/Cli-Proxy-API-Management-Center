@@ -1,18 +1,20 @@
 /**
  * 通知中心：铃铛图标 + 未读计数 + 下拉面板
  */
-
 import {Button} from '@/components/ui/Button'
 import {IconBell, IconCheckCheck, IconTrash2} from '@/components/ui/icons'
+import {Pagination} from '@/components/ui/Pagination'
+import {usePagination} from '@/hooks/usePagination'
 import type {PersistentNotification} from '@/stores/useNotificationStore'
 import {useNotificationStore} from '@/stores/useNotificationStore'
 import {PERSISTENT_NOTIFICATION_SOURCES} from '@/utils/notifications'
+import type {TFunction} from 'i18next'
 import {useCallback, useEffect, useRef} from 'react'
 import {useTranslation} from 'react-i18next'
 
 import styles from './NotificationCenter.module.scss'
 
-function formatRelativeTime(timestamp: number, t: (key: string, options?: Record<string, unknown>) => string): string {
+function formatRelativeTime(timestamp: number, t: TFunction): string {
     const diff    = Date.now() - timestamp
     const seconds = Math.floor(diff / 1000)
     if (seconds < 60) {
@@ -37,7 +39,7 @@ function NotificationItem({
                           }: {
     item: PersistentNotification
     onClick: (id: string) => void
-    t: (key: string, options?: Record<string, unknown>) => string
+    t: TFunction
 }) {
     const sourceLabel = t(PERSISTENT_NOTIFICATION_SOURCES[item.source]?.labelKey ?? 'notifications.sources.unknown')
     return (
@@ -65,8 +67,9 @@ export function NotificationCenter() {
     const clearAllPersistent      = useNotificationStore((s) => s.clearAllPersistent)
     const unreadCount             = useNotificationStore((s) => s.unreadCount)
 
-    const count      = unreadCount()
-    const wrapperRef = useRef<HTMLDivElement>(null)
+    const { currentItems, currentPage, pageSize, goToPage, setPageSize } = usePagination(persistentNotifications, 5)
+    const count                                                          = unreadCount()
+    const wrapperRef                                                     = useRef<HTMLDivElement>(null)
 
     // 点击外部关闭面板
     useEffect(() => {
@@ -131,11 +134,16 @@ export function NotificationCenter() {
                         {persistentNotifications.length === 0 ? (
                             <div className={styles.empty}>{t('notifications.empty')}</div>
                         ) : (
-                             persistentNotifications.map((item) => (
+                             currentItems.map((item) => (
                                  <NotificationItem key={item.id} item={item} onClick={handleItemClick} t={t} />
                              ))
                          )}
                     </div>
+                    {persistentNotifications.length >
+                     pageSize &&
+                     <Pagination total={persistentNotifications.length} page={currentPage} pageSize={pageSize}
+                                 pageSizeOptions={[5, 10, 20]} onPageChange={goToPage}
+                                 onPageSizeChange={setPageSize} />}
                 </div>
             )}
         </div>

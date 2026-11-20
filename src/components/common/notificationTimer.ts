@@ -14,10 +14,10 @@ export function createNotificationTimer(duration: number, onExpire: () => void, 
     let remaining = duration
     let startedAt = 0
     let handle: unknown
-    let running = false
-    let active = false
-    let finished = false
-    const pauses = new Set<string>()
+    let running   = false
+    let active    = false
+    let finished  = false
+    const pauses  = new Set<string>()
 
     function stopCountdown() {
         if (!running) {
@@ -33,11 +33,11 @@ export function createNotificationTimer(duration: number, onExpire: () => void, 
             return
         }
         startedAt = timing.now()
-        running = true
-        handle = timing.schedule(() => {
-            running = false
-            active = false
-            finished = true
+        running   = true
+        handle    = timing.schedule(() => {
+            running   = false
+            active    = false
+            finished  = true
             remaining = 0
             onExpire()
         }, remaining)
@@ -65,7 +65,7 @@ export function createNotificationTimer(duration: number, onExpire: () => void, 
             stopCountdown()
         },
         dispose() {
-            active = false
+            active   = false
             finished = true
             stopCountdown()
             pauses.clear()

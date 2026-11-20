@@ -1,7 +1,7 @@
 import type {AnimationPlaybackControlsWithThen} from 'motion-dom'
 import {animate} from 'motion/mini'
 import {type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState} from 'react'
-import {type Location, useLocation} from 'react-router-dom'
+import {type Location, useLocation} from 'react-router'
 import {type LayerStatus, PageTransitionLayerContext} from './PageTransitionLayer'
 import './PageTransition.scss'
 
@@ -258,6 +258,11 @@ export function PageTransition({
 
             clearLayerStyles(currentLayerEl)
             clearLayerStyles(exitingLayerEl)
+        }
+
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+            completeTransition()
+            return
         }
 
         if (transitionVariant === 'ios') {

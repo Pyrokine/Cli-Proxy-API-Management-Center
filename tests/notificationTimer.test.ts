@@ -1,23 +1,25 @@
-import {afterEach, describe, expect, spyOn, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
 import {createNotificationTimer} from '@/components/common/notificationTimer'
 import {useNotificationStore} from '@/stores/useNotificationStore'
+import {afterEach, describe, expect, spyOn, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
 
 const initialState = useNotificationStore.getInitialState()
 afterEach(() => useNotificationStore.setState(initialState, true))
 
 function createClock() {
-    let now = 0
-    let nextId = 0
-    const scheduled = new Map<number, {callback: () => void; at: number}>()
-    const clock = {
+    let now         = 0
+    let nextId      = 0
+    const scheduled = new Map<number, { callback: () => void; at: number }>()
+    const clock     = {
         now: () => now,
         schedule: (callback: () => void, delay: number) => {
             const id = ++nextId
-            scheduled.set(id, {callback, at: now + delay})
+            scheduled.set(id, { callback, at: now + delay })
             return id
         },
-        cancel: (handle: unknown) => { scheduled.delete(handle as number) },
+        cancel: (handle: unknown) => {
+            scheduled.delete(handle as number)
+        },
     }
     return {
         clock,
@@ -25,7 +27,8 @@ function createClock() {
         advance: (elapsed: number) => {
             const end = now + elapsed
             while (true) {
-                const due = [...scheduled.entries()].filter(([, entry]) => entry.at <= end).sort((a, b) => a[1].at - b[1].at)[0]
+                const due = [...scheduled.entries()].filter(([, entry]) => entry.at <= end).sort((a, b) => a[1].at -
+                                                                                                           b[1].at)[0]
                 if (!due) {
                     break
                 }
@@ -150,8 +153,8 @@ describe('notification readable-time expiry', () => {
             }
             const notifications = useNotificationStore.getState().notifications
             expect(notifications).toHaveLength(4)
-            expect(new Set(notifications.map(({id}) => id)).size).toBe(4)
-            expect(notifications.slice(1).map(({duration}) => duration)).toEqual([0, -1, 100])
+            expect(new Set(notifications.map(({ id }) => id)).size).toBe(4)
+            expect(notifications.slice(1).map(({ duration }) => duration)).toEqual([0, -1, 100])
             expect(timeout).not.toHaveBeenCalled()
         } finally {
             timeout.mockRestore()
@@ -164,9 +167,13 @@ describe('notification readable-time expiry', () => {
         store.showNotification('Second', 'error', -1)
         store.addPersistentNotification('History', 'info', 'connection')
         let confirmations = 0
-        store.showConfirmation({message: 'Synthetic confirmation', onConfirm: () => { ++confirmations }})
+        store.showConfirmation({
+                                   message: 'Synthetic confirmation', onConfirm: () => {
+                ++confirmations
+            },
+                               })
         store.setConfirmationLoading(true)
-        const before = useNotificationStore.getState()
+        const before          = useNotificationStore.getState()
         const [first, second] = before.notifications
         store.removeNotification(first!.id)
         store.removeNotification(first!.id)
@@ -182,13 +189,18 @@ describe('notification readable-time expiry', () => {
     test('history deduplication and clearing remain independent of toast lifetime', () => {
         const store = useNotificationStore.getState()
         store.showNotification('Visible toast', 'info', 0)
-        store.addPersistentNotification('First update', 'info', 'version', {dedupeKey: 'synthetic'})
+        store.addPersistentNotification('First update', 'info', 'version', { dedupeKey: 'synthetic' })
         const original = useNotificationStore.getState().persistentNotifications[0]!
         store.markAsRead(original.id)
-        store.addPersistentNotification('Latest update', 'warning', 'version', {dedupeKey: 'synthetic'})
+        store.addPersistentNotification('Latest update', 'warning', 'version', { dedupeKey: 'synthetic' })
         const updated = useNotificationStore.getState().persistentNotifications
         expect(updated).toHaveLength(1)
-        expect(updated[0]).toMatchObject({id: original.id, timestamp: original.timestamp, read: true, message: 'Latest update'})
+        expect(updated[0]).toMatchObject({
+                                             id: original.id,
+                                             timestamp: original.timestamp,
+                                             read: true,
+                                             message: 'Latest update',
+                                         })
         expect(store.unreadCount()).toBe(0)
         store.clearAllPersistent()
         expect(useNotificationStore.getState().persistentNotifications).toHaveLength(0)
@@ -197,16 +209,19 @@ describe('notification readable-time expiry', () => {
 
     test('view owns both readable-time expiry and exit cleanup', () => {
         const store = readFileSync(new URL('../src/stores/useNotificationStore.ts', import.meta.url), 'utf8')
-        const view = readFileSync(new URL('../src/components/common/NotificationContainer.tsx', import.meta.url), 'utf8')
+        const view  = readFileSync(
+            new URL('../src/components/common/NotificationContainer.tsx', import.meta.url),
+            'utf8',
+        )
         expect(store).not.toContain('setTimeout(')
         expect(view).toContain('createNotificationTimer(')
         expect(view).toContain('readableTimer.start()')
         expect(view).toContain('readableTimer.stop()')
-        expect(view).toContain("document.removeEventListener('visibilitychange', syncVisibility)")
+        expect(view).toContain('document.removeEventListener(\'visibilitychange\', syncVisibility)')
         expect(view).toContain('clearTimeout(exitTimer)')
         expect(view).toContain('inert={isExiting || undefined}')
-        expect(view).toContain("aria-label={t('common.close')}")
-        expect(view).toContain("type === 'error' ? 'alert' : 'status'")
+        expect(view).toContain('aria-label={t(\'common.close\')}')
+        expect(view).toContain('type === \'error\' ? \'alert\' : \'status\'')
         expect(view).toContain('event.stopPropagation()')
         expect(view).toContain('returnFocusRef.current')
     })

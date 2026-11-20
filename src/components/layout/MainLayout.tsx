@@ -2,8 +2,8 @@ import {INLINE_LOGO_JPEG} from '@/assets/logoInline'
 import {NotificationCenter} from '@/components/common/NotificationCenter'
 import {PageTransition} from '@/components/common/PageTransition'
 import {VersionCompatBanner} from '@/components/common/VersionCompatBanner'
-import {Button} from '@/components/ui/Button'
 import {countCredentialCards} from '@/components/credentials/hooks/useVendorRegistry'
+import {Button} from '@/components/ui/Button'
 import {
     IconBot,
     IconSidebarAuthFiles,
@@ -20,14 +20,15 @@ import {
 import {triggerHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {resolveProviderEditModalState} from '@/hooks/useProviderEditPresentation'
 import {MainRoutes} from '@/router/MainRoutes'
+import {apiClient} from '@/services/api/client'
 import {useAuthStore, useConfigStore, useLanguageStore, useNotificationStore, useThemeStore} from '@/stores'
 import {useAuthFilesSummaryStore} from '@/stores/useAuthFilesSummaryStore'
 import type {Theme} from '@/types'
 import {LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER} from '@/utils/constants'
 import {isSupportedLanguage} from '@/utils/language'
-import {ReactNode, SVGProps, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
+import {ReactNode, SVGProps, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {NavLink, useLocation} from 'react-router-dom'
+import {NavLink, useLocation} from 'react-router'
 
 const sidebarIcons: Record<string, ReactNode> = {
     dashboard: <IconSidebarDashboard size={18} />,
@@ -212,9 +213,9 @@ export function MainLayout() {
     const refreshAuthFilesCount = useAuthFilesSummaryStore((state) => state.refresh)
     const clearAuthFilesCount   = useAuthFilesSummaryStore((state) => state.clear)
 
-    const config      = useConfigStore((state) => state.config)
-    const fetchConfig = useConfigStore((state) => state.fetchConfig)
-    const clearCache  = useConfigStore((state) => state.clearCache)
+    const config           = useConfigStore((state) => state.config)
+    const fetchConfig      = useConfigStore((state) => state.fetchConfig)
+    const clearCache       = useConfigStore((state) => state.clearCache)
     const credentialsCount = useMemo(() => countCredentialCards(config, authFilesCount), [config, authFilesCount])
 
     const theme       = useThemeStore((state) => state.theme)
@@ -222,16 +223,19 @@ export function MainLayout() {
     const language    = useLanguageStore((state) => state.language)
     const setLanguage = useLanguageStore((state) => state.setLanguage)
 
-    const [sidebarOpen, setSidebarOpen]           = useState(false)
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-    const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
-    const [themeMenuOpen, setThemeMenuOpen]       = useState(false)
-    const [brandExpanded, setBrandExpanded]       = useState(true)
-    const contentRef                              = useRef<HTMLDivElement | null>(null)
-    const languageMenuRef                         = useRef<HTMLDivElement | null>(null)
-    const themeMenuRef                            = useRef<HTMLDivElement | null>(null)
-    const brandCollapseTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const headerRef                               = useRef<HTMLElement | null>(null)
+    const [sidebarOpen, setSidebarOpen]               = useState(false)
+    const [sidebarCollapsed, setSidebarCollapsed]     = useState(false)
+    const [sidebarHintVisible, setSidebarHintVisible] = useState(false)
+    const sidebarHintRef                              = useRef<HTMLDivElement | null>(null)
+    const sidebarHintId                               = useId()
+    const [languageMenuOpen, setLanguageMenuOpen]     = useState(false)
+    const [themeMenuOpen, setThemeMenuOpen]           = useState(false)
+    const [brandExpanded, setBrandExpanded]           = useState(true)
+    const contentRef                                  = useRef<HTMLDivElement | null>(null)
+    const languageMenuRef                             = useRef<HTMLDivElement | null>(null)
+    const themeMenuRef                                = useRef<HTMLDivElement | null>(null)
+    const brandCollapseTimer                          = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const headerRef                                   = useRef<HTMLElement | null>(null)
 
     const fullBrandName            = 'CLI Proxy API Management Center'
     const abbrBrandName            = t('title.abbr')
@@ -239,12 +243,15 @@ export function MainLayout() {
     const mobileSidebarToggleLabel = sidebarOpen
                                      ? t('sidebar.toggle_collapse', { defaultValue: 'Close navigation' })
                                      : t('sidebar.toggle_expand', { defaultValue: 'Open navigation' })
-    const sidebarToggleLabel = sidebarCollapsed
-        ? t('sidebar.expand', {defaultValue: '展开'})
-        : t('sidebar.collapse', {defaultValue: '收起'})
-    const sidebarShortcutLabel = useMemo(() =>
-        typeof navigator !== 'undefined' && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform || navigator.userAgent)
-            ? '⌘B' : 'Ctrl+B', [])
+    const sidebarToggleLabel       = sidebarCollapsed
+                                     ? t('sidebar.expand', { defaultValue: '展开' })
+                                     : t('sidebar.collapse', { defaultValue: '收起' })
+    const sidebarShortcutLabel     = useMemo(() =>
+                                                 typeof navigator !==
+                                                 'undefined' &&
+                                                 /Mac|iPhone|iPod|iPad/i.test(navigator.platform ||
+                                                                              navigator.userAgent)
+                                                 ? '⌘B' : 'Ctrl+B', [])
 
     useEffect(() => {
         const handleSidebarShortcut = (event: KeyboardEvent) => {
@@ -253,7 +260,7 @@ export function MainLayout() {
                 return
             }
             if (event.composedPath().some((target) => target instanceof HTMLElement && (
-                target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+                target.isContentEditable || /^(?:INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
                 target.closest('[role="textbox"], [role="searchbox"], [role="combobox"]')
             ))) {
                 return
@@ -268,6 +275,28 @@ export function MainLayout() {
         window.addEventListener('keydown', handleSidebarShortcut)
         return () => window.removeEventListener('keydown', handleSidebarShortcut)
     }, [])
+
+    useEffect(() => {
+        if (!sidebarHintVisible) {
+            return
+        }
+        const handleSidebarHintOutside = (event: PointerEvent) => {
+            if (!sidebarHintRef.current?.contains(event.target as Node)) {
+                setSidebarHintVisible(false)
+            }
+        }
+        const handleSidebarHintEscape  = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setSidebarHintVisible(false)
+            }
+        }
+        document.addEventListener('pointerdown', handleSidebarHintOutside)
+        document.addEventListener('keydown', handleSidebarHintEscape)
+        return () => {
+            document.removeEventListener('pointerdown', handleSidebarHintOutside)
+            document.removeEventListener('keydown', handleSidebarHintEscape)
+        }
+    }, [sidebarHintVisible])
 
     // 将顶栏高度写入 CSS 变量，确保侧栏/内容区计算一致，防止滚动时抖动
     useLayoutEffect(() => {
@@ -471,6 +500,7 @@ export function MainLayout() {
 
     // 页面版本检测——每 5 分钟检查服务器上的面板是否更新
     const versionNotifiedRef = useRef(false)
+    const versionBaselineRef = useRef<string | null>(null)
     useEffect(() => {
         const currentVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
         if (!currentVersion) {
@@ -485,9 +515,9 @@ export function MainLayout() {
                 }
                 // 对比 Last-Modified 作为版本指纹
                 const lastModified = resp.headers.get('last-modified') || ''
-                const stored       = sessionStorage.getItem('cpa-panel-last-modified')
-                if (!stored) {
-                    sessionStorage.setItem('cpa-panel-last-modified', lastModified)
+                const stored       = versionBaselineRef.current
+                if (stored === null) {
+                    versionBaselineRef.current = lastModified
                     return
                 }
                 if (lastModified && lastModified !== stored && !versionNotifiedRef.current) {
@@ -505,6 +535,7 @@ export function MainLayout() {
             }
         }
 
+        void checkVersion()
         const id = setInterval(checkVersion, 5 * 60 * 1000) // 5 minutes
         return () => clearInterval(id)
     }, [addPersistentNotification, t])
@@ -622,8 +653,12 @@ export function MainLayout() {
     }, [])
 
     const handleRefreshAll = async () => {
+        const authGeneration = apiClient.getAuthGeneration()
         clearCache()
-        const results  = await Promise.allSettled([fetchConfig(undefined, true), triggerHeaderRefresh()])
+        const results = await Promise.allSettled([fetchConfig(undefined, true), triggerHeaderRefresh()])
+        if (authGeneration !== apiClient.getAuthGeneration()) {
+            return
+        }
         const rejected = results.find((result) => result.status === 'rejected')
         if (rejected && rejected.status === 'rejected') {
             const reason  = rejected.reason
@@ -639,16 +674,38 @@ export function MainLayout() {
             <VersionCompatBanner />
             <header className='main-header' ref={headerRef}>
                 <div className='left'>
-                    <button
-                        className='sidebar-toggle-header'
-                        onClick={() => setSidebarCollapsed((prev) => !prev)}
-                        title={`${sidebarToggleLabel} (${sidebarShortcutLabel})`}
-                        aria-label={sidebarToggleLabel}
-                        aria-expanded={!sidebarCollapsed}
-                        aria-keyshortcuts='Control+B Meta+B'
+                    <div className='sidebar-toggle-wrap' ref={sidebarHintRef}
+                         onPointerEnter={(event) => {
+                             if (event.pointerType === 'mouse') {
+                                 setSidebarHintVisible(true)
+                             }
+                         }}
+                         onPointerLeave={(event) => {
+                             if (event.pointerType === 'mouse') {
+                                 setSidebarHintVisible(false)
+                             }
+                         }}
                     >
-                        {sidebarCollapsed ? headerIcons.chevronRight : headerIcons.chevronLeft}
-                    </button>
+                        <button
+                            className='sidebar-toggle-header'
+                            onClick={() => {
+                                setSidebarCollapsed((prev) => !prev);
+                                setSidebarHintVisible(true)
+                            }}
+                            onFocus={() => setSidebarHintVisible(true)}
+                            onBlur={() => setSidebarHintVisible(false)}
+                            aria-describedby={sidebarHintId}
+                            aria-label={sidebarToggleLabel}
+                            aria-expanded={!sidebarCollapsed}
+                            aria-keyshortcuts='Control+B Meta+B'
+                        >
+                            {sidebarCollapsed ? headerIcons.chevronRight : headerIcons.chevronLeft}
+                        </button>
+                        <span id={sidebarHintId} role='tooltip' className='sidebar-shortcut-hint'
+                              hidden={!sidebarHintVisible}>
+                            {sidebarToggleLabel} ({sidebarShortcutLabel})
+                        </span>
+                    </div>
                     <Button
                         className='mobile-menu-btn'
                         variant='ghost'

@@ -1,4 +1,4 @@
-import {type AriaAttributes, type KeyboardEvent, useRef} from 'react'
+import {type AriaAttributes, useRef} from 'react'
 import {DropdownPanel} from './DropdownPanel'
 import {IconChevronDown} from './icons'
 import styles from './Select.module.scss'
@@ -38,30 +38,21 @@ export function Select({
                            ariaInvalid,
                            fullWidth = true,
                        }: SelectProps) {
-    const { isOpen, pos, wrapRef, dropdownRef, toggle, close } = useDropdown(options.length, 240, disabled)
-    const triggerRef = useRef<HTMLButtonElement | null>(null)
-
-    const closeOnEscape = (event: KeyboardEvent<HTMLButtonElement>) => {
-        if (isOpen && event.key === 'Escape') {
-            event.preventDefault()
-            event.stopPropagation()
-            close()
-            triggerRef.current?.focus({ preventScroll: true })
-        }
-    }
+    const { isOpen, pos, wrapRef, dropdownRef, toggle, close, onKeyDown } = useDropdown(options.length, 240, disabled)
+    const triggerRef                                                      = useRef<HTMLButtonElement | null>(null)
 
     const selected      = options.find((o) => o.value === value)
     const displayText   = selected?.label ?? placeholder ?? ''
     const isPlaceholder = !selected && placeholder
 
     return (
-        <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}>
+        <div className={`${styles.wrap} ${fullWidth ? styles.wrapFullWidth : ''} ${className ?? ''}`} ref={wrapRef}
+             onKeyDown={onKeyDown}>
             <button
                 ref={triggerRef}
                 type='button'
                 className={styles.trigger}
                 onClick={toggle}
-                onKeyDown={closeOnEscape}
                 id={id}
                 aria-haspopup='listbox'
                 aria-expanded={isOpen}
@@ -95,7 +86,6 @@ export function Select({
                                 role='option'
                                 aria-selected={active}
                                 className={`${styles.option} ${active ? styles.optionActive : ''}`}
-                                onKeyDown={closeOnEscape}
                                 onClick={() => {
                                     onChange(opt.value)
                                     close()

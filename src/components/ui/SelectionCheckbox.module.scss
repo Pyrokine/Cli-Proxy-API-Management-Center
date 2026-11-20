@@ -83,3 +83,13 @@
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
 }
+
+@media (prefers-reduced-motion: reduce) {
+    .box {
+        transition: none;
+    }
+
+    .root:active .box {
+        transform: none;
+    }
+}

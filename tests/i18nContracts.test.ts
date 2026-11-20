@@ -72,128 +72,144 @@ const literalKeyPatterns: Array<{ pattern: RegExp; keyPrefix?: string }> = [
     },
 ]
 
-const dynamicKeyManifest = [
-    ...['gemini', 'interactions', 'codex', 'meta'].flatMap((provider) =>
-                                                       [
-                                                           'models_label',
-                                                           'models_add_btn',
-                                                           'models_fetch_button',
-                                                           'models_hint',
-                                                           'models_fetch_title',
-                                                           'models_fetch_apply',
-                                                           'models_fetch_hint',
-                                                           'models_fetch_url_label',
-                                                           'models_fetch_refresh',
-                                                           'models_search_label',
-                                                           'models_search_placeholder',
-                                                           'models_fetch_loading',
-                                                           'models_fetch_empty',
-                                                           'models_search_empty',
-                                                       ].map((suffix) => `ai_providers.${provider}_${suffix}`),
-    ),
-    ...['claude_models', 'openai_models'].flatMap((provider) =>
-                                                      [
-                                                          'fetch_error',
-                                                          'fetch_title',
-                                                          'fetch_apply',
-                                                          'fetch_hint',
-                                                          'fetch_url_label',
-                                                          'fetch_refresh',
-                                                          'search_label',
-                                                          'search_placeholder',
-                                                          'fetch_loading',
-                                                          'fetch_empty',
-                                                          'search_empty',
-                                                      ].map((suffix) => `ai_providers.${provider}_${suffix}`),
-    ),
-    ...['gemini', 'interactions', 'codex', 'meta', 'claude', 'openai'].flatMap((provider) =>
-                                                                           [
-                                                                               'title',
-                                                                               'hint',
-                                                                               'select_placeholder',
-                                                                               'select_empty',
-                                                                               'action',
-                                                                           ].map(
-                                                                               (suffix) => `ai_providers.${provider}_test_${suffix}`,
-                                                                           ),
-    ),
-    ...['all', 'available', 'exhausted', 'error', 'disabled'].map(
-        (suffix) => `credentials.filter_${suffix}`,
-    ),
-    ...['all', 'api_key', 'auth_file'].map((suffix) => `credentials.filter_type_${suffix}`),
-    ...['name', 'type', 'status', 'requests', 'priority'].map((suffix) => `credentials.sort_${suffix}`),
-    ...['normal', 'unavailable', 'unknown', 'disabled', 'completed', 'stopped', 'error', 'running'].map(
-        (suffix) => `credentials.inspection_status_${suffix}`,
-    ),
-    ...[
-        'ok',
-        'quota_exceeded',
-        'account_banned',
-        'refresh_failed',
-        'token_expired',
-        'provider_error',
-        'disabled',
-        'unknown',
-        'pending',
-        'refreshing',
-    ].map((suffix) => `credentials.inspection_reason_${suffix}`),
-    ...[
-        'none',
-        'wait_quota_recovery',
-        'check_provider_account',
-        'manual_refresh_token',
-        'enable_account',
-        'check_login_or_provider_status',
-        'wait_or_check_login',
-        'enable_when_needed',
-    ].map((suffix) => `credentials.inspection_advice_${suffix}`),
-    ...['healthy', 'warning', 'error', 'unknown'].map(
-        (suffix) => `credentials.provider_health_status_${suffix}`,
-    ),
-    ...['panel', 'cpa'].map((suffix) => `version_history.target_${suffix}`),
-    ...['downloading', 'verifying', 'replacing', 'done', 'error', 'poll_failed', 'reconnecting', 'unconfirmed'].map(
-        (suffix) => `version_history.status_${suffix}`,
-    ),
-    ...[
-        'validation_blocked',
-        'port_range',
-        'non_negative_integer',
-        'integer_range_1_3600',
-        'quota_refresh_interval_range',
-        'quota_refresh_max_interval_range',
-        'payload_invalid_number',
-        'payload_invalid_boolean',
-        'payload_invalid_json',
-    ].map((suffix) => `config_management.visual.validation.${suffix}`),
-    ...['empty', 'masked', 'weak', 'fair', 'good', 'strong'].map(
-        (suffix) => `config_management.visual.api_keys.strength.levels.${suffix}`,
-    ),
-    ...[
-        'short',
-        'limited_character_classes',
-        'low_unique_characters',
-        'repeated_characters',
-        'repeated_pattern',
-        'sequential_characters',
-        'common_term',
-    ].map((suffix) => `config_management.visual.api_keys.strength.patterns.${suffix}`),
-    ...[
-        'use_longer_key',
-        'mix_character_classes',
-        'increase_character_variety',
-        'avoid_repeated_characters',
-        'avoid_repeated_patterns',
-        'avoid_sequences',
-        'avoid_common_terms',
-        'use_generator',
-        'replace_masked_value',
-    ].map((suffix) => `config_management.visual.api_keys.strength.suggestions.${suffix}`),
-    ...['overview', 'events', 'settings'].map((suffix) => `usage_stats.tab_${suffix}`),
-    ...['2xx', '3xx', '4xx', '5xx'].map((suffix) => `logs.filter_status_${suffix}`),
-    ...['history', 'ban_started', 'automatic_expiry', 'manual_unban'].map(
-        (suffix) => `system_info.rate_limit_event_${suffix}`,
-    ),
-]
+const dynamicKeyManifest =
+          [
+              ...['gemini', 'interactions', 'codex', 'meta'].flatMap(
+                  (provider) =>
+                      [
+                          'models_label',
+                          'models_add_btn',
+                          'models_fetch_button',
+                          'models_hint',
+                          'models_fetch_title',
+                          'models_fetch_apply',
+                          'models_fetch_hint',
+                          'models_fetch_url_label',
+                          'models_fetch_refresh',
+                          'models_search_label',
+                          'models_search_placeholder',
+                          'models_fetch_loading',
+                          'models_fetch_empty',
+                          'models_search_empty',
+                      ].map(
+                          (suffix) => `ai_providers.${provider}_${suffix}`,
+                      ),
+              ),
+              ...['claude_models', 'openai_models'].flatMap((provider) =>
+                                                                [
+                                                                    'fetch_error',
+                                                                    'fetch_title',
+                                                                    'fetch_apply',
+                                                                    'fetch_hint',
+                                                                    'fetch_url_label',
+                                                                    'fetch_refresh',
+                                                                    'search_label',
+                                                                    'search_placeholder',
+                                                                    'fetch_loading',
+                                                                    'fetch_empty',
+                                                                    'search_empty',
+                                                                ].map((suffix) => `ai_providers.${provider}_${suffix}`),
+              ),
+              ...['gemini', 'interactions', 'codex', 'meta', 'claude', 'openai'].flatMap(
+                  (provider) =>
+                      [
+                          'title',
+                          'hint',
+                          'select_placeholder',
+                          'select_empty',
+                          'action',
+                      ].map(
+                          (suffix) => `ai_providers.${
+                              provider}_test_${
+                              suffix}`,
+                      ),
+              ),
+              ...['all', 'available', 'exhausted', 'error', 'disabled'].map(
+                  (suffix) => `credentials.filter_${suffix}`,
+              ),
+              ...['all', 'api_key', 'auth_file'].map((suffix) => `credentials.filter_type_${suffix}`),
+              ...['name', 'type', 'status', 'requests', 'priority'].map((suffix) => `credentials.sort_${suffix}`),
+              ...['normal', 'unavailable', 'unknown', 'disabled', 'completed', 'stopped', 'error', 'running'].map(
+                  (suffix) => `credentials.inspection_status_${suffix}`,
+              ),
+              ...[
+                  'ok',
+                  'quota_exceeded',
+                  'account_banned',
+                  'refresh_failed',
+                  'token_expired',
+                  'provider_error',
+                  'disabled',
+                  'unknown',
+                  'pending',
+                  'refreshing',
+              ].map((suffix) => `credentials.inspection_reason_${suffix}`),
+              ...[
+                  'none',
+                  'wait_quota_recovery',
+                  'check_provider_account',
+                  'manual_refresh_token',
+                  'enable_account',
+                  'check_login_or_provider_status',
+                  'wait_or_check_login',
+                  'enable_when_needed',
+              ].map((suffix) => `credentials.inspection_advice_${suffix}`),
+              ...['healthy', 'warning', 'error', 'unknown'].map(
+                  (suffix) => `credentials.provider_health_status_${suffix}`,
+              ),
+              ...['panel', 'cpa'].map((suffix) => `version_history.target_${suffix}`),
+              ...[
+                  'downloading',
+                  'verifying',
+                  'replacing',
+                  'done',
+                  'error',
+                  'poll_failed',
+                  'reconnecting',
+                  'unconfirmed',
+              ].map(
+                  (suffix) => `version_history.status_${suffix}`,
+              ),
+              ...[
+                  'validation_blocked',
+                  'port_range',
+                  'non_negative_integer',
+                  'integer_range_1_3600',
+                  'quota_refresh_interval_range',
+                  'quota_refresh_max_interval_range',
+                  'payload_invalid_number',
+                  'payload_invalid_boolean',
+                  'payload_invalid_json',
+              ].map((suffix) => `config_management.visual.validation.${suffix}`),
+              ...['empty', 'masked', 'weak', 'fair', 'good', 'strong'].map(
+                  (suffix) => `config_management.visual.api_keys.strength.levels.${suffix}`,
+              ),
+              ...[
+                  'short',
+                  'limited_character_classes',
+                  'low_unique_characters',
+                  'repeated_characters',
+                  'repeated_pattern',
+                  'sequential_characters',
+                  'common_term',
+              ].map((suffix) => `config_management.visual.api_keys.strength.patterns.${suffix}`),
+              ...[
+                  'use_longer_key',
+                  'mix_character_classes',
+                  'increase_character_variety',
+                  'avoid_repeated_characters',
+                  'avoid_repeated_patterns',
+                  'avoid_sequences',
+                  'avoid_common_terms',
+                  'use_generator',
+                  'replace_masked_value',
+              ].map((suffix) => `config_management.visual.api_keys.strength.suggestions.${suffix}`),
+              ...['overview', 'events', 'settings'].map((suffix) => `usage_stats.tab_${suffix}`),
+              ...['2xx', '3xx', '4xx', '5xx'].map((suffix) => `logs.filter_status_${suffix}`),
+              ...['history', 'ban_started', 'automatic_expiry', 'manual_unban'].map(
+                  (suffix) => `system_info.rate_limit_event_${suffix}`,
+              ),
+          ]
 
 const technicalOnlyPatterns = [
     /^CPAMC$/,
@@ -204,7 +220,12 @@ const technicalOnlyPatterns = [
         '^(?:Qwen|Gemini|GeminiCLI|Gemini CLI|Kimi|AIStudio|Claude|Anthropic|' +
         'Codex|Antigravity|xAI|iFlow|Vertex|Interactions|OpenAI|Devin)(?: OAuth)?$',
     ),
-    /^(?:Free|Plus|Team|Pro(?: (?:5x|20x|100|200))?|Ultra(?: Lite)?|Max(?: (?:5x|20x))?|SuperGrok(?: Heavy)?|Iguana Necktie)$/,
+    // noinspection LongLine
+    new RegExp(
+        '^(?:Free|Plus|Team|Pro(?: (?:5x|20x|100|200))?|Ultra(?: Lite)?|M' +
+        'ax(?: (?:5x|20x))?|SuperGrok(?: Heavy)?|Iguana Necktie)$',
+        '',
+    ),
     new RegExp(
         '^(?:API Key|Request ID|Tokens|Websockets?|WebSocket|IP|OAuth|JSON|' +
         'true|false|Bearer|Basic|GitHub Token|User-Agent|Registry|Metadata|' +
@@ -337,7 +358,8 @@ describe('global i18n contract', () => {
 
     test('does not mix Simplified Chinese into Traditional Chinese translations', () => {
         const mixed = Object.entries(flatLocales['zh-TW'])
-                            .filter(([, value]) => simplifiedChineseFragments.some((fragment) => value.includes(fragment)))
+                            .filter(([, value]) => simplifiedChineseFragments.some((fragment) => value.includes(
+                                fragment)))
                             .map(([key, value]) => `${key}=${value}`)
         expect(mixed).toEqual([])
     })
@@ -394,10 +416,12 @@ describe('global i18n contract', () => {
     })
 
     test('names the single reset count and requires explicit consumption confirmation in every locale', () => {
-        expect(Object.fromEntries(localeNames.map((locale) => [locale,
-            flatLocales[locale]['codex_quota.reset_credits_label']]))).toEqual({
-            en: 'Owned resets', ru: 'Имеющиеся сбросы', 'zh-CN': '持有重置次数', 'zh-TW': '持有重置次數',
-        })
+        expect(Object.fromEntries(localeNames.map((locale) => [
+            locale,
+            flatLocales[locale]['codex_quota.reset_credits_label'],
+        ]))).toEqual({
+                         en: 'Owned resets', ru: 'Имеющиеся сбросы', 'zh-CN': '持有重置次数', 'zh-TW': '持有重置次數',
+                     })
         localeNames.forEach((locale) => {
             expect(flatLocales[locale]['codex_quota.reset_credits_applicable_label']).toBeUndefined()
             expect(flatLocales[locale]['codex_quota.reset_credits_expiry_label']).not.toContain('GMT+8')
@@ -417,11 +441,13 @@ describe('global i18n contract', () => {
         })
     })
 
-    test('documents GPT Image 2.5 Flare and Sunburst on image endpoints in every locale', () => {
+    test('documents GPT Image 2.5 and 2.6 Flare and Sunburst on image endpoints in every locale', () => {
         localeNames.forEach((localeName) => {
             const description = flatLocales[localeName]['model_management.image_call_desc']
             expect(description).toContain('GPT Image 2.5 Flare/Sunburst')
+            expect(description).toContain('GPT Image 2.6 Flare/Sunburst')
             expect(description).toContain('OpenAI')
+            expect(flatLocales[localeName]['model_management.image_call_token_desc']).toContain('GPT Image 2.6')
         })
     })
 

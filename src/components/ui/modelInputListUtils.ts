@@ -18,7 +18,7 @@ export const updateModelNumericField = (
                      field === 'min' ? 'thinkingMinDraft' : 'thinkingMaxDraft'
     const trimmed  = value.trim()
     const parsed   = Number(trimmed)
-    const updated  = {...entry}
+    const updated  = { ...entry }
     if (trimmed && (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed) ||
                     (field === 'maxContextLength' && parsed === 0))) {
         updated[draftKey] = value
@@ -34,7 +34,7 @@ export const updateModelNumericField = (
         }
     } else {
         delete updated.preserveImportedThinkingRange
-        const thinking = normalizeModelThinking({...updated.thinking, [field]: trimmed ? parsed : undefined})
+        const thinking = normalizeModelThinking({ ...updated.thinking, [field]: trimmed ? parsed : undefined })
         if (thinking) {
             updated.thinking = thinking
         } else {
@@ -58,7 +58,7 @@ export const getModelEntriesValidationKey = (entries: ModelEntry[]): string | un
         const max = entry.thinking?.max
         if (entry.thinkingMinDraft !== undefined || entry.thinkingMaxDraft !== undefined ||
             [min, max].some((bound) => bound !== undefined &&
-                (!Number.isSafeInteger(bound) || bound < 0))) {
+                                       (!Number.isSafeInteger(bound) || bound < 0))) {
             return 'ai_providers.model_thinking_budget_invalid'
         }
         if ((min ?? 0) > (max ?? 0) && !entry.preserveImportedThinkingRange) {
@@ -81,7 +81,7 @@ export const modelsToEntries = (models?: ModelAlias[]): ModelEntry[] => {
         alias: model.alias || '',
         ...normalizeModelMetadata(model),
         ...((model.thinking?.min ?? 0) > (model.thinking?.max ?? 0) ?
-            {preserveImportedThinkingRange: true} : {}),
+            { preserveImportedThinkingRange: true } : {}),
     }))
 }
 

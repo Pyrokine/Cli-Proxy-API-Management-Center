@@ -1,6 +1,6 @@
 import {Button} from '@/components/ui/Button'
 import {useTranslation} from 'react-i18next'
-import {useLocation, useNavigate} from 'react-router-dom'
+import {useLocation, useNavigate} from 'react-router'
 import styles from './NotFoundPage.module.scss'
 
 export function NotFoundPage() {

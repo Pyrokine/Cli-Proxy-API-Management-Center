@@ -33,8 +33,10 @@ export function DropdownPanel({
                 top: pos.up ? undefined : pos.top,
                 bottom: pos.up ? window.innerHeight - pos.top : undefined,
                 left: pos.left,
+                width: 'max-content',
                 minWidth: pos.width,
-                maxWidth: `calc(100vw - ${pos.left}px - 16px)`,
+                maxWidth: 'min(36rem, calc(100vw - 16px))',
+                maxHeight: pos.maxHeight,
             }}
         >
             {children}
