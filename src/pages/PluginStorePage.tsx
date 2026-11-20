@@ -14,13 +14,14 @@ import {
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Select} from '@/components/ui/Select'
-import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {apiClient} from '@/services/api/client'
+import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate} from 'react-router-dom'
+import {useNavigate} from 'react-router'
 import {waitForPluginStoreState} from './pluginPolling'
 import {
     buildGitHubReleasesPageURL,
@@ -83,18 +84,18 @@ const pluginStoreErrorRestartRequired = (err: unknown) => {
 }
 
 export function PluginStorePage() {
-    const { t }                = useTranslation()
-    const navigate             = useNavigate()
-    const apiBase              = useAuthStore((state) => state.apiBase)
-    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
-    const clearConfigCache     = useConfigStore((state) => state.clearCache)
-    const { showNotification } = useNotificationStore()
-    const mountedRef           = useRef(true)
-    const loadAbortRef         = useRef<AbortController | null>(null)
-    const installAbortRef      = useRef<AbortController | null>(null)
-    const releaseAbortRef      = useRef<AbortController | null>(null)
+    const { t }                               = useTranslation()
+    const navigate                            = useNavigate()
+    const apiBase                             = useAuthStore((state) => state.apiBase)
+    const authGeneration                      = useAuthStore(() => apiClient.getAuthGeneration())
+    const clearConfigCache                    = useConfigStore((state) => state.clearCache)
+    const { showNotification }                = useNotificationStore()
+    const mountedRef                          = useRef(true)
+    const loadAbortRef                        = useRef<AbortController | null>(null)
+    const installAbortRef                     = useRef<AbortController | null>(null)
+    const releaseAbortRef                     = useRef<AbortController | null>(null)
     const [pageGeneration, setPageGeneration] = useState(authGeneration)
-    const isCurrentConnection = useCallback(
+    const isCurrentConnection                 = useCallback(
         () => mountedRef.current && authGeneration === apiClient.getAuthGeneration(),
         [authGeneration],
     )
@@ -143,8 +144,8 @@ export function PluginStorePage() {
         loadAbortRef.current?.abort()
         const controller     = new AbortController()
         loadAbortRef.current = controller
-        const isActive = () => isCurrentConnection() && !controller.signal.aborted &&
-            loadAbortRef.current === controller
+        const isActive       = () => isCurrentConnection() && !controller.signal.aborted &&
+                                     loadAbortRef.current === controller
         if (!options?.skipLeadingState) {
             setLoading(true)
             setError('')
@@ -238,6 +239,8 @@ export function PluginStorePage() {
         { key: 'updates', label: t('plugin_store.filter_updates', { defaultValue: '可更新' }), count: stats.updates },
     ]
 
+    useHeaderRefresh(loadStore)
+
     const loadReleaseVersions = useCallback(async (entry: PluginStoreEntry) => {
         if (!isCurrentConnection()) {
             return
@@ -252,8 +255,8 @@ export function PluginStorePage() {
 
         const controller        = new AbortController()
         releaseAbortRef.current = controller
-        const isActive = () => isCurrentConnection() && !controller.signal.aborted &&
-            releaseAbortRef.current === controller
+        const isActive          = () => isCurrentConnection() && !controller.signal.aborted &&
+                                        releaseAbortRef.current === controller
         setReleaseVersionsLoading(true)
         try {
             const versions = await fetchPluginReleaseVersions(entry.id, entry.source_id, { signal: controller.signal })
@@ -296,7 +299,7 @@ export function PluginStorePage() {
         const controller        = new AbortController()
         installAbortRef.current = controller
         const isActive          = () => isCurrentConnection() && !controller.signal.aborted &&
-            installAbortRef.current === controller
+                                        installAbortRef.current === controller
         const entryKey          = storeEntryKey(entry)
         const version           = supportsPluginVersionSelection(entry.install_type) ? requestedVersion.trim() : ''
         setInstallingKey(entryKey)

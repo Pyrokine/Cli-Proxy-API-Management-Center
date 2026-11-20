@@ -2,28 +2,30 @@ import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {OAuthLoginAction} from '@/components/credentials/OAuthLoginAction'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
+import {IconSlidersHorizontal} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {IconSlidersHorizontal} from '@/components/ui/icons'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
+import {apiClient} from '@/services/api/client'
 import {
     type PluginConfigField,
     type PluginConfigObject,
     type PluginConfigValue,
     type PluginEntry,
-    type PluginStoreEntry,
     pluginsApi,
     pluginStoreApi,
+    type PluginStoreEntry,
 } from '@/services/api/plugins'
-import {apiClient} from '@/services/api/client'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import {getErrorMessage} from '@/utils/helpers'
 import {safeExternalUrl} from '@/utils/validation'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Link, useNavigate} from 'react-router-dom'
+import {Link, useNavigate} from 'react-router'
 import styles from './PluginManagementPage.module.scss'
+import {waitForPluginRuntimeState} from './pluginPolling'
 import {buildPluginResourceRoute, getPluginLogo, resolvePluginAssetURL} from './pluginResources'
 
 type PluginPageStatus = 'loading' | 'ready' | 'empty' | 'error'
@@ -53,8 +55,18 @@ function normalizeNumberInput(value: string, integer: boolean): PluginConfigValu
     if (!trimmed) {
         return null
     }
-    const parsed = integer ? Number.parseInt(trimmed, 10) : Number(trimmed)
-    return Number.isFinite(parsed) ? parsed : trimmed
+    const parsed = Number(trimmed)
+    return Number.isFinite(parsed) && (!integer || (/^-?\d+$/.test(trimmed) && Number.isSafeInteger(parsed))) ?
+           parsed :
+           trimmed
+}
+
+function configValuesEqual(left: PluginConfigValue | undefined, right: PluginConfigValue | undefined): boolean {
+    const canonical = (value: PluginConfigValue | undefined) => JSON.stringify(value, (_key, entry: unknown) =>
+        entry !== null && typeof entry === 'object' && !Array.isArray(entry) ?
+        Object.fromEntries(Object.entries(entry).sort(([a], [b]) => a.localeCompare(b))) : entry,
+    )
+    return canonical(left) === canonical(right)
 }
 
 function pluginTitle(plugin: PluginEntry): string {
@@ -93,7 +105,7 @@ function Badge({ tone, children }: { tone: PluginBadgeTone; children: string }) 
     return <span className={`${styles.badge} ${styles[`badge_${tone}`]}`}>{children}</span>
 }
 
-function PluginLogo({src}: {src: string}) {
+function PluginLogo({ src }: { src: string }) {
     const [failed, setFailed] = useState(false)
     return src && !failed ?
            <img src={src} alt='' onError={() => setFailed(true)} /> :
@@ -101,23 +113,25 @@ function PluginLogo({src}: {src: string}) {
 }
 
 export function PluginManagementPage() {
-    const { t }                = useTranslation()
-    const navigate             = useNavigate()
-    const apiBase              = useAuthStore((state) => state.apiBase)
-    const managementKey        = useAuthStore((state) => state.managementKey)
-    const connectionStatus     = useAuthStore((state) => state.connectionStatus)
-    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
-    const { showNotification } = useNotificationStore()
-    const mountedRef           = useRef(true)
+    const { t }                               = useTranslation()
+    const navigate                            = useNavigate()
+    const apiBase                             = useAuthStore((state) => state.apiBase)
+    const managementKey                       = useAuthStore((state) => state.managementKey)
+    const connectionStatus                    = useAuthStore((state) => state.connectionStatus)
+    const authGeneration                      = useAuthStore(() => apiClient.getAuthGeneration())
+    const { showNotification }                = useNotificationStore()
+    const mountedRef                          = useRef(true)
     const [pageGeneration, setPageGeneration] = useState(authGeneration)
-    const isCurrentConnection = useCallback(
+    const isCurrentConnection                 = useCallback(
         () => mountedRef.current && authGeneration === apiClient.getAuthGeneration(),
         [authGeneration],
     )
 
-    const [data, setData]                             = useState<(Awaited<ReturnType<typeof pluginsApi.list>> & {authGeneration: number}) | null>(null)
-    const requestSequence                            = useRef(0)
-    const [oauthSelection, setOAuthSelection]         = useState<{id: string; authGeneration: number} | null>(null)
+    const [data, setData]                             = useState<(Awaited<ReturnType<typeof pluginsApi.list>> & {
+        authGeneration: number
+    }) | null>(null)
+    const requestSequence                             = useRef(0)
+    const [oauthSelection, setOAuthSelection]         = useState<{ id: string; authGeneration: number } | null>(null)
     const [status, setStatus]                         = useState<PluginPageStatus>('loading')
     const [error, setError]                           = useState<string | null>(null)
     const [refreshing, setRefreshing]                 = useState(false)
@@ -127,15 +141,17 @@ export function PluginManagementPage() {
     const [expandedPluginID, setExpandedPluginID]     = useState<string | null>(null)
     const [editingPlugin, setEditingPlugin]           = useState<PluginEntry | null>(null)
     const [configDraft, setConfigDraft]               = useState<PluginConfigObject>({})
+    const configRequestSequence                       = useRef(0)
+    const [configReadState, setConfigReadState]       = useState<'loading' | 'ready' | 'error'>('loading')
     const [jsonDraft, setJsonDraft]                   = useState<Record<string, string>>({})
     const [configError, setConfigError]               = useState<string | null>(null)
     const [savingConfig, setSavingConfig]             = useState(false)
     const [storeLogos, setStoreLogos]                 = useState<{
-        apiBase: string
-        managementKey: string
-        entries: PluginStoreEntry[]
-        error: string
-    } | null>(null)
+                                                                     apiBase: string
+                                                                     managementKey: string
+                                                                     entries: PluginStoreEntry[]
+                                                                     error: string
+                                                                 } | null>(null)
 
     if (pageGeneration !== authGeneration) {
         setPageGeneration(authGeneration)
@@ -147,6 +163,8 @@ export function PluginManagementPage() {
         setDeletingPluginID(null)
         setDeletePluginTarget(null)
         setExpandedPluginID(null)
+        ++configRequestSequence.current
+        setConfigReadState('loading')
         setEditingPlugin(null)
         setConfigDraft({})
         setJsonDraft({})
@@ -156,17 +174,23 @@ export function PluginManagementPage() {
         setStoreLogos(null)
     }
 
-    const currentData      = data?.authGeneration === apiClient.getAuthGeneration() ? data : null
-    const plugins          = currentData?.plugins ?? []
-    const pluginsEnabled   = currentData?.plugins_enabled ?? false
-    const pluginsDir       = currentData?.plugins_dir || 'plugins'
-    const oauthPlugin      = pluginsEnabled && oauthSelection?.authGeneration === currentData?.authGeneration
-        ? plugins.find((plugin) => plugin.id === oauthSelection?.id && plugin.effective_enabled && plugin.supports_oauth && plugin.oauth_provider)
-        : undefined
-    const needsStoreLogos  = plugins.some((plugin) => !plugin.logo?.trim() && !plugin.metadata?.logo?.trim())
+    const currentData       = data?.authGeneration === apiClient.getAuthGeneration() ? data : null
+    const plugins           = currentData?.plugins ?? []
+    const pluginsEnabled    = currentData?.plugins_enabled ?? false
+    const pluginsDir        = currentData?.plugins_dir || 'plugins'
+    const oauthPlugin       = pluginsEnabled && oauthSelection?.authGeneration === currentData?.authGeneration
+                              ?
+                              plugins.find((plugin) => plugin.id ===
+                                                       oauthSelection?.id &&
+                                                       plugin.effective_enabled &&
+                                                       plugin.supports_oauth &&
+                                                       plugin.oauth_provider)
+                              :
+                              undefined
+    const needsStoreLogos   = plugins.some((plugin) => !plugin.logo?.trim() && !plugin.metadata?.logo?.trim())
     const currentStoreLogos = storeLogos?.apiBase === apiBase && storeLogos.managementKey === managementKey
                               ? storeLogos : null
-    const logoEntries      = currentStoreLogos?.entries ?? EMPTY_PLUGIN_STORE_ENTRIES
+    const logoEntries       = currentStoreLogos?.entries ?? EMPTY_PLUGIN_STORE_ENTRIES
 
     useEffect(() => {
         mountedRef.current = true
@@ -179,7 +203,7 @@ export function PluginManagementPage() {
         if (!isCurrentConnection()) {
             return
         }
-        const sequence = ++requestSequence.current
+        const sequence  = ++requestSequence.current
         const isCurrent = () => sequence === requestSequence.current && isCurrentConnection()
         if (!silent) {
             setStatus('loading')
@@ -192,7 +216,7 @@ export function PluginManagementPage() {
             if (!isCurrent()) {
                 return
             }
-            setData({...next, authGeneration})
+            setData({ ...next, authGeneration })
             setStatus(next.plugins.length > 0 ? 'ready' : 'empty')
         } catch (err: unknown) {
             if (!isCurrent()) {
@@ -210,7 +234,7 @@ export function PluginManagementPage() {
 
     useEffect(() => {
         const requests = requestSequence
-        const timer = window.setTimeout(() => {
+        const timer    = window.setTimeout(() => {
             void fetchPlugins()
         }, 0)
         return () => {
@@ -226,49 +250,88 @@ export function PluginManagementPage() {
             return
         }
         const controller = new AbortController()
-        void pluginStoreApi.list({signal: controller.signal, timeout: 15_000})
-            .then((response) => {
-                if (!Array.isArray(response.plugins)) {
-                    throw new Error('Invalid plugin store response')
-                }
-                if (!controller.signal.aborted && isCurrentConnection()) {
-                    setStoreLogos({apiBase, managementKey, entries: response.plugins, error: ''})
-                }
-            })
-            .catch((err: unknown) => {
-                if (!controller.signal.aborted && isCurrentConnection()) {
-                    setStoreLogos({apiBase, managementKey, entries: [], error: getErrorMessage(err)})
-                }
-            })
+        void pluginStoreApi.list({ signal: controller.signal, timeout: 15_000 })
+                           .then((response) => {
+                               if (!Array.isArray(response.plugins)) {
+                                   throw new Error('Invalid plugin store response')
+                               }
+                               if (!controller.signal.aborted && isCurrentConnection()) {
+                                   setStoreLogos({ apiBase, managementKey, entries: response.plugins, error: '' })
+                               }
+                           })
+                           .catch((err: unknown) => {
+                               if (!controller.signal.aborted && isCurrentConnection()) {
+                                   setStoreLogos({ apiBase, managementKey, entries: [], error: getErrorMessage(err) })
+                               }
+                           })
         return () => controller.abort()
     }, [apiBase, connectionStatus, currentData, isCurrentConnection, managementKey])
 
-    const openConfig = useCallback((plugin: PluginEntry) => {
+    useHeaderRefresh(fetchPlugins)
+
+    const openConfig = useCallback(async (plugin: PluginEntry) => {
         if (!isCurrentConnection()) {
             return
         }
-        const nextConfig                       = { ...(plugin.config ?? {}) }
-        const nextJson: Record<string, string> = {}
-        for (const field of plugin.config_fields) {
-            if (field.type === 'array' || field.type === 'object') {
-                nextJson[field.name] = stringifyConfigValue(nextConfig[field.name], field.type)
-            }
-        }
+        const request = ++configRequestSequence.current
         setEditingPlugin(plugin)
-        setConfigDraft(nextConfig)
-        setJsonDraft(nextJson)
+        setConfigDraft({})
+        setJsonDraft({})
         setConfigError(null)
+        setConfigReadState('loading')
+        try {
+            const nextConfig = { ...await pluginsApi.getConfig(plugin.id) }
+            if (!isCurrentConnection() || request !== configRequestSequence.current) {
+                return
+            }
+            const nextJson: Record<string, string> = {}
+            for (const field of plugin.config_fields) {
+                if (field.type === 'array' || field.type === 'object') {
+                    nextJson[field.name] = stringifyConfigValue(nextConfig[field.name], field.type)
+                }
+            }
+            setEditingPlugin({ ...plugin, config: nextConfig })
+            setConfigDraft({ ...nextConfig })
+            setJsonDraft(nextJson)
+            setConfigReadState('ready')
+        } catch (error: unknown) {
+            if (!isCurrentConnection() || request !== configRequestSequence.current) {
+                return
+            }
+            setConfigError(getErrorMessage(error))
+            setConfigReadState('error')
+        }
     }, [isCurrentConnection])
 
     const closeConfig = useCallback(() => {
         if (savingConfig || !isCurrentConnection()) {
             return
         }
+        ++configRequestSequence.current
+        setConfigReadState('loading')
         setEditingPlugin(null)
         setConfigDraft({})
         setJsonDraft({})
         setConfigError(null)
     }, [isCurrentConnection, savingConfig])
+
+    const confirmPluginRuntime = useCallback(async (
+        id: string,
+        predicate: (plugin: PluginEntry, response: Awaited<ReturnType<typeof pluginsApi.list>>) => boolean,
+    ) => {
+        const result = await waitForPluginRuntimeState(id, predicate, isCurrentConnection)
+        if (!isCurrentConnection()) {
+            return
+        }
+        ++requestSequence.current
+        setData({ ...result.response, authGeneration })
+        setStatus(result.response.plugins.length > 0 ? 'ready' : 'empty')
+        setRefreshing(false)
+        setError(null)
+        if (result.timedOut) {
+            throw new Error(t('plugin_management.runtime_timeout'))
+        }
+    }, [authGeneration, isCurrentConnection, t])
 
     const handleTogglePlugin = useCallback(
         async (plugin: PluginEntry, enabled: boolean) => {
@@ -276,26 +339,36 @@ export function PluginManagementPage() {
                 return
             }
             setSavingPluginID(plugin.id)
+            let committed = false
             try {
                 await pluginsApi.setEnabled(plugin.id, enabled)
+                committed = true
+                if (!isCurrentConnection()) {
+                    return
+                }
+                await confirmPluginRuntime(plugin.id, (current) => current.enabled ===
+                                                                   enabled &&
+                                                                   current.effective_enabled ===
+                                                                   enabled &&
+                                                                   (!enabled || current.registered))
                 if (!isCurrentConnection()) {
                     return
                 }
                 showNotification(t('plugin_management.save_success'), 'success')
-                await fetchPlugins({ silent: true })
             } catch (err: unknown) {
                 if (!isCurrentConnection()) {
                     return
                 }
                 const message = err instanceof Error ? err.message : String(err ?? '')
-                showNotification(`${t('plugin_management.save_failed')}${message ? `: ${message}` : ''}`, 'error')
+                showNotification(committed ? t('plugin_management.runtime_check_failed', { message }) :
+                                 `${t('plugin_management.save_failed')}${message ? `: ${message}` : ''}`, 'error')
             } finally {
                 if (isCurrentConnection()) {
                     setSavingPluginID((current) => current === plugin.id ? null : current)
                 }
             }
         },
-        [fetchPlugins, isCurrentConnection, showNotification, t],
+        [confirmPluginRuntime, isCurrentConnection, showNotification, t],
     )
 
     const closeDelete = useCallback(() => {
@@ -340,52 +413,110 @@ export function PluginManagementPage() {
         }
     }, [isCurrentConnection])
 
-    const handleSaveConfig = useCallback(async () => {
-        if (!editingPlugin || !isCurrentConnection()) {
-            return
-        }
-        setConfigError(null)
-        const payload: PluginConfigObject = { ...configDraft }
-        for (const field of editingPlugin.config_fields) {
-            if (field.type !== 'array' && field.type !== 'object') {
-                continue
-            }
-            const text = jsonDraft[field.name]?.trim() ?? ''
-            if (!text) {
-                payload[field.name] = null
-                continue
-            }
-            try {
-                payload[field.name] = JSON.parse(text) as PluginConfigValue
-            } catch {
-                setConfigError(t('plugin_management.invalid_json', { field: field.name }))
+    const handleSaveConfig = useCallback(
+        async () => {
+            if (!editingPlugin || !isCurrentConnection() || configReadState !== 'ready') {
                 return
             }
-        }
+            setConfigError(null)
+            const baseline                    = editingPlugin.config ?? {}
+            const payload: PluginConfigObject = Object.fromEntries(
+                Object.entries(configDraft).filter(([name, value]) => JSON.stringify(value) !==
+                                                                      JSON.stringify(baseline[name])),
+            )
+            for (const field of [{ name: 'priority', type: 'integer' }, ...editingPlugin.config_fields]) {
+                const text = jsonDraft[field.name]
+                if (text === undefined) {
+                    continue
+                }
+                if (field.type === 'number' || field.type === 'integer') {
+                    const value = normalizeNumberInput(text, field.type === 'integer')
+                    if (typeof value === 'string') {
+                        setConfigError(t('plugin_management.invalid_number', { field: field.name }))
+                        return
+                    }
+                    if (JSON.stringify(value) !== JSON.stringify(baseline[field.name])) {
+                        payload[field.name] = value
+                    }
+                    continue
+                }
+                if (field.type !== 'array' && field.type !== 'object') {
+                    const value = text.trim() ? text : null
+                    if (JSON.stringify(value) !== JSON.stringify(baseline[field.name])) {
+                        payload[field.name] = value
+                    }
+                    continue
+                }
+                if (text === stringifyConfigValue(baseline[field.name], field.type)) {
+                    continue
+                }
+                try {
+                    const value = text.trim() ? JSON.parse(text) as PluginConfigValue : null
+                    if (text.trim() && field.type === 'array' && !Array.isArray(value)) {
+                        setConfigError(t('plugin_management.expected_array'))
+                        return
+                    }
+                    if (JSON.stringify(value) !== JSON.stringify(baseline[field.name])) {
+                        payload[field.name] = value
+                    }
+                } catch {
+                    setConfigError(t('plugin_management.invalid_json', { field: field.name }))
+                    return
+                }
+            }
 
-        setSavingConfig(true)
-        try {
-            await pluginsApi.patchConfig(editingPlugin.id, payload)
-            if (!isCurrentConnection()) {
-                return
+            setSavingConfig(true)
+            let committed = false
+            try {
+                await pluginsApi.patchConfig(editingPlugin.id, payload)
+                committed = true
+                if (!isCurrentConnection()) {
+                    return
+                }
+                await confirmPluginRuntime(editingPlugin.id, (plugin, response) => {
+                    const enabled = typeof payload.enabled === 'boolean' ? payload.enabled :
+                                    payload.enabled === null ? plugin.enabled : editingPlugin.enabled
+                    return plugin.enabled === enabled &&
+                           plugin.effective_enabled === (enabled && response.plugins_enabled) &&
+                           (!(enabled && response.plugins_enabled) || plugin.registered) &&
+                           Object.entries(payload).every(([key, value]) => value === null ?
+                                                                           !Object.prototype.hasOwnProperty.call(
+                                                                               plugin.config,
+                                                                               key,
+                                                                           ) :
+                                                                           configValuesEqual(plugin.config[key], value))
+                })
+                if (!isCurrentConnection()) {
+                    return
+                }
+                showNotification(t('plugin_management.save_success'), 'success')
+                setEditingPlugin(null)
+                setConfigDraft({})
+                setJsonDraft({})
+            } catch (err: unknown) {
+                if (!isCurrentConnection()) {
+                    return
+                }
+                const message = err instanceof Error ? err.message : String(err ?? '')
+                setConfigError(committed ? t('plugin_management.runtime_check_failed', { message }) :
+                               message || t('plugin_management.save_failed'))
+            } finally {
+                if (isCurrentConnection()) {
+                    setSavingConfig(false)
+                }
             }
-            showNotification(t('plugin_management.save_success'), 'success')
-            setEditingPlugin(null)
-            setConfigDraft({})
-            setJsonDraft({})
-            await fetchPlugins({ silent: true })
-        } catch (err: unknown) {
-            if (!isCurrentConnection()) {
-                return
-            }
-            const message = err instanceof Error ? err.message : String(err ?? '')
-            setConfigError(message || t('plugin_management.save_failed'))
-        } finally {
-            if (isCurrentConnection()) {
-                setSavingConfig(false)
-            }
-        }
-    }, [configDraft, editingPlugin, fetchPlugins, isCurrentConnection, jsonDraft, showNotification, t])
+        },
+        [
+            configDraft,
+            configReadState,
+            confirmPluginRuntime,
+            editingPlugin,
+            isCurrentConnection,
+            jsonDraft,
+            showNotification,
+            t,
+        ],
+    )
 
     const renderConfigInput = (field: PluginConfigField) => {
         const value = configDraft[field.name]
@@ -426,20 +557,22 @@ export function PluginManagementPage() {
             return (
                 <Input
                     type='number'
-                    value={value === undefined || value === null ? '' : String(value)}
+                    value={jsonDraft[field.name] ?? (value === undefined || value === null ? '' : String(value))}
                     onChange={(event) =>
-                        handleConfigValueChange(
-                            field.name,
-                            normalizeNumberInput(event.target.value, field.type === 'integer'),
-                        )
+                        setJsonDraft((prev) => ({ ...prev, [field.name]: event.target.value }))
                     }
                 />
             )
         }
         return (
             <Input
-                value={value === undefined || value === null || isJsonConfigValue(value) ? '' : String(value)}
-                onChange={(event) => handleConfigValueChange(field.name, event.target.value)}
+                value={jsonDraft[field.name] ??
+                       (value === undefined || value === null || isJsonConfigValue(value) ? '' : String(value))}
+                onChange={(event) => {
+                    if (isCurrentConnection()) {
+                        setJsonDraft((prev) => ({ ...prev, [field.name]: event.target.value }))
+                    }
+                }}
             />
         )
     }
@@ -540,10 +673,17 @@ export function PluginManagementPage() {
                                 type='button'
                                 variant='secondary'
                                 size='sm'
-                                disabled={!pluginsEnabled || !plugin.effective_enabled || connectionStatus !== 'connected' || savingPluginID === plugin.id || deletingPluginID === plugin.id}
+                                disabled={!pluginsEnabled ||
+                                          !plugin.effective_enabled ||
+                                          connectionStatus !==
+                                          'connected' ||
+                                          savingPluginID ===
+                                          plugin.id ||
+                                          deletingPluginID ===
+                                          plugin.id}
                                 onClick={() => {
                                     if (currentData?.authGeneration === apiClient.getAuthGeneration()) {
-                                        setOAuthSelection({id: plugin.id, authGeneration: currentData.authGeneration})
+                                        setOAuthSelection({ id: plugin.id, authGeneration: currentData.authGeneration })
                                     }
                                 }}
                             >
@@ -725,7 +865,12 @@ export function PluginManagementPage() {
                         key={`${oauthPlugin.id}:${oauthPlugin.oauth_provider}:${oauthSelection?.authGeneration}`}
                         provider={oauthPlugin.oauth_provider}
                         plugin
-                        disableControls={connectionStatus !== 'connected' || savingPluginID === oauthPlugin.id || deletingPluginID === oauthPlugin.id}
+                        disableControls={connectionStatus !==
+                                         'connected' ||
+                                         savingPluginID ===
+                                         oauthPlugin.id ||
+                                         deletingPluginID ===
+                                         oauthPlugin.id}
                         onSuccess={() => {
                             setOAuthSelection(null)
                             showNotification(t('credentials.oauth_success'), 'success')
@@ -766,13 +911,11 @@ export function PluginManagementPage() {
                         <Input
                             label={t('common.priority')}
                             type='number'
-                            value={configDraft.priority === undefined || configDraft.priority === null ?
-                                   '' :
-                                   String(configDraft.priority)}
-                            onChange={(event) => handleConfigValueChange(
-                                'priority',
-                                normalizeNumberInput(event.target.value, true),
-                            )}
+                            value={jsonDraft.priority ??
+                                   (configDraft.priority === undefined || configDraft.priority === null ?
+                                    '' :
+                                    String(configDraft.priority))}
+                            onChange={(event) => setJsonDraft((prev) => ({ ...prev, priority: event.target.value }))}
                         />
                         {editingPlugin.config_fields.length === 0 ? (
                             <div className={styles.emptyConfig}>{t('plugin_management.no_config_fields')}</div>
@@ -786,6 +929,7 @@ export function PluginManagementPage() {
                                 {field.description && <p>{field.description}</p>}
                             </div>
                         ))}
+                        {configReadState === 'loading' && <div role='status'>{t('common.loading')}</div>}
                         {configError && <div className='error-box'>{configError}</div>}
                     </div>
                 )}

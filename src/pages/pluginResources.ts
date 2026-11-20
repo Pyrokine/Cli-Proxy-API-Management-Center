@@ -57,11 +57,15 @@ export const getPluginLogo = (plugin: PluginEntry, entries: PluginStoreEntry[]):
     if (ownLogo) {
         return ownLogo
     }
-    const repository = plugin.metadata?.github_repository?.trim()
+    const repository          = plugin.metadata?.github_repository?.trim()
     const normalizeRepository = (value: string) =>
         buildRepositoryURL(value).replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase()
-    const matches = entries.filter((entry) =>
-        entry.id === plugin.id && (!repository || normalizeRepository(entry.repository) === normalizeRepository(repository)))
+    const matches             = entries.filter((entry) =>
+                                                   entry.id ===
+                                                   plugin.id &&
+                                                   (!repository ||
+                                                    normalizeRepository(entry.repository) ===
+                                                    normalizeRepository(repository)))
     return matches.length === 1 ? matches[0].logo?.trim() ?? '' : ''
 }
 

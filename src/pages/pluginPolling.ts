@@ -1,5 +1,11 @@
-import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
 import {apiClient} from '@/services/api/client'
+import {
+    type PluginEntry,
+    pluginsApi,
+    pluginStoreApi,
+    type PluginStoreEntry,
+    type PluginStoreResponse,
+} from '@/services/api/plugins'
 
 const PLUGIN_STATE_TIMEOUT_MS  = 15000
 const PLUGIN_STATE_INTERVAL_MS = 500
@@ -35,12 +41,12 @@ export async function waitForPluginStoreState(
     id: string,
     sourceId: string,
     predicate: (plugin: PluginStoreEntry, response: PluginStoreResponse) => boolean,
-    timeoutMs  = PLUGIN_STATE_TIMEOUT_MS,
-    intervalMs = PLUGIN_STATE_INTERVAL_MS,
+    timeoutMs      = PLUGIN_STATE_TIMEOUT_MS,
+    intervalMs     = PLUGIN_STATE_INTERVAL_MS,
     signal?: AbortSignal,
     authGeneration = apiClient.getAuthGeneration(),
 ): Promise<PluginStoreStateWaitResult> {
-    const deadline = Date.now() + timeoutMs
+    const deadline        = Date.now() + timeoutMs
     const throwIfInactive = () => {
         throwIfAborted(signal)
         if (authGeneration !== apiClient.getAuthGeneration()) {
@@ -48,7 +54,7 @@ export async function waitForPluginStoreState(
         }
     }
     throwIfInactive()
-    let latest = await pluginStoreApi.list({ signal })
+    let latest = await pluginStoreApi.list({ signal, timeout: Math.max(1, deadline - Date.now()) })
 
     for (; ;) {
         throwIfInactive()
@@ -62,6 +68,33 @@ export async function waitForPluginStoreState(
         }
         await wait(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal)
         throwIfInactive()
-        latest = await pluginStoreApi.list({ signal })
+        latest = await pluginStoreApi.list({ signal, timeout: Math.max(1, deadline - Date.now()) })
+    }
+}
+
+export async function waitForPluginRuntimeState(
+    id: string,
+    predicate: (plugin: PluginEntry, response: Awaited<ReturnType<typeof pluginsApi.list>>) => boolean,
+    isCurrent: () => boolean,
+    timeoutMs  = PLUGIN_STATE_TIMEOUT_MS,
+    intervalMs = PLUGIN_STATE_INTERVAL_MS,
+): Promise<{ response: Awaited<ReturnType<typeof pluginsApi.list>>; plugin: PluginEntry | null; timedOut: boolean }> {
+    const deadline = Date.now() + timeoutMs
+    for (; ;) {
+        if (!isCurrent()) {
+            throw abortError()
+        }
+        const response = await pluginsApi.list({ timeout: Math.max(1, deadline - Date.now()) })
+        if (!isCurrent()) {
+            throw abortError()
+        }
+        const plugin = response.plugins.find((item) => item.id === id) ?? null
+        if (plugin && predicate(plugin, response)) {
+            return { response, plugin, timedOut: false }
+        }
+        if (Date.now() >= deadline) {
+            return { response, plugin, timedOut: true }
+        }
+        await wait(Math.min(intervalMs, Math.max(0, deadline - Date.now())))
     }
 }

@@ -1,4 +1,5 @@
 import {EmptyState} from '@/components/ui/EmptyState'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {apiClient} from '@/services/api/client'
 import {pluginsApi} from '@/services/api/plugins'
 import {useAuthStore} from '@/stores'
@@ -6,7 +7,7 @@ import {normalizeApiBase} from '@/utils/connection'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useParams} from 'react-router-dom'
+import {useParams} from 'react-router'
 import styles from './PluginResourcePage.module.scss'
 import {
     collectPluginResourceEntries,
@@ -24,7 +25,8 @@ const trustedPluginResourceURL = (src: string, apiBase: string): URL | null => {
     if (resourceURL.origin !== baseURL.origin) {
         return null
     }
-    if (!resourceURL.pathname.startsWith(pluginResourcePathPrefix)) {
+    const allowedPrefix = `${baseURL.pathname.replace(/\/+$/, '')}${pluginResourcePathPrefix}`
+    if (!resourceURL.pathname.startsWith(allowedPrefix)) {
         return null
     }
     return resourceURL
@@ -54,7 +56,7 @@ export function PluginResourcePage() {
         const controller       = new AbortController()
         loadAbortRef.current   = controller
         const isCurrentRequest = () => loadSeqRef.current === sequence && !controller.signal.aborted &&
-            authGeneration === apiClient.getAuthGeneration()
+                                       authGeneration === apiClient.getAuthGeneration()
 
         if (!options?.skipLeadingState) {
             setLoading(true)
@@ -109,6 +111,8 @@ export function PluginResourcePage() {
             }
         }
     }, [apiBase, authGeneration, managementKey, pluginID, resourceKey, t])
+
+    useHeaderRefresh(loadResource)
 
     useEffect(() => {
         const id = window.setTimeout(() => {
