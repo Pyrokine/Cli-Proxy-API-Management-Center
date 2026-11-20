@@ -1,10 +1,12 @@
 import {Button} from '@/components/ui/Button'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import type {ModelInfo} from '@/utils/models'
+import {useId, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ModelCheckboxList} from './ModelCheckboxList'
-import styles from './ProviderEditForm.module.scss'
+import styles from './ModelDiscovery.module.scss'
 
 interface ProviderModelSelectionContentProps {
     i18nPrefix: string
@@ -16,9 +18,8 @@ interface ProviderModelSelectionContentProps {
     search: string
     onSearchChange: (value: string) => void
     selected: Set<string>
-    missingCount: number
+    missingModelNames: Set<string>
     onToggleSelection: (name: string) => void
-    onSelectMissing: () => void
     onRefresh: () => void
     disabled: boolean
     hint?: string
@@ -30,36 +31,51 @@ export function ProviderModelSelectionContent({
                                                   i18nPrefix,
                                                   endpoint,
                                                   discoveredModels,
-                                                  filteredModels,
+                                                  filteredModels: matchingModels,
                                                   fetching,
                                                   error,
                                                   search,
                                                   onSearchChange,
                                                   selected,
-                                                  missingCount,
+                                                  missingModelNames,
                                                   onToggleSelection,
-                                                  onSelectMissing,
                                                   onRefresh,
                                                   disabled,
                                                   hint,
                                                   loadingLabel,
                                                   emptyLabel,
                                               }: ProviderModelSelectionContentProps) {
-    const { t } = useTranslation()
+    const { t }                           = useTranslation()
+    const endpointId                      = useId()
+    const [onlySelected, setOnlySelected] = useState(false)
+    const filteredModels                  = onlySelected ?
+                                            matchingModels.filter((model) => selected.has(model.name)) : matchingModels
+    const selectableCount                 = filteredModels.filter((model) => missingModelNames.has(model.name)).length
+    const selectMatching                  = (checked: boolean) => {
+        if (disabled || fetching) {
+            return
+        }
+        filteredModels.forEach((model) => {
+            if (missingModelNames.has(model.name) && selected.has(model.name) !== checked) {
+                onToggleSelection(model.name)
+            }
+        })
+    }
 
     return (
-        <div className={styles.openaiModelsContent}>
-            <div className={styles.sectionHint}>{hint ?? t(`ai_providers.${i18nPrefix}_fetch_hint`)}</div>
-            <div className={styles.openaiModelsEndpointSection}>
-                <label className={styles.openaiModelsEndpointLabel}>
-                    {t(`ai_providers.${i18nPrefix}_fetch_url_label`)}
-                </label>
-                <div className={styles.openaiModelsEndpointControls}>
-                    <input className={`input ${styles.openaiModelsEndpointInput}`} readOnly value={endpoint} />
+        <div className={styles.content}>
+            <div className={styles.hint}>{hint ?? t(`ai_providers.${i18nPrefix}_fetch_hint`)}</div>
+            <div className={styles.endpoint}>
+                <label htmlFor={endpointId}>{t(`ai_providers.${i18nPrefix}_fetch_url_label`)}</label>
+                <div className={styles.endpointControls}>
+                    <input id={endpointId} className='input' readOnly value={endpoint} />
                     <Button
                         variant='secondary'
                         size='sm'
-                        onClick={onRefresh}
+                        onClick={() => {
+                            setOnlySelected(false)
+                            onRefresh()
+                        }}
                         loading={fetching}
                         disabled={disabled}
                     >
@@ -74,29 +90,45 @@ export function ProviderModelSelectionContent({
                 onChange={(event) => onSearchChange(event.target.value)}
                 disabled={fetching}
             />
-            <div className={styles.openaiModelsSelectionActions}>
-                <Button
-                    variant='secondary'
-                    size='sm'
-                    onClick={onSelectMissing}
-                    disabled={disabled || fetching || missingCount === 0}
-                >
-                    {t('ai_providers.models_select_missing', { count: missingCount })}
-                </Button>
+            <div className={styles.selectionToolbar}>
+                <div className={styles.selectionSummary} role='status'>
+                    <span>{t('ai_providers.models_match_count', {
+                        matching: filteredModels.length, total: discoveredModels.length,
+                    })}</span>
+                    <strong>{t('ai_providers.model_discovery_selected_count', { count: selected.size })}</strong>
+                </div>
+                <div className={styles.selectionActions}>
+                    <ToggleSwitch checked={onlySelected} onChange={setOnlySelected}
+                                  label={t('ai_providers.models_only_selected')} disabled={fetching} />
+                    <Button variant='secondary' size='sm' onClick={() => selectMatching(true)}
+                            disabled={disabled || fetching || selectableCount === 0}>
+                        {t('ai_providers.models_select_visible', { count: selectableCount })}
+                    </Button>
+                    <Button variant='secondary' size='sm' onClick={() => selectMatching(false)}
+                            disabled={disabled || fetching || selectableCount === 0}>
+                        {t('ai_providers.models_clear_visible', { count: selectableCount })}
+                    </Button>
+                </div>
             </div>
-            {error && <div className='error-box'>{error}</div>}
+            <div className={styles.hint}>{t('ai_providers.models_append_hint')}</div>
+            {error && <div className='error-box' role='alert'>{error}</div>}
             {fetching ? (
-                <div className={styles.sectionHint}>
+                <div className={styles.hint}>
                     {loadingLabel ?? t(`ai_providers.${i18nPrefix}_fetch_loading`)}
                 </div>
             ) : discoveredModels.length === 0 ? (
-                <div className={styles.sectionHint}>
+                <div className={styles.hint}>
                     {emptyLabel ?? t(`ai_providers.${i18nPrefix}_fetch_empty`)}
                 </div>
             ) : filteredModels.length === 0 ? (
-                <div className={styles.sectionHint}>{t(`ai_providers.${i18nPrefix}_search_empty`)}</div>
+                <div className={styles.hint}>
+                    {onlySelected && selected.size === 0 ?
+                     t('ai_providers.models_selected_empty') : t(`ai_providers.${i18nPrefix}_search_empty`)}
+                </div>
             ) : (
-                    <ModelCheckboxList models={filteredModels} selected={selected} onToggle={onToggleSelection} />
+                    <ModelCheckboxList key={`${search}:${onlySelected}`} models={filteredModels} selected={selected}
+                                       missingModelNames={missingModelNames} onToggle={onToggleSelection}
+                                       disabled={disabled || fetching} />
                 )}
         </div>
     )
@@ -113,9 +145,8 @@ interface ModelDiscoveryModalProps {
     search: string
     onSearchChange: (value: string) => void
     selected: Set<string>
-    missingCount: number
+    missingModelNames: Set<string>
     onToggleSelection: (name: string) => void
-    onSelectMissing: () => void
     onApply: () => void
     onRefresh: () => void
     canApply: boolean
@@ -135,9 +166,8 @@ export function ModelDiscoveryModal({
                                         search,
                                         onSearchChange,
                                         selected,
-                                        missingCount,
+                                        missingModelNames,
                                         onToggleSelection,
-                                        onSelectMissing,
                                         onApply,
                                         onRefresh,
                                         canApply,
@@ -154,11 +184,13 @@ export function ModelDiscoveryModal({
             width={720}
             footer={
                 <>
-                    <Button variant='secondary' size='sm' onClick={onClose} disabled={fetching}>
+                    <Button variant='secondary' size='sm' onClick={onClose}>
                         {t('common.cancel')}
                     </Button>
                     <Button size='sm' onClick={onApply} disabled={!canApply}>
-                        {t(`ai_providers.${i18nPrefix}_models_fetch_apply`)}
+                        {t(`ai_providers.${i18nPrefix}_models_fetch_apply`)}{selected.size > 0 ?
+                                                                             ` (${selected.size})` :
+                                                                             ''}
                     </Button>
                 </>
             }
@@ -173,9 +205,8 @@ export function ModelDiscoveryModal({
                 search={search}
                 onSearchChange={onSearchChange}
                 selected={selected}
-                missingCount={missingCount}
+                missingModelNames={missingModelNames}
                 onToggleSelection={onToggleSelection}
-                onSelectMissing={onSelectMissing}
                 onRefresh={onRefresh}
                 disabled={disabled}
             />

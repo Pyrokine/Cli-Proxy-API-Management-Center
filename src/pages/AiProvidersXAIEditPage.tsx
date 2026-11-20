@@ -1,22 +1,23 @@
 import type {ProviderFormState} from '@/components/providers'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
-import {ModelInputList} from '@/components/ui/ModelInputList'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
     type ProviderEditFormConfig,
     useProviderEditForm,
 } from '@/hooks/useProviderEditForm'
-import {providersApi} from '@/services/api'
+import {modelsApi, providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
 import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
-import {buildHeaderObject, headersToEntries} from '@/utils/headers'
+import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
+import {getErrorMessage} from '@/utils/helpers'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {ExcludedModelsField, ProviderConnectionFields} from './ProviderFormFields'
+import {ProviderConnectionFields, ProviderModelSection} from './ProviderFormFields'
 
 const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
 
@@ -40,7 +41,7 @@ const buildSignature = (form: ProviderFormState) =>
                        ...buildBaseSignatureFields(form),
                        websockets: Boolean(form.websockets),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
-                       excludedModels: parseTextList(form.excludedText),
+                       excludedModels: parseTextList(form.excludedText, /\r?\n/),
                    })
 
 export function AiProvidersXAIEditPage() {
@@ -70,13 +71,16 @@ export function AiProvidersXAIEditPage() {
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
-            excludedModels: parseTextList(form.excludedText),
+            excludedModels: parseTextList(form.excludedText, /\r?\n/),
         }),
         createConfig: (config) => providersApi.createXAIConfig(config),
         updateConfig: (index, config, original) => providersApi.patchXAIConfig(index, config, original),
         validateBeforeSave: (form, original) => {
             const validationError = getCredentialWeightValidationKey(form.weight) ??
-                getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors)
+                                    getRequestScopedErrorsValidationKey(
+                                        form.requestScopedErrors,
+                                        original?.requestScopedErrors,
+                                    )
             if (validationError) {
                 return validationError
             }
@@ -104,6 +108,7 @@ export function AiProvidersXAIEditPage() {
               error,
               invalidIndexParam,
               invalidIndex,
+              disableControls,
               canSave,
               disabled,
               title,
@@ -111,6 +116,29 @@ export function AiProvidersXAIEditPage() {
               handleBack,
               swipeRef,
           } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>(editOptions)
+
+    const baseUrl   = form.baseUrl?.trim() || DEFAULT_XAI_BASE_URL
+    const discovery = useModelDiscovery(
+        { ...form, baseUrl },
+        setForm,
+        { disableControls, saving, loading, invalidIndexParam, invalidIndex },
+        {
+            buildEndpoint: (url) => modelsApi.buildV1ModelsEndpoint(url),
+            fetchModels: (url, apiKey, headers, proxyUrl, signal) =>
+                modelsApi.fetchV1ModelsViaApiCall(
+                    url,
+                    hasHeader(headers, 'authorization') ? undefined : apiKey,
+                    headers,
+                    proxyUrl,
+                    form.authIndex,
+                    signal,
+                ),
+            canAutoFetch: (apiKey, headers) => Boolean(apiKey || form.authIndex?.trim()) ||
+                                               hasHeader(headers, 'authorization'),
+            buildErrorMessage: (err) => `${t('ai_providers.xai_models_fetch_error')}: ${getErrorMessage(err)}`,
+            i18nPrefix: 'xai',
+        },
+    )
 
     return (
         <ProviderEditShell
@@ -150,26 +178,12 @@ export function AiProvidersXAIEditPage() {
                     </>
                 }
             />
-            <div className='form-group'>
-                <label>{t('ai_providers.xai_models_label')}</label>
-                <ModelInputList
-                    entries={form.modelEntries}
-                    onChange={(entries) => setForm((previous) => ({ ...previous, modelEntries: entries }))}
-                    addLabel={t('ai_providers.xai_models_add_btn')}
-                    namePlaceholder={t('common.model_name_placeholder')}
-                    aliasPlaceholder={t('common.model_alias_placeholder')}
-                    removeButtonTitle={t('common.delete')}
-                    removeButtonAriaLabel={t('common.delete')}
-                    disabled={disabled}
-                    metadataEditing
-                    provider='xai'
-                />
-                <div className='hint'>{t('ai_providers.xai_models_hint')}</div>
-            </div>
-            <ExcludedModelsField
-                value={form.excludedText}
-                onChange={(value) => setForm((previous) => ({ ...previous, excludedText: value }))}
+            <ProviderModelSection
+                form={form}
+                setForm={setForm}
                 disabled={disabled}
+                discovery={discovery}
+                i18nPrefix='xai'
             />
         </ProviderEditShell>
     )

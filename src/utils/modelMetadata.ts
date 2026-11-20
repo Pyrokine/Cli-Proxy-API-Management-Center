@@ -3,10 +3,10 @@ import type {ModelAlias, ModelThinking} from '@/types'
 type ModelMetadata = Pick<ModelAlias,
     'maxContextLength' | 'thinking' | 'displayName' | 'forceMapping' | 'isCompat' |
     'supportConfigurationUpdate' | 'useMaxCompletionTokens' | 'image' |
-    'inputModalities' | 'outputModalities'>
+    'inputModalities' | 'outputModalities'> & Record<string, unknown>
 
 const MAX_CONTEXT_LENGTH_KEYS = ['maxContextLength', 'max-context-length', 'max_context_length'] as const
-const BOOLEAN_MODEL_FIELDS = [
+const BOOLEAN_MODEL_FIELDS    = [
     ['forceMapping', 'force-mapping'],
     ['isCompat', 'is-compat'],
     ['supportConfigurationUpdate', 'support-configuration-update'],
@@ -15,6 +15,31 @@ const BOOLEAN_MODEL_FIELDS = [
 ] as const
 const ZERO_ALLOWED_KEYS       = ['zeroAllowed', 'zero_allowed', 'zero-allowed'] as const
 const DYNAMIC_ALLOWED_KEYS    = ['dynamicAllowed', 'dynamic_allowed', 'dynamic-allowed'] as const
+const THINKING_FIELDS         = new Set(['min', 'max', 'levels', ...ZERO_ALLOWED_KEYS, ...DYNAMIC_ALLOWED_KEYS])
+const MODEL_FIELDS            = new Set([
+                                            'name',
+                                            'alias',
+                                            'priority',
+                                            'testModel',
+                                            'test-model',
+                                            'thinking',
+                                            ...MAX_CONTEXT_LENGTH_KEYS,
+                                            'displayName',
+                                            'display-name',
+                                            'display_name',
+                                            ...BOOLEAN_MODEL_FIELDS.flat(),
+                                            'inputModalities',
+                                            'input-modalities',
+                                            'outputModalities',
+                                            'output-modalities',
+                                            'maxContextLengthDraft',
+                                            'thinkingMinDraft',
+                                            'thinkingMaxDraft',
+                                            'preserveImportedThinkingRange',
+                                        ])
+
+export const getUnknownModelMetadata = (value: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(value).filter(([field]) => !MODEL_FIELDS.has(field)))
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -63,7 +88,8 @@ export const normalizeModelThinking = (value: unknown): ModelThinking | undefine
         return undefined
     }
 
-    const thinking: ModelThinking = {}
+    const thinking: ModelThinking = Object.fromEntries(Object.entries(value).filter(([field]) => !THINKING_FIELDS.has(
+        field)))
     const min                     = normalizeInteger(value.min)
     const max                     = normalizeInteger(value.max)
     const zeroAllowed             = readOwnValue(value, ZERO_ALLOWED_KEYS)
@@ -95,7 +121,7 @@ export const normalizeModelThinking = (value: unknown): ModelThinking | undefine
         }
     }
 
-    return Object.keys(thinking).length > 0 ? thinking : undefined
+    return thinking
 }
 
 export const normalizeModelMetadata = (value: unknown): ModelMetadata => {
@@ -103,7 +129,7 @@ export const normalizeModelMetadata = (value: unknown): ModelMetadata => {
         return {}
     }
 
-    const metadata: ModelMetadata = {}
+    const metadata: ModelMetadata = getUnknownModelMetadata(value)
     const maxContextLength        = readOwnValue(value, MAX_CONTEXT_LENGTH_KEYS)
     if (maxContextLength.found) {
         const normalized = normalizeMaxContextLength(maxContextLength.value)
@@ -125,7 +151,7 @@ export const normalizeModelMetadata = (value: unknown): ModelMetadata => {
             metadata[field] = normalized
         }
     }
-    const inputModalities = readOwnValue(value, ['inputModalities', 'input-modalities'])
+    const inputModalities  = readOwnValue(value, ['inputModalities', 'input-modalities'])
     const outputModalities = readOwnValue(value, ['outputModalities', 'output-modalities'])
     if (inputModalities.found && Array.isArray(inputModalities.value) &&
         inputModalities.value.every((item) => typeof item === 'string')) {
@@ -140,11 +166,12 @@ export const normalizeModelMetadata = (value: unknown): ModelMetadata => {
 
 export const normalizeModelMetadataFromManagement = (value: unknown): ModelMetadata => {
     const metadata = normalizeModelMetadata(value)
-    if (!isRecord(value) || !isRecord(value.thinking)) {
+    if (!isRecord(value) || !isRecord(value.thinking) || Object.keys(value.thinking).length === 0) {
         return metadata
     }
     const thinking    = metadata.thinking ?? {}
     metadata.thinking = {
+        ...thinking,
         min: thinking.min ?? 0,
         max: thinking.max ?? 0,
         zeroAllowed: thinking.zeroAllowed ?? false,
@@ -183,11 +210,11 @@ export const normalizeModelEntriesForSignature = (
         }
         const numericDrafts = [entry.maxContextLengthDraft, entry.thinkingMinDraft, entry.thinkingMaxDraft]
         acc.push({
-            name,
-            alias,
-            ...normalizeModelMetadata(entry),
-            ...(numericDrafts.some((draft) => draft !== undefined) ? {numericDrafts} : {}),
-        })
+                     name,
+                     alias,
+                     ...normalizeModelMetadata(entry),
+                     ...(numericDrafts.some((draft) => draft !== undefined) ? { numericDrafts } : {}),
+                 })
         return acc
     }, [])
 }
@@ -202,7 +229,8 @@ const serializeThinking = (
         return undefined
     }
 
-    const output: Record<string, unknown> = {}
+    const output: Record<string, unknown> = Object.fromEntries(Object.entries(thinking)
+                                                                     .filter(([field]) => !THINKING_FIELDS.has(field)))
     if (thinking.min !== undefined) {
         output.min = thinking.min
     }
@@ -223,7 +251,7 @@ const serializeThinking = (
 
 export const serializeModelMetadataForManagement = (value: unknown): Record<string, unknown> => {
     const metadata                        = normalizeModelMetadata(value)
-    const output: Record<string, unknown> = {}
+    const output: Record<string, unknown> = getUnknownModelMetadata(metadata)
     if (metadata.maxContextLength !== undefined) {
         output['max-context-length'] = metadata.maxContextLength
     }
@@ -276,7 +304,7 @@ export const rewriteModelMetadataForYaml = (value: unknown): unknown => {
         if (Object.keys(thinkingOutput).length > 0) {
             output.thinking = thinkingOutput
         } else {
-            delete output.thinking
+            output.thinking = {}
         }
     }
 

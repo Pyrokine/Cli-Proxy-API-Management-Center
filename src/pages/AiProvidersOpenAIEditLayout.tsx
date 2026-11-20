@@ -7,15 +7,15 @@ import {providersApi} from '@/services/api'
 import {useConfigStore, useNotificationStore, useOpenAIEditDraftStore} from '@/stores'
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry, OpenAIProviderConfig} from '@/types'
-import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {getCredentialRetryValidationKey, getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
 import type {Dispatch, SetStateAction} from 'react'
 import {useCallback} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Outlet} from 'react-router-dom'
+import {Outlet} from 'react-router'
 
 export type OpenAIEditOutletContext = {
     hasIndexParam: boolean
@@ -70,6 +70,7 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
             proxyUrl: string
             authIndex: string
             weight: number | null
+            disabled: boolean
             headers: Array<{ key: string; value: string }>
         }>
     >((acc, entry) => {
@@ -81,7 +82,7 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
         if (!apiKey && !proxyUrl && !authIndex && weight === null && headers.length === 0) {
             return acc
         }
-        acc.push({ apiKey, proxyUrl, authIndex, weight, headers })
+        acc.push({ apiKey, proxyUrl, authIndex, weight, headers, disabled: Boolean(entry.disabled) })
         return acc
     }, [])
 
@@ -248,6 +249,7 @@ export function AiProvidersOpenAIEditLayout() {
                         headers: entry.headers,
                         authIndex: entry.authIndex?.trim() || undefined,
                         weight: entry.weight,
+                        disabled: entry.disabled,
                     })),
                 }
                 if (form.priority !== undefined && Number.isFinite(form.priority)) {
@@ -332,7 +334,7 @@ export function AiProvidersOpenAIEditLayout() {
 
     /* ---- OpenAI-specific: keyTestStatuses bound to current draftKey ---- */
     const { draftKey, isCurrent } = layout
-    const keyTestStatuses = rawDrafts[draftKey]?.keyTestStatuses ?? []
+    const keyTestStatuses         = rawDrafts[draftKey]?.keyTestStatuses ?? []
 
     const handleSetDraftKeyTestStatus = useCallback(
         (keyIndex: number, status: KeyTestStatus) => {

@@ -1,10 +1,11 @@
-import {describe, expect, spyOn, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-import {createElement} from 'react'
-import {renderToStaticMarkup} from 'react-dom/server'
-
 import {ModelInputList, type ModelProvider} from '@/components/ui/ModelInputList'
-import {entriesToModels, getModelEntriesValidationKey, modelsToEntries, parseThinkingLevelsInput, updateModelNumericField} from '@/components/ui/modelInputListUtils'
+import {
+    entriesToModels,
+    getModelEntriesValidationKey,
+    modelsToEntries,
+    parseThinkingLevelsInput,
+    updateModelNumericField,
+} from '@/components/ui/modelInputListUtils'
 import i18n from '@/i18n'
 import {apiClient} from '@/services/api/client'
 import {
@@ -24,6 +25,9 @@ import {
     serializeModelMetadataForManagement,
 } from '@/utils/modelMetadata'
 import {findMissingProviderModelNames, mergeProviderModelEntries} from '@/utils/providerModels'
+import {describe, expect, spyOn, test} from 'bun:test'
+import {createElement} from 'react'
+import {renderToStaticMarkup} from 'react-dom/server'
 
 const MODEL_METADATA = {
     maxContextLength: 128000,
@@ -66,29 +70,39 @@ describe('provider model metadata', () => {
             'support-configuration-update': false, 'use-max-completion-tokens': true,
             image: true, 'input-modalities': ['text', 'image'], 'output-modalities': ['text'],
         }
-        const original = normalizeProviderKeyConfig({'api-key': 'key', models: [rawModel]})!
-        const models = entriesToModels(modelsToEntries(original.models ?? []))
+        const original = normalizeProviderKeyConfig({ 'api-key': 'key', models: [rawModel] })!
+        const models   = entriesToModels(modelsToEntries(original.models ?? []))
         expect(models).toEqual(original.models ?? [])
-        const saved = buildCodexConfigPatchRequest(0, {...original, priority: 2, models}, original)
+        const saved = buildCodexConfigPatchRequest(0, { ...original, priority: 2, models }, original)
         expect(saved.value).toHaveProperty('priority', 2)
         expect(saved.value).not.toHaveProperty('models')
 
-        const openAI = normalizeOpenAIProvider({
-            name: 'provider', 'base-url': 'https://example.test/v1',
-            'api-key-entries': [], models: [rawModel],
-        })!
+        const openAI       = normalizeOpenAIProvider({
+                                                         name: 'provider', 'base-url': 'https://example.test/v1',
+                                                         'api-key-entries': [], models: [rawModel],
+                                                     })!
         const openAIModels = entriesToModels(modelsToEntries(openAI.models ?? []))
-        const savedOpenAI = buildOpenAIProviderPatchRequest(0, {...openAI, priority: 2, models: openAIModels}, openAI)
+        const savedOpenAI  = buildOpenAIProviderPatchRequest(
+            0,
+            { ...openAI, priority: 2, models: openAIModels },
+            openAI,
+        )
         expect(savedOpenAI.value).toHaveProperty('priority', 2)
         expect(savedOpenAI.value).not.toHaveProperty('models')
-        expect(normalizeModelEntriesForSignature(modelsToEntries(openAI.models ?? []))[0]).toMatchObject({
-            displayName: 'Public A', image: true, inputModalities: ['text', 'image'],
-        })
+        expect(normalizeModelEntriesForSignature(modelsToEntries(openAI.models ?? []))[0]).toMatchObject(
+            {
+                displayName: 'Public A',
+                image: true,
+                inputModalities: [
+                    'text',
+                    'image',
+                ],
+            })
     })
 
     test('shows only model options supported by each provider backend', () => {
         const render = (provider: ModelProvider) => renderToStaticMarkup(createElement(ModelInputList, {
-            entries: [{name: 'upstream-model', alias: 'public-model'}],
+            entries: [{ name: 'upstream-model', alias: 'public-model' }],
             onChange: () => undefined,
             metadataEditing: true,
             provider,
@@ -102,7 +116,8 @@ describe('provider model metadata', () => {
             image: i18n.t('ai_providers.model_image_label'),
             input: i18n.t('ai_providers.model_input_modalities_label'),
         }
-        for (const provider of ['gemini', 'interactions', 'claude', 'codex', 'xai', 'meta', 'vertex', 'openai'] as const) {
+        for (const provider of
+            ['gemini', 'interactions', 'claude', 'codex', 'xai', 'meta', 'vertex', 'openai'] as const) {
             const markup = render(provider)
             expect(markup).toContain(labels.display)
             expect(markup).toContain(i18n.t('ai_providers.model_thinking_levels_label'))
@@ -116,55 +131,82 @@ describe('provider model metadata', () => {
     })
 
     test('sends edited model capabilities to their backend management endpoints', () => {
-        const common = {name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model',
-            maxContextLength: 200000, isCompat: true}
-        const key = {apiKey: 'key', authIndex: 'test-auth'}
-        const gemini = buildGeminiConfigPatchRequest(0, {...key, models: [common]}, key).value
-        const codex = buildCodexConfigPatchRequest(0, {...key, models: [{...common,
-            forceMapping: true, supportConfigurationUpdate: true}]}, key).value
-        const xai = buildXAIConfigPatchRequest(0, {...key, models: [{...common, forceMapping: true}]}, key).value
+        const common = {
+            name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model',
+            maxContextLength: 200000, isCompat: true,
+        }
+        const key    = { apiKey: 'key', authIndex: 'test-auth' }
+        const gemini = buildGeminiConfigPatchRequest(0, { ...key, models: [common] }, key).value
+        const codex  = buildCodexConfigPatchRequest(0, {
+            ...key, models: [
+                {
+                    ...common,
+                    forceMapping: true, supportConfigurationUpdate: true,
+                },
+            ],
+        }, key).value
+        const xai    = buildXAIConfigPatchRequest(0, { ...key, models: [{ ...common, forceMapping: true }] }, key).value
         const openai = buildOpenAIProviderPatchRequest(0, {
             name: 'test', baseUrl: 'https://example.test', apiKeyEntries: [],
-            models: [{...common, image: true, useMaxCompletionTokens: true,
-                inputModalities: ['text', 'image'], outputModalities: ['text']}],
-        }, {name: 'test', baseUrl: 'https://example.test', apiKeyEntries: []}).value
-        const vertex = buildVertexConfigPatchRequest(0, {...key,
-            models: [{name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model'}]}, key).value
+            models: [
+                {
+                    ...common, image: true, useMaxCompletionTokens: true,
+                    inputModalities: ['text', 'image'], outputModalities: ['text'],
+                },
+            ],
+        }, { name: 'test', baseUrl: 'https://example.test', apiKeyEntries: [] }).value
+        const vertex = buildVertexConfigPatchRequest(0, {
+            ...key,
+            models: [{ name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model' }],
+        }, key).value
 
         const expected = {
             name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model',
             'max-context-length': 200000, 'is-compat': true,
         }
         expect(gemini).toHaveProperty('models', [expected])
-        expect(codex).toHaveProperty('models', [{...expected, 'force-mapping': true,
-            'support-configuration-update': true}])
-        expect(xai).toHaveProperty('models', [{...expected, 'force-mapping': true}])
-        expect(openai).toHaveProperty('models', [{...expected, image: true,
-            'use-max-completion-tokens': true, 'input-modalities': ['text', 'image'],
-            'output-modalities': ['text']}])
-        expect(vertex).toHaveProperty('models', [{
-            name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model',
-        }])
-        const vertexForm = readFileSync(new URL('../src/pages/AiProvidersVertexEditPage.tsx', import.meta.url), 'utf8')
-        expect(vertexForm).toContain('...(displayName ? {displayName} : {})')
+        expect(codex).toHaveProperty('models', [
+            {
+                ...expected, 'force-mapping': true,
+                'support-configuration-update': true,
+            },
+        ])
+        expect(xai).toHaveProperty('models', [{ ...expected, 'force-mapping': true }])
+        expect(openai).toHaveProperty('models', [
+            {
+                ...expected, image: true,
+                'use-max-completion-tokens': true, 'input-modalities': ['text', 'image'],
+                'output-modalities': ['text'],
+            },
+        ])
+        expect(vertex).toHaveProperty('models', [
+            {
+                name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model',
+            },
+        ])
+        expect(entriesToModels([{ name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model' }]))
+            .toEqual([
+                         { name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model' },
+                     ])
     })
 
-    test('restores zero-value thinking fields omitted by management JSON', () => {
-        expect(normalizeModelMetadataFromManagement({ thinking: {} })).toEqual({
-                                                                                   thinking: {
-                                                                                       min: 0,
-                                                                                       max: 0,
-                                                                                       zeroAllowed: false,
-                                                                                       dynamicAllowed: false,
-                                                                                   },
-                                                                               })
+    test('preserves explicit empty thinking and restores omitted values for nonempty management overrides', () => {
+        expect(normalizeModelMetadataFromManagement({ thinking: {} })).toEqual({ thinking: {} })
+        expect(normalizeModelMetadataFromManagement({ thinking: { max: 128 } })).toEqual({
+                                                                                             thinking: {
+                                                                                                 min: 0,
+                                                                                                 max: 128,
+                                                                                                 zeroAllowed: false,
+                                                                                                 dynamicAllowed: false,
+                                                                                             },
+                                                                                         })
         expect(normalizeModelMetadataFromManagement({ name: 'model-a' })).toEqual({})
     })
 
-    test('treats an empty thinking level list as unset', () => {
-        expect(normalizeModelMetadata({ thinking: { levels: [] } })).toEqual({})
-        expect(normalizeModelMetadata({ thinking: { levels: ['', ' '] } })).toEqual({})
-        expect(serializeModelMetadataForManagement({ thinking: { levels: [] } })).toEqual({})
+    test('clearing thinking levels retains an explicit empty override', () => {
+        expect(normalizeModelMetadata({ thinking: { levels: [] } })).toEqual({ thinking: {} })
+        expect(normalizeModelMetadata({ thinking: { levels: ['', ' '] } })).toEqual({ thinking: {} })
+        expect(serializeModelMetadataForManagement({ thinking: { levels: [] } })).toEqual({ thinking: {} })
     })
 
     test('treats empty or non-positive context lengths as unset', () => {
@@ -178,14 +220,16 @@ describe('provider model metadata', () => {
     })
 
     test('preserves invalid numeric edits and refuses to serialize them as cleared model fields', () => {
-        const original = {name: 'model-a', alias: '', maxContextLength: 4096, thinking: {min: 0, max: 128}}
+        const original = { name: 'model-a', alias: '', maxContextLength: 4096, thinking: { min: 0, max: 128 } }
         for (const raw of ['0', '-1', '1.5', '1e3', '9007199254740992', 'abc']) {
             const entry = updateModelNumericField(original, 'maxContextLength', raw)
             expect(entry.maxContextLength).toBe(4096)
             expect(entry.maxContextLengthDraft).toBe(raw)
             expect(getModelEntriesValidationKey([entry])).toBe('ai_providers.model_context_invalid')
             expect(() => entriesToModels([entry])).toThrow('ai_providers.model_context_invalid')
-            expect(normalizeModelEntriesForSignature([entry])).not.toEqual(normalizeModelEntriesForSignature([original]))
+            expect(normalizeModelEntriesForSignature([entry]))
+                .not
+                .toEqual(normalizeModelEntriesForSignature([original]))
         }
         const invalidMin = updateModelNumericField(original, 'min', '-3')
         const invalidMax = updateModelNumericField(original, 'max', '1.5')
@@ -197,36 +241,49 @@ describe('provider model metadata', () => {
     })
 
     test('accepts corrected numeric drafts and intentional clearing while rejecting reversed thinking limits', () => {
-        const original = {name: 'model-a', alias: '', maxContextLength: 4096, thinking: {min: 0, max: 128}}
-        const corrected = updateModelNumericField(updateModelNumericField(original, 'maxContextLength', 'bad'),
-            'maxContextLength', '8192')
+        const original  = { name: 'model-a', alias: '', maxContextLength: 4096, thinking: { min: 0, max: 128 } }
+        const corrected = updateModelNumericField(
+            updateModelNumericField(original, 'maxContextLength', 'bad'),
+            'maxContextLength', '8192',
+        )
         expect(corrected.maxContextLengthDraft).toBeUndefined()
         expect(entriesToModels([corrected])[0].maxContextLength).toBe(8192)
         const cleared = updateModelNumericField(updateModelNumericField(original, 'min', 'bad'), 'min', '')
         expect(cleared.thinkingMinDraft).toBeUndefined()
-        expect(entriesToModels([cleared])[0].thinking).toEqual({max: 128})
+        expect(entriesToModels([cleared])[0].thinking).toEqual({ max: 128 })
         const reversed = updateModelNumericField(original, 'min', '256')
         expect(getModelEntriesValidationKey([reversed])).toBe('ai_providers.model_thinking_budget_range')
         expect(() => entriesToModels([reversed])).toThrow('ai_providers.model_thinking_budget_range')
-        expect(entriesToModels([updateModelNumericField(reversed, 'max', '512')])[0].thinking).toEqual({min: 256, max: 512})
+        expect(entriesToModels([updateModelNumericField(reversed, 'max', '512')])[0].thinking).toEqual({
+                                                                                                           min: 256,
+                                                                                                           max: 512,
+                                                                                                       })
     })
 
     test('preserves a backend thinking range on unrelated edits, then validates changed bounds', () => {
-        const loaded = modelsToEntries([{name: 'model-a', thinking: {min: 20, max: 0}}])[0]
+        const loaded = modelsToEntries([{ name: 'model-a', thinking: { min: 20, max: 0 } }])[0]
         expect(getModelEntriesValidationKey([loaded])).toBeUndefined()
-        expect(entriesToModels([{...loaded, alias: 'public-model'}])).toEqual([
-            {name: 'model-a', alias: 'public-model', thinking: {min: 20, max: 0}},
-        ])
+        expect(entriesToModels([{ ...loaded, alias: 'public-model' }])).toEqual([
+                                                                                    {
+                                                                                        name: 'model-a',
+                                                                                        alias: 'public-model',
+                                                                                        thinking: { min: 20, max: 0 },
+                                                                                    },
+                                                                                ])
         expect(getModelEntriesValidationKey([updateModelNumericField(loaded, 'min', '20')]))
             .toBe('ai_providers.model_thinking_budget_range')
         const corrected = updateModelNumericField(loaded, 'max', '20')
-        expect(entriesToModels([corrected])[0].thinking).toEqual({min: 20, max: 20})
+        expect(entriesToModels([corrected])[0].thinking).toEqual({ min: 20, max: 20 })
     })
 
     test('shows invalid drafts and translated inline errors in model metadata fields', () => {
         const markup = renderToStaticMarkup(createElement(ModelInputList, {
-            entries: [updateModelNumericField({name: 'model-a', alias: '', maxContextLength: 4096},
-                'maxContextLength', 'not-a-number')],
+            entries: [
+                updateModelNumericField(
+                    { name: 'model-a', alias: '', maxContextLength: 4096 },
+                    'maxContextLength', 'not-a-number',
+                ),
+            ],
             onChange: () => undefined,
             metadataEditing: true,
             provider: 'codex',
@@ -298,26 +355,31 @@ describe('provider model metadata', () => {
                 1,
                 '/claude-api-key',
                 expect.objectContaining({ models: [{ name: 'model-a', ...expectedMetadata }] }),
+                { mutationReadback: expect.any(Function) },
             )
             expect(post).toHaveBeenNthCalledWith(
                 2,
                 '/codex-api-key',
                 expect.objectContaining({ models: [{ name: 'model-a', ...expectedMetadata }] }),
+                { mutationReadback: expect.any(Function) },
             )
             expect(post).toHaveBeenNthCalledWith(
                 3,
                 '/gemini-api-key',
                 expect.objectContaining({ models: [{ name: 'model-a', ...expectedMetadata }] }),
+                { mutationReadback: expect.any(Function) },
             )
             expect(post).toHaveBeenNthCalledWith(
                 4,
                 '/interactions-api-key',
                 expect.objectContaining({ models: [{ name: 'model-a', ...expectedMetadata }] }),
+                { mutationReadback: expect.any(Function) },
             )
             expect(post).toHaveBeenNthCalledWith(
                 5,
                 '/openai-compatibility',
                 expect.objectContaining({ models: [{ name: 'model-a', ...expectedMetadata }] }),
+                { mutationReadback: expect.any(Function) },
             )
         } finally {
             post.mockRestore()
@@ -332,27 +394,28 @@ describe('provider model metadata', () => {
         )
 
         expect(request.value).toHaveProperty('models', [
-                                                 {
-                                                     name: 'model-a',
-                                                     alias: 'alias-a',
-                                                     thinking: {
-                                                         min: 0,
-                                                         max: 0,
-                                                         zero_allowed: false,
-                                                         dynamic_allowed: false,
-                                                     },
-                                                 },
-                                             ])
+            {
+                name: 'model-a',
+                alias: 'alias-a',
+                thinking: {
+                    min: 0,
+                    max: 0,
+                    zero_allowed: false,
+                    dynamic_allowed: false,
+                },
+            },
+        ])
     })
 
     test('includes metadata in dirty signatures and ignores entries that cannot be saved', () => {
-        expect(normalizeModelEntriesForSignature([{ name: 'model-a', alias: '', ...MODEL_METADATA }])).toEqual([
-                                                                                                                   {
-                                                                                                                       name: 'model-a',
-                                                                                                                       alias: '',
-                                                                                                                       ...MODEL_METADATA,
-                                                                                                                   },
-                                                                                                               ])
+        expect(normalizeModelEntriesForSignature([{ name: 'model-a', alias: '', ...MODEL_METADATA }])).toEqual(
+            [
+                {
+                    name: 'model-a',
+                    alias: '',
+                    ...MODEL_METADATA,
+                },
+            ])
         expect(normalizeModelEntriesForSignature([
                                                      {
                                                          name: '',
@@ -375,7 +438,7 @@ describe('provider model metadata', () => {
             (name) => name.replace(/^models\//, '').trim(),
         )
 
-        expect([...missing]).toEqual(['models/model-c', 'model-d'])
+        expect([...missing]).toEqual(['MODEL-B', 'models/model-c', 'model-d'])
     })
 
     test('model discovery preserves existing metadata and retains aliases for new models', () => {
@@ -398,18 +461,18 @@ describe('provider model metadata', () => {
 
     test('model discovery preserves every advanced-only and invalid numeric draft row', () => {
         const drafts = [
-            {displayName: 'Draft'}, {forceMapping: false}, {isCompat: false},
-            {supportConfigurationUpdate: false}, {useMaxCompletionTokens: false}, {image: false},
-            {inputModalities: []}, {outputModalities: []}, {priority: 0},
-            {maxContextLengthDraft: 'bad'}, {thinkingMinDraft: '-1'}, {thinkingMaxDraft: '1e3'},
+            { displayName: 'Draft' }, { forceMapping: false }, { isCompat: false },
+            { supportConfigurationUpdate: false }, { useMaxCompletionTokens: false }, { image: false },
+            { inputModalities: [] }, { outputModalities: [] }, { priority: 0 },
+            { maxContextLengthDraft: 'bad' }, { thinkingMinDraft: '-1' }, { thinkingMaxDraft: '1e3' },
         ]
         for (const draft of drafts) {
-            const entry = {name: '', alias: '', ...draft}
-            const configured = [entry, {name: '', alias: ''}]
-            const merged = mergeProviderModelEntries(configured, [{name: 'model-a'}])
-            expect(merged).toEqual({entries: [entry, {name: 'model-a', alias: ''}], addedCount: 1})
+            const entry      = { name: '', alias: '', ...draft }
+            const configured = [entry, { name: '', alias: '' }]
+            const merged     = mergeProviderModelEntries(configured, [{ name: 'model-a' }])
+            expect(merged).toEqual({ entries: [entry, { name: 'model-a', alias: '' }], addedCount: 1 })
             expect(merged.entries[0]).toBe(entry)
-            expect(configured).toEqual([entry, {name: '', alias: ''}])
+            expect(configured).toEqual([entry, { name: '', alias: '' }])
         }
     })
 
@@ -421,7 +484,7 @@ describe('provider model metadata', () => {
             { name: '', alias: '', maxContextLength: 4096 },
             { name: '', alias: '' },
         ]
-        const merged = mergeProviderModelEntries(
+        const merged     = mergeProviderModelEntries(
             configured,
             [
                 { name: 'model-a' },
@@ -433,9 +496,13 @@ describe('provider model metadata', () => {
         )
 
         expect(merged).toEqual({
-            entries: [...configured.slice(0, 4), { name: 'model-b', alias: '' }],
-            addedCount: 1,
-        })
+                                   entries: [
+                                       ...configured.slice(0, 4),
+                                       { name: 'MODEL-A', alias: '' },
+                                       { name: 'model-b', alias: '' },
+                                   ],
+                                   addedCount: 2,
+                               })
         expect(configured).toHaveLength(5)
     })
 })

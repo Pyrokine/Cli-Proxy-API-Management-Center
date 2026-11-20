@@ -10,7 +10,7 @@ import {normalizeHeaderEntries} from '@/utils/headers'
 import {parseIndexParam} from '@/utils/helpers'
 import {type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useParams} from 'react-router-dom'
+import {useParams} from 'react-router'
 
 export {normalizeModelEntriesForSignature} from '@/utils/modelMetadata'
 
@@ -156,8 +156,8 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
     const [configGeneration, setConfigGeneration]   = useState<number | null>(null)
     const [loading, setLoading]                     = useState(true)
     const [savingGeneration, setSavingGeneration]   = useState<number | null>(null)
-    const saving = savingGeneration === authGeneration
-    const setSaving = useCallback((value: boolean) => {
+    const saving                                    = savingGeneration === authGeneration
+    const setSaving                                 = useCallback((value: boolean) => {
         if (isCurrent()) {
             setSavingGeneration(value ? authGeneration : null)
         }
@@ -165,11 +165,14 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
     const [error, setError]                         = useState('')
     const [storedForm, setStoredForm]               = useState<TForm>(() => config.buildEmptyForm())
     const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(config.buildEmptyForm()))
-    const sourceLoaded = configGeneration === authGeneration
-    const configs = useMemo(() => sourceLoaded ? storedConfigs : [], [sourceLoaded, storedConfigs])
-    const form = sourceLoaded ? storedForm : config.buildEmptyForm()
-    const resolvedLoading = loading || !sourceLoaded
-    const setForm: Dispatch<SetStateAction<TForm>> = useCallback((action) => {
+    const sourceLoaded                              = configGeneration === authGeneration
+    const configs                                   = useMemo(
+        () => sourceLoaded ? storedConfigs : [],
+        [sourceLoaded, storedConfigs],
+    )
+    const form                                      = sourceLoaded ? storedForm : config.buildEmptyForm()
+    const resolvedLoading                           = loading || !sourceLoaded
+    const setForm: Dispatch<SetStateAction<TForm>>  = useCallback((action) => {
         if (isCurrent()) {
             setStoredForm(action)
         }

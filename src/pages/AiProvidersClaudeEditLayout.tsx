@@ -7,15 +7,15 @@ import {findProviderConfigIndexByAuthIndex, providersApi} from '@/services/api'
 import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {useClaudeEditDraftStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {ProviderKeyConfig} from '@/types'
-import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {getCredentialRetryValidationKey, getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
+import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, getChangedHeaderNames, headersToEntries, normalizeHeaderEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import type {ModelInfo} from '@/utils/models'
 import type {Dispatch, SetStateAction} from 'react'
 import {useCallback, useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Outlet} from 'react-router-dom'
+import {Outlet} from 'react-router'
 
 type TestStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -65,6 +65,7 @@ const normalizeCloakConfig = (cloak: ProviderFormState['cloak']) => {
     return {
         mode,
         strictMode,
+        cacheUserId: cloak.cacheUserId ?? null,
         sensitiveWords: sensitiveWords.length ? sensitiveWords : null,
     }
 }
@@ -84,7 +85,7 @@ const buildClaudeSignature = (form: ProviderFormState, _testModel: string) =>
                        proxyUrl: String(form.proxyUrl ?? '').trim(),
                        headers: normalizeHeaderEntries(form.headers),
                        models: normalizeModelEntriesForSignature(form.modelEntries, { aliasFallbackToName: true }),
-                       excludedModels: parseTextList(form.excludedText ?? ''),
+                       excludedModels: parseTextList(form.excludedText ?? '', /\r?\n/),
                        cloak: normalizeCloakConfig(form.cloak),
                        fingerprintProfile: normalizeClaudeFingerprintProfile(form.fingerprintProfile),
                        rebuildMidSystemMessage: Boolean(form.rebuildMidSystemMessage),
@@ -191,12 +192,17 @@ export function AiProvidersClaudeEditLayout() {
 
             const fingerprintProfile = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
             if (fingerprintProfile !== '' && fingerprintProfile !== 'claude-code-cli') {
-                showNotification(t('ai_providers.claude_fingerprint_profile_unknown', { value: fingerprintProfile }), 'error')
+                showNotification(
+                    t('ai_providers.claude_fingerprint_profile_unknown', { value: fingerprintProfile }),
+                    'error',
+                )
                 return
             }
 
-            const stableIndex = editIndex !== null ? findProviderConfigIndexByAuthIndex(configs, form.authIndex ?? '') : -1
-            const rulesError = getRequestScopedErrorsValidationKey(
+            const stableIndex = editIndex !== null ?
+                                findProviderConfigIndexByAuthIndex(configs, form.authIndex ?? '') :
+                                -1
+            const rulesError  = getRequestScopedErrorsValidationKey(
                 form.requestScopedErrors, stableIndex >= 0 ? configs[stableIndex].requestScopedErrors : undefined)
             if (rulesError) {
                 showNotification(t(rulesError), 'error')
@@ -220,7 +226,7 @@ export function AiProvidersClaudeEditLayout() {
                         ...model,
                         alias: model.alias ?? model.name,
                     })),
-                    excludedModels: parseTextList(form.excludedText),
+                    excludedModels: parseTextList(form.excludedText, /\r?\n/),
                     cloak: form.cloak,
                     fingerprintProfile,
                     rebuildMidSystemMessage: Boolean(form.rebuildMidSystemMessage),
@@ -289,17 +295,20 @@ export function AiProvidersClaudeEditLayout() {
         [showNotification, t, updateConfigValue],
     )
 
-    const layout                      = useProviderEditLayout({
-                                                                  loadConfigs: providersApi.getClaudeConfigs,
-                                                                  draftKeyPrefix: 'claude',
-                                                                  routePrefix: '/credentials/claude',
-                                                                  useDraftStore: useClaudeEditDraftStore,
-                                                                  buildEmptyDraftInit,
-                                                                  buildSignature: buildClaudeSignature,
-                                                                  seedDraftInit,
-                                                                  mergeNotificationKey: 'ai_providers.claude_models_fetch_added',
-                                                                  onSave,
-                                                              })
+    const layout                      =
+              useProviderEditLayout(
+                  {
+                      loadConfigs: providersApi.getClaudeConfigs,
+                      draftKeyPrefix: 'claude',
+                      routePrefix: '/credentials/claude',
+                      useDraftStore: useClaudeEditDraftStore,
+                      buildEmptyDraftInit,
+                      buildSignature: buildClaudeSignature,
+                      seedDraftInit,
+                      mergeNotificationKey:
+                          'ai_providers.claude_models_fetch_added',
+                      onSave,
+                  })
     const credentialDraft             = useClaudeEditDraftStore((state) => state.drafts[layout.draftKey])
     const markApiKeyEdited            = useClaudeEditDraftStore((state) => state.markDraftApiKeyEdited)
     const markCredentialHeadersEdited = useClaudeEditDraftStore(

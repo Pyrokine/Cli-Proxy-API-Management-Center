@@ -1,30 +1,33 @@
-import {describe, expect, spyOn, test} from 'bun:test'
-import {readFileSync} from 'node:fs'
-
 import {apiCallApi} from '@/services/api/apiCall'
 import {apiClient} from '@/services/api/client'
 import {modelsApi} from '@/services/api/models'
 import {oauthApi} from '@/services/api/oauth'
 import {findProviderConfigIndexByAuthIndex, providersApi} from '@/services/api/providers'
 import {normalizeConfigResponse} from '@/services/api/transformers'
+import {describe, expect, spyOn, test} from 'bun:test'
+import {readFileSync} from 'node:fs'
+import {expectSourceToContain} from './sourceContractAssertions'
 
-const metaEditorSource = readFileSync(new URL('../src/pages/AiProvidersMetaEditPage.tsx', import.meta.url), 'utf8')
-const oauthActionSource = readFileSync(new URL('../src/components/credentials/OAuthLoginAction.tsx', import.meta.url), 'utf8')
-const dashboardSource = readFileSync(new URL('../src/pages/DashboardPage.tsx', import.meta.url), 'utf8')
+const metaEditorSource  = readFileSync(new URL('../src/pages/AiProvidersMetaEditPage.tsx', import.meta.url), 'utf8')
+const oauthActionSource = readFileSync(
+    new URL('../src/components/credentials/OAuthLoginAction.tsx', import.meta.url),
+    'utf8',
+)
+const dashboardSource   = readFileSync(new URL('../src/pages/DashboardPage.tsx', import.meta.url), 'utf8')
 
 describe('Meta Muse provider contracts', () => {
     test('reads Meta keys and stable identities from both management views', async () => {
         const get = spyOn(apiClient, 'get').mockResolvedValue({
-                                                                'meta-api-key': [
-                                                                    {
-                                                                        'api-key': 'meta...tail',
-                                                                        'auth-index': 'meta:entry',
-                                                                        'base-url': 'https://api.meta.ai/v1',
-                                                                        models: [{ name: 'muse-4', alias: 'muse' }],
-                                                                    },
-                                                                    { 'api-key': '' },
-                                                                ],
-                                                            })
+                                                                  'meta-api-key': [
+                                                                      {
+                                                                          'api-key': 'meta...tail',
+                                                                          'auth-index': 'meta:entry',
+                                                                          'base-url': 'https://api.meta.ai/v1',
+                                                                          models: [{ name: 'muse-4', alias: 'muse' }],
+                                                                      },
+                                                                      { 'api-key': '' },
+                                                                  ],
+                                                              })
         try {
             const keys = await providersApi.getMetaConfigs()
             expect(get).toHaveBeenCalledWith('/meta-api-key')
@@ -47,7 +50,7 @@ describe('Meta Muse provider contracts', () => {
 
     test('includes Meta keys in the dashboard credential total', () => {
         expect(dashboardSource).toContain('providersApi.getMetaConfigs()')
-        expect(dashboardSource).toContain("meta: metaRes.status === 'fulfilled' ? metaRes.value.length : null")
+        expect(dashboardSource).toContain('meta: metaRes.status === \'fulfilled\' ? metaRes.value.length : null')
         expect(dashboardSource).toContain('const providerCounts     = Object.values(providerStats)')
         expect(dashboardSource).toContain('providerCounts.reduce((total, count) => total + (count ?? 0), 0)')
     })
@@ -58,12 +61,20 @@ describe('Meta Muse provider contracts', () => {
             authIndex: 'meta:entry',
             baseUrl: 'https://api.meta.ai/v1',
         }
-        const get = spyOn(providersApi, 'getMetaConfigs').mockResolvedValue([
-            {...original, authIndex: 'meta:other-a'}, {...original, authIndex: 'meta:other-b'}, original,
-        ])
-        const post = spyOn(apiClient, 'post').mockResolvedValue({ status: 'ok' })
-        const patch = spyOn(apiClient, 'patch').mockResolvedValue({ status: 'ok' })
-        const remove = spyOn(apiClient, 'delete').mockResolvedValue({ status: 'ok' })
+        const get      = spyOn(providersApi, 'getMetaConfigs').mockResolvedValue([
+                                                                                     {
+                                                                                         ...original,
+                                                                                         authIndex: 'meta:other-a',
+                                                                                     },
+                                                                                     {
+                                                                                         ...original,
+                                                                                         authIndex: 'meta:other-b',
+                                                                                     },
+                                                                                     original,
+                                                                                 ])
+        const post     = spyOn(apiClient, 'post').mockResolvedValue({ status: 'ok' })
+        const patch    = spyOn(apiClient, 'patch').mockResolvedValue({ status: 'ok' })
+        const remove   = spyOn(apiClient, 'delete').mockResolvedValue({ status: 'ok' })
         try {
             await providersApi.createMetaConfig({
                                                     apiKey: 'meta-new-key',
@@ -74,20 +85,22 @@ describe('Meta Muse provider contracts', () => {
                 'api-key': 'meta-new-key',
                 models: [{ name: 'muse-4', alias: 'muse' }],
                 'excluded-models': ['muse-legacy'],
-            })
+            }, { mutationReadback: expect.any(Function) })
 
             await providersApi.patchMetaConfig(2, { ...original, weight: 3 }, original)
             expect(patch).toHaveBeenCalledWith('/meta-api-key', {
                 index: 2,
                 'auth-index': 'meta:entry',
                 value: expect.objectContaining({ weight: 3 }),
-            }, {__authGeneration: apiClient.getAuthGeneration()})
+            }, { ...({ __authGeneration: apiClient.getAuthGeneration() }), mutationReadback: expect.any(Function) })
             const patchRequest = patch.mock.calls[0]?.[1] as { value: Record<string, unknown> } | undefined
             expect(patchRequest?.value).not.toHaveProperty('api-key')
 
             await providersApi.deleteMetaConfig(' meta...tail ', ' https://api.meta.ai/v1 ')
             expect(remove).toHaveBeenCalledWith('/meta-api-key', {
-                data: { 'api-key': 'meta...tail', 'base-url': 'https://api.meta.ai/v1' },
+                ...({
+                    data: { 'api-key': 'meta...tail', 'base-url': 'https://api.meta.ai/v1' },
+                }), mutationReadback: expect.any(Function),
             })
         } finally {
             get.mockRestore()
@@ -98,7 +111,7 @@ describe('Meta Muse provider contracts', () => {
     })
 
     test('carries device-code nonce and abort signal through Meta and international Kimi OAuth', async () => {
-        const get = spyOn(apiClient, 'get').mockResolvedValue({ status: 'wait' })
+        const get        = spyOn(apiClient, 'get').mockResolvedValue({ status: 'wait' })
         const controller = new AbortController()
         try {
             for (const provider of ['meta', 'kimi-ai'] as const) {
@@ -106,6 +119,7 @@ describe('Meta Muse provider contracts', () => {
                 expect(get).toHaveBeenLastCalledWith(`/${provider}-auth-url`, {
                     params: { nonce: 'nonce-a' },
                     signal: controller.signal,
+                    mutationReadback: expect.any(Function),
                 })
             }
             await oauthApi.getAuthStatus('state-a', 'nonce-a', controller.signal)
@@ -114,7 +128,10 @@ describe('Meta Muse provider contracts', () => {
                 signal: controller.signal,
             })
             expect(oauthActionSource).toContain('setUserCode(response.user_code?.trim() ?? \'\')')
-            expect(oauthActionSource).toContain("const supportsCallback = plugin || CALLBACK_SUPPORTED.includes(provider)")
+            expectSourceToContain(
+                oauthActionSource,
+                'const supportsCallback = plugin || CALLBACK_SUPPORTED.includes(provider)',
+            )
             expect(oauthActionSource).toContain('{userCode && (')
         } finally {
             get.mockRestore()
@@ -122,12 +139,12 @@ describe('Meta Muse provider contracts', () => {
     })
 
     test('prepares Meta model discovery without contacting an upstream provider', async () => {
-        const request = spyOn(apiCallApi, 'request').mockResolvedValue({
-                                                                       statusCode: 200,
-                                                                       header: {},
-                                                                       bodyText: '{"data":[{"id":"muse-4"}]}',
-                                                                       body: { data: [{ id: 'muse-4' }] },
-                                                                   })
+        const request    = spyOn(apiCallApi, 'request').mockResolvedValue({
+                                                                              statusCode: 200,
+                                                                              header: {},
+                                                                              bodyText: '{"data":[{"id":"muse-4"}]}',
+                                                                              body: { data: [{ id: 'muse-4' }] },
+                                                                          })
         const controller = new AbortController()
         try {
             const models = await modelsApi.fetchV1ModelsViaApiCall(
@@ -140,24 +157,24 @@ describe('Meta Muse provider contracts', () => {
             )
             expect(models.map((model) => model.name)).toEqual(['muse-4'])
             expect(request).toHaveBeenCalledWith({
-                method: 'GET',
-                url: 'https://api.meta.ai/v1/models',
-                header: { Authorization: 'Bearer $TOKEN$' },
-                proxyUrl: 'socks5://proxy.example.test:1080',
-                authIndex: 'meta:entry',
-                draftToken: 'meta-draft-key',
-            }, { signal: controller.signal })
+                                                     method: 'GET',
+                                                     url: 'https://api.meta.ai/v1/models',
+                                                     header: { Authorization: 'Bearer $TOKEN$' },
+                                                     proxyUrl: 'socks5://proxy.example.test:1080',
+                                                     authIndex: 'meta:entry',
+                                                     draftToken: 'meta-draft-key',
+                                                 }, { signal: controller.signal })
         } finally {
             request.mockRestore()
         }
     })
 
     test('uses the Meta Responses endpoint and requires a selected model for connection tests', () => {
-        expect(metaEditorSource).toContain(".replace(/\\/models$/i, '/responses')")
-        expect(metaEditorSource).toContain("data: JSON.stringify({ model: modelName, input: 'Hi', stream: false })")
-        expect(metaEditorSource).toContain("if (!modelName) {")
-        expect(metaEditorSource).toContain("const baseUrl = form.baseUrl?.trim() || DEFAULT_META_BASE_URL")
-        expect(metaEditorSource).toContain("apiKey.toLowerCase().startsWith('dca:')")
-        expect(metaEditorSource).toContain("i18nPrefix='meta'")
+        expect(metaEditorSource).toContain('.replace(/\\/models$/i, \'/responses\')')
+        expect(metaEditorSource).toContain('data: JSON.stringify({ model: modelName, input: \'Hi\', stream: false })')
+        expect(metaEditorSource).toContain('if (!modelName) {')
+        expectSourceToContain(metaEditorSource, 'const baseUrl = form.baseUrl?.trim() || DEFAULT_META_BASE_URL')
+        expect(metaEditorSource).toContain('apiKey.toLowerCase().startsWith(\'dca:\')')
+        expect(metaEditorSource).toContain('i18nPrefix=\'meta\'')
     })
 })

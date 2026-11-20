@@ -9,6 +9,7 @@ import {normalizeModelList} from '@/utils/models'
 import axios, {type AxiosRequestConfig} from 'axios'
 import {apiCallApi, getApiCallErrorMessage, isCredentialHeaderName, prepareApiCallAuth} from './apiCall'
 import {apiClient} from './client'
+import type {RequestSpeed} from './usage'
 
 const DEFAULT_CLAUDE_BASE_URL   = 'https://api.anthropic.com'
 const DEFAULT_GEMINI_BASE_URL   = 'https://generativelanguage.googleapis.com'
@@ -32,6 +33,8 @@ export type ModelCatalogTokenRates = {
     cache_write?: number
     cache_write_5m?: number
     cache_write_1h?: number
+    cache_write_30m?: number
+    cache_write_12h?: number
 }
 
 export type ModelCatalogUtcRateBand = ModelCatalogTokenRates & {
@@ -40,8 +43,62 @@ export type ModelCatalogUtcRateBand = ModelCatalogTokenRates & {
     end: string
 }
 
+export type ModelCatalogSpeedRate = {
+    speed: Exclude<RequestSpeed, 'unknown'>
+    provider?: string
+    multiplier: number
+    multipliers?: Partial<Record<
+        'prompt' | 'completion' | 'cache_read' | 'cache_write' | 'cache_write_5m' | 'cache_write_1h' |
+        'cache_write_30m' | 'cache_write_12h', number
+    >>
+    effective_from?: string
+    effective_until?: string
+    source?: string
+}
+
+export type ModelCatalogConditionalRate = Omit<ModelCatalogTokenRates, 'cache'> & {
+    id?: string
+    provider?: string
+    region?: string
+    speed?: Exclude<RequestSpeed, 'unknown'>
+    min_input_tokens?: number
+    max_input_tokens?: number
+    effective_from?: string
+    effective_until?: string
+    multiplier?: number
+    unpriced_buckets?: string[]
+    source?: string
+}
+
+export type ModelCatalogModalityRate = Omit<ModelCatalogTokenRates, 'cache'> & {
+    modality: 'text' | 'image' | 'audio' | 'video'
+}
+
+export type ModelCatalogChargeRate = {
+    kind: string
+    unit: string
+    price: number
+    per_units: number
+    provider?: string
+    region?: string
+    speed?: Exclude<RequestSpeed, 'unknown'>
+    resolution?: string
+    source?: string
+}
+
+export type ModelCatalogCoverageGap = {
+    dimension: 'input_length' | 'cache_write_ttl' | 'region' | 'modality' | 'tools' | 'unconditional' | 'calendar'
+    reason: string
+}
+
 export type ModelCatalogPrice = ModelCatalogTokenRates & {
     utc_rate_bands?: ModelCatalogUtcRateBand[]
+    speed_rates?: ModelCatalogSpeedRate[]
+    conditional_rates?: ModelCatalogConditionalRate[]
+    modality_rates?: ModelCatalogModalityRate[]
+    charge_rates?: ModelCatalogChargeRate[]
+    request_scoped?: boolean
+    coverage_gaps?: ModelCatalogCoverageGap[]
     status?: ModelCatalogPriceStatus
     auto_apply?: boolean
     currency?: string
@@ -63,6 +120,7 @@ export type ModelCatalogFileModel = {
     display_name?: string
     user_created: boolean
     enabled: boolean
+    speed?: string
     aliases?: string[]
     price?: ModelCatalogPrice
 }
@@ -78,6 +136,7 @@ export type ModelCatalogRow = ModelCatalogFileModel & {
     runtime_quota_cooldown_clients?: number
     runtime_suspended_clients?: number
     requestable: boolean
+    speed_options?: string[]
     not_requestable_reason?: string
     api_key_blocked_count?: number
     credential_excluded_count?: number
@@ -111,6 +170,7 @@ export type ModelCatalogPatchRequest = {
     display_name?: string
     'display-name'?: string
     enabled?: boolean
+    speed?: string
     aliases?: string[]
     price?: ModelCatalogPrice
     clear_price?: boolean
@@ -175,11 +235,34 @@ async function fetchModelList(
     }
 
     const payload = result.body ?? result.bodyText
-    return normalizeModelList(payload, { dedupe: true })
+    return parseModelListResponse(payload)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
+
+function parseModelListResponse(payload: unknown, dedupe = true): ReturnType<typeof normalizeModelList> {
+    if (typeof payload === 'string') {
+        try {
+            payload = JSON.parse(payload)
+        } catch {
+            throw new Error(i18n.t('models.invalid_discovery_response'))
+        }
+    }
+    const entries = Array.isArray(payload) ? payload : isRecord(payload) ?
+                                                       (Array.isArray(payload.data) ?
+                                                        payload.data :
+                                                        Array.isArray(payload.models) ? payload.models : null) : null
+    if (!entries || entries.some((entry: unknown) => {
+        const name = typeof entry === 'string' ?
+                     entry :
+                     isRecord(entry) ? entry.id || entry.name || entry.model || entry.value : null
+        return typeof name !== 'string' || !name.trim()
+    })) {
+        throw new Error(i18n.t('models.invalid_discovery_response'))
+    }
+    return normalizeModelList(payload, { dedupe })
+}
 
 const TOKEN_HEADER_TEMPLATE_PATTERN = /^(?:\$TOKEN\$|(?:Bearer|Basic|ApiKey)\s+\$TOKEN\$)$/i
 
@@ -204,7 +287,12 @@ const buildRequestSignature = (
     const headerSignature = Object.entries(headers)
                                   .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
                                   .map(([key, value]) => [key, value])
-    return JSON.stringify({ authGeneration: apiClient.getAuthGeneration(), url, authIndex: authIndex ?? '', headers: headerSignature })
+    return JSON.stringify({
+                              authGeneration: apiClient.getAuthGeneration(),
+                              url,
+                              authIndex: authIndex ?? '',
+                              headers: headerSignature,
+                          })
 }
 
 const buildModelsEndpoint = (baseUrl: string): string => {
@@ -212,7 +300,7 @@ const buildModelsEndpoint = (baseUrl: string): string => {
     if (!normalized) {
         return ''
     }
-    const trimmed = normalized.replace(/\/+$/g, '')
+    const trimmed = normalized.replace(/\/+$/g, '').replace(/\/(?:chat\/completions|completions|responses)$/i, '')
     if (/\/models$/i.test(trimmed)) {
         return trimmed
     }
@@ -224,7 +312,7 @@ const buildV1ModelsEndpoint = (baseUrl: string): string => {
     if (!normalized) {
         return ''
     }
-    const trimmed = normalized.replace(/\/+$/g, '')
+    const trimmed = normalized.replace(/\/+$/g, '').replace(/\/(?:chat\/completions|completions|responses)$/i, '')
     if (/\/v1\/models$/i.test(trimmed)) {
         return trimmed
     }
@@ -253,10 +341,9 @@ const buildClaudeModelsEndpoint = (
 const buildGeminiModelsEndpoint = (baseUrl: string): string => {
     const normalized = normalizeApiBase(baseUrl)
     const fallback   = normalized || DEFAULT_GEMINI_BASE_URL
-    let trimmed      = fallback.replace(/\/+$/g, '')
-    trimmed          = trimmed.replace(/\/v1beta\/models$/i, '')
-    trimmed          = trimmed.replace(/\/v1beta(?:\/.*)?$/i, '')
-    return `${trimmed}/v1beta/models`
+    const trimmed    = fallback.replace(/\/+$/g, '')
+    const version    = trimmed.match(/\/(?<version>v1(?:beta|alpha)?)(?:\/|$)/i)?.[1] ?? 'v1beta'
+    return `${trimmed.replace(/\/v1(?:beta|alpha)?(?:\/.*)?$/i, '')}/${version}/models`
 }
 
 const stripGeminiModelResourceName = (value: string): string => {
@@ -365,7 +452,7 @@ export const modelsApi = {
             '/runtime-models',
             config,
         )
-        return normalizeModelList(response, { dedupe: true })
+        return parseModelListResponse(response)
     },
 
     async fetchModelCatalog() {
@@ -373,11 +460,21 @@ export const modelsApi = {
     },
 
     async patchModelCatalogModel(request: ModelCatalogPatchRequest) {
-        return apiClient.patch<ModelCatalogResponse>('/model-catalog', request)
+        return apiClient.patch<ModelCatalogResponse>(
+            '/model-catalog',
+            request,
+            { mutationReadback: () => modelsApi.fetchModelCatalog() },
+        )
     },
 
     async deleteModelCatalogModel(name: string) {
-        return apiClient.delete<ModelCatalogResponse>('/model-catalog', { params: { name } })
+        return apiClient.delete<ModelCatalogResponse>(
+            '/model-catalog',
+            {
+                ...({ params: { name } }),
+                mutationReadback: () => modelsApi.fetchModelCatalog(),
+            },
+        )
     },
 
     async fetchDefaultUpdatePreview() {
@@ -388,6 +485,7 @@ export const modelsApi = {
         return apiClient.post<ModelCatalogApplyDefaultUpdateResponse>(
             '/model-catalog/default-update/apply',
             { decisions },
+            { mutationReadback: () => modelsApi.fetchModelCatalog() },
         )
     },
 
@@ -417,7 +515,7 @@ export const modelsApi = {
             },
         })
         const payload  = response.data?.data ?? response.data?.models ?? response.data
-        return normalizeModelList(payload, { dedupe: true })
+        return parseModelListResponse(payload)
     },
 
     /**
@@ -561,7 +659,7 @@ export const modelsApi = {
         signal?: AbortSignal,
     ) {
         const authGeneration = apiClient.getAuthGeneration()
-        const endpoint = buildGeminiModelsEndpoint(baseUrl)
+        const endpoint       = buildGeminiModelsEndpoint(baseUrl)
         if (!endpoint) {
             throw new Error('Invalid base url')
         }
@@ -604,10 +702,10 @@ export const modelsApi = {
                 }
 
                 const payload    = result.body ?? result.bodyText
-                const normalized = normalizeModelList(payload, { dedupe: false })
+                const normalized = parseModelListResponse(payload, false)
                 normalized.forEach((model) => {
                     const name = stripGeminiModelResourceName(model.name)
-                    const key  = (name || '').toLowerCase()
+                    const key  = name
                     if (!key || seen.has(key)) {
                         return
                     }
@@ -619,14 +717,16 @@ export const modelsApi = {
                     collected.push(resolved)
                 })
 
-                const nextToken =
-                          isRecord(payload) && typeof payload.nextPageToken === 'string' ? payload.nextPageToken : ''
-                if (!nextToken) {
+                pageToken =
+                    isRecord(payload) && typeof payload.nextPageToken === 'string' ? payload.nextPageToken : ''
+                if (!pageToken) {
                     break
                 }
-                pageToken = nextToken
             }
 
+            if (pageToken) {
+                throw new Error(i18n.t('models.incomplete_discovery_response'))
+            }
             return collected
         }
 

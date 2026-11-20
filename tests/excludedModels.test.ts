@@ -1,4 +1,3 @@
-import {describe, expect, test} from 'bun:test'
 import {
     formatExcludedModelsText,
     isModelExcludedByRules,
@@ -9,11 +8,13 @@ import {
     splitExcludedModelRules,
     toggleExcludedModelRule,
 } from '@/utils/excludedModels'
+import {describe, expect, test} from 'bun:test'
 
 describe('excluded model rules', () => {
-    test('normalizes comma/newline input without reordering surviving rules', () => {
+    test('normalizes newline input without reordering surviving rules', () => {
         const rules = parseExcludedModelsText(` GPT-5-*
-gpt-5-*, retired-model `)
+gpt-5-*
+ retired-model `)
         expect(rules).toEqual(['GPT-5-*', 'retired-model'])
         expect(parseExcludedModelsText(formatExcludedModelsText(rules))).toEqual(rules)
     })
@@ -48,4 +49,17 @@ gpt-5-*, retired-model `)
                                                                                          ])
         expect(isModelExcludedByRules(['gpt-5-*'], 'GPT-5-Mini')).toBe(true)
     })
+})
+
+test('commas belong to one model rule and survive formatting, custom editing and wildcard matching', () => {
+    expect(parseExcludedModelsText('a,b\nkeep')).toEqual(['a,b', 'keep'])
+    expect(parseExcludedModelsText(formatExcludedModelsText(['a,b', 'keep']))).toEqual(['a,b', 'keep'])
+    expect(matchesExcludedModelRule('a,b', 'a')).toBe(false)
+    expect(matchesExcludedModelRule('a,b', 'a,b')).toBe(true)
+    expect(matchesExcludedModelRule('a,b*', 'a,b-suffix')).toBe(true)
+    expect(replaceCustomExcludedModelRules(['catalog', 'a,b'], ['catalog'], 'a,b\nunknown')).toEqual([
+                                                                                                         'catalog',
+                                                                                                         'a,b',
+                                                                                                         'unknown',
+                                                                                                     ])
 })

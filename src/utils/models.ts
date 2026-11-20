@@ -24,7 +24,7 @@ const MODEL_CATEGORIES = [
     { id: 'minimax', label: 'MiniMax' },
 ]
 
-type Translator = (key: string, opts?: Record<string, unknown>) => string
+type Translator = (key: string, opts: { defaultValue: string }) => string
 
 /** Returns the localized label for a category id, falling back to the English brand label. */
 function localizeCategoryLabel(id: string, fallback: string, t?: Translator): string {
@@ -89,7 +89,7 @@ export function normalizeModelList(payload: unknown, { dedupe = false } = {}): M
 
     const seen = new Set<string>()
     return normalized.filter((model) => {
-        const key = (model?.name || '').toLowerCase()
+        const key = model?.name || ''
         if (!key || seen.has(key)) {
             return false
         }

@@ -1,11 +1,11 @@
 import {CredentialOverrideFields, RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {Button} from '@/components/ui/Button'
-import type {CredentialOverrides, RequestScopedErrorRule} from '@/types'
 import {HeaderInputList} from '@/components/ui/HeaderInputList'
 import {Input} from '@/components/ui/Input'
 import {ModelInputList} from '@/components/ui/ModelInputList'
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
 import type {ModelDiscoveryReturn} from '@/hooks/useModelDiscovery'
+import type {CredentialOverrides, RequestScopedErrorRule} from '@/types'
 import {getCredentialWeightValidationKey, MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
 import type {HeaderEntry} from '@/utils/headers'
 import type {Dispatch, ReactNode, SetStateAction} from 'react'
@@ -169,12 +169,12 @@ export function ProviderConnectionFields<T extends ProviderConnectionForm>({
                 disableCooling={form.disableCooling}
                 requestRetry={form.requestRetry}
                 disabled={disabled}
-                onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
+                onChange={(overrides) => setForm((previous) => ({ ...previous, ...overrides }))}
             />
             {supportsErrorRules && (
                 <RequestScopedErrorsField
                     rules={form.requestScopedErrors}
-                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    onChange={(rules) => setForm((previous) => ({ ...previous, requestScopedErrors: rules }))}
                     disabled={disabled}
                 />
             )}
@@ -292,7 +292,7 @@ interface ModelConfigSectionProps {
     onAddRow: () => void
     disabled: boolean
     /** Translation key prefix for labels and provider model capabilities */
-    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta'
+    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta' | 'xai'
     /** If provided, shows a "Discover Models" button */
     onDiscovery?: () => void
     discoveryDisabled?: boolean
@@ -384,7 +384,7 @@ interface ProviderModelSectionProps<
     disabled: boolean
     discovery: ModelDiscoveryReturn
     discoveryDisabled?: boolean
-    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta'
+    i18nPrefix: 'gemini' | 'interactions' | 'codex' | 'meta' | 'xai'
     children?: ReactNode
 }
 
@@ -424,9 +424,8 @@ export function ProviderModelSection<
                 search={discovery.search}
                 onSearchChange={discovery.setSearch}
                 selected={discovery.selected}
-                missingCount={discovery.missingCount}
+                missingModelNames={discovery.missingModelNames}
                 onToggleSelection={discovery.toggleSelection}
-                onSelectMissing={discovery.selectMissingModels}
                 onApply={discovery.applySelected}
                 onRefresh={() => void discovery.fetchDiscovery()}
                 canApply={discovery.canApply}

@@ -25,13 +25,13 @@ export function findMissingProviderModelNames(
 ): Set<string> {
     const configured = new Set(
         entries
-            .map((entry) => normalizeName(entry.name).toLowerCase())
+            .map((entry) => normalizeName(entry.name))
             .filter(Boolean),
     )
     const missing    = new Set<string>()
     discoveredModels.forEach((model) => {
         const name = normalizeName(model.name)
-        const key  = name.toLowerCase()
+        const key  = name
         if (!name || configured.has(key)) {
             return
         }
@@ -46,13 +46,18 @@ export function mergeProviderModelEntries(
     discoveredModels: ModelInfo[],
     normalizeName: (name: string) => string = (name) => name.trim(),
 ): { entries: ModelEntry[]; addedCount: number } {
-    const configured = new Set(
-        entries.map((entry) => normalizeName(entry.name).toLowerCase()).filter(Boolean),
+    const configured       = new Set(
+        entries.map((entry) => normalizeName(entry.name)).filter(Boolean),
     )
-    const mergedEntries = [...entries]
+    const mergedEntries    = [...entries]
     const placeholderIndex = mergedEntries.findIndex(
         (entry) => !normalizeName(entry.name) && !entry.alias.trim() &&
-            Object.entries(entry).every(([key, value]) => key === 'name' || key === 'alias' || value === undefined),
+                   Object.entries(entry).every(([key, value]) => key ===
+                                                                 'name' ||
+                                                                 key ===
+                                                                 'alias' ||
+                                                                 value ===
+                                                                 undefined),
     )
     if (placeholderIndex >= 0) {
         mergedEntries.splice(placeholderIndex, 1)
@@ -61,7 +66,7 @@ export function mergeProviderModelEntries(
     let addedCount = 0
     discoveredModels.forEach((model) => {
         const name = normalizeName(model.name)
-        const key = name.toLowerCase()
+        const key  = name
         if (!name || configured.has(key)) {
             return
         }

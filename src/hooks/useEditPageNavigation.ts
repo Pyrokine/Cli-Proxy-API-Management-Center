@@ -1,7 +1,7 @@
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {resolveProviderEditModalState} from '@/hooks/useProviderEditPresentation'
 import {useCallback, useEffect} from 'react'
-import {useLocation, useNavigate} from 'react-router-dom'
+import {useLocation, useNavigate} from 'react-router'
 
 type LocationState = { fromAiProviders?: boolean } | null
 

@@ -1,5 +1,5 @@
-import type {Location} from 'react-router-dom'
-import {useLocation} from 'react-router-dom'
+import type {Location} from 'react-router'
+import {useLocation} from 'react-router'
 
 type ProviderEditModalState = {
     fromAiProviders: true
@@ -14,7 +14,7 @@ const activePresentationTokens = new Set<string>()
 let fallbackTokenSequence      = 0
 
 const PROVIDER_EDIT_PATH = new RegExp(
-    '^/credentials/(?:gemini|interactions|codex|claude|xai|vertex|openai)/' +
+    '^/credentials/(?:gemini|interactions|codex|claude|xai|vertex|meta|openai)/' +
     '(?:new|\\d+)(?:/models)?/?$',
 )
 

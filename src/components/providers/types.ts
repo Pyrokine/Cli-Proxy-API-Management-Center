@@ -1,5 +1,11 @@
 import type {ModelEntry} from '@/components/ui/modelInputListUtils'
-import type {ApiKeyEntry, CredentialOverrides, GeminiKeyConfig, ProviderKeyConfig, RequestScopedErrorRule} from '@/types'
+import type {
+    ApiKeyEntry,
+    CredentialOverrides,
+    GeminiKeyConfig,
+    ProviderKeyConfig,
+    RequestScopedErrorRule,
+} from '@/types'
 import type {HeaderEntry} from '@/utils/headers'
 
 export type {ModelEntry} from '@/components/ui/modelInputListUtils'
@@ -30,7 +36,7 @@ export type ProviderFormState = Omit<ProviderKeyConfig, 'headers'> & {
     excludedText: string
 }
 
-export type VertexFormState = Omit<ProviderKeyConfig, 'headers' | 'excludedModels'> & {
+export type VertexFormState = Omit<ProviderKeyConfig, 'headers'> & {
     headers: HeaderEntry[]
     modelEntries: ModelEntry[]
 }

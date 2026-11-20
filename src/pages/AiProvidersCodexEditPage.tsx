@@ -2,8 +2,8 @@ import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import type {ProviderFormState} from '@/components/providers'
 import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
-import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {Select} from '@/components/ui/Select'
+import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useModelDiscovery} from '@/hooks/useModelDiscovery'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {useProviderConnectivityTestState} from '@/hooks/useProviderConnectivityTestState'
@@ -22,11 +22,7 @@ import {getErrorMessage} from '@/utils/helpers'
 import {useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {
-    ProviderConnectionFields,
-    ProviderModelSection,
-    QuickFillField,
-} from './ProviderFormFields'
+import {ProviderConnectionFields, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 import {CODEX_QUICK_FILL_PRESETS} from './providerQuickFill'
 
 // ---- Form helpers ----
@@ -60,7 +56,7 @@ const buildSignature = (form: ProviderFormState) =>
                        alphaSearch: Boolean(form.alphaSearch),
                        disableCodexCloaking: form.disableCodexCloaking ?? null,
                        models: normalizeModelEntriesForSignature(form.modelEntries),
-                       excludedModels: parseTextList(form.excludedText ?? ''),
+                       excludedModels: parseTextList(form.excludedText ?? '', /\r?\n/),
                    })
 
 // ---- Page component ----
@@ -96,13 +92,16 @@ export function AiProvidersCodexEditPage() {
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
-            excludedModels: parseTextList(form.excludedText),
+            excludedModels: parseTextList(form.excludedText, /\r?\n/),
         }),
         createConfig: (config) => providersApi.createCodexConfig(config),
         updateConfig: (index, config, original) => providersApi.patchCodexConfig(index, config, original),
         validateBeforeSave: (form, original) => {
             const validationError = getCredentialWeightValidationKey(form.weight) ??
-                getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors)
+                                    getRequestScopedErrorsValidationKey(
+                                        form.requestScopedErrors,
+                                        original?.requestScopedErrors,
+                                    )
             if (validationError) {
                 return validationError
             }
@@ -200,58 +199,62 @@ export function AiProvidersCodexEditPage() {
             return
         }
 
-        const modelName     = testModel.trim() || availableModels[0] || DEFAULT_CODEX_TEST_MODEL
-        const customHeaders = buildHeaderObject(form.headers)
-        const apiKey        = form.apiKey.trim()
-        const hasAuth       = hasHeader(customHeaders, 'authorization')
-        if (!apiKey && !hasAuth) {
-            showTestError(t('ai_providers.codex_test_key_required'))
-            return
-        }
+        try {
+            const modelName     = testModel.trim() || availableModels[0] || DEFAULT_CODEX_TEST_MODEL
+            const customHeaders = buildHeaderObject(form.headers)
+            const apiKey        = form.apiKey.trim()
+            const hasAuth       = hasHeader(customHeaders, 'authorization')
+            if (!apiKey && !hasAuth) {
+                showTestError(t('ai_providers.codex_test_key_required'))
+                return
+            }
 
-        const endpoint = buildCodexChatCompletionsEndpoint(baseUrl)
-        if (!endpoint) {
-            showTestError(t('notification.codex_base_url_required'))
-            return
-        }
+            const endpoint = buildCodexChatCompletionsEndpoint(baseUrl)
+            if (!endpoint) {
+                showTestError(t('notification.codex_base_url_required'))
+                return
+            }
 
-        const preparedAuth                    = prepareApiCallAuth({
-                                                                       headers: customHeaders,
-                                                                       apiKey,
-                                                                       authIndex: form.authIndex,
-                                                                       preferredHeader: 'Authorization',
-                                                                       authorizationScheme: 'Bearer',
-                                                                   })
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            ...preparedAuth.headers,
-        }
+            const preparedAuth                    = prepareApiCallAuth({
+                                                                           headers: customHeaders,
+                                                                           apiKey,
+                                                                           authIndex: form.authIndex,
+                                                                           preferredHeader: 'Authorization',
+                                                                           authorizationScheme: 'Bearer',
+                                                                       })
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...preparedAuth.headers,
+            }
 
-        await runConnectivityTest(
-            () => apiCallApi.request(
+            await runConnectivityTest(
+                () => apiCallApi.request(
+                    {
+                        method: 'POST',
+                        url: endpoint,
+                        header: headers,
+                        data: JSON.stringify({
+                                                 model: modelName,
+                                                 messages: [{ role: 'user', content: 'Hi' }],
+                                                 max_tokens: 8,
+                                             }),
+                        proxyUrl: form.proxyUrl?.trim() || undefined,
+                        authIndex: form.authIndex?.trim() || undefined,
+                        draftToken: preparedAuth.draftToken,
+                    },
+                    { timeout: CODEX_TEST_TIMEOUT_MS },
+                ),
                 {
-                    method: 'POST',
-                    url: endpoint,
-                    header: headers,
-                    data: JSON.stringify({
-                                             model: modelName,
-                                             messages: [{ role: 'user', content: 'Hi' }],
-                                             max_tokens: 8,
-                                         }),
-                    proxyUrl: form.proxyUrl?.trim() || undefined,
-                    authIndex: form.authIndex?.trim() || undefined,
-                    draftToken: preparedAuth.draftToken,
+                    running: t('ai_providers.codex_test_running'),
+                    success: t('ai_providers.codex_test_success'),
+                    failed: t('ai_providers.codex_test_failed'),
+                    timeout: t('ai_providers.codex_test_timeout', { seconds: CODEX_TEST_TIMEOUT_MS / 1000 }),
+                    unknownError: t('common.unknown_error'),
                 },
-                { timeout: CODEX_TEST_TIMEOUT_MS },
-            ),
-            {
-                running: t('ai_providers.codex_test_running'),
-                success: t('ai_providers.codex_test_success'),
-                failed: t('ai_providers.codex_test_failed'),
-                timeout: t('ai_providers.codex_test_timeout', { seconds: CODEX_TEST_TIMEOUT_MS / 1000 }),
-                unknownError: t('common.unknown_error'),
-            },
-        )
+            )
+        } catch (error: unknown) {
+            showTestError(getErrorMessage(error) || t('common.unknown_error'))
+        }
     }
 
     return (
@@ -296,7 +299,7 @@ export function AiProvidersCodexEditPage() {
                 <ToggleSwitch
                     label={t('ai_providers.codex_alpha_search_label')}
                     checked={Boolean(form.alphaSearch)}
-                    onChange={(value) => setForm((prev) => ({...prev, alphaSearch: value}))}
+                    onChange={(value) => setForm((prev) => ({ ...prev, alphaSearch: value }))}
                     disabled={controlsDisabled}
                 />
                 <div className='hint'>{t('ai_providers.codex_alpha_search_hint')}</div>
@@ -308,11 +311,11 @@ export function AiProvidersCodexEditPage() {
                     ariaLabel={t('ai_providers.codex_cloaking_label')}
                     ariaDescribedBy='codex-credential-cloaking-hint'
                     value={form.disableCodexCloaking === undefined ? 'inherit' :
-                        form.disableCodexCloaking ? 'disabled' : 'enabled'}
+                           form.disableCodexCloaking ? 'disabled' : 'enabled'}
                     options={[
-                        {value: 'inherit', label: t('ai_providers.codex_cloaking_inherit')},
-                        {value: 'enabled', label: t('ai_providers.codex_cloaking_enabled')},
-                        {value: 'disabled', label: t('ai_providers.codex_cloaking_disabled')},
+                        { value: 'inherit', label: t('ai_providers.codex_cloaking_inherit') },
+                        { value: 'enabled', label: t('ai_providers.codex_cloaking_enabled') },
+                        { value: 'disabled', label: t('ai_providers.codex_cloaking_disabled') },
                     ]}
                     onChange={(value) => setForm((prev) => ({
                         ...prev,

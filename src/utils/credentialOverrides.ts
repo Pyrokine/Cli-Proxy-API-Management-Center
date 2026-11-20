@@ -27,13 +27,13 @@ export const updateRequestScopedErrorRule = (
     patch: Partial<RequestScopedErrorRule>,
     conditionIndices?: number[],
 ): RequestScopedErrorRule => {
-    const origin = errorRuleOrigins.get(rule) ?? {}
-    const updated = {...rule, ...patch}
-    const nextOrigin = {...origin}
+    const origin     = errorRuleOrigins.get(rule) ?? {}
+    const updated    = { ...rule, ...patch }
+    const nextOrigin = { ...origin }
     for (const field of ['match', 'matchRegex'] as const) {
         if (patch[field] !== undefined) {
             nextOrigin[field] = patch[field]?.map((_, index) =>
-                origin[field]?.[conditionIndices?.[index] ?? index] ?? false)
+                                                      origin[field]?.[conditionIndices?.[index] ?? index] ?? false)
         }
     }
     errorRuleOrigins.set(updated, nextOrigin)
@@ -48,14 +48,16 @@ export const getRequestScopedErrorsValidationKey = (
         return undefined
     }
     for (const [index, rule] of rules.entries()) {
-        const origin = errorRuleOrigins.get(rule)
+        const origin   = errorRuleOrigins.get(rule)
         const baseline = original ?? (origin?.rule ? [origin.rule] : undefined)
         if (baseline?.some((previous) => JSON.stringify(previous) === JSON.stringify(rule))) {
             continue
         }
         const previous = origin
-            ? baseline?.find((entry) => origin.rule && JSON.stringify(entry) === JSON.stringify(origin.rule))
-            : original?.[index]
+                         ?
+                         baseline?.find((entry) => origin.rule && JSON.stringify(entry) === JSON.stringify(origin.rule))
+                         :
+                         original?.[index]
         if (!Number.isSafeInteger(rule.status) || (rule.status ?? 0) <= 0) {
             return 'ai_providers.error_rules_invalid_status'
         }
@@ -65,14 +67,14 @@ export const getRequestScopedErrorsValidationKey = (
         }
         if (![...(rule.match ?? []), ...(rule.matchRegex ?? [])].some((value) => value.length > 0) &&
             !(previous && JSON.stringify(rule.match ?? []) === JSON.stringify(previous.match ?? []) &&
-                JSON.stringify(rule.matchRegex ?? []) === JSON.stringify(previous.matchRegex ?? []))) {
+            JSON.stringify(rule.matchRegex ?? []) === JSON.stringify(previous.matchRegex ?? []))) {
             return 'ai_providers.error_rules_invalid_match'
         }
         for (const field of ['match', 'matchRegex'] as const) {
             if (rule[field]?.some((value, matchIndex) =>
-                value.length === 0 && !(previous && (origin
-                    ? origin[field]?.[matchIndex]
-                    : previous[field]?.[matchIndex] === '')))) {
+                                      value.length === 0 && !(previous && (origin
+                                                                           ? origin[field]?.[matchIndex]
+                                                                           : previous[field]?.[matchIndex] === '')))) {
                 return 'ai_providers.error_rules_invalid_match'
             }
         }

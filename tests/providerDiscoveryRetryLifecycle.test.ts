@@ -1,18 +1,18 @@
-import {describe, expect, mock, spyOn, test} from 'bun:test'
 import {apiCallApi} from '@/services/api/apiCall'
 import {apiClient} from '@/services/api/client'
 import {modelsApi} from '@/services/api/models'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import type {ModelInfo} from '@/utils/models'
+import {describe, expect, mock, spyOn, test} from 'bun:test'
 import {sourceCallback} from './sourceCallbacks'
 
 describe('model discovery request connection ownership', () => {
-    for (const stage of [1, 2, 3]) {
+    for (const stage of [1, 2]) {
         test(`OpenAI fallback stops before retry ${stage} can use another management connection`, async () => {
             const generation = spyOn(apiClient, 'getAuthGeneration').mockReturnValue(1)
             const firstError = new Error('synthetic first failure')
-            let attempts = 0
-            const request = mock((): Promise<ModelInfo[]> => {
+            let attempts     = 0
+            const request    = mock((): Promise<ModelInfo[]> => {
                 attempts += 1
                 if (attempts <= stage) {
                     if (attempts === stage) {
@@ -23,11 +23,26 @@ describe('model discovery request connection ownership', () => {
                 return Promise.resolve([])
             })
             try {
-                const fetch = sourceCallback<(signal: AbortSignal) => Promise<ModelInfo[]>>('pages/AiProvidersOpenAIModelsPage.tsx', 'fetchModels', {
-                    apiClient, modelsApi: {fetchV1ModelsViaApiCall: request, fetchModelsViaApiCall: request},
-                    form: {baseUrl: 'https://fixture.invalid', headers: [], authIndex: 'synthetic-provider', apiKeyEntries: [{apiKey: 'synthetic', authIndex: 'synthetic-key', proxyUrl: 'http://proxy.invalid'}]},
-                    buildHeaderObject, hasHeader,
-                })
+                const fetch = sourceCallback<(signal: AbortSignal) => Promise<ModelInfo[]>>(
+                    'pages/AiProvidersOpenAIModelsPage.tsx',
+                    'fetchModels',
+                    {
+                        apiClient, modelsApi: { fetchV1ModelsViaApiCall: request, fetchModelsViaApiCall: request },
+                        form: {
+                            baseUrl: 'https://fixture.invalid',
+                            headers: [],
+                            authIndex: 'synthetic-provider',
+                            apiKeyEntries: [
+                                {
+                                    apiKey: 'synthetic',
+                                    authIndex: 'synthetic-key',
+                                    proxyUrl: 'http://proxy.invalid',
+                                },
+                            ],
+                        },
+                        buildHeaderObject, hasHeader, anonymous: false,
+                    },
+                )
                 let failure: unknown
                 try {
                     await fetch(new AbortController().signal)
@@ -46,14 +61,27 @@ describe('model discovery request connection ownership', () => {
         const generation = spyOn(apiClient, 'getAuthGeneration').mockReturnValue(1)
         type Result = Awaited<ReturnType<typeof apiCallApi.request>>
         let resolve!: (value: Result) => void
-        const first = new Promise<Result>((accept) => {resolve = accept})
+        const first   = new Promise<Result>((accept) => {
+            resolve = accept
+        })
         const request = spyOn(apiCallApi, 'request')
             .mockImplementationOnce(() => first)
-            .mockResolvedValue({statusCode: 200, header: {}, bodyText: '', body: {models: []}})
+            .mockResolvedValue({ statusCode: 200, header: {}, bodyText: '', body: { models: [] } })
         try {
-            const pending = modelsApi.fetchGeminiModelsViaApiCall('https://fixture.invalid', undefined, {}, undefined, 'synthetic-pagination-index')
+            const pending = modelsApi.fetchGeminiModelsViaApiCall(
+                'https://fixture.invalid',
+                undefined,
+                {},
+                undefined,
+                'synthetic-pagination-index',
+            )
             generation.mockReturnValue(3)
-            resolve({statusCode: 200, header: {}, bodyText: '', body: {models: [{name: 'models/synthetic'}], nextPageToken: 'next-synthetic-page'}})
+            resolve({
+                        statusCode: 200,
+                        header: {},
+                        bodyText: '',
+                        body: { models: [{ name: 'models/synthetic' }], nextPageToken: 'next-synthetic-page' },
+                    })
             let failure: unknown
             try {
                 await pending

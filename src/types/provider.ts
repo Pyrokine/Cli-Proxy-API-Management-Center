@@ -9,6 +9,8 @@ export interface ModelThinking {
     zeroAllowed?: boolean
     dynamicAllowed?: boolean
     levels?: string[]
+
+    [key: string]: unknown
 }
 
 export interface ModelAlias {
@@ -26,9 +28,12 @@ export interface ModelAlias {
     image?: boolean
     inputModalities?: string[]
     outputModalities?: string[]
+
+    [key: string]: unknown
 }
 
 export interface ApiKeyEntry {
+    disabled?: boolean
     apiKey: string
     proxyUrl?: string
     headers?: Record<string, string>
@@ -37,6 +42,7 @@ export interface ApiKeyEntry {
 }
 
 export interface CloakConfig {
+    cacheUserId?: boolean | null
     mode?: string
     strictMode?: boolean
     sensitiveWords?: string[]

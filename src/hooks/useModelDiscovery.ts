@@ -69,11 +69,10 @@ export interface ModelDiscoveryReturn {
     // Actions
     fetchDiscovery: () => Promise<void>
     toggleSelection: (name: string) => void
-    selectMissingModels: () => void
     applySelected: () => void
 
     // Derived
-    missingCount: number
+    missingModelNames: Set<string>
     canOpen: boolean
     canApply: boolean
 }
@@ -103,11 +102,11 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
     },
     discoveryConfig: ModelDiscoveryConfig,
 ): ModelDiscoveryReturn {
-    const { t }                = useTranslation()
-    const { showNotification } = useNotificationStore()
-    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
+    const { t }                                         = useTranslation()
+    const { showNotification }                          = useNotificationStore()
+    const authGeneration                                = useAuthStore(() => apiClient.getAuthGeneration())
     const [discoveryGeneration, setDiscoveryGeneration] = useState(authGeneration)
-    const sourceLoaded         = discoveryGeneration === authGeneration
+    const sourceLoaded                                  = discoveryGeneration === authGeneration
 
     const [open, setOpen]                         = useState(false)
     const [endpoint, setEndpoint]                 = useState('')
@@ -213,7 +212,6 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                     return
                 }
                 setDiscoveredModels(list)
-                setSelected(findMissingProviderModelNames(formState.modelEntries, list, normalizeName))
             } catch (err: unknown) {
                 if (authGeneration !== apiClient.getAuthGeneration() || requestIdRef.current !== requestId ||
                     controller.signal.aborted) {
@@ -242,9 +240,7 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
             formState.apiKey,
             formState.baseUrl,
             formState.headers,
-            formState.modelEntries,
             formState.proxyUrl,
-            normalizeName,
         ],
     )
 
@@ -272,19 +268,19 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
                     return
                 }
 
-                const config       = discoveryConfigRef.current
-                const nextEndpoint = config.buildEndpoint(formState.baseUrl ?? '')
-                const headerObject = buildHeaderObject(formState.headers)
+                const config          = discoveryConfigRef.current
+                const nextEndpoint    = config.buildEndpoint(formState.baseUrl ?? '')
+                const headerObject    = buildHeaderObject(formState.headers)
                 const headerSignature = Object.entries(headerObject)
                                               .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-                const signature = JSON.stringify([
-                    authGeneration,
-                    formState.authIndex?.trim() ?? '',
-                    nextEndpoint,
-                    formState.apiKey.trim(),
-                    formState.proxyUrl?.trim() ?? '',
-                    headerSignature,
-                ])
+                const signature       = JSON.stringify([
+                                                           authGeneration,
+                                                           formState.authIndex?.trim() ?? '',
+                                                           nextEndpoint,
+                                                           formState.apiKey.trim(),
+                                                           formState.proxyUrl?.trim() ?? '',
+                                                           headerSignature,
+                                                       ])
                 if (autoFetchSignatureRef.current === signature) {
                     return
                 }
@@ -344,10 +340,6 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         })
     }
 
-    const selectMissingModels = () => {
-        setSelected(new Set(missingModelNames))
-    }
-
     // ---- Apply selected ----
 
     const applySelected = () => {
@@ -370,7 +362,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
               !flags.invalidIndexParam &&
               !flags.invalidIndex
 
-    const canApply = sourceLoaded && canApplyDiscoveredModels(selected.size, flags.disableControls, flags.saving, fetching)
+    const canApply = sourceLoaded &&
+                     canApplyDiscoveredModels(selected.size, flags.disableControls, flags.saving, fetching)
 
     return {
         open,
@@ -385,9 +378,8 @@ export function useModelDiscovery<TForm extends DiscoveryFormState>(
         selected: sourceLoaded ? selected : new Set<string>(),
         fetchDiscovery,
         toggleSelection,
-        selectMissingModels,
         applySelected,
-        missingCount: sourceLoaded ? missingModelNames.size : 0,
+        missingModelNames: sourceLoaded ? missingModelNames : new Set<string>(),
         canOpen,
         canApply,
     }

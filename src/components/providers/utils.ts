@@ -1,9 +1,9 @@
 import type {ApiKeyEntry} from '@/types'
 import type {GeminiFormState} from './types'
 
-export const parseTextList = (text: string): string[] =>
+export const parseTextList = (text: string, separator: RegExp = /[\n,]+/): string[] =>
     text
-        .split(/[\n,]+/)
+        .split(separator)
         .map((item) => item.trim())
         .filter(Boolean)
 
@@ -61,7 +61,7 @@ export const buildInteractionsProbePayload = (model: string) => ({
 
 export const buildInteractionsEndpoint = (baseUrl: string): string => {
     let trimmed = String(baseUrl || '').trim() || DEFAULT_GEMINI_BASE_URL
-    trimmed     = trimmed.replace(/\/+$/g, '')
+    trimmed     = trimmed.replace(/\/+$/g, '').replace(/\/v0\/management$/i, '')
     if (!/^https?:\/\//i.test(trimmed)) {
         // noinspection HttpUrlsUsage
         trimmed = `http://${trimmed}`
@@ -84,4 +84,5 @@ export const buildApiKeyEntry = (input?: Partial<ApiKeyEntry>): ApiKeyEntry => (
     headers: input?.headers ?? {},
     authIndex: input?.authIndex ?? '',
     weight: input?.weight,
+    disabled: input?.disabled,
 })

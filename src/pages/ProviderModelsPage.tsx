@@ -7,12 +7,12 @@ import {apiClient} from '@/services/api/client'
 import {useAuthStore} from '@/stores'
 import type {ModelInfo} from '@/utils/models'
 import {canApplyDiscoveredModels, findMissingProviderModelNames} from '@/utils/providerModels'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate} from 'react-router-dom'
+import {useNavigate} from 'react-router'
 import {ProviderModelSelectionContent} from './ModelDiscoveryModal'
-import {ProviderPresentationShell} from './ProviderEditShell'
 import layoutStyles from './ProviderEditLayout.module.scss'
+import {ProviderPresentationShell} from './ProviderEditShell'
 
 export type ProviderModelsPageProps = {
     /** i18n key prefix, e.g. "claude_models" or "openai_models" */
@@ -34,6 +34,7 @@ export type ProviderModelsPageProps = {
     buildAutoFetchSignature?: () => string
     /** Optional: build extra error diagnostic string */
     buildErrorDiagnostic?: (message: string) => string
+    controls?: ReactNode
     fetchTitle?: string
     fetchHint?: string
     fetchLoadingLabel?: string
@@ -54,18 +55,19 @@ export function ProviderModelsPage({
                                        canAutoFetch,
                                        buildAutoFetchSignature,
                                        buildErrorDiagnostic,
+                                       controls,
                                        fetchTitle,
                                        fetchHint,
                                        fetchLoadingLabel,
                                        fetchEmptyLabel,
                                        fetchErrorLabel,
                                    }: ProviderModelsPageProps) {
-    const { t }        = useTranslation()
-    const navigate     = useNavigate()
-    const presentation = useProviderEditPresentation()
-    const authGeneration = useAuthStore(() => apiClient.getAuthGeneration())
+    const { t }                                         = useTranslation()
+    const navigate                                      = useNavigate()
+    const presentation                                  = useProviderEditPresentation()
+    const authGeneration                                = useAuthStore(() => apiClient.getAuthGeneration())
     const [discoveryGeneration, setDiscoveryGeneration] = useState(authGeneration)
-    const sourceLoaded = discoveryGeneration === authGeneration
+    const sourceLoaded                                  = discoveryGeneration === authGeneration
 
     const [endpoint, setEndpoint] = useState('')
     const [models, setModels]     = useState<ModelInfo[]>([])
@@ -116,7 +118,6 @@ export function ProviderModelsPage({
                 return
             }
             setModels(list)
-            setSelected(findMissingProviderModelNames(configuredModelEntries, list))
         } catch (err: unknown) {
             if (authGeneration !== apiClient.getAuthGeneration() || requestGenerationRef.current !== generation ||
                 controller.signal.aborted) {
@@ -135,7 +136,7 @@ export function ProviderModelsPage({
                 setFetching(false)
             }
         }
-    }, [authGeneration, buildErrorDiagnostic, configuredModelEntries, fetchErrorLabel, fetchModels, i18nPrefix, t])
+    }, [authGeneration, buildErrorDiagnostic, fetchErrorLabel, fetchModels, i18nPrefix, t])
 
     // Reset state and auto-fetch when dependencies change
     useEffect(() => {
@@ -148,7 +149,9 @@ export function ProviderModelsPage({
                 return
             }
             const shouldFetch = canAutoFetch()
-            const signature = buildAutoFetchSignature ? JSON.stringify([authGeneration, buildAutoFetchSignature()]) : null
+            const signature   = buildAutoFetchSignature ?
+                                JSON.stringify([authGeneration, buildAutoFetchSignature()]) :
+                                null
             if (shouldFetch && signature !== null && autoFetchSignatureRef.current === signature) {
                 return
             }
@@ -218,10 +221,6 @@ export function ProviderModelsPage({
         })
     }
 
-    const selectMissingModels = () => {
-        setSelected(new Set(missingModelNames))
-    }
-
     const handleApply = () => {
         if (!sourceLoaded || authGeneration !== apiClient.getAuthGeneration()) {
             return
@@ -243,11 +242,14 @@ export function ProviderModelsPage({
             disabled={!canApply}
             className={layoutStyles.floatingSaveButton}
         >
-            {t(`ai_providers.${i18nPrefix}_fetch_apply`)}{sourceLoaded && selected.size > 0 ? ` (${selected.size})` : ''}
+            {t(`ai_providers.${i18nPrefix}_fetch_apply`)}{sourceLoaded && selected.size > 0 ?
+                                                          ` (${selected.size})` :
+                                                          ''}
         </Button>
     )
     const content           = (
         <Card>
+            {controls}
             <ProviderModelSelectionContent
                 i18nPrefix={i18nPrefix}
                 endpoint={sourceLoaded ? endpoint : ''}
@@ -258,9 +260,8 @@ export function ProviderModelsPage({
                 search={sourceLoaded ? search : ''}
                 onSearchChange={setSearch}
                 selected={sourceLoaded ? selected : new Set<string>()}
-                missingCount={sourceLoaded ? missingModelNames.size : 0}
+                missingModelNames={sourceLoaded ? missingModelNames : new Set<string>()}
                 onToggleSelection={toggleSelection}
-                onSelectMissing={selectMissingModels}
                 onRefresh={() => void doFetch()}
                 disabled={disableControls || saving}
                 hint={fetchHint}

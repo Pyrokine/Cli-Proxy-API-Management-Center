@@ -9,8 +9,8 @@ import type {
     RequestScopedErrorRule,
 } from '@/types'
 import type {Config, ImageArtifactCacheConfig, PluginsConfig, RemoteManagementConfig} from '@/types/config'
-import {readCredentialWeight} from '@/utils/credentialWeight'
 import {readRequestScopedErrorRule} from '@/utils/credentialOverrides'
+import {readCredentialWeight} from '@/utils/credentialWeight'
 import {buildHeaderObject} from '@/utils/headers'
 import {normalizeModelMetadataFromManagement} from '@/utils/modelMetadata'
 
@@ -138,8 +138,8 @@ const normalizePriority = (record: Record<string, unknown> | null): number | und
 
 const normalizeCredentialOverrides = (record: Record<string, unknown> | null): CredentialOverrides => {
     const overrides: CredentialOverrides = {}
-    const cooling = record?.['disable-cooling']
-    const retry = record?.['request-retry']
+    const cooling                        = record?.['disable-cooling']
+    const retry                          = record?.['request-retry']
     if (cooling !== undefined && cooling !== null) {
         if (typeof cooling !== 'boolean') {
             throw new Error('disable-cooling must be a boolean')
@@ -165,28 +165,33 @@ const normalizeRequestScopedErrors = (value: unknown): RequestScopedErrorRule[] 
     return value.map((rule) => {
         if (!isRecord(rule) ||
             (rule.status !== undefined && (typeof rule.status !== 'number' || !Number.isSafeInteger(rule.status))) ||
-            (rule.match !== undefined && (!Array.isArray(rule.match) || !rule.match.every((entry) => typeof entry === 'string'))) ||
+            (rule.match !==
+             undefined &&
+             (!Array.isArray(rule.match) || !rule.match.every((entry) => typeof entry === 'string'))) ||
             (rule['match-regexr'] !== undefined &&
-                (!Array.isArray(rule['match-regexr']) || !rule['match-regexr'].every((entry) => typeof entry === 'string'))) ||
+             (!Array.isArray(rule['match-regexr']) ||
+              !rule['match-regexr'].every((entry) => typeof entry === 'string'))) ||
             (rule.action !== undefined && typeof rule.action !== 'string')) {
             throw new Error('Invalid request-scoped-errors rule')
         }
         return readRequestScopedErrorRule({
-            ...(rule.status !== undefined ? {status: rule.status as number} : {}),
-            ...(rule.match !== undefined ? {match: rule.match as string[]} : {}),
-            ...(rule['match-regexr'] !== undefined ? {matchRegex: rule['match-regexr'] as string[]} : {}),
-            ...(rule.action !== undefined ? {action: rule.action as string} : {}),
-        })
+                                              ...(rule.status !== undefined ? { status: rule.status as number } : {}),
+                                              ...(rule.match !== undefined ? { match: rule.match as string[] } : {}),
+                                              ...(rule['match-regexr'] !== undefined ?
+                                                  { matchRegex: rule['match-regexr'] as string[] } :
+                                                  {}),
+                                              ...(rule.action !== undefined ? { action: rule.action as string } : {}),
+                                          })
     })
 }
 
 const normalizeProviderKeyBase = (record: Record<string, unknown> | null): Partial<ProviderKeyConfig> => {
     const config: Partial<ProviderKeyConfig> = normalizeCredentialOverrides(record)
-    const requestScopedErrors = normalizeRequestScopedErrors(record?.['request-scoped-errors'])
+    const requestScopedErrors                = normalizeRequestScopedErrors(record?.['request-scoped-errors'])
     if (requestScopedErrors !== undefined) {
         config.requestScopedErrors = requestScopedErrors
     }
-    const authIndex                          = record?.['auth-index'] ?? record?.authIndex
+    const authIndex = record?.['auth-index'] ?? record?.authIndex
     if (typeof authIndex === 'string' && authIndex.trim()) {
         config.authIndex = authIndex.trim()
     }
@@ -231,6 +236,7 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
         headers,
         authIndex: normalized || undefined,
         weight: readCredentialWeight(record?.weight),
+        disabled: normalizeBoolean(record?.disabled),
     }
 }
 
@@ -305,6 +311,17 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
         if (strictMode !== undefined) {
             cloak.strictMode = strictMode
         }
+        if (Object.prototype.hasOwnProperty.call(cloakRaw, 'cache-user-id')) {
+            const value = cloakRaw['cache-user-id']
+            if (value === null) {
+                cloak.cacheUserId = null
+            } else {
+                const enabled = normalizeBoolean(value)
+                if (enabled !== undefined) {
+                    cloak.cacheUserId = enabled
+                }
+            }
+        }
         const sensitiveWords = normalizeExcludedModels(cloakRaw['sensitive-words'])
         if (sensitiveWords.length) {
             cloak.sensitiveWords = sensitiveWords
@@ -372,13 +389,13 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
             .filter(Boolean) as ApiKeyEntry[]
     }
 
-    const headers   = normalizeHeaders(provider.headers)
-    const models    = normalizeModelAliases(provider.models)
-    const priority  = provider.priority
-    const testModel = provider['test-model']
-    const disabled  = normalizeBoolean(provider.disabled)
+    const headers               = normalizeHeaders(provider.headers)
+    const models                = normalizeModelAliases(provider.models)
+    const priority              = provider.priority
+    const testModel             = provider['test-model']
+    const disabled              = normalizeBoolean(provider.disabled)
     const supportPromptCacheKey = normalizeBoolean(provider['support-prompt-cache-key'])
-    const authIndex = provider['auth-index']
+    const authIndex             = provider['auth-index']
 
     const result: OpenAIProviderConfig = {
         ...normalizeCredentialOverrides(provider),
@@ -386,7 +403,7 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
         baseUrl: String(baseUrl),
         apiKeyEntries,
     }
-    const requestScopedErrors = normalizeRequestScopedErrors(provider['request-scoped-errors'])
+    const requestScopedErrors          = normalizeRequestScopedErrors(provider['request-scoped-errors'])
     if (requestScopedErrors !== undefined) {
         result.requestScopedErrors = requestScopedErrors
     }

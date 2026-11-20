@@ -22,11 +22,7 @@ import {buildHeaderObject, hasHeader, headersToEntries} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {
-    ProviderConnectionFields,
-    ProviderModelSection,
-    QuickFillField,
-} from './ProviderFormFields'
+import {ProviderConnectionFields, ProviderModelSection, QuickFillField} from './ProviderFormFields'
 import {GEMINI_QUICK_FILL_PRESETS} from './providerQuickFill'
 
 // ---- Gemini-specific helpers ----
@@ -65,7 +61,7 @@ const buildSignature = (form: GeminiFormState) =>
                        models: normalizeModelEntriesForSignature(form.modelEntries, {
                            normalizeName: (name) => stripGeminiModelResourceName(name).trim(),
                        }),
-                       excludedModels: parseTextList(form.excludedText ?? ''),
+                       excludedModels: parseTextList(form.excludedText ?? '', /\r?\n/),
                    })
 
 // ---- Page component ----
@@ -107,7 +103,7 @@ export function AiProvidersGeminiEditPage() {
                 proxyUrl: form.proxyUrl?.trim() || undefined,
                 headers: buildHeaderObject(form.headers),
                 models: entriesToModels(normalizedModelEntries),
-                excludedModels: parseTextList(form.excludedText),
+                excludedModels: parseTextList(form.excludedText, /\r?\n/),
             }
         },
         createConfig: (config) => providersApi.createGeminiKey(config),

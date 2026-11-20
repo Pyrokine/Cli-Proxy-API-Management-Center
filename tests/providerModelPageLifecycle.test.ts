@@ -1,36 +1,56 @@
-import {describe, expect, mock, spyOn, test} from 'bun:test'
 import {apiClient} from '@/services/api/client'
 import type {ModelInfo} from '@/utils/models'
 import {findMissingProviderModelNames} from '@/utils/providerModels'
+import {describe, expect, mock, spyOn, test} from 'bun:test'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const file = 'pages/ProviderModelsPage.tsx'
 
 function page() {
-    const generation = spyOn(apiClient, 'getAuthGeneration').mockReturnValue(1)
+    const generation                        = spyOn(apiClient, 'getAuthGeneration').mockReturnValue(1)
     let resolve!: (value: ModelInfo[]) => void
     let reject!: (reason: unknown) => void
-    const response = new Promise<ModelInfo[]>((accept, decline) => {resolve = accept; reject = decline})
-    const fetchModels = mock(() => response)
+    const response                          = new Promise<ModelInfo[]>((accept, decline) => {
+        resolve = accept;
+        reject  = decline
+    })
+    const fetchModels                       = mock(() => response)
     const updates: Array<[string, unknown]> = []
-    const requestControllerRef = {current: null as AbortController | null}
-    const requestGenerationRef = {current: 0}
-    const scope = {
+    const requestControllerRef              = { current: null as AbortController | null }
+    const requestGenerationRef              = { current: 0 }
+    const scope                             = {
         apiClient, authGeneration: 1, initialLoading: false, requestControllerRef, requestGenerationRef,
-        configuredModelEntries: [], findMissingProviderModelNames, fetchModels,
+        configuredModelEntries: [],
+        // noinspection JSUnusedGlobalSymbols
+        'findMissingProviderModelNames': findMissingProviderModelNames, fetchModels,
         buildErrorDiagnostic: undefined, fetchErrorLabel: 'failure', i18nPrefix: 'synthetic',
         t: (key: string) => key, buildEndpoint: () => 'https://fixture.invalid/v1/models',
-        buildAutoFetchSignature: () => 'fixture', autoFetchSignatureRef: {current: ''}, canAutoFetch: () => true,
-        setFetching: (value: boolean) => updates.push(['fetching', value]),
+        // noinspection JSUnusedGlobalSymbols
+        'buildAutoFetchSignature': () => 'fixture', autoFetchSignatureRef: { current: '' }, canAutoFetch: () => true,
+        // noinspection JSUnusedGlobalSymbols
+        'setFetching': (value: boolean) => updates.push(['fetching', value]),
         setError: (value: string) => updates.push(['error', value]),
-        setModels: (value: ModelInfo[]) => updates.push(['models', value]),
+        // noinspection JSUnusedGlobalSymbols
+        'setModels': (value: ModelInfo[]) => updates.push(['models', value]),
         setSelected: (value: Set<string>) => updates.push(['selected', value]),
-        setEndpoint: (value: string) => updates.push(['endpoint', value]),
-        setSearch: (value: string) => updates.push(['search', value]),
-        setDiscoveryGeneration: (value: number) => updates.push(['generation', value]),
+        // noinspection JSUnusedGlobalSymbols
+        'setEndpoint': (value: string) => updates.push(['endpoint', value]),
+        // noinspection JSUnusedGlobalSymbols
+        'setSearch': (value: string) => updates.push(['search', value]),
+        // noinspection JSUnusedGlobalSymbols
+        'setDiscoveryGeneration': (value: number) => updates.push(['generation', value]),
     }
-    const doFetch = sourceCallback<() => Promise<void>>(file, 'doFetch', scope)
-    return {scope: {...scope, doFetch}, doFetch, generation, resolve, reject, fetchModels, updates, requestControllerRef}
+    const doFetch                           = sourceCallback<() => Promise<void>>(file, 'doFetch', scope)
+    return {
+        scope: { ...scope, doFetch },
+        doFetch,
+        generation,
+        resolve,
+        reject,
+        fetchModels,
+        updates,
+        requestControllerRef,
+    }
 }
 
 describe('shared provider model page result ownership', () => {
@@ -39,10 +59,10 @@ describe('shared provider model page result ownership', () => {
             const current = page()
             try {
                 const pending = current.doFetch()
-                const before = [...current.updates]
+                const before  = [...current.updates]
                 current.generation.mockReturnValue(3)
                 if (outcome === 'success') {
-                    current.resolve([{name: 'old-model'}])
+                    current.resolve([{ name: 'old-model' }])
                 } else {
                     current.reject(new Error('synthetic old failure'))
                 }
@@ -71,9 +91,14 @@ describe('shared provider model page result ownership', () => {
         const current = page()
         try {
             const pending = current.doFetch()
-            sourceCallback<() => () => void>(file, 'useEffect', current.scope, 'requestControllerRef.current?.abort()')()()
+            sourceCallback<() => () => void>(
+                file,
+                'useEffect',
+                current.scope,
+                'requestControllerRef.current?.abort()',
+            )()()
             const before = [...current.updates]
-            current.resolve([{name: 'old-model'}])
+            current.resolve([{ name: 'old-model' }])
             await pending
             expect(current.updates).toEqual(before)
             expect(current.requestControllerRef.current).toBeNull()
@@ -87,7 +112,12 @@ describe('shared provider model page result ownership', () => {
         try {
             const cleanup = sourceCallback<() => (() => void) | void>(file, 'useEffect', current.scope, 0)()
             cleanup?.()
-            sourceCallback<() => () => void>(file, 'useEffect', current.scope, 'requestControllerRef.current?.abort()')()()
+            sourceCallback<() => () => void>(
+                file,
+                'useEffect',
+                current.scope,
+                'requestControllerRef.current?.abort()',
+            )()()
             current.resolve([])
             await Promise.resolve()
             await Promise.resolve()
@@ -100,14 +130,15 @@ describe('shared provider model page result ownership', () => {
 
     test('equivalent auto-fetch dependencies leave the current result and request untouched', async () => {
         const current = page()
-        const doFetch = mock(async () => {})
+        const doFetch = mock(async () => {
+        })
         try {
-            const scope = {...current.scope, doFetch}
+            const scope = { ...current.scope, doFetch }
             sourceCallback<() => (() => void) | void>(file, 'useEffect', scope, 0)()
             await Promise.resolve()
-            const controller = new AbortController()
+            const controller                     = new AbortController()
             current.requestControllerRef.current = controller
-            const before = [...current.updates]
+            const before                         = [...current.updates]
             sourceCallback<() => (() => void) | void>(file, 'useEffect', scope, 0)()
             await Promise.resolve()
             expect(controller.signal.aborted).toBe(false)
@@ -119,11 +150,20 @@ describe('shared provider model page result ownership', () => {
     })
 
     test('old apply callbacks cannot merge models or navigate on another connection', () => {
-        const current = page()
-        const mergeDiscoveredModels = mock(() => {})
-        const handleBack = mock(() => {})
+        const current               = page()
+        const mergeDiscoveredModels = mock(() => {
+        })
+        const handleBack            = mock(() => {
+        })
         try {
-            const scope = {...current.scope, sourceLoaded: true, models: [{name: 'synthetic'}], selected: new Set(['synthetic']), mergeDiscoveredModels, handleBack}
+            const scope = {
+                ...current.scope,
+                sourceLoaded: true,
+                models: [{ name: 'synthetic' }],
+                selected: new Set(['synthetic']),
+                mergeDiscoveredModels,
+                handleBack,
+            }
             const apply = sourceInitializer<() => void>(file, 'handleApply', scope)
             apply()
             expect(mergeDiscoveredModels).toHaveBeenCalledTimes(1)

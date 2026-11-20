@@ -1,9 +1,8 @@
 import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
-import {buildApiKeyEntry} from '@/components/providers/utils'
 import {CredentialOverrideFields, RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
-import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
+import {buildApiKeyEntry} from '@/components/providers/utils'
 import {Button} from '@/components/ui/Button'
 import {IconEye, IconEyeOff} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
@@ -18,12 +17,13 @@ import {apiClient} from '@/services/api/client'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import type {KeyTestStatus} from '@/stores/useOpenAIEditDraftStore'
 import type {ApiKeyEntry} from '@/types'
+import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {MAX_CREDENTIAL_WEIGHT} from '@/utils/credentialWeight'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useLocation, useNavigate, useOutletContext} from 'react-router-dom'
+import {useLocation, useNavigate, useOutletContext} from 'react-router'
 import type {OpenAIEditOutletContext} from './AiProvidersOpenAIEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
@@ -39,12 +39,12 @@ const buildOpenAIChatCompletionsEndpoint = (baseUrl: string) =>
 const idleKeyTestStatus = (): KeyTestStatus => ({ status: 'idle', message: '' })
 
 export function AiProvidersOpenAIEditPage() {
-    const { t }                = useTranslation()
-    const navigate             = useNavigate()
-    const location             = useLocation()
-    const modalPresentation    = resolveProviderEditModalState(location.state, location.pathname)
-    const { showNotification } = useNotificationStore()
-    const authGeneration       = useAuthStore(() => apiClient.getAuthGeneration())
+    const { t }                                  = useTranslation()
+    const navigate                               = useNavigate()
+    const location                               = useLocation()
+    const modalPresentation                      = resolveProviderEditModalState(location.state, location.pathname)
+    const { showNotification, showConfirmation } = useNotificationStore()
+    const authGeneration                         = useAuthStore(() => apiClient.getAuthGeneration())
     const {
               hasIndexParam,
               invalidIndexParam,
@@ -66,7 +66,7 @@ export function AiProvidersOpenAIEditPage() {
               availableModels,
               handleBack,
               handleSave,
-          }                    = useOutletContext<OpenAIEditOutletContext>()
+          }                                      = useOutletContext<OpenAIEditOutletContext>()
 
     const title = hasIndexParam ? t('ai_providers.openai_edit_modal_title') : t('ai_providers.openai_add_modal_title')
 
@@ -150,155 +150,165 @@ export function AiProvidersOpenAIEditPage() {
         })
     }
 
-    const runOpenAIConnectivityTest = async (keyIndex?: number) => {
+    const runOpenAIConnectivityTest = async (keyIndex?: number | 'all') => {
         if (authGeneration !== apiClient.getAuthGeneration() || isTesting || activeTestAbortRef.current) {
             return
         }
 
-        const baseUrl = form.baseUrl.trim()
-        if (!baseUrl) {
-            const message = t('notification.openai_test_url_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
-            return
-        }
-
+        const baseUrl   = form.baseUrl.trim()
         const modelName = resolvedTestModel.trim()
-        if (!modelName) {
-            const message = t('notification.openai_test_model_required')
+        const endpoint  = baseUrl ? buildOpenAIChatCompletionsEndpoint(baseUrl) : ''
+        if (!endpoint || !modelName) {
+            const message = t(!endpoint ?
+                              'notification.openai_test_url_required' :
+                              'notification.openai_test_model_required')
             setTestStatus('error')
             setTestMessage(message)
             showNotification(message, 'error')
             return
         }
 
-        const headerObject = buildHeaderObject(form.headers)
-        const keyEntry     = keyIndex !== undefined
-                             ? form.apiKeyEntries[keyIndex]
-                             : form.apiKeyEntries.find((entry) => entry.apiKey?.trim() || entry.authIndex?.trim())
-        const authIndex    = keyEntry?.authIndex?.trim()
-        const apiKey       = keyEntry?.apiKey?.trim()
-        const hasAuth      = hasHeader(headerObject, 'authorization')
-        if (!apiKey && !hasAuth && !authIndex) {
-            const message = t('notification.openai_test_key_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            if (keyIndex !== undefined) {
-                setDraftKeyTestStatus(keyIndex, { status: 'error', message })
-            }
-            showNotification(message, 'error')
-            return
-        }
-
-        const endpoint = buildOpenAIChatCompletionsEndpoint(baseUrl)
-        if (!endpoint) {
-            const message = t('notification.openai_test_url_required')
-            setTestStatus('error')
-            setTestMessage(message)
-            showNotification(message, 'error')
-            return
-        }
-
-        let preparedAuth: ReturnType<typeof prepareApiCallAuth>
+        let headerObject: Record<string, string>
         try {
-            preparedAuth = prepareApiCallAuth({
-                                                  headers: headerObject,
-                                                  apiKey,
-                                                  authIndex,
-                                                  preferredHeader: 'Authorization',
-                                                  authorizationScheme: 'Bearer',
-                                              })
+            headerObject = buildHeaderObject(form.headers)
         } catch (err: unknown) {
             const message = `${t('ai_providers.openai_test_failed')}: ${getErrorMessage(err)}`
             setTestStatus('error')
             setTestMessage(message)
-            if (keyIndex !== undefined) {
-                setDraftKeyTestStatus(keyIndex, { status: 'error', message })
-            }
             showNotification(message, 'error')
             return
         }
 
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            ...preparedAuth.headers,
+        const allKeys = keyIndex === 'all'
+        const indices = allKeys
+                        ?
+                        form.apiKeyEntries.map((_, index) => index)
+                        :
+            [keyIndex ?? form.apiKeyEntries.findIndex((entry) => entry.apiKey?.trim() || entry.authIndex?.trim())]
+        if (!indices.length) {
+            const message = t('notification.openai_test_key_required')
+            setTestStatus('error')
+            setTestMessage(message)
+            showNotification(message, 'error')
+            return
         }
-        const requestId                       = ++activeTestRequestIdRef.current
-        const controller                      = new AbortController()
-        activeTestAbortRef.current            = controller
 
-        const runningMessage = t('ai_providers.openai_test_running')
+        const requestId            = ++activeTestRequestIdRef.current
+        const controller           = new AbortController()
+        activeTestAbortRef.current = controller
+        const runningMessage       = t('ai_providers.openai_test_running')
         setIsTesting(true)
         setTestStatus('loading')
         setTestMessage(runningMessage)
-        if (keyIndex !== undefined) {
-            setDraftKeyTestStatus(keyIndex, { status: 'loading', message: runningMessage })
-        }
+        let successCount = 0
+        let failureCount = 0
 
         try {
-            const result = await apiCallApi.request(
-                {
-                    method: 'POST',
-                    url: endpoint,
-                    header: headers,
-                    data: JSON.stringify({
-                                             model: modelName,
-                                             messages: [{ role: 'user', content: 'Hi' }],
-                                             max_tokens: 8,
-                                         }),
-                    proxyUrl: keyEntry?.proxyUrl?.trim() || undefined,
-                    authIndex,
-                    draftToken: preparedAuth.draftToken,
-                },
-                { timeout: OPENAI_TEST_TIMEOUT_MS, signal: controller.signal },
-            )
-
-            if (authGeneration !== apiClient.getAuthGeneration() || requestId !== activeTestRequestIdRef.current ||
-                controller.signal.aborted) {
-                return
-            }
-            if (result.statusCode < 200 || result.statusCode >= 300) {
-                const detail  = getApiCallErrorMessage(result) || t('common.unknown_error')
-                const message = `${t('ai_providers.openai_test_failed')}: ${detail}`
-                setTestStatus('error')
-                setTestMessage(message)
-                if (keyIndex !== undefined) {
-                    setDraftKeyTestStatus(keyIndex, { status: 'error', message })
+            for (const index of indices) {
+                if (authGeneration !==
+                    apiClient.getAuthGeneration() ||
+                    requestId !==
+                    activeTestRequestIdRef.current ||
+                    controller.signal.aborted) {
+                    return
                 }
-                showNotification(message, 'error')
-            } else {
-                const message = t('ai_providers.openai_test_success')
-                setTestStatus('success')
-                setTestMessage(message)
-                if (keyIndex !== undefined) {
-                    setDraftKeyTestStatus(keyIndex, { status: 'success', message })
+                const keyEntry                  = form.apiKeyEntries[index]
+                const authIndex                 = keyEntry?.authIndex?.trim()
+                const apiKey                    = keyEntry?.apiKey?.trim()
+                let status: 'success' | 'error' = 'error'
+                let message                     = t('notification.openai_test_key_required')
+                if (index >= 0) {
+                    setDraftKeyTestStatus(index, { status: 'loading', message: runningMessage })
                 }
-                showNotification(message, 'success')
+                try {
+                    if (apiKey || authIndex || hasHeader(headerObject, 'authorization')) {
+                        const preparedAuth = prepareApiCallAuth({
+                                                                    headers: headerObject,
+                                                                    apiKey,
+                                                                    authIndex,
+                                                                    preferredHeader: 'Authorization',
+                                                                    authorizationScheme: 'Bearer',
+                                                                })
+                        const result       = await apiCallApi.request(
+                            {
+                                method: 'POST',
+                                url: endpoint,
+                                header: { 'Content-Type': 'application/json', ...preparedAuth.headers },
+                                data: JSON.stringify({
+                                                         model: modelName,
+                                                         messages: [
+                                                             {
+                                                                 role: 'user',
+                                                                 content: 'Hi',
+                                                             },
+                                                         ],
+                                                         max_tokens: 8,
+                                                     }),
+                                proxyUrl: keyEntry?.proxyUrl?.trim() ||
+                                          undefined,
+                                authIndex,
+                                draftToken: preparedAuth.draftToken,
+                            },
+                            {
+                                timeout: OPENAI_TEST_TIMEOUT_MS,
+                                signal: controller.signal,
+                            },
+                        )
+                        if (result.statusCode >= 200 && result.statusCode < 300) {
+                            status  = 'success'
+                            message = t('ai_providers.openai_test_success')
+                        } else {
+                            message =
+                                `${t('ai_providers.openai_test_failed')}: ${getApiCallErrorMessage(result) ||
+                                                                            t('common.unknown_error')}`
+                        }
+                    }
+                } catch (err: unknown) {
+                    const detail    = getErrorMessage(err)
+                    const errorCode = typeof err === 'object' && err !== null && 'code' in err ?
+                                      String((err as { code?: string }).code) :
+                                      ''
+                    if (errorCode === 'ERR_CANCELED') {
+                        return
+                    }
+                    const isTimeout = errorCode === 'ECONNABORTED' || detail.toLowerCase().includes('timeout')
+                    message         = isTimeout
+                                      ?
+                                      t('ai_providers.openai_test_timeout', { seconds: OPENAI_TEST_TIMEOUT_MS / 1000 })
+                                      :
+                                      `${t('ai_providers.openai_test_failed')}: ${detail || t('common.unknown_error')}`
+                }
+                if (authGeneration !==
+                    apiClient.getAuthGeneration() ||
+                    requestId !==
+                    activeTestRequestIdRef.current ||
+                    controller.signal.aborted) {
+                    return
+                }
+                if (index >= 0) {
+                    setDraftKeyTestStatus(index, { status, message })
+                }
+                if (status === 'success') {
+                    ++successCount
+                } else {
+                    ++failureCount
+                }
+                if (!allKeys) {
+                    setTestStatus(status)
+                    setTestMessage(message)
+                    showNotification(message, status)
+                }
             }
-        } catch (err: unknown) {
-            const message   = getErrorMessage(err)
-            const errorCode = typeof err === 'object' && err !== null && 'code' in err
-                              ? String((err as { code?: string }).code)
-                              : ''
-            if (
-                authGeneration !== apiClient.getAuthGeneration() ||
-                requestId !== activeTestRequestIdRef.current ||
-                controller.signal.aborted ||
-                errorCode === 'ERR_CANCELED'
-            ) {
-                return
+            if (allKeys) {
+                const status  = failureCount ? 'error' : 'success'
+                const message = t(
+                    'ai_providers.openai_test_all_result',
+                    { success: successCount, failed: failureCount, total: indices.length },
+                )
+                setTestStatus(status)
+                setTestMessage(message)
+                showNotification(message, status)
             }
-            const isTimeout       = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout')
-            const resolvedMessage = isTimeout
-                                    ? t('ai_providers.openai_test_timeout', { seconds: OPENAI_TEST_TIMEOUT_MS / 1000 })
-                                    : `${t('ai_providers.openai_test_failed')}: ${message || t('common.unknown_error')}`
-            setTestStatus('error')
-            setTestMessage(resolvedMessage)
-            if (keyIndex !== undefined) {
-                setDraftKeyTestStatus(keyIndex, { status: 'error', message: resolvedMessage })
-            }
-            showNotification(resolvedMessage, 'error')
         } finally {
             if (requestId === activeTestRequestIdRef.current) {
                 activeTestAbortRef.current = null
@@ -319,24 +329,45 @@ export function AiProvidersOpenAIEditPage() {
         }
 
         const removeEntry = (idx: number) => {
-            const next = list.filter((_, i) => i !== idx)
-            setForm((prev) => ({
-                ...prev,
-                apiKeyEntries: next.length ? next : [buildApiKeyEntry()],
-            }))
-            const nextStatuses = keyTestStatuses.filter((_, i) => i !== idx)
-            setDraftKeyTestStatuses(next.length ? nextStatuses : [idleKeyTestStatus()])
-            setVisibleApiKeyRows((prev) => {
-                const shifted: Record<number, boolean> = {}
-                Object.entries(prev).forEach(([rawIndex, value]) => {
-                    const rowIndex = Number(rawIndex)
-                    if (!Number.isInteger(rowIndex) || rowIndex === idx) {
-                        return
+            const remove = () => {
+                if (authGeneration !== apiClient.getAuthGeneration()) {
+                    throw new Error(t('common.connection_changed'))
+                }
+                const next = list.filter((_, i) => i !== idx)
+                setForm((prev) => {
+                    if (prev.apiKeyEntries.length !==
+                        list.length ||
+                        prev.apiKeyEntries.some((entry, index) => entry !== list[index])) {
+                        throw new Error(t('ai_providers.openai_key_changed'))
                     }
-                    shifted[rowIndex > idx ? rowIndex - 1 : rowIndex] = value
+                    return { ...prev, apiKeyEntries: next.length ? next : [buildApiKeyEntry()] }
                 })
-                return shifted
-            })
+                const nextStatuses = keyTestStatuses.filter((_, i) => i !== idx)
+                setDraftKeyTestStatuses(next.length ? nextStatuses : [idleKeyTestStatus()])
+                setVisibleApiKeyRows((prev) => {
+                    const shifted: Record<number, boolean> = {}
+                    Object.entries(prev).forEach(([rawIndex, value]) => {
+                        const rowIndex = Number(rawIndex)
+                        if (!Number.isInteger(rowIndex) || rowIndex === idx) {
+                            return
+                        }
+                        shifted[rowIndex > idx ? rowIndex - 1 : rowIndex] = value
+                    })
+                    return shifted
+                })
+            }
+            if (hasIndexParam && (list[idx]?.apiKey.trim() || list[idx]?.authIndex?.trim())) {
+                showConfirmation({
+                                     title: t('common.delete'),
+                                     message: t('ai_providers.openai_remove_key_confirm'),
+                                     variant: 'danger',
+                                     confirmText: t('common.delete'),
+                                     cancelText: t('common.cancel'),
+                                     onConfirm: remove,
+                                 })
+            } else {
+                remove()
+            }
         }
 
         const addEntry = () => {
@@ -350,6 +381,14 @@ export function AiProvidersOpenAIEditPage() {
                     <span className={styles.keyEntriesCount}>
                         {t('ai_providers.openai_keys_count')}: {list.length}
                     </span>
+                    <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={() => void runOpenAIConnectivityTest('all')}
+                        disabled={controlsDisabled || !form.apiKeyEntries.length}
+                    >
+                        {t('ai_providers.openai_test_all_action')}
+                    </Button>
                     <Button
                         variant='secondary'
                         size='sm'
@@ -384,6 +423,8 @@ export function AiProvidersOpenAIEditPage() {
                                         className={`input ${styles.keyTableInput} ${styles.keyTableSecretInput}`}
                                         placeholder={t('ai_providers.openai_key_placeholder')}
                                         autoComplete='new-password'
+                                        data-lpignore='true'
+                                        data-1p-ignore='true'
                                         spellCheck={false}
                                         autoCapitalize='none'
                                         autoCorrect='off'
@@ -453,6 +494,11 @@ export function AiProvidersOpenAIEditPage() {
                             </div>
 
                             <div className={styles.keyTableColAction}>
+                                {entry.headers &&
+                                 Object.keys(entry.headers).length >
+                                 0 &&
+                                 <div role='status'
+                                      className='hint'>{t('ai_providers.openai_legacy_key_headers')}</div>}
                                 <Button
                                     variant={keyTestStatuses[index]?.status === 'error' ? 'danger' : 'secondary'}
                                     size='sm'
@@ -520,11 +566,11 @@ export function AiProvidersOpenAIEditPage() {
                     disableCooling={form.disableCooling}
                     requestRetry={form.requestRetry}
                     disabled={controlsDisabled}
-                    onChange={(overrides) => setForm((previous) => ({...previous, ...overrides}))}
+                    onChange={(overrides) => setForm((previous) => ({ ...previous, ...overrides }))}
                 />
                 <RequestScopedErrorsField
                     rules={form.requestScopedErrors}
-                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    onChange={(rules) => setForm((previous) => ({ ...previous, requestScopedErrors: rules }))}
                     disabled={controlsDisabled}
                 />
                 <PrefixField form={form} setForm={setForm} disabled={controlsDisabled} />
@@ -548,7 +594,7 @@ export function AiProvidersOpenAIEditPage() {
                     <ToggleSwitch
                         label={t('ai_providers.openai_prompt_cache_key_label')}
                         checked={Boolean(form.supportPromptCacheKey)}
-                        onChange={(value) => setForm((prev) => ({...prev, supportPromptCacheKey: value}))}
+                        onChange={(value) => setForm((prev) => ({ ...prev, supportPromptCacheKey: value }))}
                         disabled={controlsDisabled}
                     />
                     <div className='hint'>{t('ai_providers.openai_prompt_cache_key_hint')}</div>

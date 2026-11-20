@@ -1,6 +1,5 @@
-import {describe, expect, test} from 'bun:test'
-
 import {buildModelTree, getModelMetadata, getModelProviderChannels} from '@/utils/modelTree'
+import {describe, expect, test} from 'bun:test'
 
 describe('model tree metadata', () => {
     test('classifies current DeepSeek, GLM, Kimi, and MiniMax generations', () => {
@@ -43,10 +42,10 @@ describe('model tree metadata', () => {
 
     test('classifies the current Claude, GPT, Qwen, Gemini, and Grok model families', () => {
         expect(getModelMetadata('claude-opus-5-5')).toEqual({
-                                                                    provider: 'Claude',
-                                                                    generation: 'Claude 5.5',
-                                                                    family: 'Opus',
-                                                                })
+                                                                provider: 'Claude',
+                                                                generation: 'Claude 5.5',
+                                                                family: 'Opus',
+                                                            })
         expect(getModelMetadata('gpt-6-sol')).toEqual({
                                                           provider: 'GPT',
                                                           generation: 'GPT-6',
@@ -58,20 +57,20 @@ describe('model tree metadata', () => {
                                                             family: 'Max',
                                                         })
         expect(getModelMetadata('gemini-3.1-flash-lite-image')).toEqual({
-                                                                           provider: 'Gemini',
-                                                                           generation: 'Gemini 3.1',
-                                                                           family: 'Flash',
-                                                                       })
+                                                                            provider: 'Gemini',
+                                                                            generation: 'Gemini 3.1',
+                                                                            family: 'Flash',
+                                                                        })
         expect(getModelMetadata('grok-4.7')).toEqual({
                                                          provider: 'Grok',
                                                          generation: 'Grok 4.7',
                                                          family: 'Grok 4.7',
                                                      })
         expect(getModelMetadata('grok-imagine-image-2.0')).toEqual({
-                                                                      provider: 'Grok',
-                                                                      generation: 'Grok Imagine',
-                                                                      family: 'Image',
-                                                                  })
+                                                                       provider: 'Grok',
+                                                                       generation: 'Grok Imagine',
+                                                                       family: 'Image',
+                                                                   })
     })
 
     test('groups current DeepSeek models from catalog metadata', () => {

@@ -33,7 +33,7 @@ export const normalizeExcludedModelsValue = (value: unknown): string[] => {
 }
 
 export const parseExcludedModelsText = (text: string): string[] =>
-    normalizeExcludedModelRules(text.split(/[\r\n,]+/))
+    normalizeExcludedModelRules(text.split(/[\r\n]+/))
 
 export const formatExcludedModelsText = (rules: readonly string[]): string =>
     normalizeExcludedModelRules(rules).join('\n')

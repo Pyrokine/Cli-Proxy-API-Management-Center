@@ -37,7 +37,7 @@ const buildSignature = (form: GeminiFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
-                       excludedModels: parseTextList(form.excludedText),
+                       excludedModels: parseTextList(form.excludedText, /\r?\n/),
                    })
 
 export function AiProvidersInteractionsEditPage() {
@@ -66,7 +66,7 @@ export function AiProvidersInteractionsEditPage() {
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
-            excludedModels: parseTextList(form.excludedText),
+            excludedModels: parseTextList(form.excludedText, /\r?\n/),
         }),
         createConfig: (config) => providersApi.createInteractionsKey(config),
         updateConfig: (index, config, original) => providersApi.patchInteractionsKey(index, config, original),

@@ -15,7 +15,7 @@ export function useModelSelectOptions(modelEntries: ModelEntry[]) {
                 return
             }
 
-            const key             = value.toLowerCase()
+            const key             = value
             const alias           = entry.alias.trim()
             const normalizedAlias = alias && alias !== value ? alias : ''
             const existing        = entries.get(key)

@@ -3,31 +3,27 @@ import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
 import {RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {buildClaudeMessagesEndpoint, parseTextList} from '@/components/providers/utils'
-import {Select} from '@/components/ui/Select'
 import {getModelEntriesValidationKey} from '@/components/ui/modelInputListUtils'
+import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useEdgeSwipeBack} from '@/hooks/useEdgeSwipeBack'
 import {useEscapeKey} from '@/hooks/useEscapeKey'
 import {useModelSelectOptions} from '@/hooks/useModelSelectOptions'
 import {resolveProviderEditModalState, withProviderEditReturnFocus} from '@/hooks/useProviderEditPresentation'
 import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api'
-import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {apiClient} from '@/services/api/client'
+import {normalizeClaudeFingerprintProfile} from '@/services/api/transformers'
 import {useAuthStore, useNotificationStore} from '@/stores'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useLocation, useNavigate, useOutletContext} from 'react-router-dom'
+import {useLocation, useNavigate, useOutletContext} from 'react-router'
 import type {ClaudeEditOutletContext} from './AiProvidersClaudeEditLayout'
 import styles from './ProviderEditForm.module.scss'
 import {ProviderEditShell} from './ProviderEditShell'
-import {
-    ExcludedModelsField,
-    ProviderConnectionFields,
-    QuickFillField,
-} from './ProviderFormFields'
+import {ExcludedModelsField, ProviderConnectionFields, QuickFillField} from './ProviderFormFields'
 import {CLAUDE_QUICK_FILL_PRESETS, resolveClaudeModelDiscovery} from './providerQuickFill'
 
 const CLAUDE_TEST_TIMEOUT_MS           = 30_000
@@ -83,17 +79,17 @@ export function AiProvidersClaudeEditPage() {
         lastCloakConfigRef.current = form.cloak
     }, [form.cloak])
 
-    const fingerprintProfile = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
+    const fingerprintProfile        = normalizeClaudeFingerprintProfile(form.fingerprintProfile)
     const invalidFingerprintProfile = fingerprintProfile !== '' && fingerprintProfile !== 'claude-code-cli'
     const fingerprintProfileOptions = [
         { value: '', label: t('ai_providers.claude_fingerprint_profile_default') },
         { value: 'claude-code-cli', label: t('ai_providers.claude_fingerprint_profile_cli') },
         ...(invalidFingerprintProfile ? [{ value: fingerprintProfile, label: fingerprintProfile }] : []),
     ]
-    const canSave = !disableControls && !loading && !saving && !invalidIndexParam &&
-                    !invalidIndex && !isTesting && !invalidFingerprintProfile &&
-                    !getCredentialRetryValidationKey(form.requestRetry) &&
-                    !getModelEntriesValidationKey(form.modelEntries)
+    const canSave                   = !disableControls && !loading && !saving && !invalidIndexParam &&
+                                      !invalidIndex && !isTesting && !invalidFingerprintProfile &&
+                                      !getCredentialRetryValidationKey(form.requestRetry) &&
+                                      !getModelEntriesValidationKey(form.modelEntries)
 
     const modelSelectOptions = useModelSelectOptions(form.modelEntries)
     const controlsDisabled   = saving || disableControls || isTesting
@@ -124,19 +120,37 @@ export function AiProvidersClaudeEditPage() {
         return 'auto'
     }, [form.cloak?.mode])
 
-    const connectivityConfigSignature = useMemo(() => JSON.stringify({
-        authGeneration,
-        apiKey: form.apiKey.trim(),
-        authIndex: form.authIndex?.trim() ?? '',
-        baseUrl: form.baseUrl?.trim() ?? '',
-        proxyUrl: form.proxyUrl?.trim() ?? '',
-        testModel: testModel.trim(),
-        headers: form.headers.map((entry) => [entry.key.trim(), entry.value.trim()]),
-        models: form.modelEntries.map((entry) => [entry.name.trim(), entry.alias.trim()]),
-    }), [authGeneration, form.apiKey, form.authIndex, form.baseUrl, form.headers, form.modelEntries, form.proxyUrl, testModel])
+    const connectivityConfigSignature = useMemo(
+        () => JSON.stringify({
+                                 authGeneration,
+                                 apiKey: form.apiKey.trim(),
+                                 authIndex: form.authIndex?.trim() ?? '',
+                                 baseUrl: form.baseUrl?.trim() ?? '',
+                                 proxyUrl: form.proxyUrl?.trim() ?? '',
+                                 testModel: testModel.trim(),
+                                 headers: form.headers.map((entry) => [
+                                     entry.key.trim(),
+                                     entry.value.trim(),
+                                 ]),
+                                 models: form.modelEntries.map((entry) => [
+                                     entry.name.trim(),
+                                     entry.alias.trim(),
+                                 ]),
+                             }),
+        [
+            authGeneration,
+            form.apiKey,
+            form.authIndex,
+            form.baseUrl,
+            form.headers,
+            form.modelEntries,
+            form.proxyUrl,
+            testModel,
+        ],
+    )
 
     const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
-    const cancelActiveTest = useCallback(() => {
+    const cancelActiveTest              = useCallback(() => {
         ++activeTestRequestIdRef.current
         activeTestAbortRef.current?.abort()
         activeTestAbortRef.current = null
@@ -231,8 +245,8 @@ export function AiProvidersClaudeEditPage() {
             headers['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION
         }
 
-        const requestId = ++activeTestRequestIdRef.current
-        const controller = new AbortController()
+        const requestId            = ++activeTestRequestIdRef.current
+        const controller           = new AbortController()
         activeTestAbortRef.current = controller
         setIsTesting(true)
         setTestStatus('loading')
@@ -273,8 +287,8 @@ export function AiProvidersClaudeEditPage() {
                 showNotification(message, 'success')
             }
         } catch (err: unknown) {
-            const message         = getErrorMessage(err)
-            const errorCode       =
+            const message   = getErrorMessage(err)
+            const errorCode =
                       typeof err === 'object' && err !== null && 'code' in err ?
                       String((err as { code?: string }).code) :
                       ''
@@ -346,7 +360,7 @@ export function AiProvidersClaudeEditPage() {
                 />
                 <RequestScopedErrorsField
                     rules={form.requestScopedErrors}
-                    onChange={(rules) => setForm((previous) => ({...previous, requestScopedErrors: rules}))}
+                    onChange={(rules) => setForm((previous) => ({ ...previous, requestScopedErrors: rules }))}
                     disabled={controlsDisabled}
                 />
 
@@ -354,7 +368,7 @@ export function AiProvidersClaudeEditPage() {
                     <ToggleSwitch
                         label={t('ai_providers.claude_rebuild_system_messages_label')}
                         checked={Boolean(form.rebuildMidSystemMessage)}
-                        onChange={(value) => setForm((prev) => ({...prev, rebuildMidSystemMessage: value}))}
+                        onChange={(value) => setForm((prev) => ({ ...prev, rebuildMidSystemMessage: value }))}
                         disabled={controlsDisabled}
                     />
                     <div className='hint'>{t('ai_providers.claude_rebuild_system_messages_hint')}</div>
@@ -389,7 +403,9 @@ export function AiProvidersClaudeEditPage() {
                 </ModelConfigSection>
 
                 <div className='form-group'>
-                    <label htmlFor='claude-fingerprint-profile'>{t('ai_providers.claude_fingerprint_profile_label')}</label>
+                    <label
+                        htmlFor='claude-fingerprint-profile'>{t(
+                        'ai_providers.claude_fingerprint_profile_label')}</label>
                     <Select
                         id='claude-fingerprint-profile'
                         value={fingerprintProfile}
@@ -447,6 +463,9 @@ export function AiProvidersClaudeEditPage() {
                                             cloak: {
                                                 mode,
                                                 strictMode: restored.strictMode ?? false,
+                                                ...(restored.cacheUserId !== undefined ?
+                                                    { cacheUserId: restored.cacheUserId } :
+                                                    {}),
                                                 sensitiveWords: restored.sensitiveWords ?? [],
                                             },
                                         }
@@ -499,6 +518,33 @@ export function AiProvidersClaudeEditPage() {
                                     ariaLabel={t('ai_providers.claude_cloak_strict_label')}
                                 />
                                 <div className='hint'>{t('ai_providers.claude_cloak_strict_hint')}</div>
+                            </div>
+
+                            <div className='form-group'>
+                                <label>{t('ai_providers.claude_cloak_cache_user_id_label')}</label>
+                                <Select
+                                    value={form.cloak.cacheUserId === undefined || form.cloak.cacheUserId === null ?
+                                           'inherit' :
+                                           String(form.cloak.cacheUserId)}
+                                    options={[
+                                        {
+                                            value: 'inherit',
+                                            label: t('ai_providers.claude_cloak_cache_user_id_inherit'),
+                                        },
+                                        { value: 'true', label: t('common.enabled') },
+                                        { value: 'false', label: t('common.disabled') },
+                                    ]}
+                                    onChange={(value) => setForm((previous) => ({
+                                        ...previous,
+                                        cloak: {
+                                            ...previous.cloak,
+                                            cacheUserId: value === 'inherit' ? null : value === 'true',
+                                        },
+                                    }))}
+                                    disabled={controlsDisabled}
+                                    ariaLabel={t('ai_providers.claude_cloak_cache_user_id_label')}
+                                />
+                                <div className='hint'>{t('ai_providers.claude_cloak_cache_user_id_hint')}</div>
                             </div>
 
                             <div className='form-group'>

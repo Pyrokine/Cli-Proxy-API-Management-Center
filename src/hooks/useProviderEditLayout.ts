@@ -22,7 +22,7 @@ import type {Dispatch, SetStateAction} from 'react'
 import {useCallback, useEffect, useMemo, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import type {BlockerFunction} from 'react-router'
-import {useLocation, useNavigate, useParams} from 'react-router-dom'
+import {useLocation, useNavigate, useParams} from 'react-router'
 import type {StoreApi, UseBoundStore} from 'zustand'
 
 /* ------------------------------------------------------------------ */
@@ -147,18 +147,21 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
     /* ---- Connection status ---- */
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
-    const authGeneration = useAuthStore(() => apiClient.getAuthGeneration())
-    const isCurrent = useCallback(() => apiClient.getAuthGeneration() === authGeneration, [authGeneration])
+    const authGeneration   = useAuthStore(() => apiClient.getAuthGeneration())
+    const isCurrent        = useCallback(() => apiClient.getAuthGeneration() === authGeneration, [authGeneration])
     const disableControls  = connectionStatus !== 'connected'
 
-    const [storedConfigs, setStoredConfigs] = useState<C[]>([])
-    const [configGeneration, setConfigGeneration] = useState<number | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [savingGeneration, setSavingGeneration] = useState<number | null>(null)
-    const saving = savingGeneration === authGeneration
-    const sourceLoaded = configGeneration === authGeneration
-    const configs = useMemo(() => sourceLoaded ? storedConfigs : [], [sourceLoaded, storedConfigs])
-    const setConfigs: Dispatch<SetStateAction<C[]>> = useCallback((action) => {
+    const [storedConfigs, setStoredConfigs]            = useState<C[]>([])
+    const [configGeneration, setConfigGeneration]      = useState<number | null>(null)
+    const [loading, setLoading]                        = useState(true)
+    const [savingGeneration, setSavingGeneration]      = useState<number | null>(null)
+    const saving                                       = savingGeneration === authGeneration
+    const sourceLoaded                                 = configGeneration === authGeneration
+    const configs                                      = useMemo(
+        () => sourceLoaded ? storedConfigs : [],
+        [sourceLoaded, storedConfigs],
+    )
+    const setConfigs: Dispatch<SetStateAction<C[]>>    = useCallback((action) => {
         if (isCurrent()) {
             setStoredConfigs(action)
         }
@@ -262,7 +265,7 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
             if (!name) {
                 return
             }
-            const key = name.toLowerCase()
+            const key = name
             if (!seen.has(key)) {
                 seen.set(key, name)
             }
@@ -405,7 +408,6 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
 
         if (availableModels.length === 0) {
             if (testModel) {
-                setTestModel('')
                 setTestStatus('idle')
                 setTestMessage('')
             }
@@ -413,11 +415,10 @@ export function useProviderEditLayout<F, C, D extends BaseDraft>(
         }
 
         if (!testModel || !availableModels.includes(testModel)) {
-            setTestModel(availableModels[0])
             setTestStatus('idle')
             setTestMessage('')
         }
-    }, [availableModels, resolvedLoading, setTestMessage, setTestModel, setTestStatus, testModel])
+    }, [availableModels, resolvedLoading, setTestMessage, setTestStatus, testModel])
 
     /* ---- Merge discovered models ---- */
     const mergeDiscoveredModels = useCallback(

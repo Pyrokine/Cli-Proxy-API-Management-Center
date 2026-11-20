@@ -1,6 +1,6 @@
 import type {VertexFormState} from '@/components/providers'
 import {ModelInputList} from '@/components/ui/ModelInputList'
-import {modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
@@ -11,7 +11,6 @@ import {providersApi} from '@/services/api'
 import type {ProviderKeyConfig} from '@/types'
 import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries} from '@/utils/headers'
-import {normalizeModelThinking} from '@/utils/modelMetadata'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
 import {ProviderConnectionFields} from './ProviderFormFields'
@@ -62,23 +61,8 @@ export function AiProvidersVertexEditPage() {
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
-            models: form.modelEntries
-                        .map((entry) => {
-                            const name  = entry.name.trim()
-                            const alias = entry.alias.trim()
-                            if (!name || !alias) {
-                                return null
-                            }
-                            const thinking    = normalizeModelThinking(entry.thinking)
-                            const displayName = entry.displayName?.trim()
-                            return {
-                                name,
-                                alias,
-                                ...(displayName ? {displayName} : {}),
-                                ...(thinking ? {thinking} : {}),
-                            }
-                        })
-                        .filter(Boolean) as ProviderKeyConfig['models'],
+            excludedModels: form.excludedModels,
+            models: entriesToModels(form.modelEntries),
         }),
         createConfig: (config) => providersApi.createVertexConfig(config),
         updateConfig: (index, config, original) => providersApi.patchVertexConfig(index, config, original),

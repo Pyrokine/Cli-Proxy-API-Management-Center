@@ -23,7 +23,7 @@ import {ProviderEditShell} from './ProviderEditShell'
 import {ProviderConnectionFields, ProviderModelSection} from './ProviderFormFields'
 
 const DEFAULT_META_BASE_URL = 'https://api.meta.ai/v1'
-const META_TEST_TIMEOUT_MS = 30000
+const META_TEST_TIMEOUT_MS  = 30000
 
 const buildMetaResponsesEndpoint = (baseUrl: string) =>
     modelsApi.buildV1ModelsEndpoint(baseUrl).replace(/\/models$/i, '/responses')
@@ -46,11 +46,11 @@ const buildSignature = (form: ProviderFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
-                       excludedModels: parseTextList(form.excludedText),
+                       excludedModels: parseTextList(form.excludedText, /\r?\n/),
                    })
 
 export function AiProvidersMetaEditPage() {
-    const { t } = useTranslation()
+    const { t }                                                                     = useTranslation()
     const editOptions: ProviderEditFormConfig<ProviderFormState, ProviderKeyConfig> = {
         configKey: 'meta-api-key',
         buildEmptyForm,
@@ -74,13 +74,16 @@ export function AiProvidersMetaEditPage() {
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
             models: entriesToModels(form.modelEntries),
-            excludedModels: parseTextList(form.excludedText),
+            excludedModels: parseTextList(form.excludedText, /\r?\n/),
         }),
         createConfig: (config) => providersApi.createMetaConfig(config),
         updateConfig: (index, config, original) => providersApi.patchMetaConfig(index, config, original),
         validateBeforeSave: (form, original) => {
             const validationError = getCredentialWeightValidationKey(form.weight) ??
-                getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors)
+                                    getRequestScopedErrorsValidationKey(
+                                        form.requestScopedErrors,
+                                        original?.requestScopedErrors,
+                                    )
             if (validationError) {
                 return validationError
             }
@@ -114,7 +117,7 @@ export function AiProvidersMetaEditPage() {
               swipeRef,
           } = useProviderEditForm<ProviderFormState, ProviderKeyConfig>(editOptions)
 
-    const baseUrl = form.baseUrl?.trim() || DEFAULT_META_BASE_URL
+    const baseUrl   = form.baseUrl?.trim() || DEFAULT_META_BASE_URL
     const discovery = useModelDiscovery(
         { ...form, baseUrl },
         setForm,
@@ -137,8 +140,11 @@ export function AiProvidersMetaEditPage() {
     )
 
     const [testModel, setTestModel] = useState('')
-    const modelSelectOptions = useModelSelectOptions(form.modelEntries)
-    const availableModels = useMemo(() => modelSelectOptions.map((option) => option.value), [modelSelectOptions])
+    const modelSelectOptions        = useModelSelectOptions(form.modelEntries)
+    const availableModels           = useMemo(
+        () => modelSelectOptions.map((option) => option.value),
+        [modelSelectOptions],
+    )
     const {
               testStatus,
               setTestStatus,
@@ -147,16 +153,16 @@ export function AiProvidersMetaEditPage() {
               isTesting,
               runConnectivityTest,
               showTestError,
-          } = useProviderConnectivityTestState({
-                                                   authIndex: form.authIndex,
-                                                   apiKey: form.apiKey,
-                                                   baseUrl,
-                                                   proxyUrl: form.proxyUrl,
-                                                   testModel,
-                                                   headers: form.headers,
-                                                   modelEntries: form.modelEntries,
-                                               })
-    const controlsDisabled = disabled || isTesting
+          }                         = useProviderConnectivityTestState({
+                                                                           authIndex: form.authIndex,
+                                                                           apiKey: form.apiKey,
+                                                                           baseUrl,
+                                                                           proxyUrl: form.proxyUrl,
+                                                                           testModel,
+                                                                           headers: form.headers,
+                                                                           modelEntries: form.modelEntries,
+                                                                       })
+    const controlsDisabled          = disabled || isTesting
 
     const runMetaConnectivityTest = async () => {
         if (isTesting) {
@@ -170,7 +176,7 @@ export function AiProvidersMetaEditPage() {
         }
 
         const customHeaders = buildHeaderObject(form.headers)
-        const apiKey = form.apiKey.trim()
+        const apiKey        = form.apiKey.trim()
         if ((!apiKey && !hasHeader(customHeaders, 'authorization')) || apiKey.toLowerCase().startsWith('dca:')) {
             showTestError(t('ai_providers.meta_test_key_required'))
             return

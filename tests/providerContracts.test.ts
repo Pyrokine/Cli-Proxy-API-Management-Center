@@ -1,5 +1,3 @@
-import {describe, expect, spyOn, test} from 'bun:test'
-
 import {
     buildInteractionsEndpoint,
     buildInteractionsProbePayload,
@@ -21,6 +19,7 @@ import {
     normalizeOpenAIProvider,
     normalizeProviderKeyConfig,
 } from '@/services/api/transformers'
+import {describe, expect, spyOn, test} from 'bun:test'
 
 describe('api-call token contract', () => {
     test('uses a draft token with the required placeholder', () => {
@@ -109,7 +108,7 @@ describe('provider mutation contract', () => {
         expect(request.index).toBe(3)
         expect(request['auth-index']).toBe('gemini-auth')
         expect(request.value).not.toHaveProperty('api-key')
-        expect(request.value).toMatchObject({priority: 9, weight: 0, prefix: ''})
+        expect(request.value).toMatchObject({ priority: 9, weight: 0, prefix: '' })
         expect(request.value).not.toHaveProperty('models')
         expect(request.value).not.toHaveProperty('excluded-models')
     })
@@ -276,7 +275,7 @@ describe('provider mutation contract', () => {
                 index: 0,
                 'auth-index': 'interactions-auth',
                 value: expect.objectContaining({ weight: 3 }),
-            }, {__authGeneration: apiClient.getAuthGeneration()})
+            }, { ...({ __authGeneration: apiClient.getAuthGeneration() }), mutationReadback: expect.any(Function) })
         } finally {
             get.mockRestore()
             patch.mockRestore()

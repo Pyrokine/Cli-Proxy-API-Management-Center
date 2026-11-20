@@ -12,7 +12,19 @@ type ModelMetadata = {
     family: string
 }
 
-const modelProviderOrder = ['GPT', 'Claude', 'Gemini', 'Meta', 'Kimi', 'Qwen', 'GLM', 'Grok', 'DeepSeek', 'MiniMax', 'Other']
+const modelProviderOrder = [
+    'GPT',
+    'Claude',
+    'Gemini',
+    'Meta',
+    'Kimi',
+    'Qwen',
+    'GLM',
+    'Grok',
+    'DeepSeek',
+    'MiniMax',
+    'Other',
+]
 
 const providerChannels: Record<string, string[]> = {
     GPT: ['codex', 'openai'],

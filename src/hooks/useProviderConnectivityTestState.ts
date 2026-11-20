@@ -74,23 +74,26 @@ export function useProviderConnectivityTestModel(
 }
 
 export function useProviderConnectivityTestState(input: ProviderConnectivityTestSignatureInput) {
-    const authGeneration               = useAuthStore(() => apiClient.getAuthGeneration())
-    const configSignature              = JSON.stringify([authGeneration, buildProviderConnectivityTestSignature(input)])
-    const { showNotification }         = useNotificationStore()
+    const authGeneration                = useAuthStore(() => apiClient.getAuthGeneration())
+    const configSignature               = JSON.stringify([
+                                                             authGeneration,
+                                                             buildProviderConnectivityTestSignature(input),
+                                                         ])
+    const { showNotification }          = useNotificationStore()
     const [testStatus, setTestStatus]   = useState<ProviderConnectivityTestStatus>('idle')
     const [testMessage, setTestMessage] = useState('')
     const [isTesting, setIsTesting]     = useState(false)
-    const previousConfigRef            = useRef<string | null>(configSignature)
-    const testRequestRef               = useRef<{authGeneration: number; configSignature: string} | null>(null)
-    const isCurrentConfig              = previousConfigRef.current === configSignature &&
-                                         authGeneration === apiClient.getAuthGeneration()
+    const previousConfigRef             = useRef<string | null>(configSignature)
+    const testRequestRef                = useRef<{ authGeneration: number; configSignature: string } | null>(null)
+    const isCurrentConfig               = previousConfigRef.current === configSignature &&
+                                          authGeneration === apiClient.getAuthGeneration()
 
     useEffect(() => {
         if (previousConfigRef.current === configSignature) {
             return
         }
         previousConfigRef.current = configSignature
-        testRequestRef.current = null
+        testRequestRef.current    = null
         setIsTesting(false)
         setTestStatus('idle')
         setTestMessage('')
@@ -98,7 +101,7 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
 
     useEffect(() => () => {
         previousConfigRef.current = null
-        testRequestRef.current = null
+        testRequestRef.current    = null
     }, [])
 
     const showTestError = useCallback(
@@ -123,11 +126,11 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
                 return
             }
 
-            const testRequest = {authGeneration, configSignature}
+            const testRequest      = { authGeneration, configSignature }
             testRequestRef.current = testRequest
-            const isCurrentTest = () => testRequestRef.current === testRequest &&
-                                        previousConfigRef.current === testRequest.configSignature &&
-                                        testRequest.authGeneration === apiClient.getAuthGeneration()
+            const isCurrentTest    = () => testRequestRef.current === testRequest &&
+                                           previousConfigRef.current === testRequest.configSignature &&
+                                           testRequest.authGeneration === apiClient.getAuthGeneration()
             setIsTesting(true)
             setTestStatus('loading')
             setTestMessage(messages.running)
@@ -137,7 +140,9 @@ export function useProviderConnectivityTestState(input: ProviderConnectivityTest
                 if (!isCurrentTest()) {
                     return
                 }
-                if (result.statusCode < 200 || result.statusCode >= 300) {
+                const bodyError = result.body !== null && typeof result.body === 'object' &&
+                                  'error' in result.body && result.body.error
+                if (result.statusCode < 200 || result.statusCode >= 300 || bodyError) {
                     const detail = getApiCallErrorMessage(result) || messages.unknownError
                     showTestError(`${messages.failed}: ${detail}`)
                     return
