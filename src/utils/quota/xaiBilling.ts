@@ -97,7 +97,10 @@ function parseStandardPayload(root: Record<string, unknown>): ParsedXaiQuota | n
             valueSource: parseValueSource(root.value_source),
             auxiliaryErrors: parseAuxiliaryErrors(root.auxiliary_errors),
         },
-        planType: planTier ?? planName ?? planCode,
+        planType: planTier ??
+                  planName ??
+                  planCode ??
+                  inferXaiPlanType(monthlyLimit, normalizeAmountUnit(stringValue(normalized.amount_unit))),
         planCode,
         planName,
         planTier,
@@ -242,7 +245,7 @@ function parseLegacyPayload(root: Record<string, unknown>): ParsedXaiQuota | nul
             valueSource: {},
             auxiliaryErrors: [],
         },
-        planType: planTier ?? planName ?? planCode,
+        planType: planTier ?? planName ?? planCode ?? inferXaiPlanType(monthlyLimit, legacyAmountUnit(sources)),
         planCode,
         planName,
         planTier,
@@ -502,4 +505,11 @@ function addAmounts(left: number | null, right: number | null): number | null {
 
 function subtractAmounts(total: number | null, part: number | null): number | null {
     return total !== null && part !== null ? Math.max(0, total - part) : null
+}
+
+function inferXaiPlanType(monthlyLimit: number | null, amountUnit: XaiAmountUnit): string | null {
+    if (amountUnit !== 'currency_minor') {
+        return null
+    }
+    return monthlyLimit === 150_000 ? 'supergrokheavy' : monthlyLimit === 15_000 ? 'supergrok' : null
 }

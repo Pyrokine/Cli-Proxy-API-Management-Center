@@ -148,7 +148,7 @@ interface KimiResetInfo {
     resetAtMs: number | null
 }
 
-function kimiResetInfo(data: Record<string, unknown>, nowMs: number): KimiResetInfo {
+function kimiResetInfo(data: Record<string, unknown>, nowMs: number | null): KimiResetInfo {
     for (const key of ['reset_at', 'resetAt', 'reset_time', 'resetTime']) {
         const raw = stringValue(data[key])
         if (!raw) {
@@ -158,11 +158,15 @@ function kimiResetInfo(data: Record<string, unknown>, nowMs: number): KimiResetI
         if (resetAtMs === null) {
             return { resetHint: raw, resetAtMs: null }
         }
-        const deltaSeconds = Math.floor((resetAtMs - nowMs) / 1000)
+        const deltaSeconds = nowMs === null ? 0 : Math.floor((resetAtMs - nowMs) / 1000)
         return {
             resetHint: deltaSeconds > 0 ? formatKimiResetDuration(deltaSeconds) : undefined,
             resetAtMs,
         }
+    }
+
+    if (nowMs === null) {
+        return { resetAtMs: null, resetHint: stringValue(data.reset_hint ?? data.resetHint) ?? undefined }
     }
 
     for (const key of ['reset_in', 'resetIn', 'ttl']) {
@@ -222,7 +226,7 @@ function toKimiRow(
     data: Record<string, unknown>,
     fallbackLabel: KimiRowLabel,
     id: string,
-    nowMs: number,
+    nowMs: number | null,
     duration: number | null = null,
     timeUnit?: unknown,
 ): KimiQuotaRow | null {
@@ -256,7 +260,7 @@ function toKimiRow(
     }
 }
 
-export function buildKimiQuotaRows(payload: unknown, nowMs = Date.now()): KimiQuotaRow[] {
+export function buildKimiQuotaRows(payload: unknown, nowMs: number | null = Date.now()): KimiQuotaRow[] {
     const root                 = asRecord(payload)
     const rows: KimiQuotaRow[] = []
     const limits               = root?.limits
@@ -294,14 +298,14 @@ export function buildKimiQuotaRows(payload: unknown, nowMs = Date.now()): KimiQu
         }
     }
 
-    const monthly = asRecord(asRecord(root?.usages)?.limit_month_total)
+    const monthly      = asRecord(asRecord(root?.usages)?.limit_month_total)
     const monthlyRatio = numberValue(monthly?.used_ratio)
     if (monthly && monthlyRatio !== null && monthlyRatio >= 0) {
         const used = Math.round(monthlyRatio * 100)
         if (Number.isSafeInteger(used)) {
             const row = toKimiRow(
-                {used, limit: 100, reset_time: monthly.reset_time},
-                {labelKey: 'kimi_quota.monthly_limit'}, 'monthly', nowMs,
+                { used, limit: 100, reset_time: monthly.reset_time },
+                { labelKey: 'kimi_quota.monthly_limit' }, 'monthly', nowMs,
             )
             if (row) {
                 rows.push(row)

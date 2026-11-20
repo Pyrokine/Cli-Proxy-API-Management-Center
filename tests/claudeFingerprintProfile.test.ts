@@ -1,16 +1,20 @@
+import type {ProviderFormState} from '@/components/providers/types'
+import {parseTextList} from '@/components/providers/utils'
+import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
+import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
+import {apiClient} from '@/services/api/client'
+import {buildClaudeConfigPatchPayload, providersApi} from '@/services/api/providers'
+import {
+    normalizeClaudeFingerprintProfile,
+    normalizeConfigResponse,
+    normalizeProviderKeyConfig,
+} from '@/services/api/transformers'
+import {useClaudeEditDraftStore} from '@/stores/useClaudeEditDraftStore'
+import type {ProviderKeyConfig} from '@/types'
+import {normalizeHeaderEntries} from '@/utils/headers'
 import {afterEach, describe, expect, spyOn, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 import {parse} from 'yaml'
-import {apiClient} from '@/services/api/client'
-import {buildClaudeConfigPatchPayload, providersApi} from '@/services/api/providers'
-import {normalizeClaudeFingerprintProfile, normalizeConfigResponse, normalizeProviderKeyConfig} from '@/services/api/transformers'
-import {parseTextList} from '@/components/providers/utils'
-import {normalizeHeaderEntries} from '@/utils/headers'
-import {normalizeModelEntriesForSignature} from '@/hooks/useProviderEditForm'
-import type {ProviderFormState} from '@/components/providers/types'
-import {useClaudeEditDraftStore} from '@/stores/useClaudeEditDraftStore'
-import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
-import type {ProviderKeyConfig} from '@/types'
 
 const original: ProviderKeyConfig = {
     apiKey: 'synthetic...masked',
@@ -32,14 +36,15 @@ describe('Claude fingerprint profile transport', () => {
     })
 
     test.each([
-        ['', ''],
-        [' CLAUDE-CODE-CLI ', 'claude-code-cli'],
-        [' OAuth-CLI ', 'claude-code-cli'],
-        ['future-profile', 'future-profile'],
-    ])('normalizes %j without discarding unknown values', (wire, expected) => {
+                  ['', ''],
+                  [' CLAUDE-CODE-CLI ', 'claude-code-cli'],
+                  [' OAuth-CLI ', 'claude-code-cli'],
+                  ['future-profile', 'future-profile'],
+              ])('normalizes %j without discarding unknown values', (wire, expected) => {
         const raw = { 'api-key': 'synthetic', 'fingerprint-profile': wire }
         expect(normalizeProviderKeyConfig(raw)?.fingerprintProfile).toBe(expected)
-        expect(normalizeConfigResponse({ 'claude-api-key': [raw] }).claudeApiKeys?.[0]?.fingerprintProfile).toBe(expected)
+        expect(normalizeConfigResponse({ 'claude-api-key': [raw] }).claudeApiKeys?.[0]?.fingerprintProfile).toBe(
+            expected)
     })
 
     test('keeps missing fields absent and rejects non-string wire values', () => {
@@ -52,22 +57,28 @@ describe('Claude fingerprint profile transport', () => {
     test('creates one Claude credential with a canonical profile', async () => {
         const post = spyOn(apiClient, 'post').mockResolvedValue({})
         await providersApi.createClaudeConfig({ ...original, fingerprintProfile: ' OAuth-CLI ' })
-        expect(post).toHaveBeenCalledWith('/claude-api-key', expect.objectContaining({ 'fingerprint-profile': 'claude-code-cli' }))
+        expect(post).toHaveBeenCalledWith(
+            '/claude-api-key',
+            expect.objectContaining({ 'fingerprint-profile': 'claude-code-cli' }),
+            { mutationReadback: expect.any(Function) },
+        )
         await providersApi.createClaudeConfig({ ...original, fingerprintProfile: '' })
         expect(post.mock.calls[1]?.[1]).toHaveProperty('fingerprint-profile', '')
     })
 
     test('patches only the profile with stable identity and preserves masked credentials', async () => {
         spyOn(providersApi, 'getClaudeConfigs').mockResolvedValue([
-            {...original, authIndex: 'claude:other-a'}, {...original, authIndex: 'claude:other-b'}, original,
-        ])
+                                                                      { ...original, authIndex: 'claude:other-a' },
+                                                                      { ...original, authIndex: 'claude:other-b' },
+                                                                      original,
+                                                                  ])
         const patch = spyOn(apiClient, 'patch').mockResolvedValue({})
         await providersApi.patchClaudeConfig(2, { ...original, fingerprintProfile: '' }, original)
         expect(patch).toHaveBeenCalledWith('/claude-api-key', {
             index: 2,
             'auth-index': 'claude:synthetic',
             value: { 'fingerprint-profile': '' },
-        }, {__authGeneration: apiClient.getAuthGeneration()})
+        }, { ...({ __authGeneration: apiClient.getAuthGeneration() }), mutationReadback: expect.any(Function) })
         expect(original.fingerprintProfile).toBe('claude-code-cli')
         expect(original.headers).toEqual({ Authorization: 'Bearer synthetic...masked' })
     })
@@ -81,65 +92,105 @@ describe('Claude fingerprint profile transport', () => {
     test('preserves unknown profiles on unrelated edits and sends deliberate replacements', () => {
         const unknown = { ...original, fingerprintProfile: 'future-profile' }
         expect(buildClaudeConfigPatchPayload({ ...unknown, prefix: 'edited' }, unknown)).toEqual({ prefix: 'edited' })
-        expect(buildClaudeConfigPatchPayload({ ...unknown, fingerprintProfile: '' }, unknown)).toEqual({ 'fingerprint-profile': '' })
+        expect(buildClaudeConfigPatchPayload({ ...unknown, fingerprintProfile: '' }, unknown))
+            .toEqual({ 'fingerprint-profile': '' })
     })
 
     test('propagates backend validation errors without reporting success', async () => {
         spyOn(providersApi, 'getClaudeConfigs').mockResolvedValue([original])
         spyOn(apiClient, 'patch').mockRejectedValue(new Error('Unsupported fingerprint-profile'))
-        await expect(providersApi.patchClaudeConfig(0, { ...original, fingerprintProfile: 'unknown' }, original))
+        expect(providersApi.patchClaudeConfig(0, { ...original, fingerprintProfile: 'unknown' }, original))
             .rejects.toThrow('Unsupported fingerprint-profile')
     })
 })
 
 describe('Claude fingerprint profile drafts and YAML', () => {
     test('shares the profile across edit/model route layers and clears it after both leave', () => {
-        const key = 'claude:synthetic-fingerprint-navigation'
+        const key   = 'claude:synthetic-fingerprint-navigation'
         const store = useClaudeEditDraftStore.getState()
         store.acquireDraft(key)
         expect(useClaudeEditDraftStore.getState().drafts[key].form.fingerprintProfile).toBe('')
-        store.setDraftForm(key, (form) => ({ ...form, authIndex: original.authIndex, fingerprintProfile: 'claude-code-cli' }))
+        store.setDraftForm(
+            key,
+            (form) => ({ ...form, authIndex: original.authIndex, fingerprintProfile: 'claude-code-cli' }),
+        )
         store.acquireDraft(key)
         store.setDraftForm(key, (form) => ({ ...form, modelEntries: [{ name: 'discovered', alias: '' }] }))
         store.releaseDraft(key)
-        expect(useClaudeEditDraftStore.getState().drafts[key].form).toMatchObject({
-            fingerprintProfile: 'claude-code-cli', authIndex: original.authIndex,
-            modelEntries: [{ name: 'discovered', alias: '' }],
-        })
+        expect(useClaudeEditDraftStore.getState().drafts[key].form).toMatchObject(
+            {
+                fingerprintProfile: 'claude-code-cli',
+                authIndex: original.authIndex,
+                modelEntries: [
+                    {
+                        name: 'discovered',
+                        alias: '',
+                    },
+                ],
+            })
         store.setDraftForm(key, (form) => ({ ...form, fingerprintProfile: '' }))
         expect(useClaudeEditDraftStore.getState().drafts[key].form.fingerprintProfile).toBe('')
         store.releaseDraft(key)
         expect(useClaudeEditDraftStore.getState().drafts[key]).toBeUndefined()
     })
 
-    test.each(['', 'claude-code-cli', 'oauth-cli', 'future-profile'])('preserves %j through visual YAML edits', (profile) => {
-        const source = `claude-api-key:\n  - api-key: synthetic\n    fingerprint-profile: ${JSON.stringify(profile)}\n    hidden-field: keep\n`
-        const decoded = decodeVisualConfigYaml(source)
-        const output = encodeVisualConfigYaml(source, { ...decoded.values, debug: true }, decoded.values, decoded.apiKeysStorage)
-        expect(parse(output)['claude-api-key'][0]).toEqual({
-            'api-key': 'synthetic', 'fingerprint-profile': profile, 'hidden-field': 'keep',
-        })
-    })
+    test.each(['', 'claude-code-cli', 'oauth-cli', 'future-profile'])(
+        'preserves %j through visual YAML edits',
+        (profile) => {
+            const source  = `claude-api-key:\n  - api-key: synthetic\n    fingerprint-profile: ${
+                JSON.stringify(profile)}\n    hidden-field: keep\n`
+            const decoded = decodeVisualConfigYaml(source)
+            const output  = encodeVisualConfigYaml(
+                source,
+                { ...decoded.values, debug: true },
+                decoded.values,
+                decoded.apiKeysStorage,
+            )
+            expect(parse(output)['claude-api-key'][0]).toEqual({
+                                                                   'api-key': 'synthetic',
+                                                                   'fingerprint-profile': profile,
+                                                                   'hidden-field': 'keep',
+                                                               })
+        },
+    )
 
     test('marks profile-only edits dirty and treats legacy spellings as equivalent', () => {
-        const source = readFileSync(new URL('../src/pages/AiProvidersClaudeEditLayout.tsx', import.meta.url), 'utf8')
-        const helpers = source.slice(source.indexOf('const normalizeCloakConfig'), source.indexOf('const buildEmptyForm'))
-        const compiled = new Bun.Transpiler({ loader: 'tsx' }).transformSync(helpers)
-        const signature = new Function(
-            'normalizeClaudeFingerprintProfile', 'normalizeHeaderEntries', 'normalizeModelEntriesForSignature', 'parseTextList',
+        const source                  = readFileSync(new URL(
+            '../src/pages/AiProvidersClaudeEditLayout.tsx',
+            import.meta.url,
+        ), 'utf8')
+        const helpers                 = source.slice(
+            source.indexOf('const normalizeCloakConfig'),
+            source.indexOf('const buildEmptyForm'),
+        )
+        const compiled                = new Bun.Transpiler({ loader: 'tsx' }).transformSync(helpers)
+        const signature               = new Function(
+            'normalizeClaudeFingerprintProfile',
+            'normalizeHeaderEntries',
+            'normalizeModelEntriesForSignature',
+            'parseTextList',
             `${compiled}; return buildClaudeSignature`,
-        )(normalizeClaudeFingerprintProfile, normalizeHeaderEntries, normalizeModelEntriesForSignature, parseTextList) as (form: ProviderFormState, model: string) => string
+        )(
+            normalizeClaudeFingerprintProfile,
+            normalizeHeaderEntries,
+            normalizeModelEntriesForSignature,
+            parseTextList,
+        ) as (form: ProviderFormState, model: string) => string
         const form: ProviderFormState = { apiKey: 'synthetic', headers: [], modelEntries: [], excludedText: '' }
-        const baseline = signature(form, '')
+        const baseline                = signature(form, '')
         expect(signature({ ...form, fingerprintProfile: '' }, '')).toBe(baseline)
         expect(signature({ ...form, fingerprintProfile: 'claude-code-cli' }, '')).not.toBe(baseline)
-        expect(signature({ ...form, fingerprintProfile: ' OAuth-CLI ' }, '')).toBe(signature({ ...form, fingerprintProfile: 'claude-code-cli' }, ''))
+        expect(signature({ ...form, fingerprintProfile: ' OAuth-CLI ' }, '')).toBe(signature(
+            {
+                ...form,
+                fingerprintProfile: 'claude-code-cli',
+            }, ''))
         expect(signature({ ...form, fingerprintProfile: 'future-profile' }, '')).not.toBe(baseline)
     })
 
     test('wires profile into dirty signatures, save payloads and unknown-value feedback', () => {
         const layout = readFileSync(new URL('../src/pages/AiProvidersClaudeEditLayout.tsx', import.meta.url), 'utf8')
-        const page = readFileSync(new URL('../src/pages/AiProvidersClaudeEditPage.tsx', import.meta.url), 'utf8')
+        const page   = readFileSync(new URL('../src/pages/AiProvidersClaudeEditPage.tsx', import.meta.url), 'utf8')
         expect(layout).toContain('fingerprintProfile: normalizeClaudeFingerprintProfile(form.fingerprintProfile)')
         expect(layout).toContain('fingerprintProfile: normalizeClaudeFingerprintProfile(data.fingerprintProfile)')
         expect(page).toContain('claude_fingerprint_profile_unknown')
@@ -152,7 +203,10 @@ describe('Claude fingerprint profile drafts and YAML', () => {
 
     test('provides matching profile messages in all four languages', () => {
         for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW']) {
-            const strings = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8')).ai_providers
+            const strings = JSON.parse(readFileSync(
+                new URL(`../src/i18n/locales/${locale}.json`, import.meta.url),
+                'utf8',
+            )).ai_providers
             for (const key of ['label', 'default', 'cli', 'hint', 'unknown']) {
                 expect(strings[`claude_fingerprint_profile_${key}`]).toBeString()
             }

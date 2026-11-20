@@ -65,14 +65,14 @@ export interface ClaudeResetGrant {
 }
 
 export type ClaudeResetGrants =
-    | {state: 'missing' | 'invalid'}
+    | { state: 'missing' | 'invalid' }
     | {
-        state: 'present'
-        eligible: boolean
-        grants: ClaudeResetGrant[]
-        weeklyResetsAt: string | null
-        cooldownUntil: string | null
-    }
+          state: 'present'
+          eligible: boolean
+          grants: ClaudeResetGrant[]
+          weeklyResetsAt: string | null
+          cooldownUntil: string | null
+      }
 
 export interface ClaudeQuotaState {
     status: 'idle' | 'loading' | 'success' | 'error'
@@ -86,6 +86,7 @@ export interface ClaudeQuotaState {
 
 // Quota state types
 export interface AntigravityQuotaGroup {
+    description?: string
     id: string
     label: string
     models: string[]

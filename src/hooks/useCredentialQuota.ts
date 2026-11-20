@@ -34,6 +34,7 @@ function fromAntigravity(state: AntigravityQuotaState): QuotaItem[] {
     return state.groups.map((g) => ({
         id: g.id,
         model: g.label,
+        detail: g.description,
         percent: Math.round(g.remainingFraction * 100),
         resetLabel: g.resetTime ? formatQuotaResetTime(g.resetTime) : undefined,
         resetAtMs: g.resetAtMs,
@@ -44,21 +45,41 @@ function fromAntigravity(state: AntigravityQuotaState): QuotaItem[] {
 }
 
 function fromUsedQuotaWindows(
-    state: Pick<ClaudeQuotaState, 'status' | 'windows'> | Pick<CodexQuotaState, 'status' | 'windows'>,
+    state: Pick<ClaudeQuotaState, 'status' | 'windows' | 'extraUsage'> | Pick<CodexQuotaState, 'status' | 'windows'>,
 ): QuotaItem[] {
     if (state.status !== 'success') {
         return []
     }
-    return state.windows
-                .filter((window) => window.usedPercent !== null || window.id === 'cloud-session-credits')
-                .map((window) => ({
-                    id: window.id,
-                    model: window.label,
-                    percent: window.usedPercent === null ? null : Math.max(0, 100 - window.usedPercent),
-                    resetLabel: window.resetLabel || undefined,
-                    resetAtMs: window.resetAtMs,
-                    periodHours: window.periodHours,
-                }))
+    const items: QuotaItem[] = state.windows
+                                    .filter((window) => window.usedPercent !==
+                                                        null ||
+                                                        window.id ===
+                                                        'cloud-session-credits')
+                                    .map((window) => ({
+                                        id: window.id,
+                                        model: window.label,
+                                        percent: window.usedPercent === null ?
+                                                 null :
+                                                 Math.max(0, 100 - window.usedPercent),
+                                        resetLabel: window.resetLabel || undefined,
+                                        resetAtMs: window.resetAtMs,
+                                        periodHours: window.periodHours,
+                                    }))
+    if ('extraUsage' in state && state.extraUsage) {
+        const extra = state.extraUsage
+        const money = new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD' })
+        items.push({
+                       id: 'extra-usage',
+                       model: i18n.t('claude_quota.extra_usage_label'),
+                       percent: extra.is_enabled && extra.utilization !== null ?
+                                Math.max(0, Math.min(100, 100 - extra.utilization)) :
+                                null,
+                       detail: `${i18n.t(extra.is_enabled ? 'common.enabled' : 'common.disabled')} · ${money.format(
+                           extra.used_credits / 100)} / ${money.format(extra.monthly_limit / 100)}`,
+                       showReset: false,
+                   })
+    }
+    return items
 }
 
 export function buildDevinQuotaItems(state: DevinQuotaState): QuotaItem[] {
@@ -69,15 +90,17 @@ export function buildDevinQuotaItems(state: DevinQuotaState): QuotaItem[] {
         if (window.remainingPercent === null) {
             return []
         }
-        return [{
-            id: `devin-${window.id}`,
-            model: i18n.t(`devin_quota.${window.id}_limit`, {
-                defaultValue: window.id === 'daily' ? 'Daily limit' : 'Weekly limit',
-            }),
-            percent: Math.round(window.remainingPercent),
-            resetAtMs: window.resetAtMs,
-            periodHours: window.periodHours,
-        }]
+        return [
+            {
+                id: `devin-${window.id}`,
+                model: i18n.t(`devin_quota.${window.id}_limit`, {
+                    defaultValue: window.id === 'daily' ? 'Daily limit' : 'Weekly limit',
+                }),
+                percent: Math.round(window.remainingPercent),
+                resetAtMs: window.resetAtMs,
+                periodHours: window.periodHours,
+            },
+        ]
     })
 }
 
@@ -152,7 +175,7 @@ export function buildXaiQuotaItems(state: XaiQuotaState): QuotaItem[] {
                            detail: weeklyUsed !== null ? i18n.t('xai_quota.used_percent', {
                                percent: Math.round(weeklyUsed),
                                defaultValue: '{{percent}}% used',
-                           }) : i18n.t('xai_quota.usage_unavailable', {defaultValue: 'Usage unavailable'}),
+                           }) : i18n.t('xai_quota.usage_unavailable', { defaultValue: 'Usage unavailable' }),
                            resetLabel: state.billing.periodEnd ?
                                        formatQuotaResetTime(state.billing.periodEnd) :
                                        undefined,
@@ -173,7 +196,7 @@ export function buildXaiQuotaItems(state: XaiQuotaState): QuotaItem[] {
                        percent: null,
                        showReset: false,
                        detail: used === null ?
-                               i18n.t('xai_quota.usage_unavailable', {defaultValue: 'Usage unavailable'}) :
+                               i18n.t('xai_quota.usage_unavailable', { defaultValue: 'Usage unavailable' }) :
                                i18n.t('xai_quota.used_percent', {
                                    percent: Math.round(Math.max(0, Math.min(100, used))),
                                    defaultValue: '{{percent}}% used',
@@ -181,10 +204,10 @@ export function buildXaiQuotaItems(state: XaiQuotaState): QuotaItem[] {
                    })
     }
 
-    const hasMonthlyData = state.billing.usedPercent !== null ||
-                           state.billing.monthlyLimit !== null ||
-                           state.billing.used !== null ||
-                           Boolean(state.billing.billingPeriodEnd)
+    const hasMonthlyData         = state.billing.usedPercent !== null ||
+                                   state.billing.monthlyLimit !== null ||
+                                   state.billing.used !== null ||
+                                   Boolean(state.billing.billingPeriodEnd)
     const limit                  = formatXaiAmount(
         state.billing.monthlyLimit,
         state.billing.amountUnit,
@@ -209,9 +232,9 @@ export function buildXaiQuotaItems(state: XaiQuotaState): QuotaItem[] {
                     undefined,
         resetAtMs: resolveResetMs([state.billing.billingPeriodEnd]),
     }
-    const monthlyItems = hasMonthlyData &&
-                         !(items.length > 0 && state.billing.monthlyLimit === 0 && state.billing.used === 0) ?
-                         [monthlyItem] : []
+    const monthlyItems           = hasMonthlyData &&
+                                   !(items.length > 0 && state.billing.monthlyLimit === 0 && state.billing.used === 0) ?
+        [monthlyItem] : []
 
     if (state.billing.onDemandEnabled === false || state.billing.onDemandCap === 0) {
         monthlyItem.detail = [

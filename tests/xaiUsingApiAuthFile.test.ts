@@ -1,9 +1,5 @@
+import {applyAuthFileUsingApi, readAuthFileUsingApi, supportsAuthFileUsingApi} from '@/features/authFiles/constants'
 import {describe, expect, test} from 'bun:test'
-import {
-    applyAuthFileUsingApi,
-    readAuthFileUsingApi,
-    supportsAuthFileUsingApi,
-} from '@/features/authFiles/constants'
 
 describe('xAI auth-file using_api', () => {
     test('is exposed only for xAI aliases', () => {

@@ -14,9 +14,13 @@ describe('Codex reset credits', () => {
     for (const item of sharedCases.cases) {
         test(`matches the backend eligibility contract: ${item.name}`, () => {
             const probe = parseCodexResetCreditProbe({
-                purpose: 'codex_reset_credit', auth_index: 'synthetic-index', generation: 1,
-                checked_at: sharedCases.checked_at, availability: item.expected, data: item.data,
-            }, 'synthetic-index')
+                                                         purpose: 'codex_reset_credit',
+                                                         auth_index: 'synthetic-index',
+                                                         generation: 1,
+                                                         checked_at: sharedCases.checked_at,
+                                                         availability: item.expected,
+                                                         data: item.data,
+                                                     }, 'synthetic-index')
             if (item.expected === 'error') {
                 expect(probe).toBeNull()
             } else {
@@ -26,24 +30,32 @@ describe('Codex reset credits', () => {
     }
 
     test('recomputes expiration at each current check rather than retaining yesterday\'s expiry state', () => {
-        const details = {available_count: 1, credits: [{id: 'synthetic-expiring', reset_type: 'codex_rate_limits',
-            status: 'available', expires_at: '2026-10-21T12:00:00Z', expiryState: 'valid'}]}
+        const details   = {
+            available_count: 1, credits: [
+                {
+                    id: 'synthetic-expiring', reset_type: 'codex_rate_limits',
+                    status: 'available', expires_at: '2026-10-21T12:00:00Z', expiryState: 'valid',
+                },
+            ],
+        }
         const yesterday = resolveCodexResetCredits(null, details, Date.parse('2026-10-20T12:00:00Z'))
-        const today = resolveCodexResetCredits(null, details, Date.parse('2026-10-21T12:00:00Z'))
+        const today     = resolveCodexResetCredits(null, details, Date.parse('2026-10-21T12:00:00Z'))
         expect(yesterday.credits[0]?.expiryState).toBe('valid')
         expect(yesterday.availability).toBe('available')
-        expect(today.availableCount).toMatchObject({state: 'known', value: 1})
+        expect(today.availableCount).toMatchObject({ state: 'known', value: 1 })
         expect(today.credits[0]?.expiryState).toBe('expired')
         expect(today.availability).toBe('conflict')
     })
 
     test('awaits a current count query before dispatching a consuming action', async () => {
-        let queries = 0
-        let consumes = 0
+        let queries        = 0
+        let consumes       = 0
         const availability = await runCodexResetCreditAction(async () => {
             queries += 1
-            return resolveCodexResetCredits({available_count: 0}, null).availableCount
-        }, async () => { consumes += 1 })
+            return resolveCodexResetCredits({ available_count: 0 }, null).availableCount
+        }, async () => {
+            consumes += 1
+        })
         expect(availability).toBe('none')
         expect(queries).toBe(1)
         expect(consumes).toBe(0)
@@ -228,7 +240,7 @@ describe('Codex reset credits', () => {
     })
 
     test('rechecks owned credits before executing the confirmed action', async () => {
-        const initiallyAvailable = resolveCodexResetCredits({available_count: 1, applicable_available_count: 0}, null)
+        const initiallyAvailable = resolveCodexResetCredits({ available_count: 1, applicable_available_count: 0 }, null)
             .availableCount
         expect(canUseCodexResetCredit(initiallyAvailable)).toBeTrue()
         let allowedCalls = 0
@@ -242,8 +254,9 @@ describe('Codex reset credits', () => {
 
         let current = initiallyAvailable
         expect(codexResetCreditAvailability(current)).toBe('available')
-        current = resolveCodexResetCredits({available_count: 0, applicable_available_count: 1}, null)
-            .availableCount
+        current                   =
+            resolveCodexResetCredits({ available_count: 0, applicable_available_count: 1 }, null)
+                .availableCount
         let changedAfterOpenCalls = 0
         expect(await runCodexResetCreditAction(
             () => current,
@@ -253,11 +266,11 @@ describe('Codex reset credits', () => {
         )).toBe('none')
         expect(changedAfterOpenCalls).toBe(0)
 
-        const blocked = [
-            ['none', resolveCodexResetCredits({available_count: 0}, null).availableCount],
-            ['missing', resolveCodexResetCredits({applicable_available_count: 1}, null).availableCount],
-            ['invalid', resolveCodexResetCredits({available_count: 'invalid'}, null).availableCount],
-            ['conflict', resolveCodexResetCredits({available_count: 1}, {available_count: 2}).availableCount],
+        const blocked   = [
+            ['none', resolveCodexResetCredits({ available_count: 0 }, null).availableCount],
+            ['missing', resolveCodexResetCredits({ applicable_available_count: 1 }, null).availableCount],
+            ['invalid', resolveCodexResetCredits({ available_count: 'invalid' }, null).availableCount],
+            ['conflict', resolveCodexResetCredits({ available_count: 1 }, { available_count: 2 }).availableCount],
         ] as const
         let actionCalls = 0
         for (const [expected, current] of blocked) {
@@ -276,18 +289,20 @@ describe('Codex reset credits', () => {
 
 describe('Codex account credits', () => {
     test('shows only a returned finite balance or an explicit unlimited flag', () => {
-        expect(normalizeCodexAccountCredits({balance: 0, unlimited: false})).toEqual({
-            balance: '0', unlimited: false,
-        })
-        expect(normalizeCodexAccountCredits({balance: ' 12.50 ', unlimited: true})).toEqual({
-            balance: '12.50', unlimited: true,
-        })
+        expect(normalizeCodexAccountCredits({ balance: 0, unlimited: false })).toEqual({
+                                                                                           balance: '0',
+                                                                                           unlimited: false,
+                                                                                       })
+        expect(normalizeCodexAccountCredits({ balance: ' 12.50 ', unlimited: true })).toEqual({
+                                                                                                  balance: '12.50',
+                                                                                                  unlimited: true,
+                                                                                              })
         for (const value of [-1, '-2', 'unknown', Infinity]) {
-            expect(normalizeCodexAccountCredits({balance: value})).toEqual({
-                balance: null, unlimited: false,
-            })
+            expect(normalizeCodexAccountCredits({ balance: value })).toEqual({
+                                                                                 balance: null, unlimited: false,
+                                                                             })
         }
-        expect(normalizeCodexAccountCredits(null)).toEqual({balance: null, unlimited: false})
-        expect(normalizeCodexAccountCredits({unlimited: 'true'})).toEqual({balance: null, unlimited: false})
+        expect(normalizeCodexAccountCredits(null)).toEqual({ balance: null, unlimited: false })
+        expect(normalizeCodexAccountCredits({ unlimited: 'true' })).toEqual({ balance: null, unlimited: false })
     })
 })

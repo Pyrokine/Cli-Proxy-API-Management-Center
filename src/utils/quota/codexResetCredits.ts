@@ -159,12 +159,15 @@ const normalizeCredit = (value: unknown, index: number, nowMs: number): Normaliz
     if (own(record, 'expiresAt')) {
         expiryValues.push(record.expiresAt)
     }
-    const normalizedExpiryValues                              = expiryValues.map((item) => stringValue(item))
-    const uniqueExpiryValues                                  = new Set(normalizedExpiryValues.filter((item): item is string => item !==
-                                                                                                                                null))
-    const expiresAt                                           = uniqueExpiryValues.size === 1 ?
-                                                                [...uniqueExpiryValues][0]! :
-                                                                null
+    const normalizedExpiryValues = expiryValues.map((item) => stringValue(item))
+
+    const uniqueExpiryValues = new Set(normalizedExpiryValues.filter((item): item is string => item !==
+                                                                                               null))
+
+    const expiresAt = uniqueExpiryValues.size === 1 ?
+                      [...uniqueExpiryValues][0]! :
+                      null
+
     let expiryState: CodexRateLimitResetCredit['expiryState'] = 'missing'
     if (expiryValues.length > 0) {
         const expiresAtMs = expiresAt === null ? Number.NaN : Date.parse(expiresAt)
@@ -224,9 +227,9 @@ export function normalizeCodexResetCreditsPayload(
     const hasNoFields                          = Object.keys(record).length === 0
     let invalidCreditEntries                   = own(record, 'credits') && !Array.isArray(record.credits)
     const credits: CodexRateLimitResetCredit[] = []
-    let hasAvailableCredit = false
-    let hasUnavailableCredit = false
-    let hasInvalidExpiry = false
+    let hasAvailableCredit                     = false
+    let hasUnavailableCredit                   = false
+    let hasInvalidExpiry                       = false
     if (Array.isArray(record.credits)) {
         record.credits.forEach((item, index) => {
             const normalized = normalizeCredit(item, index, nowMs)
@@ -236,7 +239,8 @@ export function normalizeCodexResetCreditsPayload(
                 credits.push(normalized.credit)
                 hasInvalidExpiry ||= normalized.credit.expiryState === 'invalid'
                 hasUnavailableCredit ||= normalized.credit.expiryState === 'expired'
-                hasAvailableCredit ||= normalized.credit.expiryState === 'valid' || normalized.credit.expiryState === 'missing'
+                hasAvailableCredit ||=
+                    normalized.credit.expiryState === 'valid' || normalized.credit.expiryState === 'missing'
             }
         })
     }
@@ -251,7 +255,9 @@ export function normalizeCodexResetCreditsPayload(
         ),
         credits,
         payloadState: (hasExpectedShape || hasNoFields) && !invalidCreditEntries ? 'valid' : 'invalid',
-        creditAvailability: hasInvalidExpiry ? 'invalid' : hasUnavailableCredit && !hasAvailableCredit ? 'conflict' : undefined,
+        creditAvailability: hasInvalidExpiry ?
+                            'invalid' :
+                            hasUnavailableCredit && !hasAvailableCredit ? 'conflict' : undefined,
         detailsState: !own(record, 'credits')
                       ? 'missing'
                       : invalidCreditEntries
@@ -330,7 +336,14 @@ export const canUseCodexResetCredit = (
 ): boolean => codexResetCreditAvailability(availableCount) === 'available'
 
 export async function runCodexResetCreditAction(
-    readAvailableCount: () => CodexResetCreditCountState | null | undefined | Promise<CodexResetCreditCountState | null | undefined>,
+    readAvailableCount: () =>
+        CodexResetCreditCountState |
+        null |
+        undefined |
+        Promise<
+            CodexResetCreditCountState |
+            null |
+            undefined>,
     action: () => Promise<void>,
 ): Promise<CodexResetCreditAvailability> {
     const availability = codexResetCreditAvailability(await readAvailableCount())
@@ -367,11 +380,11 @@ export function resolveCodexResetCredits(
               details.payloadState === 'invalid' ? invalidCount('details') : details.applicableAvailableCount
 
     const availableCount = mergeCountStates(usageAvailableCount, detailsAvailableCount)
-    let availability = codexResetCreditAvailability(availableCount)
+    let availability     = codexResetCreditAvailability(availableCount)
     if (availability === 'available') {
         availability = usage.creditAvailability === 'invalid' || details.creditAvailability === 'invalid'
-            ? 'invalid'
-            : usage.creditAvailability ?? details.creditAvailability ?? availability
+                       ? 'invalid'
+                       : usage.creditAvailability ?? details.creditAvailability ?? availability
     }
     return {
         availableCount,
@@ -384,10 +397,21 @@ export function resolveCodexResetCredits(
 
 export function parseCodexResetCreditProbe(payload: unknown, authIndex: string): CodexResetCreditProbe | null {
     const response = asRecord(payload)
-    const data = asRecord(response?.data)
-    if (!response || !data || response.purpose !== 'codex_reset_credit' || response.auth_index !== authIndex ||
-        typeof response.generation !== 'number' || !Number.isSafeInteger(response.generation) || response.generation < 1 ||
-        typeof response.checked_at !== 'string' || !Number.isFinite(Date.parse(response.checked_at)) ||
+    const data     = asRecord(response?.data)
+    if (!response ||
+        !data ||
+        response.purpose !==
+        'codex_reset_credit' ||
+        response.auth_index !==
+        authIndex ||
+        typeof response.generation !==
+        'number' ||
+        !Number.isSafeInteger(response.generation) ||
+        response.generation <
+        1 ||
+        typeof response.checked_at !==
+        'string' ||
+        !Number.isFinite(Date.parse(response.checked_at)) ||
         (typeof data.rate_limit_reset_credits_error === 'string' && data.rate_limit_reset_credits_error.trim())) {
         return null
     }
@@ -399,5 +423,5 @@ export function parseCodexResetCreditProbe(payload: unknown, authIndex: string):
     if (response.availability !== resolved.availability) {
         return null
     }
-    return {...resolved, generation: response.generation, checkedAt: response.checked_at}
+    return { ...resolved, generation: response.generation, checkedAt: response.checked_at }
 }

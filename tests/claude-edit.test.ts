@@ -1,6 +1,6 @@
-import {describe, expect, test} from 'bun:test';
 import {resolveProviderDraftInitAction} from '@/hooks/providerEditLayoutState';
 import {buildClaudeConfigPatchPayload, buildClaudeConfigPatchRequest} from '@/services/api/providers';
+import {describe, expect, test} from 'bun:test';
 
 describe('resolveProviderDraftInitAction', () => {
     test('waits for edit data before seeding a draft', () => {

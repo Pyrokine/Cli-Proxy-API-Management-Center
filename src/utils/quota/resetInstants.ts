@@ -6,7 +6,7 @@ export function parseIsoToMs(value: unknown): number | null {
     if (!trimmed) {
         return null
     }
-    const normalized = trimmed.replace(/(?<microseconds>\.\d{6})\d+/, '$<microseconds>')
+    const normalized = trimmed.replace(/(?<fraction>\.\d{3})\d+/, '$1')
     const parsed     = new Date(normalized).getTime()
     return Number.isFinite(parsed) ? parsed : null
 }

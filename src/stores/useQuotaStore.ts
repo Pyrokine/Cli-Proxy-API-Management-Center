@@ -2,6 +2,7 @@
  * Quota cache that survives route switches.
  */
 
+import type {PluginQuotaResult} from '@/components/credentials/pluginQuota'
 import type {
     AntigravityQuotaState,
     ClaudeQuotaState,
@@ -13,7 +14,6 @@ import type {
     QuotaCacheMetadata,
     XaiQuotaState,
 } from '@/types'
-import type {PluginQuotaResult} from '@/components/credentials/pluginQuota'
 import {create} from 'zustand'
 
 interface QuotaSubjectVersion {
@@ -37,16 +37,17 @@ type QuotaSnapshotCommitResult =
     | 'invalid_backend_version'
     | 'older_backend_version'
 
-export const quotaRequestClaimSignature = (claim: QuotaRequestClaim): string => JSON.stringify([
-                                                                                                   claim.connectionGeneration,
-                                                                                                   claim.cacheGeneration,
-                                                                                                   Object.entries(claim.subjectGenerations)
-                                                                                                         .sort((
-                                                                                                                   [left],
-                                                                                                                   [right],
-                                                                                                               ) => left.localeCompare(
-                                                                                                             right)),
-                                                                                               ])
+export const quotaRequestClaimSignature = (claim: QuotaRequestClaim): string => JSON.stringify(
+    [
+        claim.connectionGeneration,
+        claim.cacheGeneration,
+        Object.entries(claim.subjectGenerations)
+              .sort((
+                        [left],
+                        [right],
+                    ) => left.localeCompare(
+                  right)),
+    ])
 
 export type QuotaCachePayload =
     | { provider: 'antigravity'; value: AntigravityQuotaState }
@@ -165,12 +166,12 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
             return
         }
         set((state) => {
-            const subjectVersions = {...state.subjectVersions}
+            const subjectVersions = { ...state.subjectVersions }
             for (const key of normalized) {
-                const current = subjectVersions[key] ?? emptySubjectVersion()
-                subjectVersions[key] = {...current, localGeneration: current.localGeneration + 1}
+                const current        = subjectVersions[key] ?? emptySubjectVersion()
+                subjectVersions[key] = { ...current, localGeneration: current.localGeneration + 1 }
             }
-            return {subjectVersions}
+            return { subjectVersions }
         })
     },
     clearQuotaSubjects: (keys) => {
@@ -462,7 +463,7 @@ export const reconcileQuotaSubjects = (
                 lastError: 'Quota status response omitted this credential',
                 lastErrorAt: omittedAt,
             }
-            changed            = true
+            changed             = true
         }
         return changed ? { quotaMetadata } : state
     })

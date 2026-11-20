@@ -18,14 +18,14 @@ function parseGrant(value: unknown): ClaudeResetGrant | null {
         return null
     }
     const total = grant.resets_total
-    const left = grant.resets_left
+    const left  = grant.resets_left
     if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0 ||
         typeof left !== 'number' || !Number.isSafeInteger(left) || left < 0 || left > total) {
         return null
     }
-    const startsAt = timestamp(grant.starts_at)
-    const endsAt = timestamp(grant.ends_at)
-    const paused = grant.paused ?? false
+    const startsAt  = timestamp(grant.starts_at)
+    const endsAt    = timestamp(grant.ends_at)
+    const paused    = grant.paused ?? false
     const usableNow = grant.usable_now ?? false
     if (startsAt === undefined || endsAt === undefined || typeof paused !== 'boolean' ||
         typeof usableNow !== 'boolean' ||
@@ -34,35 +34,38 @@ function parseGrant(value: unknown): ClaudeResetGrant | null {
     }
     const label = typeof grant.label === 'string' ? grant.label
         // eslint-disable-next-line no-control-regex
-        .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : ''
-    return {id: grant.id, label, resetsTotal: total, resetsLeft: left, startsAt, endsAt, paused, usableNow}
+                                                         .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(
+            /\s+/g,
+            ' ',
+        ).trim().slice(0, 120) : ''
+    return { id: grant.id, label, resetsTotal: total, resetsLeft: left, startsAt, endsAt, paused, usableNow }
 }
 
 export function parseClaudeResetGrants(value: unknown): ClaudeResetGrants {
     if (value === undefined || value === null) {
-        return {state: 'missing'}
+        return { state: 'missing' }
     }
     const block = record(value)
     if (!block || typeof block.eligible !== 'boolean') {
-        return {state: 'invalid'}
+        return { state: 'invalid' }
     }
-    const rawGrants = block.grants ?? []
+    const rawGrants      = block.grants ?? []
     const weeklyResetsAt = timestamp(block.weekly_resets_at)
-    const cooldownUntil = timestamp(block.cooldown_until)
+    const cooldownUntil  = timestamp(block.cooldown_until)
     if (!Array.isArray(rawGrants) || weeklyResetsAt === undefined || cooldownUntil === undefined) {
-        return {state: 'invalid'}
+        return { state: 'invalid' }
     }
     const grants: ClaudeResetGrant[] = []
-    const seen = new Set<string>()
-    let remaining = 0
+    const seen                       = new Set<string>()
+    let remaining                    = 0
     for (const rawGrant of rawGrants) {
         const grant = parseGrant(rawGrant)
         if (!grant || seen.has(grant.id) || !Number.isSafeInteger(remaining + grant.resetsLeft)) {
-            return {state: 'invalid'}
+            return { state: 'invalid' }
         }
         seen.add(grant.id)
         remaining += grant.resetsLeft
         grants.push(grant)
     }
-    return {state: 'present', eligible: block.eligible, grants, weeklyResetsAt, cooldownUntil}
+    return { state: 'present', eligible: block.eligible, grants, weeklyResetsAt, cooldownUntil }
 }
