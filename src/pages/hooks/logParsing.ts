@@ -2,15 +2,27 @@ import {HTTP_METHODS, type HttpMethod, type LogLevel, type LogState, type Parsed
 
 const HTTP_METHOD_REGEX = new RegExp(`\\b(?<method>${HTTP_METHODS.join('|')})\\b`)
 
-const LOG_TIMESTAMP_REGEX         = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)]?/
-const LOG_LEVEL_REGEX             = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal|panic)\s*]?(?=\s|\[|$)\s*/i
-const LOG_SOURCE_REGEX            = /^\[(?<source>[^\]\s]+\.go:\d+)]/
-const LOG_LATENCY_REGEX           = /\b\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h)(?:\s*\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h))*\b/i
-const LOG_IPV4_REGEX              = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
-const LOG_IPV6_REGEX              = /(?<![\w:])(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}(?![\w:])/i
-const LOG_REQUEST_ID_REGEX        = /^(?<id>[a-f0-9]{8}|--------)$/i
-const LOG_NAMED_REQUEST_ID_REGEX  = /\brequest[_-]?id=(?<id>[A-Za-z0-9][A-Za-z0-9._:-]{0,127})\b/i
-const LOG_TIME_OF_DAY_REGEX       = /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
+const LOG_TIMESTAMP_REGEX =
+          /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:[Zz]|[+-]\d{2}:?\d{2})?)]?/
+
+const LOG_LEVEL_REGEX = /^\[?(?<level>trace|debug|info|warn|warning|error|fatal|panic)\s*]?(?=\s|\[|$)\s*/i
+
+const LOG_SOURCE_REGEX = /^\[(?<source>[^\]\s]+\.go:\d+)]/
+
+const LOG_LATENCY_REGEX = /\b\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h)(?:\s*\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|m|h))*\b/i
+
+const LOG_IPV4_REGEX = /\b(?:\d{1,3}\.){3}\d{1,3}\b/
+
+const LOG_IPV6_REGEX = /(?<![\w:])(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}(?![\w:])/i
+
+const LOG_REQUEST_ID_REGEX = /^(?<id>[a-f0-9]{32}|[a-f0-9]{8}|--------)$/i
+
+const LOG_REQUEST_ID_PREFIX_REGEX = /^\[(?<id>[a-f0-9]{32}|[a-f0-9]{8}|--------)]\s*/i
+
+const LOG_NAMED_REQUEST_ID_REGEX = /\brequest[_-]?id=(?<id>[A-Za-z0-9][A-Za-z0-9._:-]{0,127})\b/i
+
+const LOG_TIME_OF_DAY_REGEX = /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
+
 const GIN_TIMESTAMP_SEGMENT_REGEX =
           /^\[GIN]\s+(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{2})\s*-\s*(?<time>\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s*$/
 
@@ -178,7 +190,7 @@ const extractHttpMethodAndPath = (text: string): { method?: HttpMethod; path?: s
     const after     = text.slice((match.index ?? 0) + match[0].length).trim()
     const pathMatch = after.match(/^(?<quoted>"[^"]*"|'[^']*'|`[^`]*`)|^(?<absolute>\/\S*)/)
     const path      = normalizeLogPath(pathMatch?.groups?.quoted ?? pathMatch?.groups?.absolute)
-    return path ? {method: match.groups!.method as HttpMethod, path} : {}
+    return path ? { method: match.groups!.method as HttpMethod, path } : {}
 }
 
 const splitLogSegments = (text: string): string[] => {
@@ -202,34 +214,47 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
     let remaining = raw.trim()
 
     let timestamp: string | undefined
-    const tsMatch = remaining.match(LOG_TIMESTAMP_REGEX)
-    if (tsMatch) {
-        timestamp = tsMatch.groups!.ts
-        remaining = remaining.slice(tsMatch[0].length).trim()
-    }
-
     let requestId: string | undefined
-    const requestIdMatch = remaining.match(/^\[(?<id>[a-f0-9]{8}|--------)]\s*/i)
-    if (requestIdMatch) {
-        const id = requestIdMatch.groups!.id
-        if (!/^-+$/.test(id)) {
-            requestId = id
-        }
-        remaining = remaining.slice(requestIdMatch[0].length).trim()
-    }
-
     let level: LogLevel | undefined
-    const lvlMatch = remaining.match(LOG_LEVEL_REGEX)
-    if (lvlMatch) {
-        level     = extractLogLevel(lvlMatch.groups!.level)
-        remaining = remaining.slice(lvlMatch[0].length).trim()
-    }
-
     let source: string | undefined
-    const sourceMatch = remaining.match(LOG_SOURCE_REGEX)
-    if (sourceMatch) {
-        source    = sourceMatch.groups!.source
-        remaining = remaining.slice(sourceMatch[0].length).trim()
+
+    // A forwarded log can repeat its structured header before the request fields.
+    while (remaining) {
+        const tsMatch = remaining.match(LOG_TIMESTAMP_REGEX)
+        if (tsMatch) {
+            timestamp ??= tsMatch.groups!.ts
+            remaining = remaining.slice(tsMatch[0].length).trim()
+        }
+
+        const requestIdMatch = remaining.match(LOG_REQUEST_ID_PREFIX_REGEX)
+        if (requestIdMatch) {
+            const id = requestIdMatch.groups!.id
+            if (!/^-+$/.test(id)) {
+                requestId = id
+            }
+            remaining = remaining.slice(requestIdMatch[0].length).trim()
+        }
+
+        const lvlMatch = remaining.match(LOG_LEVEL_REGEX)
+        if (lvlMatch) {
+            level     = extractLogLevel(lvlMatch.groups!.level)
+            remaining = remaining.slice(lvlMatch[0].length).trim()
+        }
+
+        const sourceMatch = remaining.match(LOG_SOURCE_REGEX)
+        if (sourceMatch) {
+            source    = sourceMatch.groups!.source
+            remaining = remaining.slice(sourceMatch[0].length).trim()
+        }
+
+        const nestedTimestamp = remaining.match(LOG_TIMESTAMP_REGEX)
+        if (!nestedTimestamp) {
+            break
+        }
+        const nestedHeader = remaining.slice(nestedTimestamp[0].length).trim()
+        if (!LOG_REQUEST_ID_PREFIX_REGEX.test(nestedHeader) && !LOG_LEVEL_REGEX.test(nestedHeader)) {
+            break
+        }
     }
 
     let statusCode: number | undefined
@@ -324,6 +349,7 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
             const parsed = extractHttpMethodAndPath(segments[methodIndex])
             method       = parsed.method
             path         = parsed.path
+            // noinspection RegExpUnnecessaryNonCapturingGroup
             const prefix = segments[methodIndex].match(
                 new RegExp(`^(?:${HTTP_METHODS.join('|')})\\s+(?:"[^"]*"|/\\S+)`),
             )
@@ -340,7 +366,7 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
         if (sourceIndex >= 0) {
             const match = segments[sourceIndex].match(LOG_SOURCE_REGEX)
             if (match?.groups) {
-                source = match.groups.source
+                source                = match.groups.source
                 segments[sourceIndex] = segments[sourceIndex].slice(match[0].length).trim()
                 if (!segments[sourceIndex]) {
                     consumed.add(sourceIndex)
@@ -403,15 +429,15 @@ export function createLogParserCache() {
     type Entry = ParsedLogLine & { id: number }
     let previous = new Map<number, Entry>()
     return (state: LogState): Entry[] => {
-        const next = new Map<number, Entry>()
+        const next   = new Map<number, Entry>()
         const parsed = state.buffer.map((raw, index) => {
-            const id = state.bufferStart + index
+            const id     = state.bufferStart + index
             const cached = previous.get(id)
-            const entry = cached?.raw === raw ? cached : { ...parseLogLine(raw), id }
+            const entry  = cached?.raw === raw ? cached : { ...parseLogLine(raw), id }
             next.set(id, entry)
             return entry
         })
-        previous = next
+        previous     = next
         return parsed
     }
 }

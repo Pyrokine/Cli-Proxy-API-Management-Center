@@ -1,7 +1,7 @@
+import {errorLogViewerReducer, type ErrorLogViewerState} from '@/pages/hooks/errorLogViewer'
 import {describe, expect, test} from 'bun:test'
-import {errorLogViewerReducer, type ErrorLogViewerState} from '../src/pages/hooks/errorLogViewer'
 
-const item = { name: 'example-error.log', size: 32, modified: 1700000000 }
+const item                        = { name: 'example-error.log', size: 32, modified: 1700000000 }
 const closed: ErrorLogViewerState = { status: 'closed' }
 
 describe('error log viewer state', () => {
@@ -18,10 +18,10 @@ describe('error log viewer state', () => {
         const loading = errorLogViewerReducer(closed, { type: 'open', item })
 
         expect(errorLogViewerReducer(loading, { type: 'ready', text: '' })).toEqual({
-            status: 'ready',
-            item,
-            text: '',
-        })
+                                                                                        status: 'ready',
+                                                                                        item,
+                                                                                        text: '',
+                                                                                    })
     })
 
     test('keeps failure metadata and clears it when another file opens', () => {
@@ -31,9 +31,9 @@ describe('error log viewer state', () => {
 
         expect(failed).toEqual({ status: 'error', item, message: 'Unavailable' })
         expect(errorLogViewerReducer(failed, { type: 'open', item: next })).toEqual({
-            status: 'loading',
-            item: next,
-        })
+                                                                                        status: 'loading',
+                                                                                        item: next,
+                                                                                    })
     })
 
     test('ignores late terminal events unless a preview is loading', () => {

@@ -8,7 +8,7 @@ export interface LogRequest extends LogRequestScope {
 }
 
 export function createLogRequestGuard() {
-    let generation = 0
+    let generation                = 0
     let active: LogRequest | null = null
 
     const capture = (authGeneration: number): LogRequestScope => ({ generation, authGeneration })
@@ -29,7 +29,7 @@ export function createLogRequestGuard() {
                 authGeneration,
                 controller: new AbortController(),
             }
-            active = request
+            active        = request
             return request
         },
         isCurrent(request: LogRequestScope, authGeneration: number): boolean {
@@ -52,9 +52,9 @@ export function createLogRequestGuard() {
 }
 
 export function createLogRequestQueue() {
-    let generation = 0
+    let generation                                                = 0
     let active: { request: LogRequest; clearing: boolean } | null = null
-    let pendingFullReload = false
+    let pendingFullReload                                         = false
 
     const createRequest = (authGeneration: number): LogRequest => ({
         generation: ++generation,
@@ -65,7 +65,7 @@ export function createLogRequestQueue() {
     const invalidate = (): void => {
         generation += 1
         active?.request.controller.abort()
-        active = null
+        active            = null
         pendingFullReload = false
     }
 
@@ -82,7 +82,7 @@ export function createLogRequestQueue() {
                 return null
             }
             const request = createRequest(authGeneration)
-            active = { request, clearing: false }
+            active        = { request, clearing: false }
             return request
         },
         startClear(authGeneration: number): LogRequest | null {
@@ -91,7 +91,7 @@ export function createLogRequestQueue() {
             }
             invalidate()
             const request = createRequest(authGeneration)
-            active = { request, clearing: true }
+            active        = { request, clearing: true }
             return request
         },
         isCurrent(request: LogRequest, authGeneration: number): boolean {
@@ -114,7 +114,7 @@ export function createLogRequestQueue() {
                 return { finished: false, reload: false }
             }
             const shouldReload = pendingFullReload || reload
-            pendingFullReload = false
+            pendingFullReload  = false
             return { finished: true, reload: shouldReload }
         },
     }

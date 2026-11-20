@@ -25,6 +25,45 @@
     margin-bottom: $spacing-lg;
 }
 
+.requestLogGuide {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: $spacing-xs $spacing-sm;
+    margin-bottom: $spacing-sm;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: $line-height-base;
+
+    summary {
+        cursor: pointer;
+    }
+
+    p {
+        max-width: 92ch;
+        margin: $spacing-xs 0 0;
+    }
+}
+
+.fieldHelp {
+    white-space: normal;
+
+    summary {
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    > span {
+        display: block;
+        width: 240px;
+        max-width: 60vw;
+        padding-top: $spacing-xs;
+        color: var(--text-secondary);
+        font-weight: $font-weight-normal;
+        line-height: $line-height-base;
+    }
+}
+
 .content {
     display: flex;
     flex-direction: column;
@@ -415,11 +454,60 @@
     backdrop-filter: blur(8px);
 }
 
+.errorLogsHint {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+    line-height: $line-height-base;
+}
+
 .errorPanel {
-    height: 480px;
+    max-height: 480px;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+}
+
+.errorLogTableWrap {
+    min-width: 720px;
+    overflow: visible;
+}
+
+.errorLogTable {
+    table-layout: fixed;
+    font-size: $font-size-xs;
+
+    th,
+    td {
+        padding: 8px 12px;
+    }
+
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        white-space: normal;
+    }
+}
+
+.errorLogName {
+    font-family: $font-mono;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
+}
+
+.errorLogModifiedColumn {
+    width: 176px;
+}
+
+.errorLogSizeColumn {
+    width: 100px;
+}
+
+.errorLogActionsColumn {
+    width: 164px;
 }
 
 .loadMoreBanner {
@@ -484,73 +572,138 @@
 }
 
 .logSheetTableWrap {
-    min-width: 1800px;
+    min-width: 1120px;
+    overflow: visible;
 }
 
 .logTable {
-    min-width: 1800px;
+    min-width: 1120px;
     table-layout: fixed;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-family: $font-mono;
     font-size: $font-size-xs;
 
     th,
     td {
-        padding: 6px 8px;
+        padding: 8px 10px;
     }
 
     th {
         position: sticky;
         top: 0;
         z-index: 1;
+        white-space: normal;
     }
 }
 
 .timeColumn {
-    width: 156px;
-}
-
-.levelColumn {
-    width: 72px;
-}
-
-.methodColumn {
-    width: 74px;
-}
-
-.pathColumn {
-    width: 420px;
-}
-
-.messageColumn {
-    width: 360px;
+    width: 172px;
 }
 
 .statusColumn {
-    width: 64px;
-}
-
-.latencyColumn {
-    width: 84px;
+    width: 100px;
 }
 
 .requestIdColumn {
-    width: 86px;
+    width: 304px;
 }
 
-.ipColumn {
-    width: 340px;
+.actionsColumn {
+    width: 200px;
 }
 
-.traceColumn {
-    width: 60px;
+.rowActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-family: $font-family;
+
+    > button {
+        flex: 0 0 auto;
+    }
 }
 
-.copyColumn {
-    width: 64px;
+.requestSummary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 3px;
+
+    .methodBadge {
+        flex: 0 0 auto;
+        font-weight: $font-weight-medium;
+    }
 }
 
-.copyCell {
-    text-align: center;
+.resultSummary {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.latencyText,
+.inlineLabel {
+    color: var(--text-secondary);
+    font-size: $font-size-xs;
+}
+
+.requestIdText {
+    display: block;
+    max-width: 100%;
+    color: var(--primary-color);
+    @include text-ellipsis;
+}
+
+.logDetailRow > td {
+    padding: 0 12px 12px;
+    background: var(--bg-primary);
+}
+
+.logDetail {
+    min-width: 0;
+    padding: 12px;
+    border-left: 2px solid var(--border-color);
+    cursor: text;
+    user-select: text;
+}
+
+.logDetailGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 20px;
+    margin: 0 0 12px;
+
+    > div {
+        min-width: 0;
+    }
+
+    dt {
+        color: var(--text-secondary);
+        margin-bottom: 2px;
+    }
+
+    dd {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+}
+
+.logDetailLabel {
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.logDetailRaw {
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+    line-height: 1.5;
 }
 
 .copyButton {
@@ -589,6 +742,7 @@
 
     .path,
     .messageText,
+    .requestIdText,
     .ipText {
         overflow: visible;
         text-overflow: clip;
@@ -627,31 +781,26 @@
     }
 }
 
-.levelCell,
-.methodCell,
-.pathCell,
+.timeCell,
 .messageCell,
 .statusCell,
-.latencyCell,
-.requestIdCell,
-.ipCell,
-.traceCell {
+.requestIdCell {
     min-width: 0;
     vertical-align: middle;
 }
 
-.methodCell,
-.statusCell,
-.latencyCell,
-.requestIdCell,
-.ipCell,
-.traceCell {
-    text-align: center;
+.timeCell .timestamp {
+    margin-bottom: 4px;
+}
+
+.requestIdCell {
+    overflow: hidden;
 }
 
 .ipText {
     display: block;
     max-width: 100%;
+    margin-top: 4px;
     overflow: hidden;
     color: var(--text-secondary);
     font-size: $font-size-xs;
@@ -661,8 +810,7 @@
     white-space: nowrap;
 }
 
-.badge,
-.pill {
+.badge {
     @include chip-soft(
         var(--text-secondary),
         color-mix(in srgb, var(--bg-primary) 78%, transparent),
@@ -682,14 +830,6 @@
     color: var(--text-tertiary);
     font-size: $font-size-xs;
     line-height: 1;
-}
-
-.requestIdBadge {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    font-size: $font-size-xs;
-    color: #0891b2;
-    background: rgba(8, 145, 178, 0.1);
-    border-color: rgba(8, 145, 178, 0.25);
 }
 
 .statusBadge {
@@ -772,8 +912,9 @@
 
 .source {
     display: block;
+    margin-top: 3px;
     color: var(--text-tertiary);
-    overflow-wrap: anywhere;
+    @include text-ellipsis;
 }
 
 .traceButton {
@@ -988,7 +1129,7 @@
     }
 
     .errorPanel {
-        height: 360px;
+        max-height: 360px;
     }
 }
 
@@ -1044,7 +1185,7 @@
     }
 
     .errorPanel {
-        height: 280px;
+        max-height: 280px;
     }
 }
 

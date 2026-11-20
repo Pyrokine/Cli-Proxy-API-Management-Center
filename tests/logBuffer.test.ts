@@ -1,5 +1,3 @@
-import {describe, expect, test} from 'bun:test'
-
 import {
     appendLogBuffer,
     emptyLogBuffer,
@@ -9,6 +7,7 @@ import {
     trimLogBuffer,
 } from '@/pages/hooks/logBuffer'
 import {createLogParserCache} from '@/pages/hooks/logParsing'
+import {describe, expect, test} from 'bun:test'
 
 describe('log buffer retention', () => {
     test('retains only the newest complete lines within the line and text-unit limits', () => {
@@ -27,13 +26,13 @@ describe('log buffer retention', () => {
     })
 
     test('assigns distinct IDs to identical records and reuses only retained parse results', () => {
-        const parse = createLogParserCache()
-        const first = appendLogBuffer(emptyLogBuffer(), ['same', 'same'], 2)
+        const parse   = createLogParserCache()
+        const first   = appendLogBuffer(emptyLogBuffer(), ['same', 'same'], 2)
         const initial = parse(first)
         expect(initial.map((entry) => entry.id)).toEqual([0, 1])
         expect(initial[0]).not.toBe(initial[1])
 
-        const next = appendLogBuffer(first, ['same'], 2)
+        const next     = appendLogBuffer(first, ['same'], 2)
         const retained = parse(next)
         expect(next.bufferStart).toBe(1)
         expect(next.nextId).toBe(3)
@@ -44,16 +43,16 @@ describe('log buffer retention', () => {
         const reloaded = replaceLogBuffer(next, ['same'], 2)
         expect(parse(reloaded).map((entry) => entry.id)).toEqual([3])
         expect(reloaded.nextId).toBe(4)
-        expect(replaceLogBuffer(reloaded, [], 2)).toEqual({buffer: [], bufferStart: 4, nextId: 4})
+        expect(replaceLogBuffer(reloaded, [], 2)).toEqual({ buffer: [], bufferStart: 4, nextId: 4 })
     })
 
     test('continues from a full advancing file-log cursor page only', () => {
-        const page = {lines: ['one', 'two'], nextCursor: 'next', cursorReset: false}
+        const page = { lines: ['one', 'two'], nextCursor: 'next', cursorReset: false }
         expect(shouldCatchUpLogPage(page, 'previous', 2)).toBe(true)
         expect(shouldCatchUpLogPage(page, undefined, 2)).toBe(false)
-        expect(shouldCatchUpLogPage({...page, nextCursor: 'previous'}, 'previous', 2)).toBe(false)
-        expect(shouldCatchUpLogPage({...page, nextCursor: ''}, 'previous', 2)).toBe(false)
-        expect(shouldCatchUpLogPage({...page, cursorReset: true}, 'previous', 2)).toBe(false)
-        expect(shouldCatchUpLogPage({...page, lines: ['one']}, 'previous', 2)).toBe(false)
+        expect(shouldCatchUpLogPage({ ...page, nextCursor: 'previous' }, 'previous', 2)).toBe(false)
+        expect(shouldCatchUpLogPage({ ...page, nextCursor: '' }, 'previous', 2)).toBe(false)
+        expect(shouldCatchUpLogPage({ ...page, cursorReset: true }, 'previous', 2)).toBe(false)
+        expect(shouldCatchUpLogPage({ ...page, lines: ['one'] }, 'previous', 2)).toBe(false)
     })
 })

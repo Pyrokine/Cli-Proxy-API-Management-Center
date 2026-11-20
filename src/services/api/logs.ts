@@ -329,7 +329,7 @@ export const logsApi = {
 
     fetchLogs: async (params: LogsQuery = {}, options?: { signal?: AbortSignal }): Promise<LogsResponse> => {
         const authGeneration = apiClient.getAuthGeneration()
-        const ensureActive = () => {
+        const ensureActive   = () => {
             if (options?.signal?.aborted || authGeneration !== apiClient.getAuthGeneration()) {
                 throw new DOMException('Log request is no longer active', 'AbortError')
             }
@@ -346,7 +346,13 @@ export const logsApi = {
         return normalizeLogsResponse(complete)
     },
 
-    clearLogs: (options?: { signal?: AbortSignal }) => apiClient.delete('/logs', { signal: options?.signal }),
+    clearLogs: (options?: { signal?: AbortSignal }) => apiClient.delete(
+        '/logs',
+        {
+            ...({ signal: options?.signal }),
+            mutationReadback: () => logsApi.fetchLogs({ limit: 1 }),
+        },
+    ),
 
     fetchErrorLogs: async (options?: { signal?: AbortSignal }): Promise<ErrorLogsResponse> =>
         normalizeErrorLogsResponse(await apiClient.get('/request-error-logs', {
@@ -369,8 +375,10 @@ export const logsApi = {
         }),
 
     downloadRequestLogById: (id: string, homeIp?: string, options?: { signal?: AbortSignal }) =>
-        downloadLog(`/request-log-by-id/${encodeURIComponent(id)}`, options,
-                    homeIp ? { home_ip: homeIp } : undefined),
+        downloadLog(
+            `/request-log-by-id/${encodeURIComponent(id)}`, options,
+            homeIp ? { home_ip: homeIp } : undefined,
+        ),
 
     previewRequestLogById: async (
         id: string,

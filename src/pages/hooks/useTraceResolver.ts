@@ -9,6 +9,7 @@ import {
 } from '@/services/api'
 import type {ApiError, AuthFileItem, Config} from '@/types'
 import type {CredentialInfo, SourceInfo} from '@/types/sourceInfo'
+import {parseLogTimestamp} from '@/utils/format'
 import {getErrorMessage} from '@/utils/helpers'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
 import {normalizeAuthIndex, type UsageDetailWithEndpoint} from '@/utils/usage'
@@ -81,7 +82,7 @@ const buildEndpointLabel = (line: ParsedLogLine, logPath: string): string => {
 }
 
 const eventToTraceDetail = (event: UsageEvent, line: ParsedLogLine, logPath: string): UsageDetailWithEndpoint => {
-    const timestampMs = Date.parse(event.timestamp)
+    const timestampMs = parseLogTimestamp(event.timestamp)
     return {
         timestamp: event.timestamp,
         source: event.source,
@@ -207,7 +208,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                                               apiClient.getAuthGeneration() === authGeneration &&
                                               latestTraceScopeKeyRef.current === traceScopeKey &&
                                               traceScopeKeyRef.current === traceScopeKey
-            const logTimestampMs      = line.timestamp ? Date.parse(line.timestamp) : Number.NaN
+            const logTimestampMs      = line.timestamp ? parseLogTimestamp(line.timestamp) : Number.NaN
             const requestId           = line.requestId?.trim() ?? ''
             const now                 = Date.now()
             const authFresh           = traceAuthLoadedAtRef.current > 0 &&
@@ -244,16 +245,17 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             // noinspection ES6MissingAwait
             const eventsPromise              = Number.isNaN(logTimestampMs)
                                                ? Promise.resolve(null)
-                                               : usageApi.getEvents({
-                                                                        from: new Date(logTimestampMs -
-                                                                                       TRACE_LOOKUP_WINDOW_MS).toISOString(),
-                                                                        to: new Date(logTimestampMs +
-                                                                                     TRACE_LOOKUP_WINDOW_MS).toISOString(),
-                                                                        page: 1,
-                                                                        page_size: TRACE_EVENT_PAGE_SIZE,
-                                                                        sort: 'timestamp',
-                                                                        order: 'desc',
-                                                                    })
+                                               : usageApi.getEvents(
+                    {
+                        from: new Date(logTimestampMs -
+                                       TRACE_LOOKUP_WINDOW_MS).toISOString(),
+                        to: new Date(logTimestampMs +
+                                     TRACE_LOOKUP_WINDOW_MS).toISOString(),
+                        page: 1,
+                        page_size: TRACE_EVENT_PAGE_SIZE,
+                        sort: 'timestamp',
+                        order: 'desc',
+                    })
             // noinspection ES6MissingAwait
             const authPromise                = authFresh
                                                ?
@@ -341,7 +343,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             return []
         }
 
-        const logTimestampMs = traceLogLine.timestamp ? Date.parse(traceLogLine.timestamp) : Number.NaN
+        const logTimestampMs = traceLogLine.timestamp ? parseLogTimestamp(traceLogLine.timestamp) : Number.NaN
         const requestId      = traceLogLine.requestId?.trim().toLowerCase()
         const requestMatched = requestId
                                ?

@@ -1,6 +1,6 @@
 import type {DataStatusValue} from '@/components/common/DataStatusCard'
-import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
+import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import {
@@ -28,17 +28,17 @@ import {Tabs} from '@/components/ui/Tabs'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useLocalStorage} from '@/hooks/useLocalStorage'
-import {configApi} from '@/services/api/config'
 import {apiClient} from '@/services/api/client'
-import {logsApi, type ErrorLogFile, type LogsQuery} from '@/services/api/logs'
+import {configApi} from '@/services/api/config'
+import {type ErrorLogFile, logsApi, type LogsQuery} from '@/services/api/logs'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {copyToClipboard} from '@/utils/clipboard'
 import {MANAGEMENT_API_PREFIX} from '@/utils/constants'
 import {downloadBlob} from '@/utils/download'
-import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp} from '@/utils/format'
+import {formatFileSize, formatLogTimestamp, formatNumber, formatUnixTimestamp, parseLogTimestamp} from '@/utils/format'
 import {redactSensitiveText} from '@/utils/redaction'
-import {formatDurationMs, formatThinkingLabel} from '@/utils/usage'
+import {formatDurationMs, formatThinkingLabel, resolveUsageTokenMetrics} from '@/utils/usage'
 import type {PointerEvent as ReactPointerEvent} from 'react'
 import {useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -68,7 +68,8 @@ const MAX_RETRY_MS              = 60000
 const DEFAULT_LOG_PAGE_SIZE     = 50
 const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
-const LOG_LINE_TIMESTAMP_REGEX  = /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/
+const LOG_LINE_TIMESTAMP_REGEX  =
+          /^\[?(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:[Zz]|[+-]\d{2}:?\d{2})?)/
 
 const REFRESH_INTERVAL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = AUTO_REFRESH_INTERVALS
 const DEFAULT_PERSISTED_LOG_FILTERS: PersistedLogFilters                        = {
@@ -154,7 +155,7 @@ const lineTimestampSeconds = (line: string): number | null => {
     if (!timestamp) {
         return null
     }
-    const parsed = Date.parse(timestamp.replace(' ', 'T'))
+    const parsed = parseLogTimestamp(timestamp)
     return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null
 }
 
@@ -240,7 +241,9 @@ export function LogsPage() {
     const connectionStatus                       = useAuthStore((state) => state.connectionStatus)
     const authGeneration                         = useAuthStore(() => apiClient.getAuthGeneration())
     const mountedRef                             = useRef(true)
-    const isCurrentConnection                    = () => mountedRef.current && authGeneration === apiClient.getAuthGeneration()
+    const isCurrentConnection                    = () => mountedRef.current &&
+                                                         authGeneration ===
+                                                         apiClient.getAuthGeneration()
     const apiBase                                = useAuthStore((state) => state.apiBase)
     const managementKey                          = useAuthStore((state) => state.managementKey)
     const traceScopeKey                          = `${apiBase}::${managementKey}`
@@ -249,7 +252,7 @@ export function LogsPage() {
 
     const [activeTab, setActiveTab]                                 = useState<TabType>('logs')
     const [logState, setLogState]                                   = useState<LogState>(emptyLogBuffer)
-    const parseCachedLogs                                            = useMemo(createLogParserCache, [])
+    const parseCachedLogs                                           = useMemo(createLogParserCache, [])
     const [loading, setLoading]                                     = useState(true)
     const [clearingLogs, setClearingLogs]                           = useState(false)
     const [error, setError]                                         = useState('')
@@ -305,8 +308,8 @@ export function LogsPage() {
     const [errorLogViewer, dispatchErrorLogViewer]                  = useReducer(errorLogViewerReducer, {
         status: 'closed',
     })
-    const selectedErrorLog                                         = errorLogViewer.status === 'closed' ?
-                                                                     null : errorLogViewer.item
+    const selectedErrorLog                                          = errorLogViewer.status === 'closed' ?
+                                                                      null : errorLogViewer.item
     const [errorLogDownloading, setErrorLogDownloading]             = useState<string | null>(null)
     const [requestLogId, setRequestLogId]                           = useState<string | null>(null)
     const [requestLogUpdating, setRequestLogUpdating]               = useState(false)
@@ -458,7 +461,7 @@ export function LogsPage() {
                                                  startY: number
                                                  fired: boolean
                                              } | null>(null)
-    const [requests] = useState(() => ({
+    const [requests]                = useState(() => ({
         session: createLogRequestGuard(),
         logs: createLogRequestQueue(),
         errors: createLogRequestGuard(),
@@ -478,8 +481,9 @@ export function LogsPage() {
     const clearDisabled   = disableControls || clearingLogs
 
     // 分页状态
-    const [logPage, setLogPage]         = useState(1)
-    const [logPageSize, setLogPageSize] = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
+    const [logPage, setLogPage]             = useState(1)
+    const [logPageSize, setLogPageSize]     = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
+    const [expandedLogId, setExpandedLogId] = useState<number | null>(null)
 
     const loadLogs = async (incremental = false) => {
         if (!isCurrentConnection()) {
@@ -522,7 +526,10 @@ export function LogsPage() {
                                                                     .fetchLogSize({ signal: request.controller.signal })
                                                                     .catch((err: unknown) => {
                                                                         if (requestIsCurrent()) {
-                                                                            console.warn('[LogsPage] fetchLogSize failed', err)
+                                                                            console.warn(
+                                                                                '[LogsPage] fetchLogSize failed',
+                                                                                err,
+                                                                            )
                                                                         }
                                                                         return null
                                                                     }),
@@ -619,7 +626,9 @@ export function LogsPage() {
         }
     }
 
-    useHeaderRefresh(pageLayerStatus === 'current' ? () => activeTab === 'errors' ? loadErrorLogs() : loadLogs(false) : null)
+    useHeaderRefresh(pageLayerStatus === 'current' ?
+                     () => activeTab === 'errors' ? loadErrorLogs() : loadLogs(false) :
+                     null)
 
     const clearLogs = async () => {
         if (!isCurrentConnection()) {
@@ -633,8 +642,10 @@ export function LogsPage() {
                              confirmText: t('common.confirm'),
                              onConfirm: async () => {
                                  const currentAuthGeneration = apiClient.getAuthGeneration()
-                                 if (!isCurrentConnection() || !requests.session.isCurrent(session, currentAuthGeneration) ||
-                                     useAuthStore.getState().connectionStatus !== 'connected') {
+                                 if (!isCurrentConnection() ||
+                                     !requests.session.isCurrent(session, currentAuthGeneration) ||
+                                     useAuthStore.getState().connectionStatus !==
+                                     'connected') {
                                      return
                                  }
                                  const request = requests.logs.startClear(currentAuthGeneration)
@@ -652,10 +663,10 @@ export function LogsPage() {
                                      }
                                      setLogState((previous) => replaceLogBuffer(previous, [], MAX_BUFFER_LINES))
                                      pendingViewportRestoreRef.current = null
-                                     logPositionRef.current          = {}
-                                     requestLogHomeIpByIdRef.current = {}
-                                     nextReadAtRef.current           = 0
-                                     retryDelayRef.current           = INITIAL_RETRY_MS
+                                     logPositionRef.current            = {}
+                                     requestLogHomeIpByIdRef.current   = {}
+                                     nextReadAtRef.current             = 0
+                                     retryDelayRef.current             = INITIAL_RETRY_MS
                                      setCatchingUp(false)
                                      setHistoryEvicted(false)
                                      setLastUpdated(null)
@@ -684,13 +695,17 @@ export function LogsPage() {
                                      if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
                                          return
                                      }
-                                     clearFailed = true
+                                     clearFailed   = true
                                      const message = getErrorMessage(err)
                                      showNotification(`${t('notification.delete_failed')}${message ?
-                                                                                                   `: ${message}` :
-                                                                                                   ''}`, 'error')
+                                                                                           `: ${message}` :
+                                                                                           ''}`, 'error')
                                  } finally {
-                                     const result = requests.logs.finish(request, apiClient.getAuthGeneration(), clearFailed)
+                                     const result = requests.logs.finish(
+                                         request,
+                                         apiClient.getAuthGeneration(),
+                                         clearFailed,
+                                     )
                                      if (result.finished) {
                                          setClearingLogs(false)
                                          if (result.reload) {
@@ -818,10 +833,57 @@ export function LogsPage() {
         dispatchErrorLogViewer({ type: 'close' })
     }
 
+    const errorLogColumns: SheetColumn<ErrorLogFile>[] = [
+        {
+            key: 'name',
+            header: t('logs.error_logs_filename'),
+            className: styles.errorLogName,
+            cell: (item) => item.name,
+        },
+        {
+            key: 'modified',
+            header: t('logs.error_logs_modified'),
+            headerClassName: styles.errorLogModifiedColumn,
+            cell: (item) => item.modified ? formatUnixTimestamp(item.modified) : '—',
+        },
+        {
+            key: 'size',
+            header: t('logs.error_logs_size'),
+            headerClassName: styles.errorLogSizeColumn,
+            cell: (item) => typeof item.size === 'number' ? formatFileSize(item.size) : '—',
+        },
+        {
+            key: 'actions',
+            header: t('common.action'),
+            headerClassName: styles.errorLogActionsColumn,
+            cell: (item) => (
+                <div className={styles.rowActions}>
+                    <Button
+                        variant='ghost'
+                        size='xs'
+                        onClick={() => previewErrorLog(item)}
+                        disabled={disableControls}
+                    >
+                        {t('logs.error_logs_preview')}
+                    </Button>
+                    <Button
+                        variant='secondary'
+                        size='xs'
+                        onClick={() => downloadErrorLog(item.name)}
+                        disabled={disableControls || errorLogDownloading !== null}
+                        loading={errorLogDownloading === item.name}
+                    >
+                        {t('logs.error_logs_download')}
+                    </Button>
+                </div>
+            ),
+        },
+    ]
+
     useEffect(() => {
-        mountedRef.current = true
+        mountedRef.current         = true
         let observedAuthGeneration = apiClient.getAuthGeneration()
-        const invalidateRequests = () => {
+        const invalidateRequests   = () => {
             requests.session.invalidate()
             requests.logs.invalidate()
             requests.errors.invalidate()
@@ -833,7 +895,7 @@ export function LogsPage() {
             }
             longPressRef.current = null
         }
-        const resetLogs = () => {
+        const resetLogs            = () => {
             logPositionRef.current          = {}
             requestLogHomeIpByIdRef.current = {}
             nextReadAtRef.current           = 0
@@ -849,8 +911,9 @@ export function LogsPage() {
             setLogDiskSize(null)
             setTotalLogLines(null)
             setLogPage(1)
+            setExpandedLogId(null)
         }
-        const resetErrors = () => {
+        const resetErrors          = () => {
             setErrorLogs([])
             setLoadingErrors(false)
             setErrorLogsError('')
@@ -861,7 +924,7 @@ export function LogsPage() {
             setRequestLogUpdating(false)
         }
 
-        const unsubscribeAuth = useAuthStore.subscribe((next, previous) => {
+        const unsubscribeAuth   = useAuthStore.subscribe((next, previous) => {
             const nextAuthGeneration = apiClient.getAuthGeneration()
             if (nextAuthGeneration === observedAuthGeneration &&
                 next.apiBase === previous.apiBase &&
@@ -971,7 +1034,7 @@ export function LogsPage() {
               filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length
 
     const { filteredParsedLines, removedCount } = useMemo(() => {
-        const activeFilters = {
+        const activeFilters  = {
             methodFilterSet: filters.methodFilterSet,
             statusFilterSet: filters.statusFilterSet,
             pathFilterSet: filters.pathFilterSet,
@@ -983,13 +1046,13 @@ export function LogsPage() {
             removedCount: Math.max(logState.buffer.length - filteredParsed.length, 0),
         }
     }, [
-                                                                             logState.buffer.length,
-                                                                             filters.methodFilterSet,
-                                                                             filters.pathFilterSet,
-                                                                             filters.statusFilterSet,
-                                                                             levelFilter,
-                                                                             parsedSearchLines,
-                                                                         ])
+                                                              logState.buffer.length,
+                                                              filters.methodFilterSet,
+                                                              filters.pathFilterSet,
+                                                              filters.statusFilterSet,
+                                                              levelFilter,
+                                                              parsedSearchLines,
+                                                          ])
 
     // 日志逆序（新→旧），分页切片
     const reversedParsedLines = useMemo(() => [...filteredParsedLines].reverse(), [filteredParsedLines])
@@ -998,7 +1061,7 @@ export function LogsPage() {
     // 过滤/搜索条件变化时重置到第 1 页
     useEffect(() => {
         pendingViewportRestoreRef.current = null
-        logScrollerRef.current?.scrollTo({top: 0})
+        logScrollerRef.current?.scrollTo({ top: 0 })
         queueMicrotask(() => {
             setLogPage(1)
         })
@@ -1012,29 +1075,48 @@ export function LogsPage() {
                   hideManagementLogs,
               ])
 
-    const pageStart      = (logPage - 1) * logPageSize
-    const pageEnd        = pageStart + logPageSize
+    const pageStart   = (logPage - 1) * logPageSize
+    const pageEnd     = pageStart + logPageSize
     const pagedParsed = useMemo(
         () => reversedParsedLines.slice(pageStart, pageEnd),
         [reversedParsedLines, pageStart, pageEnd],
     )
 
-    const captureLogViewport = useCallback(() => {
-        const node = logScrollerRef.current
-        const top = node ? node.getBoundingClientRect().top + node.clientTop : null
-        const anchor = node && top !== null
-                       ? Array.from(node.querySelectorAll<HTMLElement>('[data-log-id]')).find((row) =>
-                Boolean(row.dataset.logId?.trim()) && Number.isFinite(Number(row.dataset.logId)) &&
-                row.getBoundingClientRect().bottom > top)
-                       : undefined
-        logViewportRef.current = {
-            page: logPage,
-            pageStart,
-            scrollTop: node?.scrollTop ?? logViewportRef.current.scrollTop,
-            anchorId: anchor ? Number(anchor.dataset.logId) : reversedParsedLines[pageStart]?.id ?? null,
-            anchorOffset: anchor && top !== null ? anchor.getBoundingClientRect().top - top : null,
-        }
-    }, [logPage, pageStart, reversedParsedLines])
+    const captureLogViewport =
+              useCallback(
+                  () => {
+                      const node             = logScrollerRef.current
+                      const top              = node ? node.getBoundingClientRect().top + node.clientTop : null
+                      const anchor           =
+                                node && top !== null
+                                ?
+                                Array.from(node.querySelectorAll<HTMLElement>('[data-log-id]')).find(
+                                    (row) =>
+                                        Boolean(
+                                            row.dataset.logId?.trim()) &&
+                                        Number.isFinite(
+                                            Number(
+                                                row.dataset.logId)) &&
+                                        row.getBoundingClientRect().bottom >
+                                        top)
+                                :
+                                undefined
+                      const anchorOrigin     = anchor ?
+                                               node?.querySelector<HTMLElement>(`[data-log-id="${Number(anchor.dataset.logId)}"]`) ??
+                                               anchor :
+                                               undefined
+                      logViewportRef.current = {
+                          page: logPage,
+                          pageStart,
+                          scrollTop: node?.scrollTop ?? logViewportRef.current.scrollTop,
+                          anchorId: anchor ? Number(anchor.dataset.logId) : reversedParsedLines[pageStart]?.id ?? null,
+                          anchorOffset: anchorOrigin && top !== null ?
+                                        anchorOrigin.getBoundingClientRect().top - top :
+                                        null,
+                      }
+                  },
+                  [logPage, pageStart, reversedParsedLines],
+              )
 
     const preserveLogViewport = () => {
         const viewport = logViewportRef.current
@@ -1042,14 +1124,14 @@ export function LogsPage() {
             pendingViewportRestoreRef.current = {
                 anchorId: viewport.anchorId,
                 scrollTop: viewport.scrollTop,
-                ...(typeof viewport.anchorOffset === 'number' ? {anchorOffset: viewport.anchorOffset} : {}),
+                ...(typeof viewport.anchorOffset === 'number' ? { anchorOffset: viewport.anchorOffset } : {}),
             }
         }
     }
 
     useEffect(() => {
         captureLogViewport()
-    }, [captureLogViewport, showRawLogs, wrapLogs])
+    }, [captureLogViewport, showRawLogs, wrapLogs, expandedLogId])
 
     useEffect(() => {
         const pending = pendingViewportRestoreRef.current
@@ -1076,13 +1158,13 @@ export function LogsPage() {
             if (pendingViewportRestoreRef.current !== restore) {
                 return
             }
-            const node = logScrollerRef.current
+            const node   = logScrollerRef.current
             const anchor = node?.querySelector<HTMLElement>(`[data-log-id="${restore.anchorId}"]`)
-            const top = node && anchor && typeof restore.anchorOffset === 'number'
-                        ? Math.max(0, node.scrollTop + anchor.getBoundingClientRect().top -
-                            node.getBoundingClientRect().top - node.clientTop - restore.anchorOffset)
-                        : restore.scrollTop
-            node?.scrollTo({top})
+            const top    = node && anchor && typeof restore.anchorOffset === 'number'
+                           ? Math.max(0, node.scrollTop + anchor.getBoundingClientRect().top -
+                                         node.getBoundingClientRect().top - node.clientTop - restore.anchorOffset)
+                           : restore.scrollTop
+            node?.scrollTo({ top })
             pendingViewportRestoreRef.current = null
         })
     }, [logPage, logPageSize, logState.bufferStart, reversedParsedLines, showRawLogs, wrapLogs])
@@ -1094,87 +1176,55 @@ export function LogsPage() {
     const logSheetEmptyHint               = logState.buffer.length > 0 ?
                                             t('logs.search_empty_desc') :
                                             t('logs.empty_desc')
-    const logColumns                      = useMemo<SheetColumn<ParsedLogLine & {id: number}>[]>(() => [
+    const logColumns                      = useMemo<SheetColumn<ParsedLogLine & { id: number }>[]>(() => [
         {
             key: 'time',
-            header: t('logs.column_time', { defaultValue: '时间' }),
+            header: `${t('logs.column_time')} / ${t('logs.column_level')}`,
             cell: () => null,
-            className: styles.timeColumn,
             headerClassName: styles.timeColumn,
         },
         {
-            key: 'level',
-            header: t('logs.column_level', { defaultValue: '级别' }),
-            cell: () => null,
-            className: styles.levelColumn,
-            headerClassName: styles.levelColumn,
-        },
-        {
-            key: 'method',
-            header: t('logs.column_method', { defaultValue: '方法' }),
-            cell: () => null,
-            className: styles.methodColumn,
-            headerClassName: styles.methodColumn,
-        },
-        {
-            key: 'path',
-            header: t('logs.column_path', { defaultValue: '路径' }),
-            cell: () => null,
-            className: styles.pathColumn,
-            headerClassName: styles.pathColumn,
-        },
-        {
             key: 'message',
-            header: t('logs.trace_message'),
+            header: (
+                <details className={styles.fieldHelp}>
+                    <summary>{t('logs.column_summary')}</summary>
+                    <span>{t('logs.column_path_hint')}</span>
+                    <span>{t('logs.column_message_hint')}</span>
+                </details>
+            ),
             cell: () => null,
-            className: styles.messageColumn,
-            headerClassName: styles.messageColumn,
         },
         {
             key: 'status',
-            header: t('logs.column_status', { defaultValue: '状态' }),
+            header: `${t('logs.column_status')} / ${t('logs.column_latency')}`,
             cell: () => null,
-            className: styles.statusColumn,
             headerClassName: styles.statusColumn,
         },
         {
-            key: 'latency',
-            header: t('logs.column_latency', { defaultValue: '耗时' }),
-            cell: () => null,
-            className: styles.latencyColumn,
-            headerClassName: styles.latencyColumn,
-        },
-        {
             key: 'request_id',
-            header: t('logs.column_request_id', { defaultValue: '请求 ID' }),
+            header: (
+                <details className={styles.fieldHelp}>
+                    <summary>{t('logs.column_request_id')} / {t('logs.column_ip')}</summary>
+                    <span>{t('logs.column_request_id_hint')}</span>
+                </details>
+            ),
             cell: () => null,
-            className: styles.requestIdColumn,
             headerClassName: styles.requestIdColumn,
         },
         {
-            key: 'ip',
-            header: t('logs.column_ip', { defaultValue: 'IP' }),
-            cell: () => null,
-            className: styles.ipColumn,
-            headerClassName: styles.ipColumn,
-        },
-        {
-            key: 'trace',
-            header: t('logs.column_trace', { defaultValue: '追踪' }),
-            cell: () => null,
-            className: styles.traceColumn,
-            headerClassName: styles.traceColumn,
-        },
-        {
             key: 'copy',
-            header: t('common.copy'),
+            header: (
+                <details className={styles.fieldHelp}>
+                    <summary>{t('common.action')}</summary>
+                    <span>{t('logs.column_trace_hint')}</span>
+                </details>
+            ),
             cell: () => null,
-            className: styles.copyColumn,
-            headerClassName: styles.copyColumn,
+            headerClassName: styles.actionsColumn,
         },
     ], [t])
 
-    const renderLogRow = (line: ParsedLogLine & {id: number}) => {
+    const renderLogRow = (line: ParsedLogLine & { id: number }) => {
         const canTraceRequest = isTraceableRequestPath(line.path)
         const rowClassNames   = [styles.logTableRow]
         if (line.level === 'warn') {
@@ -1204,101 +1254,133 @@ export function LogsPage() {
                 : styles.statusError,
         ].join(' ')
         const redactedPath    = line.path ? redactSensitiveText(line.path) : ''
-        const redactedMessage = redactSensitiveText(line.message || line.raw)
+        const redactedMessage = redactSensitiveText(line.message)
         const redactedSource  = line.source ? redactSensitiveText(line.source) : ''
+        const expanded        = expandedLogId === line.id
+        const detailId        = `log-line-detail-${line.id}`
         const emptyCell       = <span className={styles.emptyCell}>—</span>
 
         return (
-            <tr
-                data-log-id={line.id}
-                className={rowClassNames.join(' ')}
-                onDoubleClick={() => {
-                    void copyLogLine(line.raw)
-                }}
-                onPointerDown={(event) => startLongPress(event, line.requestId)}
-                onPointerUp={cancelLongPress}
-                onPointerLeave={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                onPointerMove={handleLongPressMove}
-                title={t('logs.double_click_copy_hint', {
-                    defaultValue: 'Double-click to copy',
-                })}
-            >
-                <td className={styles.timestamp}>{formatLogTimestamp(line.timestamp)}</td>
-                <td className={styles.levelCell}>
-                    {line.level ? <span className={levelClassName}>{line.level.toUpperCase()}</span> : emptyCell}
-                </td>
-                <td className={styles.methodCell}>
-                    {line.method ?
-                     <span className={[styles.badge, styles.methodBadge].join(' ')}>{line.method}</span> :
-                     emptyCell}
-                </td>
-                <td className={styles.pathCell}>
-                    {redactedPath ? (
-                        <span className={styles.path} title={redactedPath}>
-                            {redactedPath}
-                        </span>
-                    ) : emptyCell}
-                </td>
-                <td className={styles.messageCell}>
-                    {redactedSource && <span className={styles.source} title={redactedSource}>{redactedSource}</span>}
-                    {redactedMessage ? (
-                        <span className={styles.messageText} title={redactedMessage}>{redactedMessage}</span>
-                    ) : emptyCell}
-                </td>
-                <td className={styles.statusCell}>
-                    {typeof line.statusCode === 'number' ?
-                     <span className={statusClassName}>{line.statusCode}</span> :
-                     emptyCell}
-                </td>
-                <td className={styles.latencyCell}>
-                    {line.latency ? <span className={styles.pill}>{line.latency}</span> : emptyCell}
-                </td>
-                <td className={styles.requestIdCell}>
-                    {line.requestId ? (
-                        <span className={[styles.badge, styles.requestIdBadge].join(' ')} title={line.requestId}>
-                            {line.requestId}
-                        </span>
-                    ) : emptyCell}
-                </td>
-                <td className={styles.ipCell}>
-                    {line.ip ? <span className={styles.ipText} title={line.ip}>{line.ip}</span> : emptyCell}
-                </td>
-                <td className={styles.traceCell}>
-                    {canTraceRequest ? (
-                        <button
-                            type='button'
-                            className={styles.traceButton}
+            <>
+                <tr
+                    data-log-id={line.id}
+                    className={rowClassNames.join(' ')}
+                    onDoubleClick={() => void copyLogLine(line.raw)}
+                    onPointerDown={(event) => startLongPress(event, line.requestId)}
+                    onPointerUp={cancelLongPress}
+                    onPointerLeave={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    onPointerMove={handleLongPressMove}
+                    title={t('logs.double_click_copy_hint', { defaultValue: 'Double-click to copy' })}
+                >
+                    <td className={styles.timeCell}>
+                        <div className={styles.timestamp}>{formatLogTimestamp(line.timestamp)}</div>
+                        {line.level && <span className={levelClassName}>{line.level.toUpperCase()}</span>}
+                    </td>
+                    <td className={styles.messageCell}>
+                        {redactedPath && (
+                            <div className={styles.requestSummary}>
+                                {line.method && <span className={styles.methodBadge}>{line.method}</span>}
+                                <span className={styles.path} title={redactedPath}>{redactedPath}</span>
+                            </div>
+                        )}
+                        {redactedMessage && <span className={styles.messageText}>{redactedMessage}</span>}
+                        {redactedSource && <span className={styles.source}>{redactedSource}</span>}
+                        {!redactedPath && !redactedMessage && !redactedSource && emptyCell}
+                    </td>
+                    <td className={styles.statusCell}>
+                        <div className={styles.resultSummary}>
+                            {typeof line.statusCode === 'number' ?
+                             <span className={statusClassName}>{line.statusCode}</span> : emptyCell}
+                            {line.latency && <span className={styles.latencyText}>{line.latency}</span>}
+                        </div>
+                    </td>
+                    <td className={styles.requestIdCell}>
+                        {line.requestId ? (
+                            <span className={styles.requestIdText} title={line.requestId}>{line.requestId}</span>
+                        ) : emptyCell}
+                        {line.ip && (
+                            <span className={styles.ipText} title={line.ip}>
+                                <span className={styles.inlineLabel}>{t('logs.column_ip')}</span> {line.ip}
+                            </span>
+                        )}
+                    </td>
+                    <td>
+                        <div
+                            className={styles.rowActions}
                             onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                                event.stopPropagation()
-                                cancelLongPress()
-                                trace.openTraceModal(
-                                    line,
-                                    line.requestId ? requestLogHomeIpByIdRef.current[line.requestId] : undefined,
-                                )
-                            }}
-                            title={t('logs.trace_button')}
+                            onDoubleClick={(event) => event.stopPropagation()}
                         >
-                            {t('logs.trace_short', { defaultValue: '追踪' })}
-                        </button>
-                    ) : emptyCell}
-                </td>
-                <td className={styles.copyCell}>
-                    <Button
-                        variant='ghost'
-                        size='xs'
-                        className={styles.copyButton}
-                        aria-label={t('common.copy')}
-                        title={t('common.copy')}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                        onClick={() => void copyLogLine(line.raw)}
-                    >
-                        <IconCopy size={14} />
-                    </Button>
-                </td>
-            </tr>
+                            <Button
+                                variant='ghost'
+                                size='xs'
+                                aria-expanded={expanded}
+                                aria-controls={expanded ? detailId : undefined}
+                                onClick={() => setExpandedLogId((current) => current === line.id ? null : line.id)}
+                            >
+                                {expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                                {t('logs.line_details')}
+                            </Button>
+                            {canTraceRequest && (
+                                <button
+                                    type='button'
+                                    className={styles.traceButton}
+                                    onClick={() => {
+                                        cancelLongPress()
+                                        trace.openTraceModal(
+                                            line,
+                                            line.requestId ?
+                                            requestLogHomeIpByIdRef.current[line.requestId] :
+                                            undefined,
+                                        )
+                                    }}
+                                    title={t('logs.trace_button')}
+                                >
+                                    {t('logs.trace_short', { defaultValue: '追踪' })}
+                                </button>
+                            )}
+                            <Button
+                                variant='ghost'
+                                size='xs'
+                                className={styles.copyButton}
+                                aria-label={t('common.copy')}
+                                title={t('common.copy')}
+                                onClick={() => void copyLogLine(line.raw)}
+                            >
+                                <IconCopy size={14} />
+                            </Button>
+                        </div>
+                    </td>
+                </tr>
+                {expanded && (
+                    <tr data-log-id={line.id} className={styles.logDetailRow}>
+                        <td colSpan={logColumns.length}>
+                            <div id={detailId} className={styles.logDetail}>
+                                <dl className={styles.logDetailGrid}>
+                                    {[
+                                        [t('logs.column_time'), line.timestamp],
+                                        [t('logs.column_source'), redactedSource],
+                                        [t('logs.column_request_id'), line.requestId],
+                                        [t('logs.column_ip'), line.ip],
+                                        [t('logs.column_method'), line.method],
+                                        [t('logs.column_status'), line.statusCode],
+                                        [t('logs.column_latency'), line.latency],
+                                        [t('logs.column_path'), redactedPath],
+                                        [t('logs.column_message'), redactedMessage],
+                                    ].map(([label, value]) => (
+                                        <div key={label}>
+                                            <dt>{label}</dt>
+                                            <dd>{value ?? '—'}</dd>
+                                        </div>
+                                    ))}
+                                </dl>
+                                <div className={styles.logDetailLabel}>{t('logs.line_raw')}</div>
+                                <pre className={styles.logDetailRaw}>{redactSensitiveText(line.raw)}</pre>
+                            </div>
+                        </td>
+                    </tr>
+                )}
+            </>
         )
     }
 
@@ -1489,6 +1571,22 @@ export function LogsPage() {
                 ariaLabel={t('logs.title')}
             />
 
+            <div className={styles.requestLogGuide}>
+                <details>
+                    <summary>{t(requestLogEnabled ?
+                                'logs.request_log_enabled_status' :
+                                'logs.request_log_disabled_status')}</summary>
+                    <p>{t(requestLogEnabled ?
+                          'logs.error_logs_request_log_enabled' :
+                          'logs.request_log_disabled_guide')}</p>
+                </details>
+                {activeTab === 'logs' && (
+                    <Button variant='ghost' size='xs' onClick={() => handleTabChange('errors')}>
+                        {t('logs.error_logs_modal_title')}
+                    </Button>
+                )}
+            </div>
+
             <div className={styles.content}>
                 {activeTab === 'logs' && (
                     <Card className={`${styles.logCard} ${logPanelFullscreen ? styles.logCardFullscreen : ''}`}>
@@ -1553,8 +1651,15 @@ export function LogsPage() {
                                     value={levelFilter}
                                     onChange={setLevelFilter}
                                     options={[
-                                        {value: '', label: t('logs.all_levels')},
-                                        ...(['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const).map((level) => ({
+                                        { value: '', label: t('logs.all_levels') },
+                                        ...([
+                                            'trace',
+                                            'debug',
+                                            'info',
+                                            'warn',
+                                            'error',
+                                            'fatal',
+                                        ] as const).map((level) => ({
                                             value: level,
                                             label: level.toUpperCase(),
                                         })),
@@ -1843,7 +1948,9 @@ export function LogsPage() {
                         <>
                             <div
                                 ref={logScrollerRef}
-                                className={`${styles.logPanel} ${logPanelFullscreen ? styles.logPanelFullscreen : ''} ${wrapLogs ? styles.logPanelWrapped : ''}`}
+                                className={`${styles.logPanel} ${logPanelFullscreen ?
+                                                                 styles.logPanelFullscreen :
+                                                                 ''} ${wrapLogs ? styles.logPanelWrapped : ''}`}
                                 onScroll={() => {
                                     captureLogViewport()
                                 }}
@@ -1892,7 +1999,7 @@ export function LogsPage() {
                                 {showRawLogs && logSheetStatus === 'ready' ? (
                                     <pre className={styles.rawLog} spellCheck={false}>
                                         {pagedParsed.map((line) => (
-                                            <span key={line.id} data-log-id={line.id} style={{display: 'block'}}>
+                                            <span key={line.id} data-log-id={line.id} style={{ display: 'block' }}>
                                                 {redactSensitiveText(line.raw) || ' '}
                                             </span>
                                         ))}
@@ -1923,13 +2030,15 @@ export function LogsPage() {
                                     onPageChange={(p) => {
                                         pendingViewportRestoreRef.current = null
                                         setLogPage(p)
+                                        setExpandedLogId(null)
                                         logScrollerRef.current?.scrollTo({ top: 0 })
                                     }}
                                     onPageSizeChange={(size) => {
                                         pendingViewportRestoreRef.current = null
                                         setLogPageSize(size)
                                         setLogPage(1)
-                                        logScrollerRef.current?.scrollTo({top: 0})
+                                        setExpandedLogId(null)
+                                        logScrollerRef.current?.scrollTo({ top: 0 })
                                     }}
                                 />
                             )}
@@ -1952,64 +2061,27 @@ export function LogsPage() {
                         }
                     >
                         <div className='stack'>
-                            <div className='hint'>
-                                {t('logs.error_logs_description')}
-                                {` `}
+                            <p className={styles.errorLogsHint}>
+                                {t('logs.error_logs_description')}{' '}
                                 {t('logs.error_logs_retention', { count: config?.errorLogsMaxFiles ?? 10 })}
-                            </div>
-
-                            {requestLogEnabled && (
-                                <div>
-                                    <div className='status-badge warning'>
-                                        {t('logs.error_logs_request_log_enabled')}
-                                    </div>
-                                </div>
-                            )}
+                            </p>
 
                             {errorLogsError && <div className='error-box'>{errorLogsError}</div>}
 
-                            <div className={styles.errorPanel}>
-                                {loadingErrors ? (
-                                    <div className='hint'>{t('common.loading')}</div>
-                                ) : errorLogs.length === 0 ? (
-                                    <div className='hint'>{t('logs.error_logs_empty')}</div>
-                                ) : (
-                                        <div className='item-list'>
-                                            {errorLogs.map((item) => (
-                                                <div key={item.name} className='item-row'>
-                                                    <div className='item-meta'>
-                                                        <div className='item-title'>{item.name}</div>
-                                                        <div className='item-subtitle'>
-                                                            {item.size ?
-                                                             `${(item.size / 1024).toFixed(1)} KB` :
-                                                             ''}{' '}
-                                                            {item.modified ? formatUnixTimestamp(item.modified) : ''}
-                                                        </div>
-                                                    </div>
-                                                    <div className='item-actions'>
-                                                        <Button
-                                                            variant='ghost'
-                                                            size='sm'
-                                                            onClick={() => previewErrorLog(item)}
-                                                            disabled={disableControls}
-                                                        >
-                                                            {t('logs.error_logs_preview')}
-                                                        </Button>
-                                                        <Button
-                                                            variant='secondary'
-                                                            size='sm'
-                                                            onClick={() => downloadErrorLog(item.name)}
-                                                            disabled={disableControls || errorLogDownloading !== null}
-                                                            loading={errorLogDownloading === item.name}
-                                                        >
-                                                            {t('logs.error_logs_download')}
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                            </div>
+                            <Sheet
+                                rows={errorLogs}
+                                columns={errorLogColumns}
+                                rowKey={(item) => item.name}
+                                status={loadingErrors ? 'loading' : errorLogs.length > 0 ? 'ready' : 'empty'}
+                                emptyText={t('logs.error_logs_empty')}
+                                loadingText={t('common.loading')}
+                                scrollClassName={styles.errorPanel}
+                                tableWrapClassName={styles.errorLogTableWrap}
+                                tableClassName={styles.errorLogTable}
+                                pagination
+                                defaultPageSize={25}
+                                pageSizeOptions={[25, 50, 100]}
+                            />
                         </div>
                     </Card>
                 )}
@@ -2165,7 +2237,8 @@ export function LogsPage() {
                                     </div>
                                     <div className={styles.traceInfoItem}>
                                         <span
-                                            className={styles.traceInfoLabel}>{t('logs.trace_route_routed_model')}</span>
+                                            className={styles.traceInfoLabel}>{t(
+                                            'logs.trace_route_routed_model')}</span>
                                         <span className={styles.traceInfoValue}>
                                             {routeDecision.routedModel || notRecordedLabel}
                                         </span>
@@ -2184,7 +2257,8 @@ export function LogsPage() {
                                     </div>
                                     <div className={styles.traceInfoItem}>
                                         <span
-                                            className={styles.traceInfoLabel}>{t('logs.trace_route_matched_rule')}</span>
+                                            className={styles.traceInfoLabel}>{t(
+                                            'logs.trace_route_matched_rule')}</span>
                                         <span className={styles.traceInfoValue}>
                                             {routeDecision.matchedRule || notRecordedLabel}
                                         </span>
@@ -2239,168 +2313,175 @@ export function LogsPage() {
                                                 <div className={styles.traceCandidateHeader}>
                                                     {candidate.selected && (
                                                         <span className={styles.traceModelBadge}>
-                                                        {t('logs.trace_route_selected_badge')}
-                                                    </span>
+                                                            {t('logs.trace_route_selected_badge')}
+                                                        </span>
                                                     )}
                                                     <span className={styles.traceInfoValue} title={candidate.authIndex}>
-                                                    {[
-                                                        candidate.provider,
-                                                        credentialName,
-                                                        sourceInfo.type,
-                                                        candidate.authIndex,
-                                                    ]
-                                                        .filter(Boolean)
-                                                        .join(' · ')}
+                                                        {[
+                                                            candidate.provider,
+                                                            credentialName,
+                                                            sourceInfo.type,
+                                                            candidate.authIndex,
+                                                        ]
+                                                            .filter(Boolean)
+                                                            .join(' · ')}
                                                 </span>
                                                 </div>
                                                 <div className={styles.traceCandidateGrid}>
                                                     <div className={styles.traceInfoItem}>
                                                         <span
-                                                            className={styles.traceInfoLabel}>{t('logs.trace_model')}</span>
+                                                            className={styles.traceInfoLabel}>{t(
+                                                            'logs.trace_model')}</span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.model || notRecordedLabel}
-                                                    </span>
+                                                            {candidate.model || notRecordedLabel}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_target_model')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_target_model')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.targetModel || notRecordedLabel}
-                                                    </span>
+                                                            {candidate.targetModel || notRecordedLabel}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_priority')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_priority')}
+                                                        </span>
                                                         <span
-                                                            className={styles.traceInfoValue}>{candidate.priority}</span>
+                                                            className={styles.traceInfoValue}>{
+                                                            candidate.priority}</span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_effective_weight')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_effective_weight')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.effectiveWeight}
-                                                    </span>
+                                                            {candidate.effectiveWeight}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
                                                         <span className={styles.traceInfoLabel}>{t(
                                                             'logs.trace_route_native')}</span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteBoolean(candidate.native)}
-                                                    </span>
+                                                            {formatRouteBoolean(candidate.native)}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_converted')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_converted')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteBoolean(candidate.converted)}
-                                                    </span>
+                                                            {formatRouteBoolean(candidate.converted)}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_affinity')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_affinity')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.affinity || notRecordedLabel}
-                                                    </span>
+                                                            {candidate.affinity || notRecordedLabel}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_quota_status')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_quota_status')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteQuotaStatus(candidate.quotaStatus)}
-                                                    </span>
+                                                            {formatRouteQuotaStatus(candidate.quotaStatus)}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_quota_headroom')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_quota_headroom')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.quotaHeadroom === null
-                                                         ? routeBackendNotProvidedLabel
-                                                         : `${new Intl.NumberFormat(i18n.language, {
-                                                                maximumFractionDigits: 1,
-                                                            }).format(candidate.quotaHeadroom * 100)}%`}
-                                                    </span>
+                                                            {candidate.quotaHeadroom === null
+                                                             ? routeBackendNotProvidedLabel
+                                                             : `${new Intl.NumberFormat(i18n.language, {
+                                                                    maximumFractionDigits: 1,
+                                                                }).format(candidate.quotaHeadroom * 100)}%`}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_quota_reset_after')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_quota_reset_after')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatTraceDuration(
-                                                            candidate.quotaResetAfterMs,
-                                                            i18n.language,
-                                                            routeBackendNotProvidedLabel,
-                                                        )}
-                                                    </span>
+                                                            {formatTraceDuration(
+                                                                candidate.quotaResetAfterMs,
+                                                                i18n.language,
+                                                                routeBackendNotProvidedLabel,
+                                                            )}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_in_flight')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_in_flight')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteNullableNumber(candidate.inFlight)}
-                                                    </span>
+                                                            {formatRouteNullableNumber(candidate.inFlight)}
+                                                        </span>
                                                     </div>
                                                     <div className={styles.traceInfoItem}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_matched_rules')}
-                                                    </span>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_matched_rules')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.matchedRules.join(', ') ||
-                                                         t('logs.trace_route_none')}
-                                                    </span>
+                                                            {candidate.matchedRules.join(', ') ||
+                                                             t('logs.trace_route_none')}
+                                                        </span>
                                                     </div>
                                                     <div
-                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_excluded_reasons')}
-                                                    </span>
+                                                        className={`${styles.traceInfoItem} ${
+                                                            styles.traceInfoItemWide}`}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_excluded_reasons')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {candidate.excludedReasons.join(', ') ||
-                                                         t('logs.trace_route_none')}
-                                                    </span>
+                                                            {candidate.excludedReasons.join(', ') ||
+                                                             t('logs.trace_route_none')}
+                                                        </span>
                                                     </div>
                                                     <div
-                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_cooldown_exact_model')}
-                                                    </span>
+                                                        className={`${styles.traceInfoItem} ${
+                                                            styles.traceInfoItemWide}`}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_cooldown_exact_model')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteCooldown(candidate.cooldowns.exactModel)}
-                                                    </span>
+                                                            {formatRouteCooldown(candidate.cooldowns.exactModel)}
+                                                        </span>
                                                     </div>
                                                     <div
-                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_cooldown_quota_family')}
-                                                    </span>
+                                                        className={`${styles.traceInfoItem} ${
+                                                            styles.traceInfoItemWide}`}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_cooldown_quota_family')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteCooldown(candidate.cooldowns.quotaFamily)}
-                                                    </span>
+                                                            {formatRouteCooldown(candidate.cooldowns.quotaFamily)}
+                                                        </span>
                                                     </div>
                                                     <div
-                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_cooldown_credential')}
-                                                    </span>
+                                                        className={`${styles.traceInfoItem} ${
+                                                            styles.traceInfoItemWide}`}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_cooldown_credential')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteCooldown(candidate.cooldowns.credential)}
-                                                    </span>
+                                                            {formatRouteCooldown(candidate.cooldowns.credential)}
+                                                        </span>
                                                     </div>
                                                     <div
-                                                        className={`${styles.traceInfoItem} ${styles.traceInfoItemWide}`}>
-                                                    <span className={styles.traceInfoLabel}>
-                                                        {t('logs.trace_route_cooldown_provider')}
-                                                    </span>
+                                                        className={`${styles.traceInfoItem} ${
+                                                            styles.traceInfoItemWide}`}>
+                                                        <span className={styles.traceInfoLabel}>
+                                                            {t('logs.trace_route_cooldown_provider')}
+                                                        </span>
                                                         <span className={styles.traceInfoValue}>
-                                                        {formatRouteCooldown(candidate.cooldowns.provider)}
-                                                    </span>
+                                                            {formatRouteCooldown(candidate.cooldowns.provider)}
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2447,27 +2528,38 @@ export function LogsPage() {
                         ) : (
                                 <div className={styles.traceCandidates}>
                                     {trace.traceCandidates.map((candidate) => {
-                                        const detail          = candidate.detail
-                                        const sourceInfo      = trace.resolveTraceSourceInfo(
+                                        const detail = candidate.detail
+
+                                        const sourceInfo = trace.resolveTraceSourceInfo(
                                             String(detail.source ?? ''),
                                             detail.auth_index,
                                         )
-                                        const tokens          = detail.tokens
-                                        const inputTokens     = maxTraceTokenValue(tokens?.input_tokens)
-                                        const outputTokens    = maxTraceTokenValue(tokens?.output_tokens)
+
+                                        const tokens = detail.tokens
+
+                                        const inputTokens = maxTraceTokenValue(tokens?.input_tokens)
+
+                                        const outputTokens = maxTraceTokenValue(tokens?.output_tokens)
+
                                         const reasoningTokens = maxTraceTokenValue(tokens?.reasoning_tokens)
-                                        const cachedTokens    = maxTraceTokenValue(
-                                            tokens?.cached_tokens,
-                                            tokens?.cache_tokens,
-                                        )
-                                        const thinking        = detail.thinking ??
-                                                                (detail.reasoning_effort ?
-                                                                    { intensity: detail.reasoning_effort } :
-                                                                 null)
-                                        const thinkingLabel   = thinking
-                                                                ? formatThinkingLabel(thinking, i18n.language)
-                                                                : notRecordedLabel
-                                        const completedLabel  =
+
+                                        const { cachedTokens, cacheHitTokens } = resolveUsageTokenMetrics(tokens)
+
+                                        const thinking = detail.thinking ??
+                                                         (detail.reasoning_effort ?
+                                                             { intensity: detail.reasoning_effort } :
+                                                          null)
+
+                                        const thinkingLabel = thinking
+                                                              ?
+                                                              formatThinkingLabel(
+                                                                  thinking,
+                                                                  i18n.language,
+                                                              )
+                                                              :
+                                                              notRecordedLabel
+
+                                        const completedLabel =
                                                   typeof detail.completed === 'boolean'
                                                   ? detail.completed
                                                     ?
@@ -2658,7 +2750,7 @@ export function LogsPage() {
                                                     </span>
                                                         <span className={styles.traceInfoValue}>
                                                         {formatTracePercent(
-                                                            cachedTokens,
+                                                            cacheHitTokens,
                                                             inputTokens,
                                                             i18n.language,
                                                             notRecordedLabel,

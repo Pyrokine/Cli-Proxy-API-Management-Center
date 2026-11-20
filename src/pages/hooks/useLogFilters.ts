@@ -5,10 +5,12 @@ import {resolveStatusGroup} from './logTypes'
 const PATH_FILTER_LIMIT = 12
 
 export const normalizeLogPathFilters = (paths: string[]): string[] =>
-    [...new Set(paths.map((path) => {
-        const trimmed = path.trim()
-        return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed
-    }).filter(Boolean))]
+    [
+        ...new Set(paths.map((path) => {
+            const trimmed = path.trim()
+            return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed
+        }).filter(Boolean)),
+    ]
 
 export const buildLogPathOptions = (
     parsedLines: ParsedLogLine[],
@@ -79,8 +81,13 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
 
     const [methodFilters, setMethodFilters] = useState<HttpMethod[]>(() => initialFilters?.methodFilters ?? [])
     const [statusFilters, setStatusFilters] = useState<StatusGroup[]>(() => initialFilters?.statusFilters ?? [])
-    const [pathFilters, setPathFilters]     = useState<string[]>(() =>
-        normalizeLogPathFilters(initialFilters?.pathFilters ?? []))
+    const [pathFilters, setPathFilters]     =
+              useState<
+                  string[]>(
+                  () =>
+                      normalizeLogPathFilters(
+                          initialFilters?.pathFilters ??
+                          []))
 
     const methodCounts = useMemo(() => {
         const counts: Partial<Record<HttpMethod, number>> = {}
@@ -105,7 +112,10 @@ export function useLogFilters(options: UseLogFiltersOptions): UseLogFiltersRetur
         return counts
     }, [parsedLines])
 
-    const pathOptions          = useMemo(() => buildLogPathOptions(parsedLines, pathFilters), [parsedLines, pathFilters])
+    const pathOptions          = useMemo(
+        () => buildLogPathOptions(parsedLines, pathFilters),
+        [parsedLines, pathFilters],
+    )
     const methodFilterSet      = useMemo(() => new Set(methodFilters), [methodFilters])
     const statusFilterSet      = useMemo(() => new Set(statusFilters), [statusFilters])
     const pathFilterSet        = useMemo(() => new Set(pathFilters), [pathFilters])

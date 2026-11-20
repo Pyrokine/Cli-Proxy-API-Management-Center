@@ -1,10 +1,10 @@
+import {createLogRequestGuard, createLogRequestQueue} from '@/pages/hooks/logRequests'
+import {apiClient} from '@/services/api/client'
+import {logsApi} from '@/services/api/logs'
+import {AxiosHeaders} from 'axios'
 import {describe, expect, spyOn, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
-import {AxiosHeaders} from 'axios'
 import {fileURLToPath, URL} from 'node:url'
-import {apiClient} from '../src/services/api/client'
-import {logsApi} from '../src/services/api/logs'
-import {createLogRequestGuard, createLogRequestQueue} from '../src/pages/hooks/logRequests'
 
 describe('log request guard', () => {
     test('only allows the latest request in the current authentication generation to publish', () => {
@@ -30,13 +30,13 @@ describe('log request guard', () => {
     })
 
     test('close during asynchronous decoding prevents a late result from publishing', async () => {
-        const guard   = createLogRequestGuard()
-        const request = guard.begin(2)
+        const guard      = createLogRequestGuard()
+        const request    = guard.begin(2)
         let resolve!: (value: string) => void
-        const decoding = new Promise<string>((done) => {
+        const decoding   = new Promise<string>((done) => {
             resolve = done
         })
-        let published = ''
+        let published    = ''
         const completion = decoding.then((value) => {
             if (guard.isCurrent(request, 2)) {
                 published = value
@@ -154,60 +154,69 @@ describe('log API response handling', () => {
             .mockResolvedValueOnce({ files: [{ name: '', size: 4096, modified: 1720000000 }] })
             .mockResolvedValueOnce({ status: 'ok' })
         try {
-            await expect(logsApi.fetchErrorLogs()).resolves.toEqual({ files: [] })
-            await expect(logsApi.fetchErrorLogs()).resolves.toEqual({
-                files: [{ name: 'error.log', size: 4096, modified: 1720000000 }],
-            })
-            await expect(logsApi.fetchErrorLogs()).rejects.toThrow('Invalid error log file metadata')
-            await expect(logsApi.fetchErrorLogs()).rejects.toThrow('Invalid error log list response')
+            expect(logsApi.fetchErrorLogs()).resolves.toEqual({ files: [] })
+            expect(logsApi.fetchErrorLogs()).resolves.toEqual({
+                                                                  files: [
+                                                                      {
+                                                                          name: 'error.log',
+                                                                          size: 4096,
+                                                                          modified: 1720000000,
+                                                                      },
+                                                                  ],
+                                                              })
+            expect(logsApi.fetchErrorLogs()).rejects.toThrow('Invalid error log file metadata')
+            expect(logsApi.fetchErrorLogs()).rejects.toThrow('Invalid error log list response')
             expect(get).toHaveBeenCalledTimes(4)
         } finally {
             get.mockRestore()
         }
     })
 
-    test('decodes JSON blob errors without changing request identity or treating successful logs as errors', async () => {
-        const failure = Object.assign(new Error('Request failed with status code 403'), {
-            status: 403,
-            code: 'ERR_BAD_REQUEST',
-            data: new Blob([JSON.stringify({ error: { message: 'Download denied', code: 'access_denied' } })]),
-        })
-        const malformed = Object.assign(new Error('Request failed with status code 500'), {
-            status: 500,
-            data: new Blob(['not JSON']),
-        })
-        const success = {
-            data: new Blob(['{"error":"literal log content"}']),
-            status: 200,
-            statusText: 'OK',
-            headers: new AxiosHeaders(),
-            config: { headers: new AxiosHeaders() },
-        }
-        const getRaw = spyOn(apiClient, 'getRaw')
-            .mockRejectedValueOnce(failure)
-            .mockRejectedValueOnce(malformed)
-            .mockResolvedValueOnce(success)
-        try {
-            await expect(logsApi.downloadErrorLog('bad.log')).rejects.toBe(failure)
-            expect(failure.message).toBe('Download denied')
-            expect(failure.status).toBe(403)
-            expect(failure.code).toBe('ERR_BAD_REQUEST')
-            expect((failure as typeof failure & { backendCode?: string }).backendCode).toBe('access_denied')
-            await expect(logsApi.downloadRequestLogById('request/id', '192.0.2.7')).rejects.toBe(malformed)
-            expect(malformed.message).toBe('Request failed with status code 500')
-            expect(malformed.status).toBe(500)
-            await expect(logsApi.downloadErrorLog('plain.log')).resolves.toBe(success)
-            expect(await success.data.text()).toBe('{"error":"literal log content"}')
-            expect(getRaw).toHaveBeenNthCalledWith(2, '/request-log-by-id/request%2Fid', {
-                params: { home_ip: '192.0.2.7' },
-                responseType: 'blob',
-                timeout: expect.any(Number),
-                signal: undefined,
+    test(
+        'decodes JSON blob errors without changing request identity or treating successful logs as errors',
+        async () => {
+            const failure   = Object.assign(new Error('Request failed with status code 403'), {
+                status: 403,
+                code: 'ERR_BAD_REQUEST',
+                data: new Blob([JSON.stringify({ error: { message: 'Download denied', code: 'access_denied' } })]),
             })
-        } finally {
-            getRaw.mockRestore()
-        }
-    })
+            const malformed = Object.assign(new Error('Request failed with status code 500'), {
+                status: 500,
+                data: new Blob(['not JSON']),
+            })
+            const success   = {
+                data: new Blob(['{"error":"literal log content"}']),
+                status: 200,
+                statusText: 'OK',
+                headers: new AxiosHeaders(),
+                config: { headers: new AxiosHeaders() },
+            }
+            const getRaw    = spyOn(apiClient, 'getRaw')
+                .mockRejectedValueOnce(failure)
+                .mockRejectedValueOnce(malformed)
+                .mockResolvedValueOnce(success)
+            try {
+                expect(logsApi.downloadErrorLog('bad.log')).rejects.toBe(failure)
+                expect(failure.message).toBe('Download denied')
+                expect(failure.status).toBe(403)
+                expect(failure.code).toBe('ERR_BAD_REQUEST')
+                expect((failure as typeof failure & { backendCode?: string }).backendCode).toBe('access_denied')
+                expect(logsApi.downloadRequestLogById('request/id', '192.0.2.7')).rejects.toBe(malformed)
+                expect(malformed.message).toBe('Request failed with status code 500')
+                expect(malformed.status).toBe(500)
+                expect(logsApi.downloadErrorLog('plain.log')).resolves.toBe(success)
+                expect(await success.data.text()).toBe('{"error":"literal log content"}')
+                expect(getRaw).toHaveBeenNthCalledWith(2, '/request-log-by-id/request%2Fid', {
+                    params: { home_ip: '192.0.2.7' },
+                    responseType: 'blob',
+                    timeout: expect.any(Number),
+                    signal: undefined,
+                })
+            } finally {
+                getRaw.mockRestore()
+            }
+        },
+    )
 })
 
 describe('logs page lifecycle wiring', () => {
@@ -227,11 +236,14 @@ describe('logs page lifecycle wiring', () => {
     })
 
     test('checks request ownership after response and blob decoding', () => {
-        const errorDownload = source.indexOf('const downloadErrorLog = async')
-        const requestDownload = source.indexOf('const downloadRequestLog = async')
-        const nextFunction = source.indexOf('const previewErrorLog = async', errorDownload)
-        const errorDownloadSource = source.slice(errorDownload, nextFunction)
-        const requestDownloadSource = source.slice(requestDownload, source.indexOf('const toggleRequestLog', requestDownload))
+        const errorDownload         = source.indexOf('const downloadErrorLog = async')
+        const requestDownload       = source.indexOf('const downloadRequestLog = async')
+        const nextFunction          = source.indexOf('const previewErrorLog = async', errorDownload)
+        const errorDownloadSource   = source.slice(errorDownload, nextFunction)
+        const requestDownloadSource = source.slice(
+            requestDownload,
+            source.indexOf('const toggleRequestLog', requestDownload),
+        )
 
         expect(errorDownloadSource.match(/requests\.errorDownload\.isCurrent/g)?.length).toBeGreaterThanOrEqual(4)
         expect(requestDownloadSource.match(/requests\.requestDownload\.isCurrent/g)?.length).toBeGreaterThanOrEqual(4)
@@ -247,6 +259,6 @@ describe('logs page lifecycle wiring', () => {
         expect(source).toContain('requestLogHomeIpByIdRef.current[id]')
         expect(source).toContain('...data.requestLogHomeIpById')
         expect(source).toContain('const MAX_BUFFER_LINES          = 10000')
-        expect(source).toMatch(/title=\{line\.requestId\}>\s*\{line\.requestId\}\s*<\/span>/)
+        expect(source).toMatch(/title=\{line\.requestId}>\s*\{line\.requestId}\s*<\/span>/)
     })
 })

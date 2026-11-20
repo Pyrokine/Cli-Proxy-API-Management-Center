@@ -2,18 +2,18 @@ import type {LogState} from './logTypes'
 
 export const MAX_LOG_TEXT_UNITS = 8 * 1024 * 1024
 
-export const emptyLogBuffer = (): LogState => ({buffer: [], bufferStart: 0, nextId: 0})
+export const emptyLogBuffer = (): LogState => ({ buffer: [], bufferStart: 0, nextId: 0 })
 
 export function replaceLogBuffer(previous: LogState, lines: string[], maxLines: number): LogState {
     const buffer = trimLogBuffer(lines, maxLines)
     const nextId = previous.nextId + lines.length
-    return {buffer, bufferStart: nextId - buffer.length, nextId}
+    return { buffer, bufferStart: nextId - buffer.length, nextId }
 }
 
 export function appendLogBuffer(previous: LogState, lines: string[], maxLines: number): LogState {
     const buffer = trimLogBuffer([...previous.buffer, ...lines], maxLines)
     const nextId = previous.nextId + lines.length
-    return {buffer, bufferStart: nextId - buffer.length, nextId}
+    return { buffer, bufferStart: nextId - buffer.length, nextId }
 }
 
 export function shouldCatchUpLogPage(
