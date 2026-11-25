@@ -168,7 +168,6 @@
         "openai_providers": "Поставщики OpenAI",
         "quick_actions": "Быстрые действия",
         "current_config": "Текущая конфигурация",
-        "management_keys": "Ключи управления",
         "provider_api_keys": "API-ключи провайдеров",
         "provider_keys_detail": "G:{{gemini}} C:{{codex}} Cl:{{claude}} O:{{openai}}",
         "total_credentials": "Всего учётных данных",
@@ -195,7 +194,9 @@
         "caring_afternoon": "Работа продвигается.",
         "caring_evening": "Просмотрите день и оставьте важное.",
         "caring_night": "Уже поздно. Оставьте главное на виду.",
-        "system_overview": "Обзор системы"
+        "system_overview": "Обзор системы",
+        "client_api_keys": "Ключи API клиентов",
+        "stats_read_failed": "Не удалось получить число. Обновите страницу, чтобы повторить попытку."
     },
     "basic_settings": {
         "title": "Основные настройки",

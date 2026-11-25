@@ -168,7 +168,6 @@
         "openai_providers": "OpenAI Providers",
         "quick_actions": "Quick Actions",
         "current_config": "Current Configuration",
-        "management_keys": "Management Keys",
         "provider_api_keys": "Provider API keys",
         "provider_keys_detail": "G:{{gemini}} C:{{codex}} Cl:{{claude}} O:{{openai}}",
         "total_credentials": "Total Credentials",
@@ -195,7 +194,9 @@
         "caring_afternoon": "Everything is moving forward.",
         "caring_evening": "Review the day and keep what matters.",
         "caring_night": "It is late. Keep the essentials visible.",
-        "system_overview": "System overview"
+        "system_overview": "System overview",
+        "client_api_keys": "Client API keys",
+        "stats_read_failed": "Could not read the count. Refresh to retry."
     },
     "basic_settings": {
         "title": "Basic Settings",

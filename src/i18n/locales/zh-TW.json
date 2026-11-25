@@ -168,7 +168,6 @@
         "openai_providers": "OpenAI 供應商",
         "quick_actions": "快速操作",
         "current_config": "目前設定",
-        "management_keys": "管理金鑰",
         "provider_keys_detail": "G:{{gemini}} C:{{codex}} Cl:{{claude}} O:{{openai}}",
         "total_credentials": "憑證總數",
         "credentials_detail": "API Key: {{apiKeys}} / 認證檔案: {{authFiles}}",
@@ -195,7 +194,9 @@
         "tpm_30min": "TPM (30分鐘)",
         "models_used": "使用模型數",
         "no_usage_data": "暫無使用數據",
-        "view_detailed_usage": "檢視詳細統計"
+        "view_detailed_usage": "檢視詳細統計",
+        "client_api_keys": "用戶端 API 金鑰",
+        "stats_read_failed": "讀取失敗，請重新整理後再試"
     },
     "basic_settings": {
         "title": "基本設定",

@@ -168,7 +168,6 @@
         "openai_providers": "OpenAI 提供商",
         "quick_actions": "快捷操作",
         "current_config": "当前配置",
-        "management_keys": "管理密钥",
         "provider_api_keys": "API Key 配置",
         "provider_keys_detail": "G:{{gemini}} C:{{codex}} Cl:{{claude}} O:{{openai}}",
         "total_credentials": "凭证总数",
@@ -195,7 +194,9 @@
         "caring_afternoon": "当前任务正在推进",
         "caring_evening": "回看今天，保留重要信息",
         "caring_night": "时间不早了，保留必要信息",
-        "system_overview": "系统概览"
+        "system_overview": "系统概览",
+        "client_api_keys": "客户端 API Key",
+        "stats_read_failed": "读取失败，请刷新重试"
     },
     "basic_settings": {
         "title": "基础设置",

@@ -102,18 +102,32 @@ test('a failed provider keeps the visible credential total unknown and makes exp
     for (const name of ['providerCounts', 'providerStatsReady', 'totalProviderKeys', 'totalCredentials']) {
         scope[name] = sourceInitializer(file, name, scope)
     }
-    const cards = sourceInitializer<Array<{ path: string; value: unknown; sublabel?: string }>>(file, 'quickStats', {
-        ...scope, React, t: (key: string) => key, loading: false, hasProviderStats: true,
-        // noinspection JSUnusedGlobalSymbols
-        'IconKey': () => null,
-        // noinspection JSUnusedGlobalSymbols
-        'IconBot': () => null,
-        // noinspection JSUnusedGlobalSymbols
-        'IconSatellite': () => null,
-        modelsRequestLoading: false, modelsLoading: false, modelsError: null, models: [],
-    })
-    expect(cards.find((card) => card.path === '/credentials')).toMatchObject({ value: '-', sublabel: undefined })
-    expect(flow.fetch(true)).rejects.toThrow('synthetic provider failure')
+    Object.assign(scope, { t: (key: string) => key, connectionStatus: 'connected', loading: false })
+    scope.statsReadFailed = sourceInitializer(file, 'statsReadFailed', scope)
+    const cards           = sourceInitializer<Array<{ path: string; value: unknown; sublabel?: string }>>(
+        file,
+        'quickStats',
+        {
+            ...scope,
+            React,
+            hasProviderStats: true,
+            // noinspection JSUnusedGlobalSymbols
+            'IconKey': () => null,
+            // noinspection JSUnusedGlobalSymbols
+            'IconBot': () => null,
+            // noinspection JSUnusedGlobalSymbols
+            'IconSatellite': () => null,
+            modelsRequestLoading: false,
+            modelsLoading: false,
+            modelsError: null,
+            models: [],
+        },
+    )
+    expect(cards.find((card) => card.path === '/credentials')).toMatchObject({
+                                                                                 value: '-',
+                                                                                 sublabel: 'dashboard.stats_read_failed',
+                                                                             })
+    await expect(flow.fetch(true)).rejects.toThrow('synthetic provider failure')
 })
 
 test(

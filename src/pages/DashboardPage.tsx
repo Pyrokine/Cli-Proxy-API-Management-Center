@@ -33,8 +33,10 @@ interface ProviderStats {
 
 type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'night'
 
-function getTimeOfDay(): TimeOfDay {
-    const hour = new Date().getHours()
+function getTimeOfDay(time: Date, timezone?: string): TimeOfDay {
+    const hour = timezone
+                 ? Number(time.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', hourCycle: 'h23' }))
+                 : time.getHours()
     if (hour >= 5 && hour < 12) {
         return 'morning'
     }
@@ -84,8 +86,8 @@ export function DashboardPage() {
 
     const [loading, setLoading]                           = useState(true)
     const [modelsRequestLoading, setModelsRequestLoading] = useState(false)
-    const [timeOfDay, setTimeOfDay]                       = useState<TimeOfDay>(getTimeOfDay)
     const [currentTime, setCurrentTime]                   = useState(() => new Date())
+    const timeOfDay                                       = getTimeOfDay(currentTime, timezone)
 
     const statsRequestGeneration  = useRef(0)
     const modelsRequestGeneration = useRef(0)
@@ -95,10 +97,7 @@ export function DashboardPage() {
     }, [])
 
     useEffect(() => {
-        const id = window.setInterval(() => {
-            setTimeOfDay(getTimeOfDay())
-            setCurrentTime(new Date())
-        }, 60_000)
+        const id = window.setInterval(() => setCurrentTime(new Date()), 60_000)
         return () => window.clearInterval(id)
     }, [])
 
@@ -232,15 +231,18 @@ export function DashboardPage() {
     const totalCredentials   = providerStatsReady && stats.authFiles !== null ?
                                totalProviderKeys + stats.authFiles :
                                null
+    const statsReadFailed    = connectionStatus === 'connected' && !loading
+                               ? t('dashboard.stats_read_failed')
+                               : undefined
 
     const quickStats: QuickStat[] = [
         {
-            label: t('dashboard.management_keys'),
+            label: t('dashboard.client_api_keys'),
             value: stats.apiKeys ?? '-',
             icon: <IconKey size={24} />,
             path: '/config',
             loading: loading && stats.apiKeys === null,
-            sublabel: t('nav.config_management'),
+            sublabel: stats.apiKeys === null ? statsReadFailed : t('nav.config_management'),
         },
         {
             label: t('dashboard.total_credentials'),
@@ -254,7 +256,7 @@ export function DashboardPage() {
                     apiKeys: totalProviderKeys,
                     authFiles: stats.authFiles ?? 0,
                 })
-                : undefined,
+                : statsReadFailed,
         },
         {
             label: t('dashboard.available_models'),
