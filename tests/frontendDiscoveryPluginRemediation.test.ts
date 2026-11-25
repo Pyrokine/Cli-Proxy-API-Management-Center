@@ -3,6 +3,7 @@ import {entriesToModels} from '@/components/ui/modelInputListUtils'
 import {isDefaultPluginStoreSource} from '@/pages/pluginResources'
 import {apiCallApi} from '@/services/api/apiCall'
 import {modelsApi} from '@/services/api/models'
+import {encodePluginConfigPatch, pluginConfigFieldMatches} from '@/services/api/pluginConfigJSON'
 import {buildVertexConfigPatchRequest} from '@/services/api/providers'
 import type {ProviderKeyConfig} from '@/types'
 import {normalizeApiBase} from '@/utils/connection'
@@ -162,20 +163,20 @@ describe('frontend discovery and plugin remediation', () => {
             {},
         )
         for (const text of ['1.75', '1e3', '9007199254740993']) {
-            expect(normalizeNumberInput(text, true)).toBe(text)
+            expect(normalizeNumberInput(text, true)).toBeUndefined()
             const calls: unknown[]  = []
             const errors: unknown[] = []
             const save              = sourceCallback<() => Promise<void>>(source, 'handleSaveConfig', {
                 configReadState: 'ready',
                 editingPlugin: {
                     id: 'demo',
-                    config: { limit: 2 },
+                    config: { limit: '2' },
                     config_fields: [{ name: 'limit', type: 'integer' }],
                 },
-                configDraft: { limit: 2 }, jsonDraft: { limit: text }, isCurrentConnection: () => true,
+                configDraft: { limit: text }, isCurrentConnection: () => true,
                 setConfigError: (value: unknown) => errors.push(value), normalizeNumberInput,
                 t: (key: string) => key, pluginsApi: { patchConfig: (...args: unknown[]) => calls.push(args) },
-                stringifyConfigValue: () => '', setSavingConfig: () => {
+                setSavingConfig: () => {
                 },
             })
             await save()
@@ -190,33 +191,28 @@ describe('frontend discovery and plugin remediation', () => {
             configReadState: 'ready',
             editingPlugin: {
                 id: 'demo',
-                config: { limit: 2, future: { keep: true } },
+                config: { limit: '2', future: '{"keep":true}' },
                 config_fields: [{ name: 'limit', type: 'integer' }, { name: 'options', type: 'object' }],
             },
-            configDraft: { limit: 2, future: { keep: true } }, jsonDraft: { limit: '3', options: '{}' },
-            isCurrentConnection: () => true, normalizeNumberInput: sourceCallback(source, 'normalizeNumberInput', {}),
-            stringifyConfigValue: sourceCallback(
-                source,
-                'stringifyConfigValue',
-                { isJsonConfigValue: (value: unknown) => typeof value === 'object' },
-            ),
+            configDraft: { limit: '3', options: '{}' }, isCurrentConnection: () => true,
+            normalizeNumberInput: sourceCallback(source, 'normalizeNumberInput', {}),
+            configInput: sourceCallback(source, 'configInput', {}),
+            encodePluginConfigPatch, pluginConfigFieldMatches,
             setConfigError: () => {
             }, t: (key: string) => key, pluginsApi: {
                 patchConfig: async (_id: string, value: unknown) => {
                     patches.push(value)
                 },
+                getConfig: async () => ({ limit: '3', future: '{"keep":true}' }),
             },
             confirmPluginRuntime: async () => {
             }, setSavingConfig: () => {
-            }, showNotification: () => {
-            }, setEditingPlugin: () => {
-            }, setConfigDraft: () => {
-            }, setJsonDraft: () => {
-            }, fetchPlugins: async () => {
+            }, notifyConfigSaved: () => {
+            }, closeConfig: () => {
             },
         })
         await save()
-        expect(patches).toEqual([{ limit: 3 }])
+        expect(patches).toEqual(['{"limit":3}'])
     })
 
     test('classifies simplified and traditional Chinese release headings into the right columns', () => {

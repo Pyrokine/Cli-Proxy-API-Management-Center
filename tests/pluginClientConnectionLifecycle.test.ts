@@ -1,3 +1,6 @@
+import {Sheet} from '@/components/common/Sheet'
+import {Card} from '@/components/ui/Card'
+import '@/i18n'
 import {
     getGitHubRepositorySlug,
     isValidManualReleaseTag,
@@ -10,11 +13,21 @@ import {
     isOfficialPlugin,
     resolvePluginAssetURL,
 } from '@/pages/pluginResources'
-import type {PluginEntry, PluginStoreEntry, PluginStoreResponse} from '@/services/api/plugins'
+import {apiClient} from '@/services/api/client'
+import {encodePluginConfigPatch, pluginConfigFieldMatches} from '@/services/api/pluginConfigJSON'
+import {
+    type PluginEntry,
+    pluginsApi,
+    pluginStoreApi,
+    type PluginStoreEntry,
+    type PluginStoreResponse,
+} from '@/services/api/plugins'
 import {getErrorMessage} from '@/utils/helpers'
+import {AxiosError, type AxiosInstance} from 'axios'
 import {describe, expect, mock, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
-import React from 'react'
+import React, {type ReactElement} from 'react'
+import {renderToStaticMarkup} from 'react-dom/server'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const managementPage               = 'pages/PluginManagementPage.tsx'
@@ -58,8 +71,8 @@ const effects                      = [
     'setDeletePluginTarget',
     'setEditingPlugin',
     'setConfigDraft',
-    'setJsonDraft',
     'setConfigError',
+    'setConfigReadState',
     'setSavingConfig',
     'showNotification',
     'setInstallingKey',
@@ -99,26 +112,34 @@ function context() {
     }
 }
 
-function management(request = mock(async () => ({ restart_required: true }))) {
-    const current      = context()
-    const fetchPlugins = mock(async () => {
-    })
-    const scope        = {
-        configReadState: 'ready',
-        ...current.scope,
-        pluginsApi: { setEnabled: request, deletePlugin: request, patchConfig: request },
-        fetchPlugins,
-        confirmPluginRuntime: mock(async () => {
-        }),
-        deletePluginTarget: plugin,
-        editingPlugin: plugin,
-        savingConfig: false,
-        deletingPluginID: null,
-        configDraft: { enabled: false, remove: null, options: { fixture: true } },
-        jsonDraft: {},
-        stringifyConfigValue: JSON.stringify,
+function management(request = mock(async (..._args: unknown[]) => ({ restart_required: false }))) {
+    const current           = context()
+    const list              = { plugins_enabled: true, plugins_dir: 'fixtures', plugins: [] }
+    const publishPluginList = mock()
+    const write             = async (...args: unknown[]) => {
+        const result   = await request(...args)
+        const callback = args[args.length - 1] as (snapshot: typeof list) => void
+        if (current.scope.isCurrentConnection()) {
+            callback(list)
+        }
+        return result
     }
-    return { ...current, scope, request, fetchPlugins }
+    const scope             = {
+        configReadState: 'ready', ...current.scope,
+        pluginsApi: {
+            setEnabled: write, deletePlugin: write, patchConfig: write,
+            getConfig: async () => ({ enabled: 'false' }),
+        },
+        publishPluginList,
+        confirmPluginRuntime: mock(async () => list),
+        notifyConfigSaved: sourceCallback(managementPage, 'notifyConfigSaved', current.scope),
+        hasSavedPluginConfig: sourceCallback(managementPage, 'hasSavedPluginConfig', {}),
+        deletePluginTarget: plugin, editingPlugin: { ...plugin, config: { enabled: 'true' } },
+        savingConfig: false, deletingPluginID: null, configDraft: { enabled: 'false' },
+        encodePluginConfigPatch, pluginConfigFieldMatches,
+        closeConfig: () => current.writes.setEditingPlugin(null),
+    }
+    return { ...current, scope, request, publishPluginList }
 }
 
 const mutationActions = ['handleTogglePlugin', 'handleDeletePlugin', 'handleSaveConfig'] as const
@@ -159,7 +180,7 @@ function store() {
         'pluginVersionMatches': (left: string, right: string) => left.replace(/^v/i, '') === right.replace(/^v/i, ''),
         installEntry: entry,
         installVersion: 'v1.0.0',
-        installingKey: '',
+        installingKey: '', loading: false, error: '',
         gateEntry: entry,
         gateIsUpdate: true,
         gateRequestedVersion: 'v1.0.0',
@@ -176,7 +197,7 @@ function store() {
     ) => Promise<void>>(
         storePage,
         'runInstall',
-        scope,
+        { ...scope, loadStore: sourceCallback(storePage, 'loadStore', scope) },
     )
     const closeGate           = sourceInitializer<() => void>(storePage, 'closeGate', scope)
     const loadReleaseVersions = sourceCallback<(item: PluginStoreEntry) => Promise<void>>(
@@ -259,7 +280,7 @@ function polling() {
     }
 }
 
-function renderPage(file: string, values: Record<string, unknown>) {
+function renderPage(file: string, values: Record<string, unknown>, nextGeneration = 3) {
     const text = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
 
     const componentName = file === managementPage ? 'PluginManagementPage' : 'PluginStorePage'
@@ -308,9 +329,10 @@ function renderPage(file: string, values: Record<string, unknown>) {
         useHeaderRefresh: noop,
         useCallback: (work: unknown) => work,
         useMemo: (work: () => unknown) => work(),
-        Sheet: noop,
-        Card: noop,
-        Button: noop,
+        Sheet,
+        Card,
+        Button: ({ children, disabled }: { children: React.ReactNode; disabled?: boolean }) =>
+            React.createElement('button', { disabled }, children),
         Input: noop,
         Modal: noop,
         Select: noop,
@@ -324,9 +346,15 @@ function renderPage(file: string, values: Record<string, unknown>) {
         IconSettings: noop,
         IconShield: noop,
         IconSlidersHorizontal: noop,
-        EmptyState: noop,
+        EmptyState: ({ title, description, action }: {
+            title: string;
+            description?: string;
+            action?: React.ReactNode
+        }) =>
+            React.createElement('div', null, title, description, action),
         Link: noop,
         styles: {},
+        configInput: sourceCallback(managementPage, 'configInput', {}),
         EMPTY_PLUGIN_STORE_ENTRIES: [],
         // noinspection JSUnusedGlobalSymbols
         'pluginTitle': () => 'Fixture',
@@ -352,20 +380,174 @@ function renderPage(file: string, values: Record<string, unknown>) {
         StoreLogo: noop,
     }
 
-    const page = sourceCallback<() => unknown>(
-        file,
-        file === managementPage ?
-        'PluginManagementPage' :
-        'PluginStorePage',
-        scope,
-    )
+    const page = sourceCallback<() => ReactElement>(file, componentName, scope)
     page()
     Object.assign(states, values)
-    generation = 3
+    generation = nextGeneration
     index      = 0
-    page()
-    return states
+    const view = page()
+    return { states, view }
 }
+
+for (const [status, code, message] of [
+    [409, 'plugin_delete_requires_restart', 'plugin_management.delete_restart_required'],
+    [503, 'plugin_runtime_sync_failed', 'plugin_management.delete_partial'],
+] as const) {
+    test(`publishes the live list after committed deletion returns ${status}`, async () => {
+        const flow            = management()
+        const instance        = (apiClient as unknown as { instance: AxiosInstance }).instance
+        const adapter         = instance.defaults.adapter
+        const calls: string[] = []
+        const live            = {
+            plugins_enabled: true, plugins_dir: 'fixtures', plugins: status === 409 ?
+                [{ ...plugin, path: '', configured: false, enabled: false, effective_enabled: false }] : [],
+        }
+        apiClient.setConfig({ apiBase: 'https://fixture.invalid', sessionToken: '' })
+        instance.defaults.adapter = async (config) => {
+            calls.push(`${config.method} ${config.url}`)
+            if (config.method === 'delete' && config.url === '/plugins/fixture') {
+                const receipt = {
+                    mutation_id: config.headers['X-CPA-Mutation-ID'], request_id: 'fixture',
+                    outcome: 'partial', confirmed_effect: true, audit_available: true,
+                    effects: [{ kind: 'plugin.deleted', target: 'plugin' }],
+                }
+                throw new AxiosError('synthetic post-commit failure', 'ERR_BAD_RESPONSE', config, undefined, {
+                    config, status, statusText: code, headers: { 'X-CPA-Mutation-Result': JSON.stringify(receipt) },
+                    data: {
+                        error: code,
+                        file_deleted: true,
+                        configured_removed: true,
+                        restart_required: status === 409,
+                    },
+                })
+            }
+            if (config.method === 'get' && config.url === '/plugins') {
+                return { config, status: 200, statusText: 'OK', headers: {}, data: live }
+            }
+            throw new Error(`Unexpected request ${config.method} ${config.url}`)
+        }
+        try {
+            await sourceCallback<() => Promise<void>>(
+                managementPage,
+                'handleDeletePlugin',
+                { ...flow.scope, pluginsApi },
+            )()
+            expect(calls).toEqual(['delete /plugins/fixture', 'get /plugins'])
+            expect(flow.publishPluginList).toHaveBeenCalledWith(live)
+            expect(flow.writes.setDeletePluginTarget).toHaveBeenCalledWith(null)
+            expect(flow.writes.showNotification).toHaveBeenCalledWith(message, 'warning')
+        } finally {
+            instance.defaults.adapter = adapter
+            apiClient.setConfig({ apiBase: '', sessionToken: '' })
+        }
+    })
+}
+
+for (const [outcome, errorCode] of [
+    ['partial', 'runtime_sync_failed'], ['partial', 'plugin_install_finalize_failed'], ['uncertain', null],
+] as const) {
+    test(`refreshes the store after ${errorCode ?? outcome} installation without replaying the write`, async () => {
+        const flow            = store()
+        const instance        = (apiClient as unknown as { instance: AxiosInstance }).instance
+        const adapter         = instance.defaults.adapter
+        const calls: string[] = []
+        let id: string | undefined
+        const receipt         = () => ({
+            mutation_id: id, request_id: 'fixture', outcome, audit_available: true,
+            confirmed_effect: true, effects: [
+                {
+                    kind: errorCode === 'runtime_sync_failed' ? 'plugin.published' : 'configuration.persisted',
+                    target: errorCode === 'runtime_sync_failed' ? 'plugin' : 'configuration',
+                },
+            ],
+        })
+        apiClient.setConfig({ apiBase: 'https://fixture.invalid', sessionToken: '' })
+        instance.defaults.adapter = async (config) => {
+            calls.push(`${config.method} ${config.url}`)
+            if (config.method === 'post' && config.url?.startsWith('/plugin-store/fixture/install?')) {
+                id            = String(config.headers['X-CPA-Mutation-ID'])
+                const headers = { 'X-CPA-Mutation-Result': JSON.stringify(receipt()) }
+                if (errorCode) {
+                    throw new AxiosError('synthetic post-commit failure', 'ERR_BAD_RESPONSE', config, undefined, {
+                        config, status: 503, statusText: 'Unavailable', headers,
+                        data: { error: errorCode, restart_required: errorCode === 'plugin_install_finalize_failed' },
+                    })
+                }
+                return { config, status: 200, statusText: 'OK', headers, data: { status: 'installed' } }
+            }
+            if (config.method === 'get') {
+                const data = config.url === '/plugin-store' ? listing : config.url === `/mutations/${id}` ? receipt() :
+                                                                        config.url === '/plugins' ?
+                                                                            { plugins: [plugin] } :
+                                                                        undefined
+                if (data) {
+                    return { config, status: 200, statusText: 'OK', headers: {}, data }
+                }
+            }
+            throw new Error(`Unexpected request ${config.method} ${config.url}`)
+        }
+        try {
+            const scope   = { ...flow.scope, pluginStoreApi }
+            const install = sourceCallback<(value: PluginStoreEntry, update: boolean) => Promise<void>>(
+                storePage,
+                'runInstall',
+                {
+                    ...scope,
+                    loadStore: sourceCallback(
+                        storePage,
+                        'loadStore',
+                        scope,
+                    ),
+                },
+            )
+            await install(entry, true)
+            expect(calls.filter((call) => call.startsWith('post'))).toHaveLength(1)
+            expect(calls.filter((call) => call === 'get /plugin-store')).toHaveLength(1)
+            expect(flow.writes.setData).toHaveBeenCalledWith(listing)
+            expect(flow.writes.showNotification).toHaveBeenCalledWith(outcome === 'partial' ?
+                                                                      'plugin_store.install_partial' :
+                                                                      expect.stringContaining(id!), 'warning')
+            if (errorCode === 'plugin_install_finalize_failed') {
+                expect(flow.writes.showNotification).toHaveBeenCalledWith(
+                    'plugin_store.restart_required_notice',
+                    'warning',
+                )
+            }
+        } finally {
+            instance.defaults.adapter = adapter
+            apiClient.setConfig({ apiBase: '', sessionToken: '' })
+        }
+    })
+}
+
+test('store renders unknown values on a failed first read, real zero on success, and a marked stale list', () => {
+    const failed = renderToStaticMarkup(renderPage(
+        storePage,
+        { data: null, loading: false, error: 'HTTP 502' },
+        1,
+    ).view)
+    expect(failed).toContain('<strong>—</strong>')
+    expect(failed).not.toContain('<strong>0</strong>')
+    expect(failed).toContain('plugin_store.load_failed')
+    expect(failed).toContain('common.retry')
+    expect(failed).not.toContain('plugin_store.no_plugins')
+    const empty = renderToStaticMarkup(renderPage(
+        storePage,
+        { data: { ...listing, plugins: [] }, loading: false },
+        1,
+    ).view)
+    expect(empty).toContain('<strong>0</strong>')
+    expect(empty).toContain('<strong>fixtures</strong>')
+    expect(empty).toContain('plugin_store.no_plugins')
+    const stale = renderToStaticMarkup(renderPage(
+        storePage,
+        { data: listing, loading: false, error: 'HTTP 429' },
+        1,
+    ).view)
+    expect(stale).toContain('plugin_store.stale')
+    expect(stale).toContain('Fixture')
+    expect(stale).toContain('<button disabled="">plugin_store.update</button>')
+})
 
 describe('plugin management connection ownership', () => {
     for (const action of mutationActions) {
@@ -374,7 +556,7 @@ describe('plugin management connection ownership', () => {
             await mutate(flow, action)
             expect(flow.request).toHaveBeenCalledTimes(1)
             if (action === 'handleDeletePlugin') {
-                expect(flow.fetchPlugins).toHaveBeenCalledWith({ silent: true })
+                expect(flow.publishPluginList).toHaveBeenCalledWith(expect.objectContaining({ plugins: [] }))
             } else {
                 expect(flow.scope.confirmPluginRuntime).toHaveBeenCalledTimes(1)
             }
@@ -383,7 +565,7 @@ describe('plugin management connection ownership', () => {
                 'success',
             )
             if (action === 'handleSaveConfig') {
-                expect(flow.request).toHaveBeenCalledWith(plugin.id, flow.scope.configDraft)
+                expect(flow.request).toHaveBeenCalledWith(plugin.id, '{"enabled":false}', expect.any(Function))
             }
         })
         test(`${action} still exposes a current failure`, async () => {
@@ -391,7 +573,7 @@ describe('plugin management connection ownership', () => {
                 throw new Error('Fixture mutation failed')
             }))
             await mutate(flow, action)
-            expect(flow.fetchPlugins).not.toHaveBeenCalled()
+            expect(flow.publishPluginList).not.toHaveBeenCalled()
             if (action === 'handleSaveConfig') {
                 expect(flow.writes.setConfigError).toHaveBeenLastCalledWith('Fixture mutation failed')
             } else {
@@ -423,7 +605,7 @@ describe('plugin management connection ownership', () => {
                         }
                         await pending
                         flow.expectNoWrites()
-                        expect(flow.fetchPlugins).not.toHaveBeenCalled()
+                        expect(flow.publishPluginList).not.toHaveBeenCalled()
                     },
                 )
             }
@@ -437,7 +619,7 @@ describe('plugin management connection ownership', () => {
             response.resolve({ restart_required: true })
             await pending
             flow.expectNoWrites()
-            expect(flow.fetchPlugins).not.toHaveBeenCalled()
+            expect(flow.publishPluginList).not.toHaveBeenCalled()
         })
     }
 
@@ -451,13 +633,46 @@ describe('plugin management connection ownership', () => {
         })
     }
 
+    test('a plugin list error stays distinct from a confirmed empty and disabled list', () => {
+        const failure = renderToStaticMarkup(renderPage(managementPage, {
+            data: null, status: 'error', error: 'plugin_config_encode_failed',
+        }, 1).view)
+        expect(failure).toContain('role="alert"')
+        expect(failure).toContain('plugin_config_encode_failed')
+        expect(failure).not.toContain('plugin_management.global_disabled_title')
+        expect(failure).not.toContain('plugin_management.empty_title')
+        expect(failure).not.toContain('<strong>common.no</strong>')
+        expect(failure).not.toContain('<strong>0</strong>')
+        expect(failure).not.toContain('plugin_management.search_placeholder')
+
+        const failedRefresh = renderToStaticMarkup(renderPage(managementPage, {
+            data: { plugins_enabled: false, plugins_dir: 'fixtures', plugins: [], authGeneration: 1 },
+            status: 'error', error: 'synthetic refresh error',
+        }, 1).view)
+        expect(failedRefresh).toContain('role="alert"')
+        expect(failedRefresh).toContain('synthetic refresh error')
+        expect(failedRefresh).not.toContain('plugin_management.global_disabled_title')
+        expect(failedRefresh).not.toContain('<strong>common.no</strong>')
+        expect(failedRefresh).not.toContain('<strong>0</strong>')
+
+        const empty = renderToStaticMarkup(renderPage(managementPage, {
+            data: { plugins_enabled: false, plugins_dir: 'fixtures', plugins: [], authGeneration: 1 },
+            status: 'empty',
+        }, 1).view)
+        expect(empty).toContain('plugin_management.global_disabled_title')
+        expect(empty).toContain('plugin_management.empty_title')
+        expect(empty).toContain('<strong>common.no</strong>')
+        expect(empty).toContain('<strong>fixtures</strong>')
+        expect(empty).toContain('<strong>0</strong>')
+        expect(empty).not.toContain('role="alert"')
+    })
+
     test('a new connection discards config and delete selections and mutation busy state before commit', () => {
-        const states = renderPage(managementPage, {
+        const { states } = renderPage(managementPage, {
             configReadState: 'ready',
             editingPlugin: plugin,
             deletePluginTarget: plugin,
-            configDraft: { old: true },
-            jsonDraft: { old: '{}' },
+            configDraft: { old: '{}' },
             configError: 'Old error',
             savingConfig: true,
             savingPluginID: plugin.id,
@@ -479,7 +694,6 @@ describe('plugin management connection ownership', () => {
             expect(states[name]).toBeNull()
         }
         expect(states.configDraft).toEqual({})
-        expect(states.jsonDraft).toEqual({})
         expect(states.configError).toBeNull()
         expect(states.savingConfig).toBe(false)
     })
@@ -692,7 +906,7 @@ describe(
         })
 
         test('a new connection discards store results, selected versions, confirmation progress and busy state', () => {
-            const states = renderPage(storePage, {
+            const { states } = renderPage(storePage, {
                 data: listing,
                 error: 'Old error',
                 installingKey: entry.store_id,

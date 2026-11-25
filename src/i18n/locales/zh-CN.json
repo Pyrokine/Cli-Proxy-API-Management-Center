@@ -3828,8 +3828,8 @@
         "plugins_dir": "插件目录",
         "total_plugins": "插件数量",
         "global_disabled_title": "全局插件开关未启用",
-        "global_disabled_desc": "当前 plugins.enabled=false，单个插件即使启用也不会生效，打开配置源码，将 plugins.enabled 改为 true 后保存",
-        "open_config_source": "打开配置源码",
+        "global_disabled_desc": "启用全局开关后，单个插件的启用设置才会生效",
+        "open_plugin_settings": "打开插件设置",
         "list_title": "插件列表",
         "empty_title": "暂无插件",
         "empty_desc": "插件目录中没有发现动态库，配置中也没有插件实例",
@@ -3851,10 +3851,14 @@
         "open_menu_failed": "打开插件菜单失败",
         "open_menu_blocked": "浏览器阻止了插件菜单窗口",
         "delete_title": "删除插件 {{id}}",
-        "delete_confirm": "确定要删除插件 {{name}} 吗？这会删除插件文件和配置项",
+        "delete_confirm": "删除 {{name}}？这会移除该插件的全部版本文件和配置",
         "delete_success": "插件已删除",
         "delete_failed": "插件删除失败",
-        "delete_restart_required": "插件已从配置中移除，仍需重启服务释放已加载插件"
+        "delete_restart_required": "插件文件及配置已移除，请重启 CPA 卸载仍在运行的插件",
+        "expected_object": "请输入 JSON 对象",
+        "save_waiting_global": "插件配置已保存，打开全局插件开关后生效",
+        "config_check_failed": "未能确认保存结果，请重新打开编辑器查看当前配置",
+        "delete_partial": "插件文件及配置已移除，请刷新查看运行状态"
     },
     "compat": {
         "server_too_old": "当前服务端版本低于面板要求，请先升级 CPA 服务端",
@@ -3912,7 +3916,9 @@
         "gate_title": "第三方插件确认",
         "gate_step1_text": "这是第三方插件，插件代码不属于官方来源",
         "gate_step2_text": "安装后插件会在 CPA 进程内加载，具备访问请求和配置的能力",
-        "gate_step3_prompt": "输入 {{token}} 确认安装"
+        "gate_step3_prompt": "输入 {{token}} 确认安装",
+        "stale": "刷新失败，当前显示上次成功读取的插件列表",
+        "install_partial": "插件文件及配置已保存，请刷新查看运行状态"
     },
     "plugin_resource": {
         "title": "插件页面",

@@ -3828,8 +3828,8 @@
         "plugins_dir": "Plugins directory",
         "total_plugins": "Plugins",
         "global_disabled_title": "Global plugin switch is disabled",
-        "global_disabled_desc": "plugins.enabled=false, so individual plugins will not take effect even when enabled. Open source config, set plugins.enabled to true, then save.",
-        "open_config_source": "Open source config",
+        "global_disabled_desc": "Individual plugins can run once the global switch is enabled.",
+        "open_plugin_settings": "Open plugin settings",
         "list_title": "Plugin List",
         "empty_title": "No plugins",
         "empty_desc": "No dynamic libraries were discovered and no plugin instances are configured.",
@@ -3851,10 +3851,14 @@
         "open_menu_failed": "Failed to open plugin menu",
         "open_menu_blocked": "The browser blocked the plugin menu window",
         "delete_title": "Delete plugin {{id}}",
-        "delete_confirm": "Delete plugin {{name}}? This removes the plugin file and config entry.",
+        "delete_confirm": "Delete {{name}}? This removes all files for the plugin, including other versions, and its config.",
         "delete_success": "Plugin deleted",
         "delete_failed": "Failed to delete plugin",
-        "delete_restart_required": "Plugin was removed from config. Restart the service to unload the active plugin."
+        "delete_restart_required": "Plugin files and config were removed. Restart CPA to unload the active plugin.",
+        "expected_object": "Enter a JSON object",
+        "save_waiting_global": "Plugin config saved. Enable plugins globally to activate this plugin.",
+        "config_check_failed": "Could not verify the saved config. Reopen the editor to check the current values.",
+        "delete_partial": "The plugin files and config are gone. Refresh to check the runtime state."
     },
     "compat": {
         "server_too_old": "The server version is lower than this panel requires. Upgrade the CPA server first.",
@@ -3912,7 +3916,9 @@
         "gate_title": "Third-party plugin confirmation",
         "gate_step1_text": "This is a third-party plugin. Its code is not from the official source.",
         "gate_step2_text": "After installation, the plugin is loaded inside the CPA process and can access requests and config.",
-        "gate_step3_prompt": "Type {{token}} to confirm installation"
+        "gate_step3_prompt": "Type {{token}} to confirm installation",
+        "stale": "Refresh failed. Showing the last successful plugin list.",
+        "install_partial": "Plugin files and config were saved. Refresh to check the runtime state."
     },
     "plugin_resource": {
         "title": "Plugin page",

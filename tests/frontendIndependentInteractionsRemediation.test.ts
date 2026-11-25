@@ -11,6 +11,7 @@ import {ProviderConnectionFields} from '@/pages/ProviderFormFields'
 import {apiClient} from '@/services/api/client'
 import {configFileApi} from '@/services/api/configFile'
 import type {ModelCatalogRow} from '@/services/api/models'
+import {encodePluginConfigPatch, pluginConfigFieldMatches} from '@/services/api/pluginConfigJSON'
 import type {PluginEntry} from '@/services/api/plugins'
 import {EMPTY_API_KEY_MODEL_RULE, isApiKeyModelRuleEmpty} from '@/types/visualConfig'
 import {getErrorMessage} from '@/utils/helpers'
@@ -957,136 +958,124 @@ test(
 )
 
 for (const action of ['handleTogglePlugin', 'handleSaveConfig'] as const) {
-    test(
-        `${action
-        } announces success only after the real runtime predicate passes and exposes post-save verification failures`,
-        async () => {
-            const file                 = 'pages/PluginManagementPage.tsx'
-            const runtime              = Promise.withResolvers<void>()
-            const notices: unknown[][] = [];
-            const errors: unknown[]    = [];
-            let closed                 = false
-            let confirm: (
+    test(`${action} keeps the saved result separate from runtime verification`, async () => {
+        const file                 = 'pages/PluginManagementPage.tsx'
+        const runtime              = Promise.withResolvers<void>()
+        const waiting              = Promise.withResolvers<void>()
+        const notices: unknown[][] = []
+        let closed                 = false
+        let failRuntime            = false
+        const noop                 = () => {
+        }
+        const response             = { plugins_enabled: true, plugins_dir: '', plugins: [pluginFixture] }
+        const scope                = {
+            configReadState: 'ready', isCurrentConnection: () => true,
+            pluginsApi: {
+                setEnabled: async () => {
+                }, patchConfig: async () => {
+                },
+                getConfig: async () => ({ enabled: 'true', label: '"edited"' }),
+            },
+            setSavingPluginID: noop, setSavingConfig: noop, setConfigError: noop,
+            editingPlugin: {
+                ...pluginFixture, config: { enabled: 'true', label: '"before"' },
+                config_fields: [{ name: 'label', type: 'string' }],
+            },
+            configDraft: { label: 'edited' },
+            showNotification: (...args: unknown[]) => notices.push(args),
+            t: (key: string, value?: { message: string }) => key + (value ? `: ${value.message}` : ''),
+            closeConfig: () => {
+                closed = true
+            }, publishPluginList: noop,
+            hasSavedPluginConfig: sourceCallback(file, 'hasSavedPluginConfig', {}),
+            encodePluginConfigPatch, pluginConfigFieldMatches, getErrorMessage,
+            waitForPluginRuntimeState: async (
                 id: string,
-                predicate: (plugin: PluginEntry, response: { plugins_enabled: boolean }) => boolean,
-            ) => Promise<void>         = async (_id, predicate) => {
-                const updated = { ...pluginFixture, config: { limit: 2, options: { a: 1, z: 2 } } }
-                expect(predicate(updated, { plugins_enabled: true })).toBe(true)
-                expect(predicate({ ...updated, effective_enabled: false }, { plugins_enabled: true })).toBe(false)
+                predicate: (plugin: PluginEntry, list: typeof response) => boolean,
+            ) => {
+                expect(id).toBe(pluginFixture.id)
+                expect(predicate(pluginFixture, response)).toBe(true)
+                const inactive = { ...pluginFixture, effective_enabled: false, registered: false }
+                expect(predicate(inactive, response)).toBe(false)
+                expect(predicate(inactive, { ...response, plugins_enabled: false })).toBe(true)
+                if (failRuntime) {
+                    throw new Error('runtime timeout')
+                }
+                waiting.resolve()
                 await runtime.promise
-            }
-            const scope                = {
-                configReadState: 'ready',
-                isCurrentConnection: () => true,
-                pluginsApi: {
-                    // noinspection JSUnusedGlobalSymbols
-                    'setEnabled': async () => {
-                    }, patchConfig: async () => {
-                    },
-                },
-                confirmPluginRuntime: (
-                    id: string,
-                    predicate: (
-                        plugin: PluginEntry,
-                        response: { plugins_enabled: boolean },
-                    ) => boolean,
-                ) => confirm(id, predicate),
-                setSavingPluginID: () => {
-                },
-                setSavingConfig: () => {
-                },
-                editingPlugin: pluginFixture,
-                configDraft: { limit: 2, constructor: null, options: { z: 2, a: 1 } },
-                jsonDraft: {},
-                setConfigError: (value: unknown) => errors.push(value),
-                showNotification: (...args: unknown[]) => notices.push(args),
-                t: (key: string, value?: { message: string }) => key + (value ? `: ${value.message}` : ''),
-                setEditingPlugin: () => {
-                    closed = true
-                },
-                setConfigDraft: () => {
-                },
-                setJsonDraft: () => {
-                },
-                configValuesEqual: sourceCallback(file, 'configValuesEqual', {}),
-            }
-            const handler              = sourceCallback<(plugin?: PluginEntry, enabled?: boolean) => Promise<void>>(
-                file,
-                action,
-                scope,
-            )
-            // noinspection ES6MissingAwait
-            const pending              = action === 'handleTogglePlugin' ? handler(pluginFixture, true) : handler()
-            await Promise.resolve();
-            await Promise.resolve()
-            expect(notices).toEqual([])
-            expect(closed).toBe(false)
-            runtime.resolve();
-            await pending
-            expect(notices[0]).toEqual(['plugin_management.save_success', 'success'])
-            notices.length = 0;
-            errors.length  = 0;
-            closed         = false
-            confirm        = async () => {
-                throw new Error('runtime timeout')
-            }
-            await (action === 'handleTogglePlugin' ? handler(pluginFixture, true) : handler())
-            expect(notices.some((notice) => notice[1] === 'success')).toBe(false)
-            if (action === 'handleSaveConfig') {
-                expect(errors).toContain('plugin_management.runtime_check_failed: runtime timeout')
-                expect(closed).toBe(false)
-            } else {
-                expect(notices[0]).toEqual(['plugin_management.runtime_check_failed: runtime timeout', 'error'])
-            }
-        },
-    )
-}
-
-test(
-    (
-        'plugin runtime publication consumes terminal metadata and ' +
-        'invalidates older list results; object property order is ' +
-        'immaterial'
-    ),
-    async () => {
-        const file              = 'pages/PluginManagementPage.tsx'
-        const configValuesEqual = sourceCallback<(left: unknown, right: unknown) => boolean>(
+                return { response, plugin: pluginFixture, timedOut: false }
+            },
+        }
+        const handler              = sourceCallback<(plugin?: PluginEntry, enabled?: boolean) => Promise<void>>(
             file,
-            'configValuesEqual',
-            {},
-        )
-        expect(configValuesEqual({ z: { b: 2, a: 1 }, a: [1, 2] }, { a: [1, 2], z: { a: 1, b: 2 } })).toBe(true)
-        expect(configValuesEqual({ a: 1 }, { a: 2 })).toBe(false)
-        const sequence        = { current: 1 };
-        const data: unknown[] = []
-        const response        = { plugins_enabled: true, plugins_dir: '', plugins: [pluginFixture] }
-        const confirm         = sourceCallback<(id: string, predicate: () => boolean) => Promise<void>>(
-            file,
-            'confirmPluginRuntime',
+            action,
             {
-                waitForPluginRuntimeState: async () => ({
-                    response,
-                    plugin: pluginFixture,
-                    timedOut: false,
-                }),
-                isCurrentConnection: () => true,
-                requestSequence: sequence,
-                authGeneration: 7,
-                t: (key: string) => key,
-                setData: (value: unknown) => data.push(value),
-                setStatus: () => {
-                },
-                setRefreshing: () => {
-                },
-                setError: () => {
-                },
+                ...scope,
+                confirmPluginRuntime: sourceCallback(
+                    file,
+                    'confirmPluginRuntime',
+                    scope,
+                ),
+                notifyConfigSaved: sourceCallback(
+                    file,
+                    'notifyConfigSaved',
+                    scope,
+                ),
             },
         )
-        await confirm('synthetic', () => true)
-        expect(sequence.current).toBe(2)
-        expect(data).toEqual([{ ...response, authGeneration: 7 }])
-    },
-)
+        const invoke               = () => action === 'handleTogglePlugin' ? handler(pluginFixture, true) : handler()
+        const pending              = invoke()
+        await waiting.promise
+        expect(notices).toEqual([])
+        expect(closed).toBe(false)
+        runtime.resolve()
+        await pending
+        expect(notices).toEqual([['plugin_management.save_success', 'success']])
+        notices.length = 0
+        closed         = false
+        failRuntime    = true
+        await invoke()
+        expect(notices).toEqual([['plugin_management.runtime_check_failed: runtime timeout', 'warning']])
+        expect(closed).toBe(action === 'handleSaveConfig')
+    })
+}
+
+test('publishes terminal plugin state over earlier requests and compares exact JSON across key order', async () => {
+    expect(pluginConfigFieldMatches('{"z":{"b":2,"a":1},"a":[1,2]}', '{"a":[1,2],"z":{"a":1,"b":2}}')).toBe(true)
+    expect(pluginConfigFieldMatches('{"a":9007199254740993}', '{"a":9007199254740992}')).toBe(false)
+    const file            = 'pages/PluginManagementPage.tsx'
+    const sequence        = { current: 1 }
+    const data: unknown[] = []
+    const response        = { plugins_enabled: true, plugins_dir: '', plugins: [pluginFixture] }
+    const scope           = {
+        isCurrentConnection: () => true, requestSequence: sequence, authGeneration: 7,
+        setData: (value: unknown) => data.push(value), setStatus: () => {
+        }, setRefreshing: () => {
+        }, setError: () => {
+        },
+    }
+    const confirm         = sourceCallback<(id: string, enabled: boolean) => Promise<typeof response>>(
+        file,
+        'confirmPluginRuntime',
+        {
+            ...scope,
+            publishPluginList: sourceCallback(
+                file,
+                'publishPluginList',
+                scope,
+            ),
+            waitForPluginRuntimeState: async () => ({
+                response,
+                plugin: pluginFixture,
+                timedOut: false,
+            }),
+            t: (key: string) => key,
+        },
+    )
+    expect(await confirm('synthetic', true)).toBe(response)
+    expect(sequence.current).toBe(2)
+    expect(data).toEqual([{ ...response, authGeneration: 7 }])
+})
 
 test(
     (

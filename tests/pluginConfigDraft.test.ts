@@ -2,316 +2,322 @@ import i18n from '@/i18n'
 import {waitForPluginRuntimeState} from '@/pages/pluginPolling'
 import {apiClient} from '@/services/api/client'
 import {
-    type PluginConfigField,
-    type PluginConfigObject,
-    type PluginConfigValue,
-    type PluginEntry,
-    pluginsApi,
-} from '@/services/api/plugins'
-import {expect, mock, spyOn, test} from 'bun:test'
+    encodePluginConfigPatch,
+    parsePluginConfigJSON,
+    pluginConfigFieldMatches,
+    type PluginConfigJSON,
+} from '@/services/api/pluginConfigJSON'
+import {type PluginConfigField, type PluginConfigObject, type PluginEntry, pluginsApi} from '@/services/api/plugins'
+import {getErrorMessage} from '@/utils/helpers'
+import {AxiosError, type AxiosInstance} from 'axios'
+import {afterEach, expect, mock, test} from 'bun:test'
 import React, {type ReactElement, type SetStateAction} from 'react'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const file                        = 'pages/PluginManagementPage.tsx'
 const fields: PluginConfigField[] = [
     { name: 'mixed', type: 'array', enum_values: [], description: '' },
+    { name: 'options', type: 'object', enum_values: [], description: '' },
     { name: 'optional', type: 'boolean', enum_values: [], description: '' },
     { name: 'label', type: 'string', enum_values: [], description: '' },
+    { name: 'api-key', type: 'string', enum_values: [], description: '' },
 ]
+const instance                    = (apiClient as unknown as { instance: AxiosInstance }).instance
+const originalAdapter             = instance.defaults.adapter
+const marker                      = '__CLI_PROXY_CONFIG_SECRET_0123456789abcdef0123456789abcdef__'
 
-function editor(initial: PluginConfigObject) {
-    const remoteConfig                    = structuredClone(initial)
-    let configDraft: PluginConfigObject   = {}
-    let jsonDraft: Record<string, string> = {}
-    let editingPlugin: PluginEntry | null = null
-    let configReadState                   = 'loading'
-    let current                           = true
-    const plugin: PluginEntry             = {
-        id: 'fixture',
-        path: '',
-        configured: true,
-        registered: true,
-        enabled: true,
-        effective_enabled: true,
-        supports_oauth: false,
-        logo: '',
-        config: {},
-        config_fields: fields,
-        menus: [],
-        metadata: null,
+afterEach(() => {
+    instance.defaults.adapter = originalAdapter
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
+})
+
+function editor(
+    initial: PluginConfigObject | string,
+    options: { globalEnabled?: boolean; audited?: boolean; readError?: string } = {},
+) {
+    const { globalEnabled = true, audited = true, readError }                              = options
+    const remote                                                                           = parsePluginConfigJSON(
+        typeof initial === 'string' ?
+        initial :
+        JSON.stringify(initial))
+    const requests: string[]                                                               = []
+    const patches: string[]                                                                = []
+    let configDraft: Record<string, string>                                                = {}
+    let editingPlugin: (Omit<PluginEntry, 'config'> & { config: PluginConfigJSON }) | null = null
+    let configReadState                                                                    = 'loading'
+    let current                                                                            = true
+    const plugin: PluginEntry                                                              = {
+        id: 'fixture', path: '', configured: true, registered: false, enabled: false, effective_enabled: false,
+        supports_oauth: false, logo: '', config: {}, config_fields: fields, menus: [], metadata: null,
     }
-    const get                             = spyOn(apiClient, 'get')
-        .mockImplementation(async <T = unknown>(path: string): Promise<T> => (
-            path === '/plugins/fixture/config' ? structuredClone(remoteConfig) :
-                {
-                    plugins_enabled: true,
-                    plugins_dir: 'fixtures',
-                    plugins: [{ ...plugin, config: structuredClone(remoteConfig) }],
-                }
-        ) as T)
-    const patch                           = spyOn(apiClient, 'patch')
-        .mockImplementation(async <T = unknown>(_path: string, value?: unknown): Promise<T> => {
-            for (const [key, entry] of Object.entries(value as PluginConfigObject)) {
-                if (entry === null) {
-                    delete remoteConfig[key]
+    apiClient.setConfig({ apiBase: 'https://fixture.invalid', sessionToken: '' })
+    instance.defaults.adapter = async (config) => {
+        const { url, method } = config
+        requests.push(`${method} ${url}`)
+        let data: unknown
+        let headers: Record<string, string> = {}
+        if (method === 'patch' && url === '/plugins/fixture/config') {
+            const patch = String(config.data)
+            patches.push(patch)
+            for (const [key, entry] of Object.entries(parsePluginConfigJSON(patch))) {
+                if (entry === 'null') {
+                    delete remote[key]
                 } else {
-                    remoteConfig[key] = entry
+                    remote[key] = entry
                 }
             }
-            return { status: 'ok' } as T
-        })
-    const setConfigError                  = mock((_value: unknown) => {
+            data = { status: 'ok' }
+            if (audited) {
+                headers = {
+                    'X-CPA-Mutation-Result': JSON.stringify({
+                                                                mutation_id: config.headers['X-CPA-Mutation-ID'],
+                                                                request_id: 'fixture',
+                                                                outcome: 'succeeded',
+                                                                confirmed_effect: true,
+                                                                effects: [
+                                                                    {
+                                                                        kind: 'configuration.persisted',
+                                                                        target: 'configuration',
+                                                                    },
+                                                                ],
+                                                                audit_available: true,
+                                                            }),
+                }
+            }
+        } else if (method === 'get' && url === '/plugins/fixture/config') {
+            if (readError) {
+                throw new AxiosError('Request failed with status code 503', 'ERR_BAD_RESPONSE', config, undefined, {
+                    config,
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ error: readError }),
+                })
+            }
+            const safe = { ...remote }
+            if (safe['api-key'] !== undefined) {
+                safe['api-key'] = JSON.stringify(marker)
+            }
+            data = encodePluginConfigPatch(safe)
+        } else if (method === 'get' && url === '/plugins') {
+            const enabled   = remote.enabled === 'true'
+            const effective = globalEnabled && enabled
+            data            = {
+                plugins_enabled: globalEnabled, plugins_dir: 'fixtures', plugins: [
+                    {
+                        ...plugin, enabled, registered: effective, effective_enabled: effective,
+                    },
+                ],
+            }
+        } else {
+            throw new Error(`Unexpected fixture request ${method} ${url}`)
+        }
+        return { config, data, headers, status: 200, statusText: 'OK' }
+    }
+    const setConfigError      = mock((_value: unknown) => {
     })
-    const showNotification                = mock()
-    const setData                         = mock()
-    const isJsonConfigValue               = sourceCallback<(value: PluginConfigValue) => boolean>(
-        file,
-        'isJsonConfigValue',
-        {},
-    )
-    const scope                           = () => ({
-        React,
-        Input: () => null,
-        ToggleSwitch: () => null,
-        Select: () => null,
-        styles: {},
-        pluginsApi,
-        editingPlugin,
-        configDraft,
-        jsonDraft,
-        configReadState,
-        isCurrentConnection: () => current,
-        configRequestSequence: { current: 0 },
-        requestSequence: { current: 0 },
-        authGeneration: 3,
-        setConfigDraft: (value: SetStateAction<PluginConfigObject>) => {
+    const setConfigReadState  = (value: string) => {
+        configReadState = value
+    }
+    const showNotification    = mock()
+    const setData             = mock()
+    const shared              = {
+        pluginsApi, isCurrentConnection: () => current,
+        configRequestSequence: { current: 0 }, requestSequence: { current: 0 },
+        authGeneration: apiClient.getAuthGeneration(), savingConfig: false,
+        setConfigDraft: (value: SetStateAction<Record<string, string>>) => {
             configDraft = typeof value === 'function' ? value(configDraft) : value
         },
-        setJsonDraft: (value: SetStateAction<Record<string, string>>) => {
-            jsonDraft = typeof value === 'function' ? value(jsonDraft) : value
-        },
-        setEditingPlugin: (value: PluginEntry | null) => {
+        setEditingPlugin: (value: typeof editingPlugin) => {
             editingPlugin = value
         },
-        // noinspection JSUnusedGlobalSymbols
-        'setConfigReadState': (value: string) => {
-            configReadState = value
-        },
-        setConfigError,
-        showNotification,
-        setData,
-        setStatus: mock(),
-        setRefreshing: mock(),
-        setError: mock(),
-        setSavingConfig: mock(),
-        getErrorMessage: (error: unknown) => String(error),
-        t: (key: string) => key,
-        isJsonConfigValue,
-        waitForPluginRuntimeState,
-        stringifyConfigValue: sourceCallback(file, 'stringifyConfigValue', { isJsonConfigValue }),
+        setConfigReadState, setConfigError, showNotification, setData,
+        setStatus: mock(), setRefreshing: mock(), setError: mock(), setSavingConfig: mock(),
+        getErrorMessage, t: (key: string) => key,
+        configInput: sourceCallback(file, 'configInput', {}),
         normalizeNumberInput: sourceCallback(file, 'normalizeNumberInput', {}),
-        configValuesEqual: sourceCallback(file, 'configValuesEqual', {}),
-    })
-    const control                         = (name: string) => {
+        hasSavedPluginConfig: sourceCallback(file, 'hasSavedPluginConfig', {}),
+        pluginConfigFieldMatches, encodePluginConfigPatch, waitForPluginRuntimeState,
+    }
+    const publishPluginList   = sourceCallback(file, 'publishPluginList', shared)
+    const scope               = () => ({ ...shared, editingPlugin, configDraft, configReadState, publishPluginList })
+    const control             = (name: string) => {
         const values = scope()
         const render = sourceInitializer<(field: PluginConfigField) => ReactElement<{
-            value?: string;
-            checked?: boolean;
-            onChange: (value: unknown) => void
-        }>>(
-            file,
-            'renderConfigInput',
-            { ...values, handleConfigValueChange: sourceCallback(file, 'handleConfigValueChange', values) },
-        )
+            value?: string; checked?: boolean; onChange: (value: unknown) => void
+        }>>(file, 'renderConfigInput', {
+            ...values, React, Input: () => null, ToggleSwitch: () => null, Select: () => null, styles: {},
+            handleConfigValueChange: sourceCallback(file, 'handleConfigValueChange', values),
+        })
         const field  = fields.find((item) => item.name === name) ??
             { name, type: 'integer', enum_values: [], description: '' }
         return render(field).props
     }
     return {
-        patch, setConfigError, showNotification, setData,
+        patches, requests, setConfigError, showNotification, setData,
         open: () => sourceCallback<(value: PluginEntry) => Promise<void>>(file, 'openConfig', scope())(plugin),
         control, change: (name: string, text: string) => control(name).onChange({ target: { value: text } }),
         save: () => sourceCallback<() => Promise<void>>(file, 'handleSaveConfig', {
-            ...scope(), confirmPluginRuntime: sourceCallback(file, 'confirmPluginRuntime', scope()),
+            ...scope(), closeConfig: sourceCallback(file, 'closeConfig', scope()),
+            confirmPluginRuntime: sourceCallback(file, 'confirmPluginRuntime', scope()),
+            notifyConfigSaved: sourceCallback(file, 'notifyConfigSaved', scope()),
         })(),
-        remote: () => remoteConfig, draft: () => ({ configDraft, jsonDraft }),
+        remote: () => JSON.parse(encodePluginConfigPatch(remote)),
+        draft: () => configDraft,
         changeConnection: () => {
             current = false
-        },
-        dispose: () => {
-            get.mockRestore();
-            patch.mockRestore()
         },
     }
 }
 
-test('represents arrays as JSON without marking missing booleans as touched', async () => {
-    const flow = editor({ priority: 3, mixed: [1, true, { x: 1 }], future: { keep: true }, label: '   ' })
-    try {
-        await flow.open()
-        expect(flow.control('mixed').value).toBe('[\n  1,\n  true,\n  {\n    "x": 1\n  }\n]')
-        expect(flow.control('optional').checked).toBe(false)
-        await flow.save()
-        expect(flow.patch).toHaveBeenCalledWith(
-            '/plugins/fixture/config',
-            {},
-            { mutationReadback: expect.any(Function) },
-        )
-        expect(flow.remote()).toEqual({ priority: 3, mixed: [1, true, { x: 1 }], future: { keep: true }, label: '   ' })
-    } finally {
-        flow.dispose()
-    }
+test('renders existing arrays and leaves untouched fields and missing booleans unchanged', async () => {
+    const initial = { priority: 3, mixed: [1, true, { x: 1 }], future: { keep: true }, label: '   ' }
+    const flow    = editor(initial)
+    await flow.open()
+    expect(flow.control('mixed').value).toBe('[\n  1,\n  true,\n  {\n    "x": 1\n  }\n]')
+    expect(flow.control('optional').checked).toBe(false)
+    await flow.save()
+    expect(flow.patches).toEqual([])
+    expect(flow.remote()).toEqual(initial)
 })
 
-test('only patches touched base fields and preserves untouched plugin values', async () => {
-    const flow = editor({ priority: 3, mixed: [1, true, { x: 1 }], label: '', future: { keep: true } })
-    try {
-        await flow.open()
-        flow.change('priority', '5')
-        await flow.save()
-        expect(flow.patch).toHaveBeenCalledWith(
-            '/plugins/fixture/config',
-            { priority: 5 },
-            { mutationReadback: expect.any(Function) },
-        )
-        expect(flow.remote()).toEqual({ priority: 5, mixed: [1, true, { x: 1 }], label: '', future: { keep: true } })
-    } finally {
-        flow.dispose()
-    }
+test('confirms priority zero from the editable readback even when the list omits it', async () => {
+    const flow = editor({ enabled: true, priority: 5, label: '', future: { keep: true } }, { globalEnabled: false })
+    await flow.open()
+    flow.change('priority', '0')
+    await flow.save()
+    expect(flow.patches).toEqual(['{"priority":0}'])
+    expect(flow.remote()).toEqual({ enabled: true, priority: 0, label: '', future: { keep: true } })
+    expect(flow.requests).toEqual([
+                                      'get /plugins/fixture/config', 'patch /plugins/fixture/config', 'get /plugins',
+                                      'get /plugins/fixture/config',
+                                  ])
+    expect(flow.showNotification).toHaveBeenCalledWith('plugin_management.save_waiting_global', 'info')
 })
 
-test('parses touched array JSON without coercing item types', async () => {
+test('keeps exact numbers and their types when editing a neighboring string in nested JSON', async () => {
+    const flow = editor(`{"options":{"items":[9007199254740993,0.1234567890123456789,"9007199254740993",null,{"label":"old"}]}}`)
+    await flow.open()
+    const text = flow.control('options').value!
+    expect(text).toContain('9007199254740993,')
+    expect(text).toContain('0.1234567890123456789,')
+    expect(text).toContain('"9007199254740993",')
+    flow.change('options', text.replace('"old"', '"changed"'))
+    await flow.save()
+    expect(flow.patches).toHaveLength(1)
+    expect(flow.patches[0]).toContain('9007199254740993,')
+    expect(flow.patches[0]).toContain('0.1234567890123456789,')
+    expect(flow.patches[0]).not.toContain('9007199254740992')
+    expect(flow.showNotification).toHaveBeenCalledWith('plugin_management.save_success', 'success')
+})
+
+test('saves edited arrays and a touched false boolean with their JSON types', async () => {
     const flow = editor({ mixed: ['old'] })
-    try {
-        await flow.open()
-        flow.change('mixed', '[1, false, {"next": 2}]')
-        await flow.save()
-        expect(flow.patch).toHaveBeenCalledWith(
-            '/plugins/fixture/config',
-            { mixed: [1, false, { next: 2 }] },
-            { mutationReadback: expect.any(Function) },
-        )
-        expect(flow.remote()).toEqual({ mixed: [1, false, { next: 2 }] })
-    } finally {
-        flow.dispose()
-    }
-})
-
-test('writes a missing boolean only after the user touches it', async () => {
-    const flow = editor({})
-    try {
-        await flow.open()
-        flow.control('optional').onChange(false)
-        await flow.save()
-        expect(flow.patch).toHaveBeenCalledWith(
-            '/plugins/fixture/config',
-            { optional: false },
-            { mutationReadback: expect.any(Function) },
-        )
-    } finally {
-        flow.dispose()
-    }
+    await flow.open()
+    flow.change('mixed', '[1, false, {"next": 2}]')
+    flow.control('optional').onChange(false)
+    await flow.save()
+    expect(flow.patches).toHaveLength(1)
+    expect(JSON.parse(flow.patches[0])).toEqual({ mixed: [1, false, { next: 2 }], optional: false })
+    expect(flow.remote()).toEqual({ mixed: [1, false, { next: 2 }], optional: false })
 })
 
 for (const initial of ['keep me', '   ', '']) {
+    test(`deletes a cleared string from ${JSON.stringify(initial)} and publishes readback`, async () => {
+        const flow = editor({ label: initial, future: { keep: true } })
+        await flow.open()
+        flow.change('label', '   ')
+        expect(flow.control('label').value).toBe('   ')
+        await flow.save()
+        expect(flow.patches).toEqual(['{"label":null}'])
+        expect(flow.remote()).toEqual({ future: { keep: true } })
+        expect(flow.setData).toHaveBeenCalledTimes(1)
+        expect(flow.showNotification).toHaveBeenCalledWith('plugin_management.save_success', 'success')
+    })
+}
+
+for (const [field, invalid, message] of [
+    ['mixed', ['{"not":"an array"}', 'null', 'false', '1', '"string"'], 'plugin_management.expected_array'],
+    ['options', ['[]', 'null', 'false', '1', '"string"'], 'plugin_management.expected_object'],
+] as const) {
+    for (const value of invalid) {
+        test(`rejects ${value} for ${field} without a PATCH`, async () => {
+            const flow = editor({ label: 'retain' })
+            await flow.open()
+            flow.change('label', 'edited')
+            flow.change(field, value)
+            await flow.save()
+            expect(flow.patches).toEqual([])
+            expect(flow.setConfigError).toHaveBeenLastCalledWith(message)
+            expect(flow.control(field).value).toBe(value)
+        })
+    }
+}
+
+test('deletes explicitly cleared structured values and preserves other string bytes', async () => {
+    const flow = editor({ mixed: { legacy: true }, options: { old: true }, label: 'original', future: { keep: true } })
+    await flow.open()
+    flow.change('label', 'edited')
+    flow.change('label', 'original')
+    await flow.save()
+    expect(flow.patches).toEqual([])
+    await flow.open()
+    flow.change('label', ' changed ')
+    flow.change('mixed', '  ')
+    flow.change('options', '')
+    await flow.save()
+    expect(JSON.parse(flow.patches[0])).toEqual({ label: ' changed ', mixed: null, options: null })
+    expect(flow.remote()).toEqual({ label: ' changed ', future: { keep: true } })
+})
+
+for (const audited of [false, true]) {
     test(
-        `deletes a cleared touched string from ${JSON.stringify(initial)
-        } with null and publishes actual runtime readback`,
+        `redacted readback ${audited ? 'uses the save receipt' : 'keeps an unconfirmed secret unverified'}`,
         async () => {
-            const flow = editor({ label: initial, future: { keep: true } })
-            try {
-                await flow.open()
-                flow.change('label', '   ')
-                expect(flow.control('label').value).toBe('   ')
-                await flow.save()
-                expect(flow.patch).toHaveBeenCalledWith(
-                    '/plugins/fixture/config',
-                    { label: null },
-                    { mutationReadback: expect.any(Function) },
-                )
-                expect(flow.remote()).toEqual({ future: { keep: true } })
-                expect(flow.setData.mock.calls[0][0].plugins[0].config).toEqual({ future: { keep: true } })
+            const flow = editor({ 'api-key': 'old-synthetic-value' }, { audited })
+            await flow.open()
+            expect(flow.control('api-key').value).toBe(marker)
+            flow.change('api-key', 'new-synthetic-value')
+            await flow.save()
+            expect(flow.patches).toEqual(['{"api-key":"new-synthetic-value"}'])
+            if (audited) {
                 expect(flow.showNotification).toHaveBeenCalledWith('plugin_management.save_success', 'success')
-            } finally {
-                flow.dispose()
+            } else {
+                expect(flow.showNotification).not.toHaveBeenCalled()
+                expect(flow.setConfigError).toHaveBeenLastCalledWith('plugin_management.config_check_failed')
             }
         },
     )
 }
 
-for (const text of ['{"not":"an array"}', 'null', 'false', '1', '"string"']) {
-    test(`rejects non-array JSON ${text} before sending any config PATCH`, async () => {
-        const flow = editor({ mixed: ['old'], label: 'keep' })
-        try {
-            await flow.open()
-            flow.change('label', 'clearable')
-            flow.change('mixed', text)
-            await flow.save()
-            expect(flow.patch).not.toHaveBeenCalled()
-            expect(flow.setConfigError).toHaveBeenLastCalledWith('plugin_management.expected_array')
-            expect(flow.remote()).toEqual({ mixed: ['old'], label: 'keep' })
-            expect(flow.control('mixed').value).toBe(text)
-            expect(flow.showNotification).not.toHaveBeenCalled()
-        } finally {
-            flow.dispose()
-        }
-    })
-}
-
-test(
-    (
-        'clears a blank array, preserves nonblank string bytes, and ' +
-        'restores edited strings without changing untouched legacy JSON'
-    ),
-    async () => {
-        const flow = editor({ mixed: { legacy: true }, label: 'original', future: { keep: true } })
-        try {
-            await flow.open()
-            flow.change('label', 'edited')
-            flow.change('label', 'original')
-            await flow.save()
-            expect(flow.patch).toHaveBeenLastCalledWith(
-                '/plugins/fixture/config',
-                {},
-                { mutationReadback: expect.any(Function) },
-            )
-            await flow.open()
-            flow.change('label', ' changed ')
-            flow.change('mixed', '  ')
-            await flow.save()
-            expect(flow.patch).toHaveBeenLastCalledWith(
-                '/plugins/fixture/config',
-                { label: ' changed ', mixed: null },
-                { mutationReadback: expect.any(Function) },
-            )
-            expect(flow.remote()).toEqual({ label: ' changed ', future: { keep: true } })
-        } finally {
-            flow.dispose()
-        }
-    },
-)
-
-for (const [language, message] of [
-    ['en', 'Enter a JSON array'], ['zh-CN', '请输入 JSON 数组'],
-    ['zh-TW', '請輸入 JSON 陣列'], ['ru', 'Введите JSON-массив'],
+for (const [language, array, object] of [
+    ['en', 'Enter a JSON array', 'Enter a JSON object'], ['zh-CN', '请输入 JSON 数组', '请输入 JSON 对象'],
+    ['zh-TW', '請輸入 JSON 陣列', '請輸入 JSON 物件'], ['ru', 'Введите JSON-массив', 'Введите JSON-объект'],
 ]) {
-    test(`array validation has an actual ${language} message`, () => {
-        expect(i18n.t('plugin_management.expected_array', { lng: language })).toBe(message)
+    test(`structured validation has ${language} messages`, () => {
+        expect(i18n.t('plugin_management.expected_array', { lng: language })).toBe(array)
+        expect(i18n.t('plugin_management.expected_object', { lng: language })).toBe(object)
     })
 }
 
-test('an old connection cannot alter string drafts or submit their deletion', async () => {
+test('shows the server reason for an editable config error and does not send a write', async () => {
+    const readError = 'Fixture plugin config read failed'
+    const flow      = editor({ label: 'keep' }, { readError })
+    await flow.open()
+    expect(flow.setConfigError).toHaveBeenLastCalledWith(readError)
+    await flow.save()
+    expect(flow.requests).toEqual(['get /plugins/fixture/config'])
+    expect(flow.patches).toEqual([])
+})
+
+test('an old connection cannot update or submit a config draft', async () => {
     const flow = editor({ label: 'keep' })
-    try {
-        await flow.open()
-        const before = structuredClone(flow.draft())
-        flow.changeConnection()
-        flow.change('label', '  ')
-        await flow.save()
-        expect(flow.draft()).toEqual(before)
-        expect(flow.patch).not.toHaveBeenCalled()
-        expect(flow.remote()).toEqual({ label: 'keep' })
-    } finally {
-        flow.dispose()
-    }
+    await flow.open()
+    const before = structuredClone(flow.draft())
+    flow.changeConnection()
+    flow.change('label', '  ')
+    await flow.save()
+    expect(flow.draft()).toEqual(before)
+    expect(flow.patches).toEqual([])
+    expect(flow.remote()).toEqual({ label: 'keep' })
 })

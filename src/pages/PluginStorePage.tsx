@@ -18,6 +18,7 @@ import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {apiClient} from '@/services/api/client'
 import {pluginStoreApi, type PluginStoreEntry, type PluginStoreResponse} from '@/services/api/plugins'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
+import type {ApiError} from '@/types/api'
 import {getErrorMessage} from '@/utils/helpers'
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -152,6 +153,9 @@ export function PluginStorePage() {
         }
         try {
             const response = await pluginStoreApi.list({ signal: controller.signal })
+            if (!Array.isArray(response?.plugins)) {
+                throw new Error(t('plugin_store.load_failed'))
+            }
             if (isActive()) {
                 setData(response)
             }
@@ -187,11 +191,14 @@ export function PluginStorePage() {
     }, [authGeneration])
 
     const stats = useMemo(() => {
-        const plugins   = data?.plugins ?? []
+        if (!data) {
+            return null
+        }
+        const plugins   = data.plugins
         const installed = plugins.filter((plugin) => plugin.installed).length
         const updates   = plugins.filter((plugin) => plugin.installed && plugin.update_available).length
         return { total: plugins.length, installed, notInstalled: plugins.length - installed, updates }
-    }, [data?.plugins])
+    }, [data])
 
     const visiblePlugins = useMemo(() => {
         const plugins  = data?.plugins ?? []
@@ -224,19 +231,19 @@ export function PluginStorePage() {
         ].filter(Boolean).join(' ').toLowerCase().includes(query))
     }, [data?.plugins, filter, statusFilter])
 
-    const statusFilters: Array<{ key: StoreStatusFilter; label: string; count: number }> = [
-        { key: 'all', label: t('plugin_store.filter_all', { defaultValue: '全部' }), count: stats.total },
+    const statusFilters: Array<{ key: StoreStatusFilter; label: string; count?: number }> = [
+        { key: 'all', label: t('plugin_store.filter_all', { defaultValue: '全部' }), count: stats?.total },
         {
             key: 'installed',
             label: t('plugin_store.filter_installed', { defaultValue: '已安装' }),
-            count: stats.installed,
+            count: stats?.installed,
         },
         {
             key: 'notInstalled',
             label: t('plugin_store.filter_not_installed', { defaultValue: '未安装' }),
-            count: stats.notInstalled,
+            count: stats?.notInstalled,
         },
-        { key: 'updates', label: t('plugin_store.filter_updates', { defaultValue: '可更新' }), count: stats.updates },
+        { key: 'updates', label: t('plugin_store.filter_updates', { defaultValue: '可更新' }), count: stats?.updates },
     ]
 
     useHeaderRefresh(loadStore)
@@ -303,6 +310,7 @@ export function PluginStorePage() {
         const entryKey          = storeEntryKey(entry)
         const version           = supportsPluginVersionSelection(entry.install_type) ? requestedVersion.trim() : ''
         setInstallingKey(entryKey)
+        let acknowledged = false
         try {
             const result = await pluginStoreApi.install(entry.id, {
                 sourceId: entry.source_id || undefined,
@@ -311,13 +319,15 @@ export function PluginStorePage() {
             if (!isActive()) {
                 return
             }
+            acknowledged = true
             clearConfigCache()
-            const installedState = await waitForPluginStoreState(
+            const expectedVersion = version || result.version
+            const installedState  = await waitForPluginStoreState(
                 entry.id,
                 result.source_id || entry.source_id,
                 (plugin) => plugin.installed &&
                             plugin.configured &&
-                            (!version || pluginVersionMatches(plugin.installed_version, version)),
+                            (!expectedVersion || pluginVersionMatches(plugin.installed_version, expectedVersion)),
                 undefined,
                 undefined,
                 controller.signal,
@@ -327,6 +337,7 @@ export function PluginStorePage() {
                 return
             }
             setData(installedState.response)
+            setError('')
             if (installedState.timedOut || !installedState.plugin?.installed || !installedState.plugin.configured) {
                 showNotification(
                     t('plugin_store.status_pending', { defaultValue: '插件文件已写入，运行状态仍在刷新' }),
@@ -390,19 +401,34 @@ export function PluginStorePage() {
             if (isAbortError(err) || !isActive()) {
                 return
             }
-            if (pluginStoreErrorRestartRequired(err)) {
+            const failure         = err as ApiError
+            const receipt         = failure.mutation?.result
+            const body            = failure.data as { error?: string } | undefined
+            const committed       = acknowledged || receipt?.effects.some(({ kind }) => kind === 'plugin.published') ||
+                                    (body?.error === 'plugin_install_finalize_failed' &&
+                                     receipt?.effects.some(({ kind }) => kind === 'configuration.persisted'))
+            const restartRequired = pluginStoreErrorRestartRequired(err)
+            if (committed) {
+                if (!acknowledged) {
+                    clearConfigCache()
+                }
+                showNotification(t('plugin_store.install_partial'), 'warning')
+            }
+            if (restartRequired) {
                 setRestartRequiredKeys((current) => current.includes(entryKey) ? current : [...current, entryKey])
-                showNotification(t(
-                    'plugin_store.restart_required_notice',
-                    { defaultValue: '当前插件需要重启服务后生效' },
-                ), 'warning')
+                showNotification(t('plugin_store.restart_required_notice'), 'warning')
+            }
+            const uncertain = failure.mutation?.recovery || receipt?.outcome === 'uncertain' ||
+                              receipt?.outcome === 'partial'
+            if (committed || restartRequired || uncertain) {
+                if (!committed && !restartRequired) {
+                    showNotification(getErrorMessage(err) || t('common.mutation_uncertain'), 'warning')
+                }
+                await loadStore()
                 return
             }
-            showNotification(getErrorMessage(err) ||
-                             t(
-                                 isUpdate ? 'plugin_store.update_failed' : 'plugin_store.install_failed',
-                                 { defaultValue: isUpdate ? '插件更新失败' : '插件安装失败' },
-                             ), 'error')
+            showNotification(getErrorMessage(err) || t(isUpdate ? 'plugin_store.update_failed' :
+                                                       'plugin_store.install_failed'), 'error')
             throw err
         } finally {
             if (isActive()) {
@@ -412,7 +438,7 @@ export function PluginStorePage() {
                 installAbortRef.current = null
             }
         }
-    }, [authGeneration, clearConfigCache, isCurrentConnection, showNotification, t])
+    }, [authGeneration, clearConfigCache, isCurrentConnection, loadStore, showNotification, t])
 
     const openInstallOptions = (entry: PluginStoreEntry) => {
         if (!isCurrentConnection()) {
@@ -438,7 +464,7 @@ export function PluginStorePage() {
     }
 
     const confirmInstallOptions = async () => {
-        if (!installEntry || !isCurrentConnection()) {
+        if (!installEntry || error || loading || !isCurrentConnection()) {
             return
         }
         const isUpdate = installEntry.installed && installEntry.update_available
@@ -487,7 +513,7 @@ export function PluginStorePage() {
     }
 
     const confirmGate = async () => {
-        if (!gateEntry || !isCurrentConnection()) {
+        if (!gateEntry || error || loading || !isCurrentConnection()) {
             return
         }
         try {
@@ -516,7 +542,7 @@ export function PluginStorePage() {
                                :
                                formatPluginVersion(entry.installed_version || entry.version)
         const platformText   = (entry.platforms ?? []).map((item) => `${item.goos}/${item.goarch}`).join(', ')
-        const actionDisabled = missingAuth || Boolean(installingKey && !isInstalling)
+        const actionDisabled = missingAuth || loading || Boolean(error || (installingKey && !isInstalling))
 
         return (
             <Card key={entryKey} className={styles.storeCard}>
@@ -647,7 +673,12 @@ export function PluginStorePage() {
                 </div>
             </div>
 
-            {error && <div className='error-box'>{error}</div>}
+            {error && data && (
+                <div className={styles.warningBox} role='status'>
+                    <strong>{t('plugin_store.stale')}</strong>
+                    <div>{error}</div>
+                </div>
+            )}
             {(data?.source_errors ?? []).length > 0 && (
                 <div className={styles.warningBox}>
                     <strong>{t('plugin_store.source_errors_title', { defaultValue: '部分插件源拉取失败' })}</strong>
@@ -666,19 +697,19 @@ export function PluginStorePage() {
             )}
 
             <div className={styles.statsGrid}>
-                <Card className={styles.statCard}><strong>{stats.total}</strong><span>{t(
+                <Card className={styles.statCard}><strong>{stats?.total ?? '—'}</strong><span>{t(
                     'plugin_store.stat_available',
                     { defaultValue: '可用插件' },
                 )}</span></Card>
-                <Card className={styles.statCard}><strong>{stats.installed}</strong><span>{t(
+                <Card className={styles.statCard}><strong>{stats?.installed ?? '—'}</strong><span>{t(
                     'plugin_store.filter_installed',
                     { defaultValue: '已安装' },
                 )}</span></Card>
-                <Card className={styles.statCard}><strong>{stats.updates}</strong><span>{t(
+                <Card className={styles.statCard}><strong>{stats?.updates ?? '—'}</strong><span>{t(
                     'plugin_store.filter_updates',
                     { defaultValue: '可更新' },
                 )}</span></Card>
-                <Card className={styles.statCard}><strong>{data?.plugins_dir || 'plugins'}</strong><span>{t(
+                <Card className={styles.statCard}><strong>{data?.plugins_dir || '—'}</strong><span>{t(
                     'plugin_store.plugins_dir',
                     { defaultValue: '插件目录' },
                 )}</span></Card>
@@ -688,6 +719,7 @@ export function PluginStorePage() {
                 <Input
                     type='search'
                     value={filter}
+                    disabled={!data}
                     onChange={(event) => setFilter(event.target.value)}
                     placeholder={t(
                         'plugin_store.search_placeholder',
@@ -704,8 +736,10 @@ export function PluginStorePage() {
                                                                styles.filterChipActive :
                                                                ''}`}
                             onClick={() => setStatusFilter(item.key)}
+                            disabled={!data}
+                            aria-pressed={statusFilter === item.key}
                         >
-                            {item.label}<span>{item.count}</span>
+                            {item.label}<span>{item.count ?? '—'}</span>
                         </button>
                     ))}
                 </div>
@@ -715,6 +749,14 @@ export function PluginStorePage() {
                 <Card>
                     <div className={styles.loadingState}>{t('common.loading')}</div>
                 </Card>
+            ) : !data ? (
+                <EmptyState
+                    title={t('plugin_store.load_failed')}
+                    description={error}
+                    action={<Button type='button' variant='secondary' size='sm' onClick={() => void loadStore()}>
+                        {t('common.retry')}
+                    </Button>}
+                />
             ) : visiblePlugins.length === 0 ? (
                 <EmptyState
                     title={t('plugin_store.no_plugins', { defaultValue: '没有匹配的插件' })}
@@ -741,7 +783,8 @@ export function PluginStorePage() {
                         <Button type='button' variant='ghost' onClick={closeInstallOptions}
                                 disabled={Boolean(installingKey)}>{t('common.cancel')}</Button>
                         <Button type='button' onClick={() => void confirmInstallOptions()}
-                                loading={Boolean(installingKey)} disabled={Boolean(installVersionError)}>
+                                loading={Boolean(installingKey)}
+                                disabled={loading || Boolean(error || installVersionError)}>
                             {installIsUpdate ?
                              t('plugin_store.update', { defaultValue: '更新' }) :
                              t('plugin_store.install', { defaultValue: '安装' })}
@@ -845,7 +888,8 @@ export function PluginStorePage() {
                             )}</Button>
                         ) : (
                              <Button type='button' variant='danger' onClick={() => void confirmGate()}
-                                     disabled={gateTyped.trim() !== gateToken} loading={Boolean(installingKey)}>
+                                     disabled={loading || Boolean(error) || gateTyped.trim() !== gateToken}
+                                     loading={Boolean(installingKey)}>
                                  {gateIsUpdate ?
                                   t('plugin_store.update', { defaultValue: '更新' }) :
                                   t('plugin_store.install', { defaultValue: '安装' })}

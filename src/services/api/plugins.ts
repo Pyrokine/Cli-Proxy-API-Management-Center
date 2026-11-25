@@ -4,6 +4,7 @@ import {normalizeOAuthProviderKey} from '@/utils/providerKeys'
 import type {AxiosRequestConfig} from 'axios'
 import {apiClient} from './client'
 import type {OAuthProvider} from './oauth'
+import {parsePluginConfigJSON, type PluginConfigJSON} from './pluginConfigJSON'
 
 export type PluginConfigValue = string | number | boolean | null | PluginConfigValue[] | {
     [key: string]: PluginConfigValue
@@ -203,28 +204,43 @@ export const pluginsApi = {
     list: async (config?: AxiosRequestConfig): Promise<PluginListResponse> => normalizePluginListResponse(
         await apiClient.get<PluginListResponse>('/plugins', config),
     ),
-    getConfig: async (id: string): Promise<PluginConfigObject> => {
-        const value = await apiClient.get<unknown>(`/plugins/${encodeURIComponent(id)}/config`)
-        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    getConfig: async (id: string): Promise<PluginConfigJSON> => {
+        const value = await apiClient.get<string>(`/plugins/${encodeURIComponent(id)}/config`, {
+            responseType: 'text',
+            transformResponse: [
+                (data: unknown, _headers, status) => {
+                    if (typeof data === 'string' && status !== undefined && status >= 400) {
+                        try {
+                            return JSON.parse(data) as unknown
+                        } catch {
+                            return data
+                        }
+                    }
+                    return data
+                },
+            ],
+        })
+        try {
+            return parsePluginConfigJSON(value)
+        } catch {
             throw new Error(i18n.t('plugin_management.invalid_config_response'))
         }
-        return value as PluginConfigObject
     },
-    setEnabled: (id: string, enabled: boolean) =>
+    setEnabled: (id: string, enabled: boolean, onReadback?: PluginReadback) =>
         apiClient.patch<void>(
             `/plugins/${encodeURIComponent(id)}/enabled`,
             { enabled },
-            { mutationReadback: () => pluginsApi.list() },
+            { mutationReadback: readPluginList(onReadback) },
         ),
-    deletePlugin: (id: string) => apiClient.delete<PluginDeleteResult>(
+    deletePlugin: (id: string, onReadback?: PluginReadback) => apiClient.delete<PluginDeleteResult>(
         `/plugins/${encodeURIComponent(id)}`,
-        { mutationReadback: () => pluginsApi.list() },
+        { mutationReadback: readPluginList(onReadback) },
     ),
-    patchConfig: (id: string, config: PluginConfigObject) =>
+    patchConfig: (id: string, config: PluginConfigObject | string, onReadback?: PluginReadback) =>
         apiClient.patch<void>(
             `/plugins/${encodeURIComponent(id)}/config`,
             config,
-            { mutationReadback: () => pluginsApi.list() },
+            { mutationReadback: readPluginList(onReadback) },
         ),
 }
 

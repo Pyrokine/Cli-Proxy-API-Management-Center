@@ -353,13 +353,13 @@ test(
 
 test(
     (
-        'plugin editor loads full direct configuration into its existing ' +
-        'sparse draft and refuses saves after a read failure'
+        'plugin editor keeps the full editable config separate from changed fields ' +
+        'and refuses saves after a read failure'
     ),
     async () => {
         const states: unknown[] = []
         const drafts: unknown[] = []
-        const current           = { future: { retained: true }, mode: 'safe' }
+        const current           = { future: '{"retained":true}', mode: '"safe"' }
         const scope             = {
             useCallback: <T>(value: T) => value,
             isCurrentConnection: () => true,
@@ -367,14 +367,11 @@ test(
             pluginsApi: { getConfig: async () => current },
             setEditingPlugin: (value: unknown) => states.push(value),
             setConfigDraft: (value: unknown) => drafts.push(value),
-            setJsonDraft: () => {
-            },
             setConfigError: () => {
             },
             // noinspection JSUnusedGlobalSymbols
             'setConfigReadState': () => {
             },
-            stringifyConfigValue: JSON.stringify,
             getErrorMessage: String,
         }
         const open              = sourceInitializer<(plugin: unknown) => Promise<void>>(
@@ -383,16 +380,14 @@ test(
             scope,
         )
         await open({ id: 'synthetic', config: { mode: 'list-only' }, config_fields: [] })
-        expect(drafts[1]).toEqual(current)
+        expect(drafts).toEqual([{}])
         expect(states[1]).toMatchObject({ config: current })
         let patches = 0
-        const save  = sourceInitializer<() => Promise<void>>('pages/PluginManagementPage.tsx', 'handleSaveConfig', {
-            useCallback: <T>(value: T) => value,
+        const save  = sourceCallback<() => Promise<void>>('pages/PluginManagementPage.tsx', 'handleSaveConfig', {
             editingPlugin: { id: 'synthetic' },
             isCurrentConnection: () => true,
             configReadState: 'error',
             configDraft: {},
-            jsonDraft: {},
             confirmPluginRuntime: async () => {
             },
             showNotification: () => {

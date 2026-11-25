@@ -3828,8 +3828,8 @@
         "plugins_dir": "插件目錄",
         "total_plugins": "插件數量",
         "global_disabled_title": "全域插件開關未啟用",
-        "global_disabled_desc": "目前 plugins.enabled=false，單個插件即使啟用也不會生效，開啟設定原始碼，將 plugins.enabled 改為 true 後儲存",
-        "open_config_source": "開啟設定原始碼",
+        "global_disabled_desc": "啟用全域開關後，個別插件的啟用設定才會生效",
+        "open_plugin_settings": "開啟插件設定",
         "list_title": "插件列表",
         "empty_title": "暫無插件",
         "empty_desc": "插件目錄中沒有發現動態庫，設定中也沒有插件實例",
@@ -3851,10 +3851,14 @@
         "open_menu_failed": "開啟插件選單失敗",
         "open_menu_blocked": "瀏覽器阻擋了插件選單視窗",
         "delete_title": "刪除插件 {{id}}",
-        "delete_confirm": "確定要刪除插件 {{name}} 嗎？這會刪除插件檔案和設定項",
+        "delete_confirm": "刪除 {{name}}？這會移除該外掛程式的所有版本檔案和設定",
         "delete_success": "插件已刪除",
         "delete_failed": "插件刪除失敗",
-        "delete_restart_required": "插件已從設定中移除，仍需重啟服務釋放已載入插件"
+        "delete_restart_required": "外掛程式檔案及設定已移除，請重新啟動 CPA 以卸載仍在執行的外掛程式",
+        "expected_object": "請輸入 JSON 物件",
+        "save_waiting_global": "外掛程式設定已儲存，開啟全域開關後生效",
+        "config_check_failed": "未能確認儲存結果，請重新開啟編輯器查看目前設定",
+        "delete_partial": "外掛程式檔案及設定已移除，請重新整理查看執行狀態"
     },
     "compat": {
         "server_too_old": "目前伺服器端版本低於面板要求，請先升級 CPA 伺服器端",
@@ -3912,7 +3916,9 @@
         "gate_title": "第三方插件確認",
         "gate_step1_text": "這是第三方插件，插件程式碼不屬於官方來源",
         "gate_step2_text": "安裝後插件會在 CPA 行程內載入，具備存取請求和設定的能力",
-        "gate_step3_prompt": "輸入 {{token}} 確認安裝"
+        "gate_step3_prompt": "輸入 {{token}} 確認安裝",
+        "stale": "重新整理失敗，目前顯示上次成功取得的外掛程式清單",
+        "install_partial": "外掛程式檔案及設定已儲存，請重新整理查看執行狀態"
     },
     "plugin_resource": {
         "title": "插件頁面",
