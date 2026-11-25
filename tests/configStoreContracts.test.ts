@@ -116,14 +116,15 @@ describe('config section descriptors', () => {
     })
 
     test('a new login does not reuse or publish an in-flight config from the old connection', async () => {
-        const loginStart  = authStoreSource.indexOf('login: async (credentials) =>')
-        const logoutStart = authStoreSource.indexOf('logout: () =>', loginStart)
-        const loginBody   = authStoreSource.slice(loginStart, logoutStart)
-        expect(loginStart).toBeGreaterThan(-1)
-        expect(loginBody.indexOf('useConfigStore.getState().clearCache()'))
-            .toBeLessThan(loginBody.indexOf('apiClient.setConfig({'))
-        expect(loginBody.indexOf('apiClient.setConfig({'))
-            .toBeLessThan(loginBody.indexOf('useConfigStore.getState().fetchConfig(undefined, true)'))
+        const connectStart = authStoreSource.indexOf('async function connect(')
+        const connectBody  = authStoreSource.slice(connectStart, authStoreSource.indexOf('export const useAuthStore'))
+        expect(connectStart).toBeGreaterThan(-1)
+        const clearCache = connectBody.indexOf('useConfigStore.getState().clearCache()')
+        const setSession = connectBody.indexOf('apiClient.setConfig({ apiBase, sessionToken')
+        const readConfig = connectBody.indexOf('useConfigStore.getState().fetchConfig(undefined, true)')
+        expect(clearCache).toBeGreaterThan(-1)
+        expect(setSession).toBeGreaterThan(clearCache)
+        expect(readConfig).toBeGreaterThan(setSession)
 
         const pending: Array<(value: { debug: boolean }) => void> = []
         const getConfig                                           = spyOn(configApi, 'getConfig')

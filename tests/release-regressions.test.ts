@@ -144,12 +144,19 @@ describe('management authentication lifecycle', () => {
         expect(authStoreSource).toContain('AUTH_STORAGE_LOCK_NAME')
         expect(authStoreSource).toContain('withAuthStorageLock')
         expect(authStoreSource).toContain('await storeAuthentication(')
-        expect(authStoreSource).toContain('await invalidateAuthenticationForActiveTransaction()')
-        expect(authStoreSource).toContain('EXPECTED_AUTH_STORAGE_TRANSACTION')
+        expectSourceToContain(authStoreSource, 'const invalid = (error as Partial<ApiError>)?.status === 401')
+        expectSourceToContain(
+            authStoreSource,
+            'const clearing = invalid ? invalidateAuthenticationForActiveTransaction() : null',
+        )
+        expect(authStoreSource).toContain('clearing && !(await clearing)')
+        expectSourceToContain(
+            authStoreSource,
+            'beginAuthStorageTransaction(rememberPassword, restored ? credentials.transactionId : undefined)',
+        )
         expect(authStoreSource).toContain('transactionId: transaction.id')
         expect(authStoreSource).toContain('matchAuthStorageTransaction')
         expect(authStoreSource).toContain('onUnreadableValue: markPersistedAuthUnreadable')
-        expect(authStoreSource).toContain('(error as Partial<ApiError>).status === 401')
         expect(authStoreSource).toContain('invalidateStoredAuthentication()')
         expect(loginPageSource).toContain('disabled={insecureStorage}')
         expect(loginPageSource).toContain('t(\'login.storage_clear_failed\')')

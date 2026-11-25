@@ -686,7 +686,7 @@ test(
         const previousAdapter = instance.defaults.adapter
         apiClient.setConfig({
                                 apiBase: 'https://synthetic-recovery.invalid',
-                                managementKey: 'synthetic-management-key',
+                                sessionToken: 'synthetic-management-key',
                             })
         const calls: string[]     = []
         const reply               = (
@@ -809,7 +809,7 @@ test(
         } finally {
             fixture.controller.current?.abort()
             instance.defaults.adapter = previousAdapter
-            apiClient.setConfig({ apiBase: '', managementKey: '' })
+            apiClient.setConfig({ apiBase: '', sessionToken: '' })
             post = installTransport()
         }
     },

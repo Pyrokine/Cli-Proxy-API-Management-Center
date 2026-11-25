@@ -159,7 +159,7 @@ const acknowledged = {
 
 afterEach(() => {
     instance.defaults.adapter = adapter;
-    apiClient.setConfig({ apiBase: '', managementKey: '' })
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
 })
 
 for (const item of cases) {

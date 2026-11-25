@@ -14,12 +14,12 @@ let restoreReceipt    = () => {
 }
 
 beforeEach(() => {
-    apiClient.setConfig({ apiBase: 'https://synthetic-a.invalid', managementKey: 'synthetic-management-key' })
+    apiClient.setConfig({ apiBase: 'https://synthetic-a.invalid', sessionToken: 'synthetic-management-key' })
 })
 afterEach(() => {
     restoreReceipt()
     instance.defaults.adapter = originalAdapter
-    apiClient.setConfig({ apiBase: '', managementKey: '' })
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
 })
 
 function transport(options: {
@@ -199,10 +199,10 @@ for (const duringRead of ['/quota/status', '/auth-files'] as const) {
     test(`A-B-A connection changes during ${duringRead} cannot confirm the original reset`, async () => {
         const fixture = transport({
                                       duringRead, change: () => {
-                apiClient.setConfig({ apiBase: 'https://synthetic-b.invalid', managementKey: 'synthetic-b' })
+                apiClient.setConfig({ apiBase: 'https://synthetic-b.invalid', sessionToken: 'synthetic-b' })
                 apiClient.setConfig({
                                         apiBase: 'https://synthetic-a.invalid',
-                                        managementKey: 'synthetic-management-key',
+                                        sessionToken: 'synthetic-management-key',
                                     })
             },
                                   })

@@ -24,10 +24,14 @@ http://<host>:<api_port>/management.html
 ```
 
 Enter the management key after opening the page. The panel derives the API address from the current URL and also accepts
-a manual address
+a manual address. Use HTTPS for remote sign-in.
 
-By default, CLI Proxy API downloads `management.html` from the latest release of this repository and periodically checks
-for updates. The relevant backend settings are:
+After sign-in, the panel uses a separate 30-minute session. Reloading reuses the session, and signing out revokes it.
+The new panel requires CPA to provide `/v0/management/session`. Update the backend before installing the new panel,
+then enter the management key again.
+
+When the panel file is missing, CPA can download it from the configured release source. Set `auto-check-update: true`
+to check for new versions periodically.
 
 ```yaml
 remote-management:
@@ -204,16 +208,15 @@ cannot authorize a reset through this panel
 
 ## Security
 
-Sensitive browser storage uses `enc::v2::` values protected with AES-256-GCM and a random 12-byte IV. The non-exportable
-key is derived with PBKDF2-SHA-256 using 100,000 iterations and browser origin material
+Remembered sessions use `enc::v3::` with AES-256-GCM and a new random IV for each write. The browser generates a random,
+non-exportable key and keeps it in IndexedDB for the panel's origin. A copy of localStorage or sessionStorage alone
+cannot restore a session. Scripts running on the panel's origin can use the key, so serve the management panel from a
+trusted origin and use HTTPS for remote access
 
-The browser security boundary still applies: same-origin scripts can access the page context and derive the same key
-material. Protect the Management API, avoid untrusted scripts and extensions in the management profile, and use HTTPS
-for remote access
-
-Legacy `enc::v1::` and `plain::` values are migrated to `enc::v2::` after a successful read. If legacy data cannot be
-decrypted, re-encrypted, or stored safely, the panel removes the unprotected value instead of writing plaintext. When
-encrypted storage is unavailable, new sensitive values remain memory-only
+The panel converts `enc::v2::`, `enc::v1::` and `plain::` values after a successful read. If a legacy value cannot be
+migrated safely, the panel discards it and asks for a new sign-in. If the current key is missing or unreadable, the
+panel reports that it could not restore the session. When protected storage is unavailable, a new sign-in lasts only
+until the page is reloaded or closed
 
 ## Development checks
 

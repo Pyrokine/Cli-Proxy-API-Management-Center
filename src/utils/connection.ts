@@ -1,12 +1,5 @@
 import {DEFAULT_API_PORT, MANAGEMENT_API_PREFIX} from './constants'
-import {isEncodedStorageValue} from './encryption'
-
-function containsEncodedStorageValue(input: string): boolean {
-    return isEncodedStorageValue(input) ||
-           input.includes('enc::v2::') ||
-           input.includes('enc::v1::') ||
-           input.includes('plain::')
-}
+import {containsEncodedStorageValue} from './encryption'
 
 export const normalizeApiBase = (input: string | null | undefined): string => {
     let base = (input || '').trim()

@@ -116,7 +116,6 @@ export function PluginManagementPage() {
     const { t }                               = useTranslation()
     const navigate                            = useNavigate()
     const apiBase                             = useAuthStore((state) => state.apiBase)
-    const managementKey                       = useAuthStore((state) => state.managementKey)
     const connectionStatus                    = useAuthStore((state) => state.connectionStatus)
     const authGeneration                      = useAuthStore(() => apiClient.getAuthGeneration())
     const { showNotification }                = useNotificationStore()
@@ -148,7 +147,7 @@ export function PluginManagementPage() {
     const [savingConfig, setSavingConfig]             = useState(false)
     const [storeLogos, setStoreLogos]                 = useState<{
                                                                      apiBase: string
-                                                                     managementKey: string
+                                                                     authGeneration: number
                                                                      entries: PluginStoreEntry[]
                                                                      error: string
                                                                  } | null>(null)
@@ -188,7 +187,7 @@ export function PluginManagementPage() {
                               :
                               undefined
     const needsStoreLogos   = plugins.some((plugin) => !plugin.logo?.trim() && !plugin.metadata?.logo?.trim())
-    const currentStoreLogos = storeLogos?.apiBase === apiBase && storeLogos.managementKey === managementKey
+    const currentStoreLogos = storeLogos?.apiBase === apiBase && storeLogos.authGeneration === authGeneration
                               ? storeLogos : null
     const logoEntries       = currentStoreLogos?.entries ?? EMPTY_PLUGIN_STORE_ENTRIES
 
@@ -241,7 +240,7 @@ export function PluginManagementPage() {
             window.clearTimeout(timer)
             ++requests.current
         }
-    }, [fetchPlugins, apiBase, managementKey])
+    }, [fetchPlugins, apiBase, authGeneration])
 
     useEffect(() => {
         if (connectionStatus !== 'connected' || !currentData?.plugins.some(
@@ -256,16 +255,16 @@ export function PluginManagementPage() {
                                    throw new Error('Invalid plugin store response')
                                }
                                if (!controller.signal.aborted && isCurrentConnection()) {
-                                   setStoreLogos({ apiBase, managementKey, entries: response.plugins, error: '' })
+                                   setStoreLogos({ apiBase, authGeneration, entries: response.plugins, error: '' })
                                }
                            })
                            .catch((err: unknown) => {
                                if (!controller.signal.aborted && isCurrentConnection()) {
-                                   setStoreLogos({ apiBase, managementKey, entries: [], error: getErrorMessage(err) })
+                                   setStoreLogos({ apiBase, authGeneration, entries: [], error: getErrorMessage(err) })
                                }
                            })
         return () => controller.abort()
-    }, [apiBase, connectionStatus, currentData, isCurrentConnection, managementKey])
+    }, [apiBase, connectionStatus, currentData, isCurrentConnection, authGeneration])
 
     useHeaderRefresh(fetchPlugins)
 

@@ -245,8 +245,7 @@ export function LogsPage() {
                                                          authGeneration ===
                                                          apiClient.getAuthGeneration()
     const apiBase                                = useAuthStore((state) => state.apiBase)
-    const managementKey                          = useAuthStore((state) => state.managementKey)
-    const traceScopeKey                          = `${apiBase}::${managementKey}`
+    const traceScopeKey                          = `${apiBase}::${authGeneration}`
     const config                                 = useConfigStore((state) => state.config)
     const requestLogEnabled                      = config?.requestLog ?? false
 
@@ -928,7 +927,6 @@ export function LogsPage() {
             const nextAuthGeneration = apiClient.getAuthGeneration()
             if (nextAuthGeneration === observedAuthGeneration &&
                 next.apiBase === previous.apiBase &&
-                next.managementKey === previous.managementKey &&
                 next.connectionStatus === previous.connectionStatus &&
                 next.isAuthenticated === previous.isAuthenticated) {
                 return
@@ -961,7 +959,7 @@ export function LogsPage() {
             void loadLogs(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionStatus, apiBase, managementKey, authGeneration])
+    }, [connectionStatus, apiBase, authGeneration])
 
     useEffect(() => {
         if (activeTab !== 'errors' || connectionStatus !== 'connected') {
@@ -972,7 +970,7 @@ export function LogsPage() {
             void loadErrorLogs()
         })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab, connectionStatus, apiBase, managementKey, requestLogEnabled, authGeneration])
+    }, [activeTab, connectionStatus, apiBase, requestLogEnabled, authGeneration])
 
     useEffect(() => {
         if (!autoRefresh || refreshInterval <= 0 || connectionStatus !== 'connected' || activeTab !== 'logs' ||

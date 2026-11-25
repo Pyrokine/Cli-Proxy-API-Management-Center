@@ -38,7 +38,7 @@ const originalAdapter = instance(apiClient).defaults.adapter
 
 afterEach(() => {
     instance(apiClient).defaults.adapter = originalAdapter
-    apiClient.setConfig({ apiBase: '', managementKey: '' })
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
     useAuthFileStatusStore.setState({ requests: new Map() })
 })
 
@@ -205,8 +205,8 @@ describe('management mutation transport', () => {
         const pending                     = client.reconcileMutation(attempt)
         await Promise.resolve()
         await Promise.resolve()
-        client.setConfig({ apiBase: 'https://synthetic-b.example', managementKey: 'synthetic-b' })
-        client.setConfig({ apiBase: 'https://synthetic-a.example', managementKey: 'synthetic-a' })
+        client.setConfig({ apiBase: 'https://synthetic-b.example', sessionToken: 'synthetic-b' })
+        client.setConfig({ apiBase: 'https://synthetic-a.example', sessionToken: 'synthetic-a' })
         resolve(response(request, result(id)))
         expect(await pending).toEqual(attempt)
         expect(await client.reconcileMutation(attempt)).toEqual(attempt)

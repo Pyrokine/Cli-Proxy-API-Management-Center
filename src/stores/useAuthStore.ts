@@ -5,14 +5,13 @@
 
 import {clearAuthFileModelsCache} from '@/features/authFiles/authFileModelsCache'
 import i18n from '@/i18n'
-import {apiClient} from '@/services/api/client'
-import {pluginsApi} from '@/services/api/plugins'
+import {apiClient, isManagementSessionToken} from '@/services/api/client'
 import {type ServerFeatureFlags, versionApi} from '@/services/api/version'
 import {secureStorage} from '@/services/storage/secureStorage'
 import type {ApiError, AuthState, ConnectionStatus, LoginCredentials} from '@/types'
 import {detectApiBaseFromLocation, normalizeApiBase, resolveApiBase} from '@/utils/connection'
 import {STORAGE_KEY_AUTH} from '@/utils/constants'
-import {create} from 'zustand'
+import {create, type StoreApi} from 'zustand'
 import {createJSONStorage, persist, type StateStorage} from 'zustand/middleware'
 import {useAuthFilesSummaryStore} from './useAuthFilesSummaryStore'
 import {useConfigStore} from './useConfigStore'
@@ -23,20 +22,14 @@ import {useUsageStatsStore} from './useUsageStatsStore'
 
 type SessionRestoreStatus = 'idle' | 'restoring' | 'succeeded' | 'failed' | 'skipped'
 
-type RestorableAuthCredentials = {
-    apiBase: string
-    managementKey: string
-    persistent: boolean
-    source: 'bundle' | 'legacy'
-    storageTransactionId: string | null
-}
-
 type StoredAuthCredentials = {
-    version: 1
+    version: 2
     apiBase: string
-    managementKey: string
+    sessionToken: string
     transactionId: string
 }
+
+type RestorableAuthCredentials = StoredAuthCredentials & { persistent: boolean }
 
 type AuthStorageTransaction = {
     id: string
@@ -75,7 +68,7 @@ interface AuthStoreState extends AuthState {
 
     // 操作
     login: (credentials: LoginCredentials) => Promise<void>
-    logout: () => void
+    logout: () => Promise<void>
     restoreSession: () => Promise<boolean>
     refreshServerVersion: () => Promise<void>
     updateServerVersion: (
@@ -98,21 +91,15 @@ let authStorageWriteGeneration                                  = 0
 let authStorageWriteSequence                                    = 0
 let authStorageTransactionSequence                              = 0
 let activeAuthStorageTransaction: AuthStorageTransaction | null = null
-let hydratedLegacyCredentials: RestorableAuthCredentials | null = null
 
-const authHydrationWaiters              = new Set<() => void>()
-const STORAGE_KEY_AUTH_CREDENTIALS      = `${STORAGE_KEY_AUTH}:credentials`
-const STORAGE_KEY_AUTH_INTENT           = `${STORAGE_KEY_AUTH}:intent`
-const STORAGE_KEY_AUTH_TRANSACTION      = `${STORAGE_KEY_AUTH}:transaction`
-const STORAGE_KEY_AUTH_INVALIDATED      = `${STORAGE_KEY_AUTH}:invalidated`
-const AUTH_STORAGE_LOCK_NAME            = `${STORAGE_KEY_AUTH}:storage-lock`
-const EXPECTED_AUTH_STORAGE_TRANSACTION = Symbol('expected-auth-storage-transaction')
-const AUTH_INVALIDATED_HISTORY_STATE    = '__cpamAuthInvalidated'
-const AUTH_INVALIDATED_COOKIE_PREFIX    = 'cpam_auth_invalidated_'
-
-type AuthLoginCredentials = LoginCredentials & {
-    [EXPECTED_AUTH_STORAGE_TRANSACTION]?: string | null
-}
+const authHydrationWaiters           = new Set<() => void>()
+const STORAGE_KEY_AUTH_CREDENTIALS   = `${STORAGE_KEY_AUTH}:credentials`
+const STORAGE_KEY_AUTH_INTENT        = `${STORAGE_KEY_AUTH}:intent`
+const STORAGE_KEY_AUTH_TRANSACTION   = `${STORAGE_KEY_AUTH}:transaction`
+const STORAGE_KEY_AUTH_INVALIDATED   = `${STORAGE_KEY_AUTH}:invalidated`
+const AUTH_STORAGE_LOCK_NAME         = `${STORAGE_KEY_AUTH}:storage-lock`
+const AUTH_INVALIDATED_HISTORY_STATE = '__cpamAuthInvalidated'
+const AUTH_INVALIDATED_COOKIE_PREFIX = 'cpam_auth_invalidated_'
 
 class AuthStorageSupersededError extends Error {
     override name = 'AuthStorageSupersededError'
@@ -605,7 +592,6 @@ function prepareStoredAuthenticationInvalidation(): void {
     suspendStoredAuthentication()
     authStoragePersistent        = false
     activeAuthStorageTransaction = null
-    hydratedLegacyCredentials    = null
 }
 
 async function invalidateStoredAuthentication(): Promise<boolean> {
@@ -673,7 +659,7 @@ async function storeAuthentication(
     transaction: AuthStorageTransaction,
     storageWriteGeneration: number,
     apiBase: string,
-    managementKey: string,
+    sessionToken: string,
     rememberPassword: boolean,
 ): Promise<AuthStorageCommitResult> {
     const currentStatus     = (): 'current' | 'superseded' | 'unreadable' => {
@@ -707,9 +693,9 @@ async function storeAuthentication(
         const storageResult    = await secureStorage.setItem(
             STORAGE_KEY_AUTH_CREDENTIALS,
             {
-                version: 1,
+                version: 2,
                 apiBase,
-                managementKey,
+                sessionToken,
                 transactionId: transaction.id,
             } satisfies StoredAuthCredentials,
             {
@@ -768,41 +754,17 @@ function markPersistedAuthRestoreFailed(): void {
 
 const isStringStorageValue = (value: unknown): value is string => typeof value === 'string'
 
-function normalizeRestorableCredentials(
-    apiBase: string,
-    managementKey: string,
-    persistent: boolean,
-    source: RestorableAuthCredentials['source'] = 'legacy',
-): RestorableAuthCredentials | null {
-    const normalizedBase = normalizeApiBase(apiBase)
-    const normalizedKey  = managementKey.trim()
-    if (!normalizedBase || !normalizedKey) {
-        return null
-    }
-    return {
-        apiBase: normalizedBase,
-        managementKey: normalizedKey,
-        persistent,
-        source,
-        storageTransactionId: null,
-    }
-}
-
-function sameCredentials(left: RestorableAuthCredentials, right: RestorableAuthCredentials): boolean {
-    return left.apiBase === right.apiBase && left.managementKey === right.managementKey
-}
-
 function isStoredAuthCredentials(value: unknown): value is StoredAuthCredentials {
     if (value === null || typeof value !== 'object') {
         return false
     }
     const credentials = value as Partial<StoredAuthCredentials>
-    return credentials.version === 1 &&
+    return credentials.version === 2 &&
            typeof credentials.apiBase === 'string' &&
-           typeof credentials.managementKey === 'string' &&
+           Boolean(normalizeApiBase(credentials.apiBase)) &&
+           isManagementSessionToken(credentials.sessionToken) &&
            typeof credentials.transactionId === 'string' &&
-           credentials.transactionId.length > 0 &&
-           normalizeRestorableCredentials(credentials.apiBase, credentials.managementKey, false) !== null
+           credentials.transactionId.length > 0
 }
 
 function rejectPersistedAuthState(name: string): null {
@@ -811,7 +773,7 @@ function rejectPersistedAuthState(name: string): null {
     return null
 }
 
-function preparePersistedAuthState(name: string, value: string | null, persistent: boolean): string | null {
+function preparePersistedAuthState(name: string, value: string | null): string | null {
     if (value === null) {
         return null
     }
@@ -824,12 +786,7 @@ function preparePersistedAuthState(name: string, value: string | null, persisten
             return rejectPersistedAuthState(name)
         }
         const state = parsed.state as Record<string, unknown>
-        for (const key of ['apiBase', 'managementKey']) {
-            if (state[key] !== undefined && typeof state[key] !== 'string') {
-                return rejectPersistedAuthState(name)
-            }
-        }
-        if (state.rememberPassword !== undefined && typeof state.rememberPassword !== 'boolean') {
+        if ('managementKey' in state) {
             return rejectPersistedAuthState(name)
         }
         for (const key of ['serverVersion', 'serverBuildDate', 'serverMinPanelVersion']) {
@@ -842,20 +799,6 @@ function preparePersistedAuthState(name: string, value: string | null, persisten
             state.serverVersionSource !== 'header' &&
             state.serverVersionSource !== 'version') {
             return rejectPersistedAuthState(name)
-        }
-
-        const apiBase       = typeof state.apiBase === 'string' ? state.apiBase : ''
-        const managementKey = typeof state.managementKey === 'string' ? state.managementKey : ''
-        if (Boolean(apiBase.trim()) !== Boolean(managementKey.trim())) {
-            return rejectPersistedAuthState(name)
-        }
-        if (apiBase.trim() && managementKey.trim()) {
-            const credentials = normalizeRestorableCredentials(apiBase, managementKey, persistent)
-            if (!credentials ||
-                hydratedLegacyCredentials && !sameCredentials(hydratedLegacyCredentials, credentials)) {
-                return rejectPersistedAuthState(name)
-            }
-            hydratedLegacyCredentials = credentials
         }
 
         const sanitizedState: Record<string, unknown> = {}
@@ -905,102 +848,7 @@ async function readCredentialBundle(
     if (intentMatches.includes('mismatch')) {
         return { status: 'cancelled', value: null }
     }
-    const credentials = normalizeRestorableCredentials(
-        result.value.apiBase,
-        result.value.managementKey,
-        persistent,
-        'bundle',
-    )
-    return credentials ? {
-        status: 'value',
-        value: {
-            ...credentials,
-            storageTransactionId: result.value.transactionId,
-        },
-    } : { status: 'invalid', value: null }
-}
-
-async function readLegacyCredentialPair(
-    persistent: boolean,
-    shouldCommit: () => boolean,
-): Promise<AuthCredentialsReadResult> {
-    const options                                            = {
-        persistent,
-        fallbackToPersistent: false,
-        shouldCommit,
-        validate: isStringStorageValue,
-    }
-    const [apiBaseResult, apiUrlResult, managementKeyResult] = await Promise.all(
-        [
-            secureStorage.getItemResult<string>(
-                'apiBase',
-                options,
-            ),
-            secureStorage.getItemResult<string>(
-                'apiUrl',
-                options,
-            ),
-            secureStorage.getItemResult<string>(
-                'managementKey',
-                options,
-            ),
-        ])
-    const results                                            = [apiBaseResult, apiUrlResult, managementKeyResult]
-    for (const status of ['cancelled', 'invalid', 'unreadable'] as const) {
-        if (results.some((result) => result.status === status)) {
-            return { status, value: null }
-        }
-    }
-
-    const apiBase = apiBaseResult.status === 'value' ? normalizeApiBase(apiBaseResult.value) : ''
-    const apiUrl  = apiUrlResult.status === 'value' ? normalizeApiBase(apiUrlResult.value) : ''
-    const key     = managementKeyResult.status === 'value' ? managementKeyResult.value.trim() : ''
-    if (apiBase && apiUrl && apiBase !== apiUrl) {
-        return { status: 'invalid', value: null }
-    }
-    const selectedBase   = apiBase || apiUrl
-    const hasStoredValue = results.some((result) => result.status === 'value')
-    if (!hasStoredValue) {
-        return { status: 'absent', value: null }
-    }
-    const credentials = normalizeRestorableCredentials(selectedBase, key, persistent)
-    return credentials ? { status: 'value', value: credentials } : { status: 'invalid', value: null }
-}
-
-function resolveCredentialCandidates(
-    candidates: RestorableAuthCredentials[],
-): AuthCredentialsReadResult {
-    if (candidates.length === 0) {
-        return { status: 'absent', value: null }
-    }
-    const first = candidates[0]
-    if (candidates.some((candidate) => !sameCredentials(first, candidate))) {
-        return { status: 'invalid', value: null }
-    }
-    return {
-        status: 'value',
-        value: {
-            ...first,
-            persistent: candidates.some((candidate) => candidate.persistent),
-        },
-    }
-}
-
-function resolveLegacyCredentialSource(
-    result: AuthCredentialsReadResult,
-    persistent: boolean,
-): AuthCredentialsReadResult {
-    if (result.status !== 'value' && result.status !== 'absent') {
-        return result
-    }
-    const candidates: RestorableAuthCredentials[] = []
-    if (result.status === 'value') {
-        candidates.push(result.value)
-    }
-    if (hydratedLegacyCredentials?.persistent === persistent) {
-        candidates.push(hydratedLegacyCredentials)
-    }
-    return resolveCredentialCandidates(candidates)
+    return { status: 'value', value: { ...result.value, persistent } }
 }
 
 async function readStoredAuthCredentials(
@@ -1047,20 +895,157 @@ async function readStoredAuthCredentials(
         }
     }
 
-    if (remembered) {
-        const persistentLegacy = resolveLegacyCredentialSource(
-            await readLegacyCredentialPair(true, shouldCommit),
-            true,
-        )
-        if (persistentLegacy.status !== 'absent') {
-            return persistentLegacy
+    try {
+        const hasLegacyKeys = [localStorage, sessionStorage].some((storage) =>
+                                                                      [
+                                                                          'apiBase',
+                                                                          'apiUrl',
+                                                                          'managementKey',
+                                                                      ].some((key) => storage.getItem(key) !== null))
+        return { status: hasLegacyKeys ? 'invalid' : 'absent', value: null }
+    } catch {
+        return { status: 'unreadable', value: null }
+    }
+}
+
+async function revokeSession(apiBase: string, sessionToken: string): Promise<void> {
+    if (!apiBase || !sessionToken) {
+        return
+    }
+    try {
+        await apiClient.revokeManagementSession(apiBase, sessionToken)
+    } catch (error: unknown) {
+        useNotificationStore.getState().showNotification(i18n.t('login.session_revoke_failed', {
+            server: apiBase,
+            error: error instanceof Error ? error.message : String(error),
+        }), 'warning')
+    }
+}
+
+async function connect(
+    credentials: LoginCredentials | RestorableAuthCredentials,
+    set: StoreApi<AuthStoreState>['setState'],
+    get: StoreApi<AuthStoreState>['getState'],
+): Promise<void> {
+    const previous         = get()
+    const apiBase          = normalizeApiBase(credentials.apiBase)
+    const restored         = 'sessionToken' in credentials
+    const rememberPassword = restored ?
+                             credentials.persistent :
+                             credentials.rememberPassword ?? previous.rememberPassword
+    suspendStoredAuthentication()
+    const storageWriteGeneration = authStorageWriteGeneration
+    const isCurrent              = () => storageWriteGeneration === authStorageWriteGeneration
+    apiClient.setConfig({ apiBase })
+    useConfigStore.getState().clearCache()
+    useModelsStore.getState().clearCache()
+    useQuotaStore.getState().clearQuotaCache()
+    useAuthFilesSummaryStore.getState().clear()
+    clearAuthFileModelsCache()
+    useUsageStatsStore.getState().clearUsageStats()
+    set({
+            isAuthenticated: false,
+            apiBase,
+            sessionToken: '',
+            connectionStatus: 'connecting',
+            sessionRestoreError: null,
+            serverVersion: null,
+            serverBuildDate: null,
+            serverMinPanelVersion: null,
+            serverFeatures: {},
+            serverVersionSource: null,
+        })
+    const transaction    = await beginAuthStorageTransaction(
+        rememberPassword,
+        restored ? credentials.transactionId : undefined,
+    )
+    const requireCurrent = () => {
+        if (transaction.superseded || !isCurrent()) {
+            throw new AuthStorageSupersededError('Login storage operation was superseded')
         }
     }
-
-    return resolveLegacyCredentialSource(
-        await readLegacyCredentialPair(false, shouldCommit),
-        false,
-    )
+    let issuedToken      = ''
+    try {
+        requireCurrent()
+        const sessionToken = restored ? credentials.sessionToken :
+                             (issuedToken =
+                                 await apiClient.createManagementSession(apiBase, credentials.managementKey.trim()))
+        requireCurrent()
+        if (restored) {
+            apiClient.setConfig({ apiBase, sessionToken })
+        } else {
+            await apiClient.setConfig({ apiBase, sessionToken }, true)
+        }
+        requireCurrent()
+        await useConfigStore.getState().fetchConfig(undefined, true)
+        requireCurrent()
+        await get().refreshServerVersion().catch((error: unknown) => {
+            if ((error as Partial<ApiError>)?.status === 401) {
+                throw error
+            }
+            console.warn('Fetch server version failed:', error)
+        })
+        requireCurrent()
+        persistedAuthRestoreFailed = false
+        persistedAuthValueInvalid  = false
+        const storageCommit        = await storeAuthentication(
+            transaction,
+            storageWriteGeneration,
+            apiBase,
+            sessionToken,
+            rememberPassword,
+        )
+        transaction.superseded ||= storageCommit.status === 'superseded'
+        requireCurrent()
+        const storagePersistenceFailed = storageCommit.status === 'memory-only'
+        if (!storagePersistenceFailed) {
+            authStoragePersistent    = rememberPassword
+            authStorageWritesEnabled = true
+        }
+        set({
+                isAuthenticated: true,
+                apiBase,
+                sessionToken,
+                rememberPassword: rememberPassword && !storagePersistenceFailed,
+                connectionStatus: 'connected',
+                connectionError: null,
+                storageRestoreFailed: false,
+                storagePersistenceFailed,
+                storageClearFailed: storageCommit.clearFailed,
+                sessionRestoreStatus: 'succeeded',
+                sessionRestoreError: null,
+            })
+        if (issuedToken && previous.sessionToken !== sessionToken) {
+            void revokeSession(previous.apiBase, previous.sessionToken)
+        }
+    } catch (error: unknown) {
+        const superseded = error instanceof AuthStorageSupersededError
+        if (isCurrent()) {
+            apiClient.setConfig({ apiBase })
+            const invalid         = (error as Partial<ApiError>)?.status === 401
+            const intentsRestored = invalid || superseded || await restoreAuthStorageIntents(transaction)
+            if (isCurrent()) {
+                const clearing         = invalid ? invalidateAuthenticationForActiveTransaction() : null
+                const failedGeneration = authStorageWriteGeneration
+                set({
+                        isAuthenticated: false,
+                        sessionToken: '',
+                        rememberPassword: false,
+                        connectionStatus: 'error',
+                        connectionError: error instanceof Error ? error.message : 'Connection failed',
+                        storagePersistenceFailed: !intentsRestored,
+                        storageClearFailed: !intentsRestored,
+                        sessionRestoreStatus: 'failed',
+                        sessionRestoreError: restored && !superseded ? error as ApiError : null,
+                    })
+                if (clearing && !(await clearing) && failedGeneration === authStorageWriteGeneration) {
+                    set({ storagePersistenceFailed: true, storageClearFailed: true })
+                }
+            }
+        }
+        await revokeSession(apiBase, issuedToken)
+        throw error
+    }
 }
 
 export const useAuthStore = create<AuthStoreState>()(
@@ -1069,7 +1054,7 @@ export const useAuthStore = create<AuthStoreState>()(
             // 初始状态
             isAuthenticated: false,
             apiBase: '',
-            managementKey: '',
+            sessionToken: '',
             rememberPassword: false,
             serverVersion: null,
             serverBuildDate: null,
@@ -1129,10 +1114,10 @@ export const useAuthStore = create<AuthStoreState>()(
                     })
                     if (lockedRestore.status === 'acquired' && lockedRestore.value.status === 'invalidated') {
                         const resolvedBase = resolveApiBase(get().apiBase, null, detectApiBaseFromLocation())
-                        apiClient.setConfig({ apiBase: resolvedBase, managementKey: '' })
+                        apiClient.setConfig({ apiBase: resolvedBase })
                         set({
                                 apiBase: resolvedBase,
-                                managementKey: '',
+                                sessionToken: '',
                                 rememberPassword: false,
                                 storageRestoreFailed: true,
                                 storagePersistenceFailed: !lockedRestore.value.storageCleared,
@@ -1154,11 +1139,8 @@ export const useAuthStore = create<AuthStoreState>()(
                         }
                         return false
                     }
-                    const usesLegacyCredentials = storedCredentials.status === 'value' &&
-                                                  storedCredentials.value.source === 'legacy'
-                    let storageRestoreFailed    = (storedCredentials.status === 'absent' || usesLegacyCredentials) &&
-                                                  persistedAuthRestoreFailed
-                    let storageValueInvalid     = storageRestoreFailed && persistedAuthValueInvalid
+                    let storageRestoreFailed = storedCredentials.status === 'absent' && persistedAuthRestoreFailed
+                    let storageValueInvalid  = storageRestoreFailed && persistedAuthValueInvalid
                     if (storedCredentials.status === 'invalid') {
                         storageRestoreFailed = true
                         storageValueInvalid  = true
@@ -1172,16 +1154,14 @@ export const useAuthStore = create<AuthStoreState>()(
                         return false
                     }
 
-                    const restoredCredentials      = storedCredentials.status === 'value' ?
-                                                     storedCredentials.value :
-                                                     null
-                    const resolvedBase             = resolveApiBase(
+                    const restoredCredentials = storedCredentials.status === 'value' ?
+                                                storedCredentials.value :
+                                                null
+                    const resolvedBase        = resolveApiBase(
                         restoredCredentials?.apiBase || '',
                         null,
                         detectApiBaseFromLocation(),
                     )
-                    const resolvedKey              = restoredCredentials?.managementKey || ''
-                    const resolvedRememberPassword = restoredCredentials?.persistent ?? false
 
                     if (storageRestoreFailed) {
                         let storageCleared = true
@@ -1190,10 +1170,10 @@ export const useAuthStore = create<AuthStoreState>()(
                         } else {
                             suspendStoredAuthentication()
                         }
-                        apiClient.setConfig({ apiBase: resolvedBase, managementKey: '' })
+                        apiClient.setConfig({ apiBase: resolvedBase })
                         set({
                                 apiBase: resolvedBase,
-                                managementKey: '',
+                                sessionToken: '',
                                 rememberPassword: false,
                                 storageRestoreFailed: true,
                                 storagePersistenceFailed: !storageCleared,
@@ -1204,34 +1184,16 @@ export const useAuthStore = create<AuthStoreState>()(
                         return false
                     }
 
-                    set({
-                            apiBase: resolvedBase,
-                            managementKey: resolvedKey,
-                            rememberPassword: resolvedRememberPassword,
-                            storageRestoreFailed: false,
-                        })
-                    apiClient.setConfig({ apiBase: resolvedBase, managementKey: resolvedKey })
-
-                    if (!resolvedBase || !resolvedKey || !restoredCredentials) {
-                        hydratedLegacyCredentials = null
-                        set({ sessionRestoreStatus: 'skipped', sessionRestoreError: null })
+                    if (!restoredCredentials) {
+                        apiClient.setConfig({ apiBase: resolvedBase })
+                        set({ apiBase: resolvedBase, sessionRestoreStatus: 'skipped', sessionRestoreError: null })
                         return false
                     }
 
                     try {
-                        await get().login({
-                                              apiBase: resolvedBase,
-                                              managementKey: resolvedKey,
-                                              rememberPassword: resolvedRememberPassword,
-                                              [EXPECTED_AUTH_STORAGE_TRANSACTION]:
-                                              restoredCredentials.storageTransactionId,
-                                          } as AuthLoginCredentials)
-                        set({ sessionRestoreStatus: 'succeeded', sessionRestoreError: null })
+                        await connect(restoredCredentials, set, get)
                         return true
-                    } catch (error: unknown) {
-                        const apiError = error as ApiError
-                        console.warn('Auto login failed:', error)
-                        set({ sessionRestoreStatus: 'failed', sessionRestoreError: apiError })
+                    } catch {
                         return false
                     }
                 })().finally(() => {
@@ -1241,156 +1203,15 @@ export const useAuthStore = create<AuthStoreState>()(
                 return restoreSessionPromise
             },
 
-            // 登录
-            login: async (credentials) => {
-                useModelsStore.getState().clearCache()
-                useQuotaStore.getState().clearQuotaCache()
-                useAuthFilesSummaryStore.getState().clear()
-                clearAuthFileModelsCache()
-                const apiBase                    = normalizeApiBase(credentials.apiBase)
-                const managementKey              = credentials.managementKey.trim()
-                const rememberPassword           = credentials.rememberPassword ?? get().rememberPassword ?? false
-                const expectedStorageTransaction =
-                          (credentials as AuthLoginCredentials)[EXPECTED_AUTH_STORAGE_TRANSACTION]
-                authStorageWriteGeneration += 1
-                authStorageWritesEnabled         = false
-                hydratedLegacyCredentials        = null
-                const storageWriteGeneration     = authStorageWriteGeneration
-                const storageTransaction         = await beginAuthStorageTransaction(
-                    rememberPassword,
-                    expectedStorageTransaction,
-                )
+            login: (credentials) => connect(credentials, set, get),
 
-                try {
-                    // 等待撤销响应处理完 cookie，再允许新登录创建资源会话
-                    await pluginsApi.waitForResourceSessionRevocation(apiBase)
-                    if (storageTransaction.superseded || storageWriteGeneration !== authStorageWriteGeneration) {
-                        // noinspection ExceptionCaughtLocallyJS
-                        throw new AuthStorageSupersededError('Login storage operation was superseded')
-                    }
-                    set({
-                            connectionStatus: 'connecting',
-                            sessionRestoreError: null,
-                            serverVersion: null,
-                            serverBuildDate: null,
-                            serverMinPanelVersion: null,
-                            serverFeatures: {},
-                            serverVersionSource: null,
-                        })
-
-                    // 配置 API 客户端
-                    useConfigStore.getState().clearCache()
-                    await apiClient.setConfig({
-                                                  apiBase,
-                                                  managementKey,
-                                              }, true)
-
-                    // 测试连接 - 获取配置
-                    await useConfigStore.getState().fetchConfig(undefined, true)
-                    await get()
-                        .refreshServerVersion()
-                        .catch((error) => {
-                            console.warn('Fetch server version failed:', error)
-                        })
-
-                    if (storageWriteGeneration !== authStorageWriteGeneration) {
-                        // noinspection ExceptionCaughtLocallyJS
-                        throw new AuthStorageSupersededError('Login storage operation was superseded')
-                    }
-                    persistedAuthRestoreFailed = false
-                    persistedAuthValueInvalid  = false
-
-                    const storageCommit = await storeAuthentication(
-                        storageTransaction,
-                        storageWriteGeneration,
-                        apiBase,
-                        managementKey,
-                        rememberPassword,
-                    )
-                    if (storageCommit.status === 'superseded') {
-                        // noinspection ExceptionCaughtLocallyJS
-                        throw new AuthStorageSupersededError('Login storage operation was superseded')
-                    }
-                    const storagePersistenceFailed = storageCommit.status === 'memory-only'
-                    const storedRememberPassword   = rememberPassword && !storagePersistenceFailed
-                    const storageClearFailed       = storageCommit.clearFailed
-                    if (storagePersistenceFailed) {
-                        activeAuthStorageTransaction = storageTransaction
-                    } else {
-                        authStoragePersistent    = rememberPassword
-                        authStorageWritesEnabled = true
-                    }
-
-                    // 登录成功
-                    set({
-                            isAuthenticated: true,
-                            apiBase,
-                            managementKey,
-                            rememberPassword: storedRememberPassword,
-                            connectionStatus: 'connected',
-                            connectionError: null,
-                            storageRestoreFailed: false,
-                            storagePersistenceFailed,
-                            storageClearFailed,
-                            sessionRestoreStatus: 'succeeded',
-                            sessionRestoreError: null,
-                        })
-                } catch (error: unknown) {
-                    const message              =
-                              error instanceof Error ?
-                              error.message :
-                              typeof error === 'string' ? error : 'Connection failed'
-                    const isCurrentLogin       = storageWriteGeneration === authStorageWriteGeneration
-                    const storageSuperseded    = error instanceof AuthStorageSupersededError
-                    const invalidCredentials   =
-                              isCurrentLogin && (error as Partial<ApiError>).status === 401
-                    let storageIntentsRestored = true
-                    if (isCurrentLogin && !invalidCredentials && !storageSuperseded) {
-                        storageIntentsRestored = await restoreAuthStorageIntents(storageTransaction)
-                    }
-                    const storageCleared = invalidCredentials ?
-                                           await invalidateAuthenticationForActiveTransaction() :
-                                           true
-                    if (isCurrentLogin) {
-                        if (storageSuperseded) {
-                            apiClient.setConfig({ apiBase, managementKey: '' })
-                        }
-                        set({
-                                isAuthenticated: false,
-                                connectionStatus: 'error',
-                                connectionError: message || 'Connection failed',
-                                ...(invalidCredentials || storageSuperseded ? {
-                                    managementKey: '',
-                                    rememberPassword: false,
-                                    storagePersistenceFailed: !storageCleared,
-                                    storageClearFailed: !storageCleared,
-                                    sessionRestoreStatus: 'failed' as const,
-                                } : {}),
-                                ...(!storageIntentsRestored ? {
-                                    storagePersistenceFailed: true,
-                                    storageClearFailed: true,
-                                } : {}),
-                            })
-                    }
-                    throw error
-                }
-            },
-
-            // 登出
-            logout: () => {
-                const { apiBase, managementKey } = get()
-                if (apiBase) {
-                    void pluginsApi.revokeResourceSession({ apiBase, managementKey }).catch((error: unknown) => {
-                        useNotificationStore.getState().showNotification(i18n.t('login.plugin_session_revoke_failed', {
-                            server: apiBase,
-                            error: error instanceof Error ? error.message : String(error),
-                        }), 'warning')
-                    })
-                }
-                restoreSessionPromise  = null
-                const storageCleanup   = invalidateStoredAuthentication()
-                const logoutGeneration = authStorageWriteGeneration
-                apiClient.setConfig({ apiBase: '', managementKey: '' })
+            logout: async () => {
+                const { apiBase, sessionToken } = get()
+                const revocation                = revokeSession(apiBase, sessionToken)
+                restoreSessionPromise           = null
+                const storageCleanup            = invalidateAuthenticationForActiveTransaction()
+                const logoutGeneration          = authStorageWriteGeneration
+                apiClient.setConfig({ apiBase: '' })
                 useConfigStore.getState().clearCache()
                 useModelsStore.getState().clearCache()
                 useQuotaStore.getState().clearQuotaCache()
@@ -1400,7 +1221,8 @@ export const useAuthStore = create<AuthStoreState>()(
                 set({
                         isAuthenticated: false,
                         apiBase: '',
-                        managementKey: '',
+                        sessionToken: '',
+                        rememberPassword: false,
                         serverVersion: null,
                         serverBuildDate: null,
                         serverMinPanelVersion: null,
@@ -1417,15 +1239,14 @@ export const useAuthStore = create<AuthStoreState>()(
                     })
                 persistedAuthRestoreFailed = false
                 persistedAuthValueInvalid  = false
-                void storageCleanup.then((storageCleared) => {
-                    if (logoutGeneration !== authStorageWriteGeneration || get().isAuthenticated) {
-                        return
-                    }
+                const storageCleared       = await storageCleanup
+                if (logoutGeneration === authStorageWriteGeneration && !get().isAuthenticated) {
                     set({
                             storagePersistenceFailed: !storageCleared,
                             storageClearFailed: !storageCleared,
                         })
-                })
+                }
+                await revocation
             },
 
             refreshServerVersion: async () => {
@@ -1497,7 +1318,7 @@ export const useAuthStore = create<AuthStoreState>()(
                             if (!isCurrentRead()) {
                                 return null
                             }
-                            const preparedPersistent = preparePersistedAuthState(name, persistentRaw, true)
+                            const preparedPersistent = preparePersistedAuthState(name, persistentRaw)
                             if (preparedPersistent !== null) {
                                 return preparedPersistent
                             }
@@ -1511,10 +1332,11 @@ export const useAuthStore = create<AuthStoreState>()(
                             shouldCommit: isCurrentRead,
                             validate: isStringStorageValue,
                         })
-                        return isCurrentRead() ? preparePersistedAuthState(name, sessionRaw, false) : null
+                        return isCurrentRead() ? preparePersistedAuthState(name, sessionRaw) : null
                     },
                     setItem: async (name, value) => {
-                        if (authStorageHydrating || persistedAuthRestoreFailed || !authStorageWritesEnabled) {
+                        if (authStorageHydrating || persistedAuthRestoreFailed || !authStorageWritesEnabled ||
+                            !useAuthStore.getState().isAuthenticated) {
                             return
                         }
                         const writeGeneration = authStorageWriteGeneration
@@ -1572,10 +1394,14 @@ function waitForAuthHydration(): Promise<void> {
 // 监听全局未授权事件，清理认证存储和会话缓存，但不触发 logout 以避免级联请求
 if (typeof window !== 'undefined') {
     window.addEventListener('unauthorized', () => {
+        const state = useAuthStore.getState()
+        if (state.connectionStatus === 'connecting') {
+            return
+        }
+        apiClient.invalidateSession()
         restoreSessionPromise        = null
         const storageCleanup         = invalidateAuthenticationForActiveTransaction()
         const invalidationGeneration = authStorageWriteGeneration
-        const state                  = useAuthStore.getState()
         if (state.isAuthenticated) {
             useModelsStore.getState().clearCache()
             useQuotaStore.getState().clearQuotaCache()
@@ -1584,10 +1410,10 @@ if (typeof window !== 'undefined') {
         }
         useAuthStore.setState({
                                   isAuthenticated: false,
-                                  managementKey: '',
+                                  sessionToken: '',
                                   rememberPassword: false,
                                   connectionStatus: 'error',
-                                  connectionError: 'Management key is invalid or expired',
+                                  connectionError: i18n.t('login.session_expired'),
                                   storagePersistenceFailed: false,
                                   storageClearFailed: false,
                                   hydrated: true,

@@ -1,73 +1,141 @@
-/**
- * 加密工具 — AES-GCM via Web Crypto API
- *
- * 密钥通过 PBKDF2 从 (salt + host + userAgent) 派生
- * 同源脚本仍可重建密钥（浏览器 localStorage 的固有限制），
- * 但 AES-GCM 比 XOR 提供了真正的密码学保护：
- *   - 每次加密使用随机 IV，相同明文产生不同密文
- *   - 认证加密（AEAD），篡改可检测
- *   - 派生的 CryptoKey 对象不可导出
- */
-
+const ENC_V3_PREFIX    = 'enc::v3::'
 const ENC_V2_PREFIX    = 'enc::v2::'
 const ENC_V1_PREFIX    = 'enc::v1::'
 const PLAINTEXT_PREFIX = 'plain::'
-const SECRET_SALT      = 'cli-proxy-api-webui::secure-storage'
+const LEGACY_PREFIXES  = [ENC_V2_PREFIX, ENC_V1_PREFIX, PLAINTEXT_PREFIX]
+const KEY_DATABASE     = 'cli-proxy-api-webui-storage-keys'
+const KEY_STORE        = 'keys'
+const STORAGE_KEY      = 'v3'
+const LEGACY_SALT      = 'cli-proxy-api-webui::secure-storage'
 const PBKDF2_ITER      = 100_000
+const IV_SIZE          = 12
+const GCM_KEY          = { name: 'AES-GCM', length: 256 }
 
 export class InvalidEncryptedStorageValueError extends Error {
     override name = 'InvalidEncryptedStorageValueError'
 }
 
-let cachedKey: CryptoKey | null = null
+let cachedLegacyKey: CryptoKey | undefined
 
-export function isEncodedStorageValue(payload: string | null | undefined): boolean {
-    const value = (payload || '').trim()
-    return value.startsWith(ENC_V2_PREFIX) || value.startsWith(ENC_V1_PREFIX) || value.startsWith(PLAINTEXT_PREFIX)
+export function containsEncodedStorageValue(value: string): boolean {
+    return value.includes(ENC_V3_PREFIX) || LEGACY_PREFIXES.some((prefix) => value.includes(prefix))
 }
 
-export function needsSecureStorageMigration(payload: string | null | undefined): boolean {
-    const value = (payload || '').trim()
-    return value.startsWith(ENC_V1_PREFIX) || value.startsWith(PLAINTEXT_PREFIX)
+export function isEncodedStorageValue(payload: string): boolean {
+    return isProtectedStorageValue(payload) || needsSecureStorageMigration(payload)
 }
 
-export function isProtectedStorageValue(payload: string | null | undefined): boolean {
-    return (payload || '').trim().startsWith(ENC_V2_PREFIX)
+export function needsSecureStorageMigration(payload: string): boolean {
+    const value = payload.trim()
+    return LEGACY_PREFIXES.some((prefix) => value.startsWith(prefix))
+}
+
+export function isProtectedStorageValue(payload: string): boolean {
+    return payload.trim().startsWith(ENC_V3_PREFIX)
+}
+
+function hasSecureWebCrypto(): boolean {
+    return typeof window !== 'undefined' && window.isSecureContext &&
+           typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined'
 }
 
 export function isSecureStorageEncryptionAvailable(): boolean {
-    return (
-        typeof window !== 'undefined' &&
-        window.isSecureContext &&
-        typeof crypto !== 'undefined' &&
-        typeof crypto.subtle !== 'undefined'
-    )
+    try {
+        return hasSecureWebCrypto() && typeof indexedDB !== 'undefined' && typeof indexedDB.open === 'function'
+    } catch {
+        return false
+    }
+}
+
+function openKeyDatabase(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        const request           = indexedDB.open(KEY_DATABASE, 1)
+        let blocked             = false
+        request.onupgradeneeded = () => request.result.createObjectStore(KEY_STORE)
+        request.onblocked       = () => {
+            blocked = true
+            reject(new Error('Storage key database is blocked'))
+        }
+        request.onerror         = () => reject(request.error)
+        request.onsuccess       = () => {
+            const db = request.result
+            if (blocked) {
+                db.close()
+                return
+            }
+            db.onversionchange = () => db.close()
+            resolve(db)
+        }
+    })
+}
+
+function readOrStoreKey(db: IDBDatabase, candidate?: CryptoKey): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+        const transaction      = db.transaction(KEY_STORE, candidate ? 'readwrite' : 'readonly')
+        const store            = transaction.objectStore(KEY_STORE)
+        const request          = store.get(STORAGE_KEY)
+        let key: unknown
+        request.onsuccess      = () => {
+            key = request.result
+            if (key === undefined && candidate) {
+                try {
+                    store.add(candidate, STORAGE_KEY)
+                    key = candidate
+                } catch (error: unknown) {
+                    reject(error)
+                    transaction.abort()
+                }
+            }
+        }
+        transaction.onabort    = () => reject(transaction.error ?? new Error('Storage key transaction aborted'))
+        transaction.oncomplete = () => resolve(key)
+    })
+}
+
+async function getStorageKey(create: boolean): Promise<CryptoKey> {
+    const db = await openKeyDatabase()
+    try {
+        let key = await readOrStoreKey(db)
+        if (key === undefined && create) {
+            const candidate = await crypto.subtle.generateKey(GCM_KEY, false, ['encrypt', 'decrypt'])
+            // The write transaction checks again before adding the key shared by this origin
+            key             = await readOrStoreKey(db, candidate)
+        }
+        if (!(key instanceof CryptoKey) || key.type !== 'secret' || key.extractable ||
+            key.algorithm.name !== GCM_KEY.name || (key.algorithm as AesKeyAlgorithm).length !== GCM_KEY.length ||
+            !key.usages.includes('encrypt') || !key.usages.includes('decrypt')) {
+            throw new Error('The browser storage key is missing or invalid')
+        }
+        return key
+    } finally {
+        db.close()
+    }
 }
 
 function getKeyMaterial(): string {
     try {
-        return `${SECRET_SALT}|${window.location.host}|${navigator.userAgent}`
+        return `${LEGACY_SALT}|${window.location.host}|${navigator.userAgent}`
     } catch {
-        return SECRET_SALT
+        return LEGACY_SALT
     }
 }
 
-async function deriveKey(): Promise<CryptoKey> {
-    if (cachedKey) {
-        return cachedKey
+async function deriveLegacyKey(): Promise<CryptoKey> {
+    if (cachedLegacyKey) {
+        return cachedLegacyKey
     }
 
     const enc      = new TextEncoder()
     const material = await crypto.subtle.importKey('raw', enc.encode(getKeyMaterial()), 'PBKDF2', false, ['deriveKey'])
 
-    cachedKey = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: enc.encode(SECRET_SALT), iterations: PBKDF2_ITER, hash: 'SHA-256' },
+    cachedLegacyKey = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: enc.encode(LEGACY_SALT), iterations: PBKDF2_ITER, hash: 'SHA-256' },
         material,
-        { name: 'AES-GCM', length: 256 },
-        false, // non-extractable
-        ['encrypt', 'decrypt'],
+        GCM_KEY,
+        false,
+        ['decrypt'],
     )
-    return cachedKey
+    return cachedLegacyKey
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -87,10 +155,7 @@ function fromBase64(base64: string): Uint8Array {
     return bytes
 }
 
-/**
- * 加密数据 (AES-256-GCM)
- * 格式: enc::v2::<base64(iv + ciphertext)>
- */
+// AES-256-GCM envelope: enc::v3::<base64(iv + ciphertext and tag)>
 export async function encryptData(value: string): Promise<string> {
     if (!value) {
         return value
@@ -101,8 +166,8 @@ export async function encryptData(value: string): Promise<string> {
     }
 
     try {
-        const key = await deriveKey()
-        const iv  = crypto.getRandomValues(new Uint8Array(12))
+        const key = await getStorageKey(true)
+        const iv  = crypto.getRandomValues(new Uint8Array(IV_SIZE))
         const enc = new TextEncoder()
 
         const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(value))
@@ -112,15 +177,12 @@ export async function encryptData(value: string): Promise<string> {
         combined.set(iv, 0)
         combined.set(new Uint8Array(ciphertext), iv.length)
 
-        return `${ENC_V2_PREFIX}${toBase64(combined)}`
+        return `${ENC_V3_PREFIX}${toBase64(combined)}`
     } catch {
         throw new Error('Storage value could not be encrypted')
     }
 }
 
-/**
- * 解密数据 (AES-256-GCM，兼容 v1 XOR 格式)
- */
 export async function decryptData(payload: string): Promise<string> {
     if (!payload) {
         return payload
@@ -130,35 +192,33 @@ export async function decryptData(payload: string): Promise<string> {
         return payload.slice(PLAINTEXT_PREFIX.length)
     }
 
-    // v2: AES-GCM
-    if (payload.startsWith(ENC_V2_PREFIX)) {
-        if (!isSecureStorageEncryptionAvailable()) {
+    const current = payload.startsWith(ENC_V3_PREFIX)
+    if (current || payload.startsWith(ENC_V2_PREFIX)) {
+        if (current ? !isSecureStorageEncryptionAvailable() : !hasSecureWebCrypto()) {
             throw new Error('Encrypted storage is unavailable')
         }
 
         let combined: Uint8Array
         try {
-            combined = fromBase64(payload.slice(ENC_V2_PREFIX.length))
+            combined = fromBase64(payload.slice((current ? ENC_V3_PREFIX : ENC_V2_PREFIX).length))
         } catch {
             throw new InvalidEncryptedStorageValueError('Encrypted storage value is malformed')
         }
-        if (combined.byteLength < 28) {
+        if (combined.byteLength < IV_SIZE + 16) {
             throw new InvalidEncryptedStorageValueError('Encrypted storage value is malformed')
         }
 
         try {
-            const key  = await deriveKey()
-            const iv   = combined.slice(0, 12)
-            const data = combined.slice(12)
-
-            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)
+            const key       = await (current ? getStorageKey(false) : deriveLegacyKey())
+            const iv        = combined.slice(0, IV_SIZE)
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined.slice(IV_SIZE))
             return new TextDecoder().decode(decrypted)
         } catch {
             throw new Error('Encrypted storage value could not be decrypted')
         }
     }
 
-    // v1 兼容：XOR，由 secureStorage 读取后迁移为 v2
+    // v1 兼容：XOR，由 secureStorage 读取后迁移为 v3
     if (payload.startsWith(ENC_V1_PREFIX)) {
         try {
             const enc       = new TextEncoder()

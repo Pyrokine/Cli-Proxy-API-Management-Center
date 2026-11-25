@@ -371,7 +371,6 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         },
         [
             apiBase,
-            managementKey,
             authGeneration,
             connectionStatus,
             loadConfig,

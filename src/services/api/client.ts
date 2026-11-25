@@ -18,7 +18,10 @@ type AuthScopedRequestConfig = AxiosRequestConfig & {
     mutationReadback?: (data: unknown, receipt: ManagementMutationReceipt) => Promise<unknown>
 }
 
-export const MUTATION_TARGET_REACHED = Symbol('mutation-target-reached')
+export const MUTATION_TARGET_REACHED   = Symbol('mutation-target-reached')
+export const MANAGEMENT_SESSION_HEADER = 'X-CPA-Management-Session-Token'
+export const isManagementSessionToken  = (value: unknown): value is string =>
+    typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 
 const OAUTH_CREATION_PATHS = new Set([
                                          '/anthropic-auth-url',
@@ -111,10 +114,23 @@ export function parseRetryAfterSeconds(value: unknown, nowMs = Date.now()): numb
     return Math.max(0, Math.ceil((retryAt - nowMs) / 1000))
 }
 
+function usageBackupMissingMessage(url?: string): string | undefined {
+    const [path, query] = url?.split('?') ?? []
+    if (path === '/usage/export') {
+        return 'usage backup encryption key unavailable'
+    }
+    if (path === '/usage/import') {
+        return 'usage backup decryption key unavailable'
+    }
+    if (path === '/usage/events' && new URLSearchParams(query).get('export') === 'true') {
+        return 'usage event export key unavailable'
+    }
+}
+
 class ApiClient {
     private instance: AxiosInstance
-    private apiBase: string       = ''
-    private managementKey: string = ''
+    private apiBase: string      = ''
+    private sessionToken: string = ''
 
     /** 标记认证已失败，阻止后续请求继续发送 */
     private authFailed: boolean = false
@@ -140,9 +156,9 @@ class ApiClient {
     setConfig(config: ApiClientConfig, rotateResourceSession: true): Promise<void>
     setConfig(config: ApiClientConfig, rotateResourceSession = false): void | Promise<void> {
         this.authGeneration += 1
-        this.apiBase       = computeApiUrl(config.apiBase)
-        this.managementKey = config.managementKey
-        this.authFailed    = false
+        this.apiBase      = computeApiUrl(config.apiBase)
+        this.sessionToken = config.sessionToken ?? ''
+        this.authFailed   = false
 
         if (config.timeout) {
             this.instance.defaults.timeout = config.timeout
@@ -162,7 +178,7 @@ class ApiClient {
                 started        = true
                 const response = await fetch(`${base}/v0/resource/plugins/session`, {
                     method: 'POST', credentials: 'include', redirect: 'error', signal,
-                    headers: { Authorization: `Bearer ${config.managementKey}` },
+                    headers: { [MANAGEMENT_SESSION_HEADER]: this.sessionToken },
                 })
                 if (generation !== this.authGeneration) {
                     throw new Error(i18n.t('common.connection_changed'))
@@ -172,15 +188,7 @@ class ApiClient {
                     return
                 }
                 if (response.status !== 204) {
-                    const failedConfig  = { headers: new axios.AxiosHeaders(), __authGeneration: generation }
-                    const data: unknown = await response.json().catch(() => null)
-                    throw this.handleError(new axios.AxiosError(
-                        `${response.status} ${response.statusText}`.trim(), undefined, failedConfig, undefined,
-                        {
-                            status: response.status, statusText: response.statusText, data,
-                            headers: Object.fromEntries(response.headers.entries()), config: failedConfig,
-                        },
-                    ))
+                    throw await this.fetchResponseError(response)
                 }
             }
             return typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function' ?
@@ -192,6 +200,55 @@ class ApiClient {
                                 console.warn('Plugin session cross-tab coordination unavailable:', error)
                                 return rotate()
                             }) : rotate()
+        }
+    }
+
+    async createManagementSession(apiBase: string, key: string): Promise<string> {
+        const baseURL = computeApiUrl(apiBase)
+        if (!baseURL || !key) {
+            throw Object.assign(new Error(i18n.t('login.error_required')), { status: 400 })
+        }
+        const response = await fetch(`${baseURL}/session`, {
+            method: 'POST', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            headers: { Authorization: `Bearer ${key}` },
+        }).catch((error: unknown) => {
+            const timeout = error instanceof Error && error.name === 'TimeoutError'
+            throw Object.assign(new Error(timeout ? 'Request timed out' : 'Network Error'), {
+                code: timeout ? 'ECONNABORTED' : 'ERR_NETWORK',
+            })
+        })
+        if (response.status === 404 || response.status === 405) {
+            throw Object.assign(new Error(i18n.t('login.error_session_unsupported')), {
+                status: response.status, backendCode: 'management_session_unsupported',
+            })
+        }
+        if (response.status !== 201) {
+            throw await this.fetchResponseError(response)
+        }
+        const data = await response.json().catch(() => null) as { session_token?: unknown } | null
+        if (!isManagementSessionToken(data?.session_token)) {
+            throw Object.assign(new Error(i18n.t('login.error_session_response')), {
+                backendCode: 'management_session_invalid_response',
+            })
+        }
+        return data.session_token
+    }
+
+    async revokeManagementSession(apiBase: string, sessionToken: string): Promise<void> {
+        const response = await fetch(`${computeApiUrl(apiBase)}/session`, {
+            method: 'DELETE', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            headers: { [MANAGEMENT_SESSION_HEADER]: sessionToken },
+        })
+        if (response.status !== 204 && response.status !== 401) {
+            throw await this.fetchResponseError(response)
+        }
+    }
+
+    invalidateSession(): void {
+        if (!this.authFailed || this.sessionToken) {
+            this.authGeneration += 1
+            this.sessionToken = ''
+            this.authFailed   = true
         }
     }
 
@@ -286,6 +343,18 @@ class ApiClient {
             }
             return { ...receipt, recovery: (error as ApiError)?.status === 404 ? 'unknown' : 'unavailable' }
         }
+    }
+
+    private async fetchResponseError(response: Response): Promise<ApiError> {
+        const config        = { headers: new axios.AxiosHeaders() }
+        const data: unknown = await response.json().catch(() => null)
+        return this.handleError(new axios.AxiosError(
+            `${response.status} ${response.statusText}`.trim(), undefined, config, undefined,
+            {
+                status: response.status, statusText: response.statusText, data,
+                headers: Object.fromEntries(response.headers.entries()), config,
+            },
+        ))
     }
 
     private scopeRequest(config?: AuthScopedRequestConfig): AuthScopedRequestConfig {
@@ -456,9 +525,12 @@ class ApiClient {
                     config.headers['X-CPA-Mutation-ID'] = id
                 }
 
-                // 添加认证头
-                if (this.managementKey) {
-                    config.headers.Authorization = `Bearer ${this.managementKey}`
+                if (this.sessionToken) {
+                    config.headers.set(MANAGEMENT_SESSION_HEADER, this.sessionToken)
+                    config.allowAbsoluteUrls = false
+                    config.withCredentials   = false
+                    config.adapter           = typeof config.adapter === 'function' ? config.adapter : 'fetch'
+                    config.fetchOptions      = { ...config.fetchOptions, redirect: 'error' }
                 }
 
                 return config
@@ -513,8 +585,16 @@ class ApiClient {
                 return response
             },
             async (error) => {
+                const config = error?.config as AuthScopedRequestConfig | undefined
+                if (axios.isAxiosError(error) && error.response?.data instanceof Blob &&
+                    usageBackupMissingMessage(config?.url)) {
+                    try {
+                        error.response.data = JSON.parse(await error.response.data.text())
+                    } catch {
+                        // Preserve the HTTP error when the server returns a non-JSON body.
+                    }
+                }
                 const failure = this.handleError(error)
-                const config  = error?.config as AuthScopedRequestConfig | undefined
                 if (failure.mutation && (config?.mutationReadback || config?.method === 'get')) {
                     await this.reconcileResourceMutation(
                         failure.mutation,
@@ -590,7 +670,15 @@ class ApiClient {
             if (error.response?.status === 401 &&
                 requestGeneration === this.authGeneration &&
                 !this.authFailed) {
-                this.authFailed = true
+                const missingBackupPassword = usageBackupMissingMessage(error.config?.url)
+                if (missingBackupPassword &&
+                    (apiError.backendCode ===
+                     'usage_backup_password_required' ||
+                     errorValue ===
+                     missingBackupPassword)) {
+                    return apiError
+                }
+                this.invalidateSession()
                 window.dispatchEvent(new Event('unauthorized'))
             }
 

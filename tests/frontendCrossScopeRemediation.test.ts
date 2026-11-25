@@ -178,7 +178,7 @@ test('log overlap and display parsing use the same instant for UTC and offset ti
 test('plugin API errors retain their concrete message alongside their stable code and status', async () => {
     const Client = apiClient.constructor as new () => typeof apiClient
     const client = new Client()
-    client.setConfig({ apiBase: 'https://fixture.invalid', managementKey: 'synthetic' })
+    client.setConfig({ apiBase: 'https://fixture.invalid', sessionToken: 'synthetic' })
     const instance            = (client as unknown as { instance: AxiosInstance }).instance
     instance.defaults.adapter = async (config) => {
         throw new AxiosError('Request failed', axios.AxiosError.ERR_BAD_REQUEST, config, undefined, {

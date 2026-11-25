@@ -1,6 +1,6 @@
 import {EmptyState} from '@/components/ui/EmptyState'
 import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
-import {apiClient} from '@/services/api/client'
+import {apiClient, MANAGEMENT_SESSION_HEADER} from '@/services/api/client'
 import {pluginsApi} from '@/services/api/plugins'
 import {useAuthStore} from '@/stores'
 import {normalizeApiBase} from '@/utils/connection'
@@ -36,8 +36,8 @@ export function PluginResourcePage() {
     const { t }                     = useTranslation()
     const params                    = useParams<{ pluginId: string; resourceKey: string }>()
     const apiBase                   = useAuthStore((state) => state.apiBase)
-    const managementKey             = useAuthStore((state) => state.managementKey)
-    const authGeneration            = apiClient.getAuthGeneration()
+    const sessionToken              = useAuthStore((state) => state.sessionToken)
+    const authGeneration            = useAuthStore(() => apiClient.getAuthGeneration())
     const pluginID                  = useMemo(() => params.pluginId ?? '', [params.pluginId])
     const resourceKey               = useMemo(() => pluginResourceKey(params.resourceKey ?? ''), [params.resourceKey])
     const [loading, setLoading]     = useState(true)
@@ -84,10 +84,10 @@ export function PluginResourcePage() {
                 setError(t('plugin_resource.invalid_src', { defaultValue: 'Plugin page path is invalid' }))
                 return
             }
-            const headers  = managementKey ? { Authorization: `Bearer ${managementKey}` } : undefined
+            const headers  = sessionToken ? { [MANAGEMENT_SESSION_HEADER]: sessionToken } : undefined
             const response = await fetch(
                 resourceURL.toString(),
-                { credentials: 'include', headers, signal: controller.signal },
+                { credentials: 'include', headers, redirect: 'error', signal: controller.signal },
             )
             if (!isCurrentRequest()) {
                 return
@@ -110,7 +110,7 @@ export function PluginResourcePage() {
                 }
             }
         }
-    }, [apiBase, authGeneration, managementKey, pluginID, resourceKey, t])
+    }, [apiBase, authGeneration, pluginID, resourceKey, sessionToken, t])
 
     useHeaderRefresh(loadResource)
 

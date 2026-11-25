@@ -1,13 +1,23 @@
 import type {Config} from '@/types'
 import assert from 'node:assert/strict'
+import {createHash} from 'node:crypto'
 import {installTestLockManager} from './browserLockManager'
 import {installMemoryStorageEnvironment} from './memoryStorage'
 
+const tokenFor = (key: string) => createHash('sha256').update(key).digest('hex')
+
 installTestLockManager()
-globalThis.fetch = Object.assign(async () => new Response(null, { status: 204 }), {
-    preconnect: () => {
-    },
-})
+globalThis.fetch = Object.assign(async (input: string | URL | Request, options: RequestInit = {}) => {
+    if (new URL(String(input)).pathname === '/v0/management/session' && options.method === 'POST') {
+        const key = new Headers(options.headers).get('Authorization')?.replace(/^Bearer /, '')
+        assert.ok(key)
+        return Response.json({ session_token: tokenFor(key) }, { status: 201 })
+    }
+    return new Response(null, { status: 204 })
+}, {
+                                     preconnect: () => {
+                                     },
+                                 })
 
 const browserWindow = installMemoryStorageEnvironment(false)
 
@@ -41,7 +51,7 @@ try {
 
     let state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, true)
-    assert.equal(state.managementKey, 'memory-key')
+    assert.equal(state.sessionToken, tokenFor('memory-key'))
     assert.equal(state.rememberPassword, false)
     assert.equal(state.storagePersistenceFailed, true)
     assert.equal(localStorage.length, 0)
@@ -53,7 +63,7 @@ try {
                           managementKey: 'stored-key',
                           rememberPassword: true,
                       })
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     assert.equal(localStorage.getItem('managementKey'), null)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
 
@@ -74,7 +84,7 @@ try {
     }
     assert.equal(localStorage.getItem('isLoggedIn'), null)
     state = useAuthStore.getState()
-    assert.equal(state.managementKey, '')
+    assert.equal(state.sessionToken, '')
     assert.equal(state.sessionRestoreStatus, 'failed')
     assert.equal(await state.restoreSession(), false)
 

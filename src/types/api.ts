@@ -6,7 +6,7 @@
 // API 客户端配置
 export interface ApiClientConfig {
     apiBase: string
-    managementKey: string
+    sessionToken?: string
     timeout?: number
 }
 

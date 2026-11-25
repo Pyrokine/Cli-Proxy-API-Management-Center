@@ -47,7 +47,7 @@ describe('auth-file model cache', () => {
     test('a connection generation change invalidates old requests', async () => {
         const old     = deferred<Array<{ id: string }>>()
         const request = loadAuthFileModels('a.json', () => old.promise)
-        apiClient.setConfig({ apiBase: 'http://example.invalid', managementKey: 'new-key' })
+        apiClient.setConfig({ apiBase: 'http://example.invalid', sessionToken: 'new-key' })
         old.resolve([{ id: 'old-model' }])
         expect(await request).toBeNull()
     })

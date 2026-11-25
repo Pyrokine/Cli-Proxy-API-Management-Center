@@ -2,10 +2,14 @@ import {secureStorage} from '@/services/storage/secureStorage'
 import {encryptData} from '@/utils/encryption'
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test'
 import {fileURLToPath} from 'node:url'
-import {installMemoryStorageEnvironment, type MemoryStorageWindow} from './fixtures/memoryStorage'
+import {
+    createMemoryKeyDatabase,
+    installMemoryStorageEnvironment,
+    type MemoryStorageWindow,
+} from './fixtures/memoryStorage'
 
 const originalDescriptors = new Map(
-    ['window', 'localStorage', 'sessionStorage'].map((name) => [
+    ['window', 'localStorage', 'sessionStorage', 'indexedDB', 'navigator'].map((name) => [
         name,
         Object.getOwnPropertyDescriptor(globalThis, name),
     ]),
@@ -104,6 +108,55 @@ describe('secure storage lifecycle', () => {
                 value: originalCrypto,
             })
         }
+    })
+
+    test('uses one non-exportable key for concurrent first writes', async () => {
+        expect(await Promise.all([
+                                     secureStorage.setItem('session', 'one'),
+                                     secureStorage.setItem('persistent', 'two', { persistent: true }),
+                                 ])).toEqual(['stored', 'stored'])
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request     = indexedDB.open('cli-proxy-api-webui-storage-keys', 1)
+            request.onsuccess = () => resolve(request.result)
+            request.onerror   = () => reject(request.error)
+        })
+        try {
+            const key = await new Promise<CryptoKey>((resolve, reject) => {
+                const request     = db.transaction('keys').objectStore('keys').get('v3')
+                request.onsuccess = () => resolve(request.result as CryptoKey)
+                request.onerror   = () => reject(request.error)
+            })
+            expect(key.extractable).toBe(false)
+            await expect(crypto.subtle.exportKey('raw', key)).rejects.toThrow()
+        } finally {
+            db.close()
+        }
+        expect(await secureStorage.getItem('session')).toBe('one')
+        expect(await secureStorage.getItem('persistent', { persistent: true })).toBe('two')
+    })
+
+    test('preserves current ciphertext when the browser storage key is missing', async () => {
+        expect(await secureStorage.setItem('secret', 'protected', { persistent: true })).toBe('stored')
+        const encrypted      = localStorage.getItem('secret')
+        const profile        = indexedDB
+        globalThis.indexedDB = createMemoryKeyDatabase()
+
+        expect(encrypted?.startsWith('enc::v3::')).toBe(true)
+        expect(await secureStorage.getItemResult('secret', { persistent: true })).toEqual({
+                                                                                              status: 'unreadable',
+                                                                                              value: null,
+                                                                                          })
+        expect(localStorage.getItem('secret')).toBe(encrypted)
+
+        globalThis.indexedDB = profile
+        expect(await secureStorage.getItem('secret', { persistent: true })).toBe('protected')
+    })
+
+    test('keeps a new value in memory if IndexedDB aborts the key write', async () => {
+        globalThis.indexedDB = createMemoryKeyDatabase(undefined, true)
+        expect(await secureStorage.setItem('secret', 'synthetic', { persistent: true })).toBe('memory-only')
+        expect(localStorage.getItem('secret')).toBeNull()
+        expect(sessionStorage.getItem('secret')).toBeNull()
     })
 
     test('preserves protected storage when a replacement write fails', async () => {
@@ -227,24 +280,60 @@ describe('secure storage lifecycle', () => {
         }
     })
 
-    test('migrates a legacy plaintext value exactly once', async () => {
-        localStorage.setItem('legacy', `plain::${JSON.stringify('legacy-secret')}`)
-
-        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual(
-            {
-                status: 'value',
-                value: 'legacy-secret',
+    for (const [stored, value] of [
+        ['plain::"synthetic-plain"', 'synthetic-plain'],
+        ['enc::v1::QR8QQwQaCgwQTkwGWA8=', 'synthetic-v1'],
+        ['enc::v2::AAAAAAAAAAAAAAAAjuSAcVAmURvrsbItFA/7GJoLlSqHjgfqeyDpLnLq', 'synthetic-v2'],
+    ] as const) {
+        test(`migrates ${value} exactly once`, async () => {
+            Object.defineProperty(globalThis, 'navigator', {
+                configurable: true,
+                value: { userAgent: 'CPAM storage test' },
             })
-        const migrated = localStorage.getItem('legacy')
-        expect(migrated?.startsWith('enc::v2::')).toBe(true)
-        expect(migrated?.includes('plain::')).toBe(false)
+            localStorage.setItem('legacy', stored)
+            expect(await secureStorage.getItemResult('legacy', { persistent: true })).toEqual({
+                                                                                                  status: 'value',
+                                                                                                  value,
+                                                                                              })
+            const migrated = localStorage.getItem('legacy')
+            expect(migrated?.startsWith('enc::v3::')).toBe(true)
+            expect(await secureStorage.getItemResult('legacy', { persistent: true })).toEqual({
+                                                                                                  status: 'value',
+                                                                                                  value,
+                                                                                              })
+            expect(localStorage.getItem('legacy')).toBe(migrated)
+        })
+    }
 
-        expect(await secureStorage.getItemResult<string>('legacy', { persistent: true })).toEqual(
-            {
-                status: 'value',
-                value: 'legacy-secret',
-            })
-        expect(localStorage.getItem('legacy')).toBe(migrated)
+    test('does not replace a newer value that arrives during migration', async () => {
+        const originalCrypto = globalThis.crypto
+        const started        = Promise.withResolvers<void>()
+        const release        = Promise.withResolvers<void>()
+        const subtle         = new Proxy(originalCrypto.subtle, {
+            get: (target, property) => {
+                if (property === 'encrypt') {
+                    return async (...args: Parameters<SubtleCrypto['encrypt']>) => {
+                        started.resolve()
+                        await release.promise
+                        return target.encrypt(...args)
+                    }
+                }
+                const value = Reflect.get(target, property, target)
+                return typeof value === 'function' ? value.bind(target) : value
+            },
+        })
+        const restoreCrypto  = installSubtleCrypto(originalCrypto, subtle)
+        try {
+            localStorage.setItem('secret', 'plain::"old"')
+            const migration = secureStorage.getItemResult('secret', { persistent: true })
+            await started.promise
+            localStorage.setItem('secret', 'enc::v3::newer')
+            release.resolve()
+            expect(await migration).toEqual({ status: 'cancelled', value: null })
+            expect(localStorage.getItem('secret')).toBe('enc::v3::newer')
+        } finally {
+            restoreCrypto()
+        }
     })
 
     test('rejects and removes plaintext when migration cannot encrypt it', async () => {
@@ -344,11 +433,9 @@ describe('secure storage lifecycle', () => {
     })
 
     for (const scenario of [
-        'snapshot', 'cookie-only', 'same-connection', 'same-connection-failure', 'cross-tab', 'shared-cookie-host',
-        'no-locks', 'lock-failure', 'timeout', 'queued-timeout', 'superseded-wait', 'aba-wait',
-        'late-success', 'late-401', 'late-rejection', 'unsupported', 'unexpected-success',
+        'snapshot', 'late-success', 'late-401', 'late-network-failure', 'unsupported-logout', 'old-backend',
     ]) {
-        test(`revokes plugin resource sessions without replacing a new login: ${scenario}`, async () => {
+        test(`scopes management session revocation to the captured login: ${scenario}`, async () => {
             const fixture = fileURLToPath(new URL('./fixtures/pluginSessionLogout.ts', import.meta.url))
             expect(await runFixture(fixture, [scenario])).toBe(`plugin-session-logout:${scenario}=PASS`)
         })
@@ -416,7 +503,7 @@ describe('secure storage lifecycle', () => {
         )
     })
 
-    test('commits apiBase and managementKey as one credential snapshot', async () => {
+    test('commits apiBase and sessionToken as one credential snapshot', async () => {
         const fixture  = fileURLToPath(new URL('./fixtures/secureStorageAuthRecovery.ts', import.meta.url))
         const prepared = await runFixture(fixture, ['prepare-atomic-credential-write'])
         const payload  = Buffer.from(prepared, 'utf8').toString('base64url')

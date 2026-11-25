@@ -40,7 +40,7 @@ const providers       = [
 
 afterEach(() => {
     instance.defaults.adapter = originalAdapter
-    apiClient.setConfig({ apiBase: '', managementKey: '' })
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
 })
 
 function transport(outcome: ManagementMutationResult['outcome'], {
@@ -701,7 +701,7 @@ for (const stale of ['cancelled', 'new connection']) {
         if (stale === 'cancelled') {
             attempts.invalidateAll()
         } else {
-            apiClient.setConfig({ apiBase: 'https://new.synthetic.invalid', managementKey: '' })
+            apiClient.setConfig({ apiBase: 'https://new.synthetic.invalid', sessionToken: '' })
         }
         deliver(startBody)
         await request

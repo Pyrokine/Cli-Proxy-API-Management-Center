@@ -1,6 +1,6 @@
 import i18n from '@/i18n'
 import {usageApi} from '@/services/api'
-import {useAuthStore} from '@/stores/useAuthStore'
+import {apiClient} from '@/services/api/client'
 import {create} from 'zustand'
 
 export const USAGE_STATS_STALE_TIME_MS = 240_000
@@ -36,12 +36,11 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
     scopeKey: '',
 
     loadUsageStats: async (options = {}) => {
-        const force                                = options.force === true
-        const staleTimeMs                          = options.staleTimeMs ?? USAGE_STATS_STALE_TIME_MS
-        const { apiBase = '', managementKey = '' } = useAuthStore.getState()
-        const scopeKey                             = `${apiBase}::${managementKey}`
-        const state                                = get()
-        const scopeChanged                         = state.scopeKey !== scopeKey
+        const force        = options.force === true
+        const staleTimeMs  = options.staleTimeMs ?? USAGE_STATS_STALE_TIME_MS
+        const scopeKey     = String(apiClient.getAuthGeneration())
+        const state        = get()
+        const scopeChanged = state.scopeKey !== scopeKey
 
         // 先复用同源 in-flight 请求，避免多个页面同时发起重复 /usage
         if (inFlightUsageRequest && inFlightUsageRequest.scopeKey === scopeKey) {

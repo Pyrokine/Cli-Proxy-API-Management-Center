@@ -14,6 +14,13 @@ for (const trailing of ['', '/', '///']) {
     })
 }
 
+test('rejects current and legacy storage values in a management API address', () => {
+    for (const prefix of ['enc::v3::', 'enc::v2::', 'enc::v1::', 'plain::']) {
+        expect(normalizeApiBase(`${prefix}fixture`)).toBe('')
+        expect(computeApiUrl(`https://fixture-a.invalid/${prefix}fixture`)).toBe('')
+    }
+})
+
 const instance = (apiClient as unknown as { instance: AxiosInstance }).instance
 const families = [
     {
@@ -74,7 +81,7 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete', 'getRaw', 'postFo
             dispatched += 1
             return { config, status: 200, statusText: 'OK', headers: {}, data: {} }
         }
-        apiClient.setConfig({ apiBase: 'https://fixture-a.invalid', managementKey: 'fixture-key-a' })
+        apiClient.setConfig({ apiBase: 'https://fixture-a.invalid', sessionToken: 'fixture-key-a' })
         try {
             // noinspection ES6MissingAwait
             const work = method === 'get' || method === 'delete' || method === 'getRaw'
@@ -82,12 +89,12 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete', 'getRaw', 'postFo
                          : method === 'postForm'
                            ? apiClient.postForm('/fixture', new FormData())
                            : apiClient[method]('/fixture', {})
-            apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', managementKey: 'fixture-key-b' })
+            apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', sessionToken: 'fixture-key-b' })
             expect(work).rejects.toThrow()
             expect(dispatched).toBe(0)
         } finally {
             instance.defaults.adapter = originalAdapter
-            apiClient.setConfig({ apiBase: '', managementKey: '' })
+            apiClient.setConfig({ apiBase: '', sessionToken: '' })
         }
     })
 }
@@ -107,17 +114,17 @@ for (const family of families) {
                 const originalAdapter                                        = instance.defaults.adapter
                 const requests: Array<{ method?: string; baseURL?: string }> = []
                 let switchConnection                                         = false
-                apiClient.setConfig({ apiBase: 'https://fixture-a.invalid', managementKey: 'fixture-key-a' })
+                apiClient.setConfig({ apiBase: 'https://fixture-a.invalid', sessionToken: 'fixture-key-a' })
                 const hook                = instance.interceptors.request.use((config) => {
                     if (switchAt === 'write interceptor' && config.method === 'patch') {
-                        apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', managementKey: 'fixture-key-b' })
+                        apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', sessionToken: 'fixture-key-b' })
                     }
                     return config
                 })
                 instance.defaults.adapter = async (config) => {
                     requests.push({ method: config.method, baseURL: config.baseURL })
                     if (switchConnection && switchAt === 'read response') {
-                        apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', managementKey: 'fixture-key-b' })
+                        apiClient.setConfig({ apiBase: 'https://fixture-b.invalid', sessionToken: 'fixture-key-b' })
                     }
                     return {
                         config, status: 200, statusText: 'OK', headers: {},
@@ -135,7 +142,7 @@ for (const family of families) {
                 } finally {
                     instance.interceptors.request.eject(hook)
                     instance.defaults.adapter = originalAdapter
-                    apiClient.setConfig({ apiBase: '', managementKey: '' })
+                    apiClient.setConfig({ apiBase: '', sessionToken: '' })
                 }
             })
         }

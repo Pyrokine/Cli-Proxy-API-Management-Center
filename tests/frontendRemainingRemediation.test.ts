@@ -12,6 +12,7 @@ import {usePagination} from '@/hooks/usePagination'
 import {ModelCheckboxList} from '@/pages/ModelCheckboxList'
 import {collectPluginResourceEntries, resolvePluginAssetURL} from '@/pages/pluginResources'
 import {prepareApiCallAuth} from '@/services/api/apiCall'
+import {MANAGEMENT_SESSION_HEADER} from '@/services/api/client'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 import {normalizeApiBase} from '@/utils/connection'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
@@ -533,6 +534,7 @@ describe('remaining frontend remediation contracts', () => {
             authGeneration: 7,
             apiClient: { getAuthGeneration: () => 7 },
         }
+        const sessionToken                = 'a'.repeat(64)
         const resourceScope               = {
             ...common,
             loadSeqRef: { current: 0 },
@@ -548,7 +550,8 @@ describe('remaining frontend remediation contracts', () => {
             collectPluginResourceEntries,
             resolvePluginAssetURL,
             apiBase: 'https://fixture.invalid/cpa',
-            managementKey: 'synthetic',
+            sessionToken,
+            MANAGEMENT_SESSION_HEADER,
             // noinspection JSUnusedGlobalSymbols
             'setIframeSrc': (value: string) => {
                 if (value) {
@@ -564,8 +567,15 @@ describe('remaining frontend remediation contracts', () => {
                     window: { location: { origin: 'https://fixture.invalid' } },
                 },
             ),
-            fetch: async () => {
-                requests.push('resource-preflight');
+            fetch: async (url: string, options: RequestInit) => {
+                expect(url).toBe('https://fixture.invalid/cpa/v0/resource/plugins/fixture/index.html')
+                expect(options).toEqual({
+                                            credentials: 'include',
+                                            headers: { [MANAGEMENT_SESSION_HEADER]: sessionToken },
+                                            redirect: 'error',
+                                            signal: expect.any(AbortSignal),
+                                        })
+                requests.push('resource-preflight')
                 return { ok: true }
             },
         }

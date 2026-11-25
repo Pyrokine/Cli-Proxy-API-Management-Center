@@ -228,7 +228,7 @@ describe('logs page lifecycle wiring', () => {
     test('invalidates requests synchronously on connection identity changes and unmount', () => {
         expect(source).toContain('useAuthStore.subscribe')
         expect(source).toContain('next.apiBase === previous.apiBase')
-        expect(source).toContain('next.managementKey === previous.managementKey')
+        expect(source).toContain('nextAuthGeneration === observedAuthGeneration')
         expect(source).toContain('next.connectionStatus === previous.connectionStatus')
         expect(source).toContain('next.isAuthenticated === previous.isAuthenticated')
         expect(source).toContain('unsubscribeAuth()')

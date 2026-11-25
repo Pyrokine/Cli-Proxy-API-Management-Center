@@ -1,10 +1,12 @@
 import {collectPluginResourceEntries, pluginResourceKey, resolvePluginAssetURL} from '@/pages/pluginResources'
+import {MANAGEMENT_SESSION_HEADER} from '@/services/api/client'
 import type {PluginEntry} from '@/services/api/plugins'
 import {normalizeApiBase} from '@/utils/connection'
 import {getErrorMessage} from '@/utils/helpers'
 import {describe, expect, mock, test} from 'bun:test'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
+const sessionToken             = 'a'.repeat(64)
 const page                     = 'pages/PluginResourcePage.tsx'
 const resource                 = '/v0/resource/plugins/fixture/index.html'
 const plugin: PluginEntry      = {
@@ -35,7 +37,8 @@ function setup() {
         authGeneration: 1,
         apiClient: { getAuthGeneration: () => generation },
         apiBase: 'https://fixture.example',
-        managementKey: 'fixture-key',
+        sessionToken,
+        MANAGEMENT_SESSION_HEADER,
         pluginID: plugin.id,
         resourceKey: pluginResourceKey(resource),
         loadSeqRef: { current: 0 },
@@ -80,19 +83,19 @@ describe('plugin resource request ownership', () => {
         const generation = sourceInitializer<number>(
             page,
             'authGeneration',
-            { apiClient: { getAuthGeneration: () => 3 } },
+            { apiClient: { getAuthGeneration: () => 3 }, useAuthStore: (selector: () => number) => selector() },
         )
         expect(generation).toBe(3)
     })
 
-    test('loads only the current registered resource and sends the fixture key to its trusted origin', async () => {
+    test('loads only the current registered resource and sends the session token to its trusted origin', async () => {
         const flow = setup()
         await flow.callback()()
         expect(flow.list).toHaveBeenCalledTimes(1)
         const signal = flow.list.mock.calls[0][0]?.signal
         expect(signal).toBeInstanceOf(AbortSignal)
         expect(flow.fetch).toHaveBeenCalledWith('https://fixture.example' + resource, {
-            credentials: 'include', headers: { Authorization: 'Bearer fixture-key' }, signal,
+            credentials: 'include', headers: { [MANAGEMENT_SESSION_HEADER]: sessionToken }, redirect: 'error', signal,
         })
         expect(flow.frames).toEqual(['', 'https://fixture.example' + resource])
         expect(flow.errors).toEqual([''])

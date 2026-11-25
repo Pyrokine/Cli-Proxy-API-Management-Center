@@ -1,4 +1,3 @@
-import axios, {AxiosError} from 'axios'
 import assert from 'node:assert/strict'
 import {createInterface} from 'node:readline'
 import {installTestLockManager} from './browserLockManager'
@@ -6,22 +5,34 @@ import {installMemoryStorageEnvironment} from './memoryStorage'
 
 installTestLockManager()
 installMemoryStorageEnvironment(true)
-const lines                 = createInterface({ input: process.stdin })[Symbol.asyncIterator]()
-const bootstrap             = JSON.parse((await lines.next()).value!) as {
+const lines                   = createInterface({ input: process.stdin })[Symbol.asyncIterator]()
+const bootstrap               = JSON.parse((await lines.next()).value!) as {
     apiBase: string; managementKey: string; cookie: string; rotationStatus?: number
 }
-const supportsRotation      = !bootstrap.rotationStatus
-let cookie                  = bootstrap.cookie
-const rotations: string[]   = []
-const warnings: unknown[][] = []
-const originalWarn          = console.warn
-console.warn                = (...values: unknown[]) => {
+const supportsRotation        = !bootstrap.rotationStatus
+let cookie                    = bootstrap.cookie
+const rotations: string[]     = []
+const submittedKeys: string[] = []
+const retiredTokens: string[] = []
+const warnings: unknown[][]   = []
+const originalWarn            = console.warn
+console.warn                  = (...values: unknown[]) => {
     warnings.push(values);
     originalWarn(...values)
 }
 
 async function transport(url: string, options: RequestInit = {}): Promise<Response> {
     const headers = Object.fromEntries(new Headers(options.headers).entries())
+    if (headers.authorization) {
+        assert.equal(new URL(url).pathname, '/v0/management/session')
+        assert.equal(options.method, 'POST')
+        submittedKeys.push(headers.authorization)
+    }
+    if (options.method === 'DELETE') {
+        assert.equal(new URL(url).pathname, '/v0/management/session')
+        assert.ok(headers['x-cpa-management-session-token'])
+        retiredTokens.push(headers['x-cpa-management-session-token']!)
+    }
     if (cookie && new URL(url).pathname.startsWith('/v0/resource/plugins/')) {
         headers.cookie = cookie
     }
@@ -54,87 +65,90 @@ async function transport(url: string, options: RequestInit = {}): Promise<Respon
     return new Response(result.status === 204 ? null : result.body, { status: result.status, headers: responseHeaders })
 }
 
-globalThis.fetch                        =
-    Object.assign(
-        (input: string | URL | Request, options?: RequestInit) => transport(String(input), options),
-        {
-            preconnect: () => {
-            },
+globalThis.fetch                                           = Object.assign(
+    async (input: string | URL | Request, options?: RequestInit) => {
+        const request = new Request(input, options)
+        const url     = new URL(request.url)
+        assert.equal(request.redirect, 'error')
+        if (!(input instanceof Request)) {
+            assert.equal(options?.credentials, url.pathname.startsWith('/v0/resource/plugins/') ? 'include' : 'omit')
+        }
+        if (url.pathname.startsWith('/v0/management/') && !url.pathname.endsWith('/session')) {
+            assert.ok(request.headers.get('X-CPA-Management-Session-Token'))
+        }
+        return transport(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body ? await request.text() : undefined,
+        })
+    },
+    {
+        preconnect: () => {
         },
-    ) as typeof fetch
-axios.defaults.adapter                  = async (config) => {
-    const response = await transport(`${config.baseURL}${config.url}`, {
-        method: config.method?.toUpperCase(),
-        headers: config.headers.toJSON() as Record<string, string>,
-        body: config.data,
-    })
-    const result   = {
-        data: await response.text(), status: response.status, statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()), config,
-    }
-    if (response.status >= 400) {
-        throw new AxiosError('Synthetic management request failed', undefined, config, undefined, result)
-    }
-    return result
-}
-const [{ useAuthStore }, { apiClient }] = await Promise.all([
-                                                                import('../../src/stores/useAuthStore'),
-                                                                import('../../src/services/api/client'),
-                                                            ])
+    },
+) as typeof fetch
+const [{ useAuthStore }, { apiClient }, { secureStorage }] = await Promise.all([
+                                                                                   import('../../src/stores/useAuthStore'),
+                                                                                   import('../../src/services/api/client'),
+                                                                                   import('../../src/services/storage/secureStorage'),
+                                                                               ])
 await useAuthStore.persist.rehydrate()
-const credentials = { ...bootstrap, rememberPassword: true }
+const credentials = { apiBase: bootstrap.apiBase, managementKey: bootstrap.managementKey, rememberPassword: true }
+const auth        = () => useAuthStore.getState()
 if (bootstrap.rotationStatus === 500) {
-    await assert.rejects(
-        useAuthStore.getState().login(credentials),
-        (error: unknown) => (error as { status?: number }).status === 500,
-    )
-    assert.equal(useAuthStore.getState().isAuthenticated, false)
+    await assert.rejects(auth().login(credentials), (error: unknown) => (error as { status?: number }).status === 500)
+    assert.equal(auth().isAuthenticated, false)
+    assert.equal(auth().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), null)
     assert.equal(cookie, bootstrap.cookie)
-    process.stdout.write(`${JSON.stringify({ done: true, rotations })}\n`)
+    assert.equal(retiredTokens.length, 1)
+    process.stdout.write(`${JSON.stringify({ done: true })}\n`)
     process.exit(0)
 }
-await useAuthStore.getState().login(credentials)
-assert.equal(useAuthStore.getState().isAuthenticated, true)
+await auth().login(credentials)
+assert.equal(auth().isAuthenticated, true)
 assert.equal(rotations.length, supportsRotation ? 1 : 0)
-if (supportsRotation) {
-    assert.notEqual(rotations[0], bootstrap.cookie)
-}
+const firstToken = auth().sessionToken
 const generation = apiClient.getAuthGeneration()
-await useAuthStore.getState().login(credentials)
-assert.equal(useAuthStore.getState().isAuthenticated, true)
+await auth().login(credentials)
+assert.equal(auth().isAuthenticated, true)
 assert.ok(apiClient.getAuthGeneration() > generation)
 assert.equal(rotations.length, supportsRotation ? 2 : 0)
 if (supportsRotation) {
+    assert.notEqual(rotations[0], bootstrap.cookie)
     assert.notEqual(rotations[1], rotations[0])
 }
+assert.notEqual(auth().sessionToken, firstToken)
+const currentToken = auth().sessionToken
+const stored       = await secureStorage.getItem(
+    'cli-proxy-auth:credentials',
+    { persistent: true },
+) as Record<string, unknown>
+assert.equal(stored.sessionToken, currentToken)
+assert.equal(stored.managementKey, undefined)
+assert.equal(stored.version, 2)
 
-const restored = useAuthStore
-restored.setState({ isAuthenticated: false, managementKey: '', sessionRestoreStatus: 'idle' })
-apiClient.setConfig({ apiBase: '', managementKey: '' })
-await restored.persist.rehydrate()
-assert.equal(await restored.getState().restoreSession(), true)
-assert.equal(rotations.length, supportsRotation ? 3 : 0)
-if (supportsRotation) {
-    assert.notEqual(rotations[2], rotations[1])
-}
-assert.equal(restored.getState().managementKey, credentials.managementKey)
+useAuthStore.setState({ isAuthenticated: false, sessionToken: '', sessionRestoreStatus: 'idle' })
+apiClient.setConfig({ apiBase: '' })
+await useAuthStore.persist.rehydrate()
+assert.equal(await auth().restoreSession(), true)
+assert.equal(rotations.length, supportsRotation ? 2 : 0)
+assert.equal(auth().sessionToken, currentToken)
+assert.equal(submittedKeys.length, 2)
 assert.equal(
     warnings.filter((values) => values[0] === 'Server does not support plugin resource session rotation').length,
-    supportsRotation ? 0 : 3,
+    supportsRotation ? 0 : 2,
 )
-restored.getState().logout()
-assert.equal(restored.getState().isAuthenticated, false)
-const { pluginsApi } = await import('../../src/services/api/plugins')
-await pluginsApi.waitForResourceSessionRevocation(bootstrap.apiBase)
-assert.equal(cookie, 'cpa_plugin_resource_session=')
-assert.equal(await restored.getState().restoreSession(), false)
+await auth().logout()
+assert.equal(auth().isAuthenticated, false)
+assert.deepEqual(retiredTokens, [firstToken, currentToken])
+assert.equal(await auth().restoreSession(), false)
 await assert.rejects(
-    restored.getState().login({ ...credentials, managementKey: 'synthetic-invalid-password' }),
+    auth().login({ ...credentials, managementKey: 'synthetic-invalid-password' }),
     (error: unknown) => (error as { status?: number }).status === 401,
 )
-assert.equal(restored.getState().isAuthenticated, false)
-assert.equal(restored.getState().managementKey, '')
-assert.equal(await restored.getState().restoreSession(), false)
-process.stdout.write(`${JSON.stringify({ done: true, rotations })}\n`)
+assert.equal(auth().isAuthenticated, false)
+assert.equal(auth().sessionToken, '')
+assert.equal(await auth().restoreSession(), false)
+process.stdout.write(`${JSON.stringify({ done: true })}\n`)
 process.exit(0)

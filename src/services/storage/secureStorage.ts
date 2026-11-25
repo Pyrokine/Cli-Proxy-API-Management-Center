@@ -39,6 +39,9 @@ class SecureStorageService {
     async setItem(key: string, value: unknown, options: StorageOptions = {}): Promise<SecureStorageWriteResult> {
         const { encrypt = true, persistent = false } = options
 
+        if (!this.canCommit(options)) {
+            return 'cancelled'
+        }
         if (value === null || value === undefined) {
             return this.removeItem(key, options) ? 'removed' : 'memory-only'
         }
@@ -136,7 +139,7 @@ class SecureStorageService {
                 return { status: 'invalid', value: null }
             }
             if (requiresMigration) {
-                this.removeUnprotectedEverywhere(key)
+                this.removeStoredValue(source, key, raw)
                 return { status: 'invalid', value: null }
             }
             return { status: 'unreadable', value: null }
@@ -169,7 +172,7 @@ class SecureStorageService {
                 if (!this.canCommit(options)) {
                     return { status: 'cancelled', value: null }
                 }
-                this.removeUnprotectedEverywhere(key)
+                this.removeStoredValue(source, key, raw)
                 return { status: 'invalid', value: null }
             }
         }
@@ -177,24 +180,27 @@ class SecureStorageService {
         if (!this.canCommit(options)) {
             return { status: 'cancelled', value: null }
         }
-        if (source !== target || protectedValue !== raw) {
-            try {
+        try {
+            if (source.getItem(key) !== raw || (source !== target && target.getItem(key) !== null)) {
+                return { status: 'cancelled', value: null }
+            }
+            if (source !== target || protectedValue !== raw) {
                 target.setItem(key, protectedValue)
                 if (source !== target && !this.clearStorageValue(source, key) && requiresMigration) {
-                    this.clearStorageValue(target, key)
-                    this.removeUnprotectedEverywhere(key)
+                    this.removeStoredValue(target, key, protectedValue)
+                    this.removeStoredValue(source, key, raw)
                     return { status: 'invalid', value: null }
                 }
-            } catch {
-                if (!this.canCommit(options)) {
-                    return { status: 'cancelled', value: null }
-                }
-                if (requiresMigration) {
-                    this.removeUnprotectedEverywhere(key)
-                    return { status: 'invalid', value: null }
-                }
-                return { status: 'unreadable', value: null }
             }
+        } catch {
+            if (!this.canCommit(options)) {
+                return { status: 'cancelled', value: null }
+            }
+            if (requiresMigration) {
+                this.removeStoredValue(source, key, raw)
+                return { status: 'invalid', value: null }
+            }
+            return { status: 'unreadable', value: null }
         }
 
         return { status: 'value', value }

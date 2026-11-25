@@ -150,9 +150,9 @@ describe('request cancellation contracts', () => {
         apiClient.get = mockGet as typeof apiClient.get
 
         try {
-            apiClient.setConfig({ apiBase: 'https://server-a.example', managementKey: 'key-a' })
+            apiClient.setConfig({ apiBase: 'https://server-a.example', sessionToken: 'key-a' })
             const first = useAuthStore.getState().refreshServerVersion()
-            apiClient.setConfig({ apiBase: 'https://server-b.example', managementKey: 'key-b' })
+            apiClient.setConfig({ apiBase: 'https://server-b.example', sessionToken: 'key-b' })
             const second = useAuthStore.getState().refreshServerVersion()
             expect(pending).toHaveLength(2)
 
@@ -179,7 +179,7 @@ describe('request cancellation contracts', () => {
             expect(state.serverFeatures).toEqual({ plugins: true })
         } finally {
             apiClient.get = originalGet
-            apiClient.setConfig({ apiBase: '', managementKey: '' })
+            apiClient.setConfig({ apiBase: '', sessionToken: '' })
             useAuthStore.setState({
                                       serverVersion: null,
                                       serverBuildDate: null,

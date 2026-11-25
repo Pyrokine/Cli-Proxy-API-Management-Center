@@ -97,6 +97,12 @@ function getLocalizedErrorMessage(error: unknown, t: Translate): string {
                   : ''
     const backendDetail = readBackendErrorDetail(apiError.details) || readBackendErrorDetail(apiError.data) || message
 
+    if (apiError.backendCode === 'management_session_unsupported') {
+        return t('login.error_session_unsupported')
+    }
+    if (apiError.backendCode === 'management_session_invalid_response') {
+        return t('login.error_session_response')
+    }
     if (status === 429) {
         return t('login.error_rate_limited')
     }
@@ -141,7 +147,6 @@ export function LoginPage() {
     const login                                           = useAuthStore((state) => state.login)
     const restoreSession                                  = useAuthStore((state) => state.restoreSession)
     const storedBase                                      = useAuthStore((state) => state.apiBase)
-    const storedKey                                       = useAuthStore((state) => state.managementKey)
     const storedRememberPassword                          = useAuthStore((state) => state.rememberPassword)
 
     const [apiBase, setApiBase]                   = useState('')
@@ -237,9 +242,7 @@ export function LoginPage() {
                     applyLoginError(restoredState.sessionRestoreError)
                 }
                 const restoredBase = resolveApiBase(restoredState.apiBase, storedBase, detectedBase)
-                const restoredKey  = restoredState.managementKey || storedKey || ''
                 setApiBase(restoredBase || detectedBase)
-                setManagementKey(restoredKey)
                 setRememberPassword(
                     !insecureStorage &&
                     (restoredState.rememberPassword || storedRememberPassword),
@@ -273,6 +276,7 @@ export function LoginPage() {
             }
 
             const baseToUse = normalizeApiBase(apiBase) || detectedBase
+            setManagementKey('')
             setLoading(true)
             setError('')
             try {

@@ -1,7 +1,5 @@
 import i18n from '@/i18n'
-import type {ApiClientConfig} from '@/types'
-import {normalizeApiBase} from '@/utils/connection'
-import {REQUEST_TIMEOUT_MS} from '@/utils/constants'
+import type {ManagementMutationReceipt} from '@/types/api'
 import {normalizeOAuthProviderKey} from '@/utils/providerKeys'
 import type {AxiosRequestConfig} from 'axios'
 import {apiClient} from './client'
@@ -192,100 +190,17 @@ const normalizePluginListResponse = (response: PluginListResponse): PluginListRe
     plugins: (response.plugins ?? []).map(normalizePluginEntry),
 })
 
-const resourceSessionRevocations = new Map<string, Promise<void>>()
-// Cookie 按主机共享，协议和端口变化仍需等待原会话撤销
-const resourceSessionLockName    = (apiBase: string) => `cpam:plugin-resource-session:${new URL(apiBase).hostname}`
+type PluginReadback = (response: PluginListResponse, receipt: ManagementMutationReceipt) => void
 
-async function withResourceSessionLock(
-    apiBase: string,
-    operation: (signal: AbortSignal) => Promise<void>,
-): Promise<void> {
-    const lockName   = resourceSessionLockName(apiBase)
-    const pending    = resourceSessionRevocations.get(lockName)
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout    = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-            const error = new Error('Plugin session request timed out')
-            controller.abort(error)
-            reject(error)
-        }, REQUEST_TIMEOUT_MS)
-    })
-    try {
-        let started     = false
-        const run       = async () => {
-            controller.signal.throwIfAborted()
-            started = true
-            await pending
-            controller.signal.throwIfAborted()
-            await operation(controller.signal)
-        }
-        // noinspection ES6MissingAwait
-        const request   = typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function' ?
-                          navigator.locks.request(resourceSessionLockName(apiBase), { signal: controller.signal }, run)
-                                   .catch((error: unknown) => {
-                                       if (started || controller.signal.aborted) {
-                                           throw error
-                                       }
-                                       console.warn('Plugin session cross-tab coordination unavailable:', error)
-                                       return run()
-                                   }) :
-                          run()
-        const completed = Promise.race([request, timeout])
-        const settled   = completed.then(() => {
-        }, () => {
-        })
-        resourceSessionRevocations.set(lockName, settled)
-        void settled.then(() => {
-            if (resourceSessionRevocations.get(lockName) === settled) {
-                resourceSessionRevocations.delete(lockName)
-            }
-        })
-        await completed
-    } finally {
-        clearTimeout(timer)
+const readPluginList = (onReadback?: PluginReadback) => async (_data: unknown, receipt: ManagementMutationReceipt) => {
+    const response = await pluginsApi.list()
+    if (receipt.authGeneration === apiClient.getAuthGeneration()) {
+        onReadback?.(response, receipt)
     }
 }
 
 export const pluginsApi = {
-    revokeResourceSession: async (connection: Pick<ApiClientConfig, 'apiBase' | 'managementKey'>): Promise<void> => {
-        const apiBase       = normalizeApiBase(connection.apiBase)
-        const managementKey = connection.managementKey.trim()
-        const lockName      = resourceSessionLockName(apiBase)
-        const pending       = resourceSessionRevocations.get(lockName)
-        const request       = withResourceSessionLock(apiBase, async (signal) => {
-            await pending
-            signal.throwIfAborted()
-            const response = await fetch(`${apiBase}/v0/resource/plugins/session`, {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: managementKey ? { Authorization: `Bearer ${managementKey}` } : undefined,
-                redirect: 'error',
-                signal,
-            })
-            if (response.status !== 204) {
-                throw new Error(`${response.status} ${response.statusText}`.trim())
-            }
-        })
-        const settled       = request.then(() => {
-        }, () => {
-        })
-        resourceSessionRevocations.set(lockName, settled)
-        void settled.then(() => {
-            if (resourceSessionRevocations.get(lockName) === settled) {
-                resourceSessionRevocations.delete(lockName)
-            }
-        })
-        await request
-    },
-    waitForResourceSessionRevocation: async (apiBase: string): Promise<void> => {
-        const pending = resourceSessionRevocations.get(resourceSessionLockName(apiBase))
-        await withResourceSessionLock(apiBase, async (signal) => {
-            await pending
-            signal.throwIfAborted()
-        })
-    },
-    list: async (config?: AxiosRequestConfig) => normalizePluginListResponse(
+    list: async (config?: AxiosRequestConfig): Promise<PluginListResponse> => normalizePluginListResponse(
         await apiClient.get<PluginListResponse>('/plugins', config),
     ),
     getConfig: async (id: string): Promise<PluginConfigObject> => {

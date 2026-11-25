@@ -14,7 +14,7 @@ export interface LoginCredentials {
 export interface AuthState {
     isAuthenticated: boolean
     apiBase: string
-    managementKey: string
+    sessionToken: string
     rememberPassword: boolean
     serverVersion: string | null
     serverBuildDate: string | null

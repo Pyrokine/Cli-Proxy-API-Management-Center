@@ -173,7 +173,6 @@ export function OAuthLoginAction({
             if (
                 nextGeneration === authGeneration &&
                 current.apiBase === previous.apiBase &&
-                current.managementKey === previous.managementKey &&
                 current.isAuthenticated === previous.isAuthenticated
             ) {
                 return

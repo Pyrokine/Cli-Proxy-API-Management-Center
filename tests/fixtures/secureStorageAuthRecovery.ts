@@ -1,14 +1,32 @@
 import assert from 'node:assert/strict'
+import {createHash} from 'node:crypto'
 import {AUTH_STORAGE_TEST_LOCK_NAME, installTestLockManager} from './browserLockManager'
 import {installMemoryStorageEnvironment} from './memoryStorage'
 
-const testLockManager = installTestLockManager()
-globalThis.fetch      = Object.assign(async () => new Response(null, { status: 204 }), {
-    preconnect: () => {
-    },
-})
+const tokenFor = (key: string) => createHash('sha256').update(key).digest('hex')
 
-const browserWindow       = installMemoryStorageEnvironment(true)
+const testLockManager = installTestLockManager()
+globalThis.fetch      = Object.assign(async (input: string | URL | Request, options: RequestInit = {}) => {
+    if (new URL(String(input)).pathname === '/v0/management/session' && options.method === 'POST') {
+        const key = new Headers(options.headers).get('Authorization')?.replace(/^Bearer /, '')
+        assert.ok(key)
+        return Response.json({ session_token: tokenFor(key) }, { status: 201 })
+    }
+    return new Response(null, { status: 204 })
+}, {
+                                          preconnect: () => {
+                                          },
+                                      })
+
+// The child processes model reloads of one synthetic browser profile.
+const profileKey          = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(32),
+    'AES-GCM',
+    false,
+    ['encrypt', 'decrypt'],
+)
+const browserWindow       = installMemoryStorageEnvironment(true, profileKey)
 const localStorageValue   = globalThis.localStorage
 const sessionStorageValue = globalThis.sessionStorage
 
@@ -115,7 +133,29 @@ function installDecryptFailure(): void {
     })
 }
 
-async function seedAuthentication(
+async function seedAuthentication(persistent: boolean, key: string) {
+    const { secureStorage } = await import('../../src/services/storage/secureStorage')
+    const transactionId     = 'seeded-management-session'
+    const source            = persistent ? localStorage : sessionStorage
+    const keys              = [
+        'cli-proxy-auth:credentials',
+        'cli-proxy-auth:intent',
+        'cli-proxy-auth:transaction',
+    ] as const
+    assert.equal(await secureStorage.setItem(keys[0], {
+        version: 2, apiBase: 'https://example.test', sessionToken: tokenFor(key), transactionId,
+    }, { persistent }), 'stored')
+    source.setItem(keys[1], transactionId)
+    source.setItem(keys[2], transactionId)
+    if (persistent) {
+        localStorage.setItem('isLoggedIn', 'true')
+    } else {
+        localStorage.setItem(keys[1], transactionId)
+    }
+    return { snapshots: Object.fromEntries(keys.map((name) => [name, source.getItem(name)])) }
+}
+
+async function seedLegacyAuthentication(
     persistent: boolean,
     managementKey: string,
     rawState?: Record<string, unknown>,
@@ -188,11 +228,11 @@ async function assertUnreadableCiphertextIsPreserved(persistent: boolean): Promi
     assert.equal(fetchCallCount, 0)
     for (const [key, snapshot] of Object.entries(snapshots)) {
         assert.equal(source.getItem(key), snapshot)
-        assert.equal(alternate.getItem(key), null)
+        assert.equal(alternate.getItem(key), !persistent && key.endsWith(':intent') ? snapshot : null)
     }
     assert.equal(localStorage.getItem('isLoggedIn'), persistent ? 'true' : null)
     const state = useAuthStore.getState()
-    assert.equal(state.managementKey, '')
+    assert.equal(state.sessionToken, '')
     assert.equal(state.storageRestoreFailed, true)
     assert.equal(state.storagePersistenceFailed, false)
     assert.equal(state.storageClearFailed, false)
@@ -204,9 +244,9 @@ async function runUnreadableBundleWithInvalidMetadataScenario(): Promise<void> {
     const transactionId     = 'unreadable-bundle-transaction'
     localStorage.setItem('cli-proxy-auth:transaction', transactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://example.test',
-        managementKey: 'stored-key',
+        sessionToken: tokenFor('stored-key'),
         transactionId,
     }, { persistent: true }), 'stored')
     const encryptedBundle = localStorage.getItem('cli-proxy-auth:credentials')
@@ -238,7 +278,7 @@ async function runSessionBarrierScenario(): Promise<void> {
 
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(useAuthStore.getState().isAuthenticated, false)
     for (const key of AUTH_STORAGE_KEYS) {
         assert.equal(sessionStorage.getItem(key), null)
@@ -254,9 +294,9 @@ async function runLocalBarrierPreservesSharedLoginScenario(): Promise<void> {
     const transactionId     = 'current-shared-login'
     localStorage.setItem('cli-proxy-auth:transaction', transactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://current.test',
-        managementKey: 'current-key',
+        sessionToken: tokenFor('current-key'),
         transactionId,
     }, { persistent: true }), 'stored')
     localStorage.setItem('isLoggedIn', 'true')
@@ -268,21 +308,21 @@ async function runLocalBarrierPreservesSharedLoginScenario(): Promise<void> {
     })
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), transactionId)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
     const storedCredentials = await secureStorage.getItem<{
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, transactionId)
 }
 
 async function runInvalidStateScenario(): Promise<void> {
     let fetchCallCount = 0
-    await seedAuthentication(true, 'standalone-key', {
+    await seedLegacyAuthentication(true, 'standalone-key', {
         apiBase: 'https://example.test',
         managementKey: { unexpected: 'value' },
         rememberPassword: true,
@@ -336,24 +376,29 @@ async function runLegacyMigrationFailureScenario(): Promise<void> {
 }
 
 async function runEncodedPrefixKeyScenario(): Promise<void> {
-    const managementKey = 'enc::v2::real-management-key'
-    await seedAuthentication(true, managementKey)
+    const managementKey = 'enc::v2::synthetic-management-key'
+    await seedLegacyAuthentication(true, managementKey)
     let fetchCallCount     = 0
     const { useAuthStore } = await loadAuthStore(async () => {
         ++fetchCallCount
     })
-
-    assert.equal(await useAuthStore.getState().restoreSession(), true)
+    assert.equal(await useAuthStore.getState().restoreSession(), false)
+    assert.equal(fetchCallCount, 0)
+    assert.equal(localStorage.getItem('managementKey'), null)
+    await useAuthStore.getState().login({ apiBase: 'https://example.test', managementKey, rememberPassword: true })
     assert.equal(fetchCallCount, 1)
     assert.equal(useAuthStore.getState().isAuthenticated, true)
-    assert.equal(useAuthStore.getState().managementKey, managementKey)
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor(managementKey))
 }
 
 async function runSameGenerationWriteScenario(): Promise<void> {
     const { secureStorage } = await import('../../src/services/storage/secureStorage')
     const { useAuthStore }  = await loadAuthStore()
-    sessionStorage.clear()
-    localStorage.clear()
+    await useAuthStore.getState().login({
+                                            apiBase: 'https://example.test',
+                                            managementKey: 'synthetic-key',
+                                            rememberPassword: false,
+                                        })
 
     const originalCrypto = globalThis.crypto
     let releaseFirst     = () => {
@@ -452,17 +497,17 @@ async function runStaleLoginScenario(): Promise<void> {
 
     const state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, true)
-    assert.equal(state.managementKey, 'current-key')
+    assert.equal(state.sessionToken, tokenFor('current-key'))
     assert.equal(state.connectionStatus, 'connected')
     const storedCredentials = await secureStorage.getItem<{
         version: number
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.version, 1)
+    assert.equal(storedCredentials?.version, 2)
     assert.equal(storedCredentials?.apiBase, 'https://current.test')
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.ok(storedCredentials?.transactionId)
 }
 
@@ -539,10 +584,9 @@ async function prepareAtomicCredentialWriteScenario(): Promise<ReloadPayload> {
         value: originalCrypto,
     })
 
-    for (const key of ['apiBase', 'managementKey'] as const) {
-        assert.equal(localStorage.getItem(key), snapshots[key], key)
+    for (const [key, value] of Object.entries(snapshots)) {
+        assert.equal(localStorage.getItem(key), value, key)
     }
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), null)
 
     return {
         local: snapshotStorage(localStorageValue),
@@ -574,16 +618,16 @@ async function runAtomicCredentialWriteReloadScenario(payload: ReloadPayload): P
     assert.equal(await useAuthStore.getState().restoreSession(), true)
     assert.equal(fetchCallCount, 1)
     assert.equal(useAuthStore.getState().apiBase, 'https://example.test')
-    assert.equal(useAuthStore.getState().managementKey, 'old-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('old-key'))
     const storedCredentials = await secureStorage.getItem<{
         version: number
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.version, 1)
+    assert.equal(storedCredentials?.version, 2)
     assert.equal(storedCredentials?.apiBase, 'https://example.test')
-    assert.equal(storedCredentials?.managementKey, 'old-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('old-key'))
     assert.ok(storedCredentials?.transactionId)
 }
 
@@ -649,7 +693,7 @@ async function runProtectedLoginFailureReloadScenario(payload: ReloadPayload): P
     assert.equal(await useAuthStore.getState().restoreSession(), true)
     assert.equal(fetchCallCount, 1)
     assert.equal(useAuthStore.getState().apiBase, 'https://old.test')
-    assert.equal(useAuthStore.getState().managementKey, 'old-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('old-key'))
 }
 
 async function prepareSessionLogoutReloadScenario(): Promise<ReloadPayload> {
@@ -659,7 +703,7 @@ async function prepareSessionLogoutReloadScenario(): Promise<ReloadPayload> {
                                             managementKey: 'session-key',
                                             rememberPassword: false,
                                         })
-    assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     assert.ok(sessionStorage.getItem('cli-proxy-auth:transaction'))
     assert.ok(localStorage.getItem('cli-proxy-auth:intent'))
     localStorage.removeItem('cli-proxy-auth:intent')
@@ -692,7 +736,7 @@ async function runSessionLogoutReloadScenario(payload: ReloadPayload): Promise<v
     })
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(useAuthStore.getState().sessionRestoreStatus, 'skipped')
     assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials'), encryptedBundle)
     assert.equal(localStorage.getItem('cli-proxy-auth:intent'), null)
@@ -704,9 +748,9 @@ async function runPendingCrossTabLoginBlocksRestoreScenario(): Promise<void> {
     localStorage.setItem('cli-proxy-auth:intent', committedTransactionId)
     localStorage.setItem('cli-proxy-auth:transaction', committedTransactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://committed.test',
-        managementKey: 'committed-key',
+        sessionToken: tokenFor('committed-key'),
         transactionId: committedTransactionId,
     }, { persistent: true }), 'stored')
     localStorage.setItem('isLoggedIn', 'true')
@@ -719,7 +763,7 @@ async function runPendingCrossTabLoginBlocksRestoreScenario(): Promise<void> {
     })
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(useAuthStore.getState().sessionRestoreStatus, 'skipped')
     assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), encryptedBundle)
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), committedTransactionId)
@@ -737,9 +781,9 @@ async function runCrossTabRestoreClaimScenario(): Promise<void> {
     localStorage.setItem('cli-proxy-auth:intent', restoredTransactionId)
     localStorage.setItem('cli-proxy-auth:transaction', restoredTransactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://restored.test',
-        managementKey: 'restored-key',
+        sessionToken: tokenFor('restored-key'),
         transactionId: restoredTransactionId,
     }, { persistent: true }), 'stored')
     localStorage.setItem('isLoggedIn', 'true')
@@ -750,9 +794,9 @@ async function runCrossTabRestoreClaimScenario(): Promise<void> {
     })
     const currentTransactionId              = 'cross-tab-current-restore'
     const currentCiphertext                 = await encryptData(JSON.stringify({
-                                                                                   version: 1,
+                                                                                   version: 2,
                                                                                    apiBase: 'https://current.test',
-                                                                                   managementKey: 'current-key',
+                                                                                   sessionToken: tokenFor('current-key'),
                                                                                    transactionId: currentTransactionId,
                                                                                }))
     const originalGetItem                   = localStorage.getItem
@@ -784,14 +828,14 @@ async function runCrossTabRestoreClaimScenario(): Promise<void> {
     }
 
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:intent'), currentTransactionId)
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), currentTransactionId)
     const storedCredentials = await secureStorage.getItem<{
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, currentTransactionId)
 }
 
@@ -805,9 +849,9 @@ async function runCrossTabDelayedLoginScenario(): Promise<void> {
     const currentTransactionId                 = 'cross-tab-current-login'
     const currentCiphertext                    = await encryptData(JSON.stringify(
         {
-            version: 1,
+            version: 2,
             apiBase: 'https://current.test',
-            managementKey: 'current-key',
+            sessionToken: tokenFor('current-key'),
             transactionId: currentTransactionId,
         }))
     const originalSetItem                      = localStorage.setItem
@@ -843,11 +887,11 @@ async function runCrossTabDelayedLoginScenario(): Promise<void> {
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), currentTransactionId)
     const storedCredentials = await secureStorage.getItem<{
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
     assert.equal(storedCredentials?.apiBase, 'https://current.test')
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, currentTransactionId)
 }
 
@@ -866,9 +910,9 @@ async function runCrossTabStale401Scenario(): Promise<ReloadPayload> {
 
     const currentTransactionId              = 'cross-tab-current-401'
     const currentCiphertext                 = await encryptData(JSON.stringify({
-                                                                                   version: 1,
+                                                                                   version: 2,
                                                                                    apiBase: 'https://current.test',
-                                                                                   managementKey: 'current-key',
+                                                                                   sessionToken: tokenFor('current-key'),
                                                                                    transactionId: currentTransactionId,
                                                                                }))
     const originalGetItem                   = localStorage.getItem
@@ -901,16 +945,16 @@ async function runCrossTabStale401Scenario(): Promise<ReloadPayload> {
     }
 
     assert.equal(useAuthStore.getState().isAuthenticated, false)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), currentTransactionId)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
     const storedCredentials = await secureStorage.getItem<{
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
     assert.equal(storedCredentials?.apiBase, 'https://current.test')
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, currentTransactionId)
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), null)
     return {
@@ -942,15 +986,15 @@ async function runCrossTabStale401ReloadScenario(payload: ReloadPayload): Promis
     })
     assert.equal(await useAuthStore.getState().restoreSession(), true)
     assert.equal(fetchCallCount, 1)
-    assert.equal(useAuthStore.getState().managementKey, 'current-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('current-key'))
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), null)
     const committedTransaction = localStorage.getItem('cli-proxy-auth:transaction')
     assert.ok(committedTransaction)
     const storedCredentials = await secureStorage.getItem<{
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, committedTransaction)
 }
 
@@ -969,9 +1013,9 @@ async function runCrossTabLogoutOrderingScenario(): Promise<void> {
 
     const currentTransactionId              = 'cross-tab-current-after-logout'
     const currentCiphertext                 = await encryptData(JSON.stringify({
-                                                                                   version: 1,
+                                                                                   version: 2,
                                                                                    apiBase: 'https://current.test',
-                                                                                   managementKey: 'current-key',
+                                                                                   sessionToken: tokenFor('current-key'),
                                                                                    transactionId: currentTransactionId,
                                                                                }))
     const originalRemoveItem                = localStorage.removeItem
@@ -1003,15 +1047,15 @@ async function runCrossTabLogoutOrderingScenario(): Promise<void> {
     }
 
     assert.equal(useAuthStore.getState().isAuthenticated, false)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:intent'), currentTransactionId)
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), currentTransactionId)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
     const storedCredentials = await secureStorage.getItem<{
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { persistent: true })
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.equal(storedCredentials?.transactionId, currentTransactionId)
 }
 
@@ -1030,7 +1074,7 @@ async function runCrossTabPendingLoginStale401Scenario(): Promise<void> {
     await delay()
 
     assert.equal(useAuthStore.getState().isAuthenticated, false)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:intent'), 'pending-cross-tab-login')
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), null)
     assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), null)
@@ -1053,9 +1097,9 @@ async function runCrossTabMemoryOnlyStale401Scenario(): Promise<void> {
     const currentTransactionId    = 'cross-tab-current-after-memory-only'
     localStorage.setItem('cli-proxy-auth:intent', currentTransactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://current.test',
-        managementKey: 'current-key',
+        sessionToken: tokenFor('current-key'),
         transactionId: currentTransactionId,
     }, { persistent: true }), 'stored')
     localStorage.setItem('cli-proxy-auth:transaction', currentTransactionId)
@@ -1065,23 +1109,23 @@ async function runCrossTabMemoryOnlyStale401Scenario(): Promise<void> {
     await delay()
 
     assert.equal(useAuthStore.getState().isAuthenticated, false)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(localStorage.getItem('cli-proxy-auth:intent'), currentTransactionId)
     assert.equal(localStorage.getItem('cli-proxy-auth:transaction'), currentTransactionId)
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
 }
 
 async function runStaleAuthBlobScenario(): Promise<void> {
-    const { secureStorage } = await seedAuthentication(true, 'old-key')
+    const { secureStorage } = await seedLegacyAuthentication(true, 'old-key')
     const transactionId     = 'current-bundle-transaction'
     localStorage.setItem('cli-proxy-auth:intent', transactionId)
     localStorage.setItem('cli-proxy-auth:transaction', transactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://current.test',
-        managementKey: 'current-key',
+        sessionToken: tokenFor('current-key'),
         transactionId,
     }, { persistent: true }), 'stored')
 
@@ -1092,7 +1136,7 @@ async function runStaleAuthBlobScenario(): Promise<void> {
     assert.equal(await useAuthStore.getState().restoreSession(), true)
     assert.equal(fetchCallCount, 1)
     assert.equal(useAuthStore.getState().apiBase, 'https://current.test')
-    assert.equal(useAuthStore.getState().managementKey, 'current-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('current-key'))
     assert.equal(localStorage.getItem('apiBase'), null)
     assert.equal(localStorage.getItem('managementKey'), null)
     await delay()
@@ -1104,7 +1148,7 @@ async function runStaleAuthBlobScenario(): Promise<void> {
 }
 
 async function runMismatchedLegacySourcesScenario(): Promise<void> {
-    const { secureStorage } = await seedAuthentication(true, 'old-key')
+    const { secureStorage } = await seedLegacyAuthentication(true, 'old-key')
     assert.equal(await secureStorage.setItem('apiBase', 'https://current.test', { persistent: true }), 'stored')
     assert.equal(await secureStorage.setItem('managementKey', 'current-key', { persistent: true }), 'stored')
 
@@ -1114,7 +1158,7 @@ async function runMismatchedLegacySourcesScenario(): Promise<void> {
     })
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(useAuthStore.getState().storageRestoreFailed, true)
     assert.equal(localStorage.getItem('isLoggedIn'), null)
     for (const key of AUTH_STORAGE_KEYS) {
@@ -1139,9 +1183,9 @@ async function runCurrentLogin401Scenario(): Promise<void> {
     )
     const state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, false)
-    assert.equal(state.managementKey, '')
+    assert.equal(state.sessionToken, '')
     assert.equal(state.connectionStatus, 'error')
-    assert.equal(state.connectionError, 'Management key is invalid or expired')
+    assert.equal(state.connectionError, 'unauthorized')
     assert.equal(state.sessionRestoreStatus, 'failed')
     assert.equal(await state.restoreSession(), false)
     for (const key of AUTH_STORAGE_KEYS) {
@@ -1229,12 +1273,12 @@ async function runMemoryOnlySuccessfulRetryScenario(): Promise<void> {
     const storedCredentials = await secureStorage.getItem<{
         version: number
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { fallbackToPersistent: false })
-    assert.equal(storedCredentials?.version, 1)
+    assert.equal(storedCredentials?.version, 2)
     assert.equal(storedCredentials?.apiBase, 'https://retry.test')
-    assert.equal(storedCredentials?.managementKey, 'current-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('current-key'))
     assert.ok(storedCredentials?.transactionId)
     assert.equal(await secureStorage.getItem('managementKey', { fallbackToPersistent: false }), null)
 }
@@ -1288,7 +1332,7 @@ async function runRememberSwitchScenario(): Promise<void> {
                                             rememberPassword: true,
                                         })
     await delay()
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials'), null)
     assert.equal(localStorage.getItem('managementKey'), null)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
@@ -1302,16 +1346,16 @@ async function runRememberSwitchScenario(): Promise<void> {
     assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), null)
     assert.equal(localStorage.getItem('cli-proxy-auth'), null)
     assert.equal(localStorage.getItem('isLoggedIn'), null)
-    assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(sessionStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     const storedCredentials = await secureStorage.getItem<{
         version: number
         apiBase: string
-        managementKey: string
+        sessionToken: string
         transactionId: string
     }>('cli-proxy-auth:credentials', { fallbackToPersistent: false })
-    assert.equal(storedCredentials?.version, 1)
+    assert.equal(storedCredentials?.version, 2)
     assert.equal(storedCredentials?.apiBase, 'https://example.test')
-    assert.equal(storedCredentials?.managementKey, 'session-key')
+    assert.equal(storedCredentials?.sessionToken, tokenFor('session-key'))
     assert.ok(storedCredentials?.transactionId)
 }
 
@@ -1331,7 +1375,7 @@ async function runTombstoneScenario(): Promise<void> {
     }
     assert.equal(localStorage.getItem('isLoggedIn'), 'false')
     assert.equal(useAuthStore.getState().storageClearFailed, false)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     localStorage.removeItem = originalRemove
 }
@@ -1361,7 +1405,7 @@ async function runClearFailureScenario(): Promise<void> {
     await delay()
     const state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, false)
-    assert.equal(state.managementKey, '')
+    assert.equal(state.sessionToken, '')
     assert.equal(state.connectionStatus, 'error')
     assert.equal(state.storagePersistenceFailed, true)
     assert.equal(state.storageClearFailed, true)
@@ -1372,7 +1416,7 @@ async function runClearFailureScenario(): Promise<void> {
     localStorage.setItem      = localSet
     sessionStorage.removeItem = sessionRemove
     sessionStorage.setItem    = sessionSet
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
 }
 
 async function prepareTotalDenialReloadScenario(): Promise<ReloadPayload> {
@@ -1432,7 +1476,7 @@ async function runTotalDenialReloadScenario(payload: ReloadPayload): Promise<voi
         cookies.set(name, value)
     }
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), null)
     assert.equal(
         [...cookies].some(([name, value]) => name.startsWith('cpam_auth_invalidated_') && value === '1'),
@@ -1453,7 +1497,7 @@ async function runTotalDenialReloadScenario(payload: ReloadPayload): Promise<voi
     await useAuthStore.persist.rehydrate()
     assert.equal(await useAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(useAuthStore.getState().managementKey, '')
+    assert.equal(useAuthStore.getState().sessionToken, '')
     assert.equal(useAuthStore.getState().isAuthenticated, false)
 }
 
@@ -1477,7 +1521,7 @@ async function runOtherPortCookieScenario(payload: ReloadPayload): Promise<void>
     })
     assert.equal(await useAuthStore.getState().restoreSession(), true)
     assert.equal(fetchCallCount, 1)
-    assert.equal(useAuthStore.getState().managementKey, 'other-port-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('other-port-key'))
     assert.equal(useAuthStore.getState().isAuthenticated, true)
 }
 
@@ -1510,7 +1554,7 @@ async function runFailedIntentWithNewSharedCommitScenario(withoutLocks: boolean)
     await testLockManager.request(AUTH_STORAGE_TEST_LOCK_NAME, async () => {
         localStorage.setItem('cli-proxy-auth:intent', transactionId)
         assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-            version: 1, apiBase: 'https://newer.test', managementKey: 'newer-key', transactionId,
+            version: 2, apiBase: 'https://newer.test', sessionToken: tokenFor('newer-key'), transactionId,
         }, { persistent: true }), 'stored')
         localStorage.setItem('cli-proxy-auth:transaction', transactionId)
         localStorage.setItem('isLoggedIn', 'true')
@@ -1527,7 +1571,7 @@ async function runFailedIntentWithNewSharedCommitScenario(withoutLocks: boolean)
     assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), ciphertext)
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
     assert.equal(useAuthStore.getState().isAuthenticated, true)
-    assert.equal(useAuthStore.getState().managementKey, 'older-key')
+    assert.equal(useAuthStore.getState().sessionToken, tokenFor('older-key'))
     assert.equal(useAuthStore.getState().storagePersistenceFailed, true)
     assert.equal(useAuthStore.getState().rememberPassword, false)
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
@@ -1544,9 +1588,9 @@ async function runLockRequestFailureScenario(): Promise<void> {
     localStorage.setItem('cli-proxy-auth:intent', transactionId)
     localStorage.setItem('cli-proxy-auth:transaction', transactionId)
     assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-        version: 1,
+        version: 2,
         apiBase: 'https://stored.test',
-        managementKey: 'stored-key',
+        sessionToken: tokenFor('stored-key'),
         transactionId,
     }, { persistent: true }), 'stored')
     localStorage.setItem('isLoggedIn', 'true')
@@ -1569,7 +1613,7 @@ async function runLockRequestFailureScenario(): Promise<void> {
 
     const state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, true)
-    assert.equal(state.managementKey, 'memory-key')
+    assert.equal(state.sessionToken, tokenFor('memory-key'))
     assert.equal(state.rememberPassword, false)
     assert.equal(state.storagePersistenceFailed, true)
     assert.equal(state.storageClearFailed, true)
@@ -1608,7 +1652,7 @@ async function runLockUnavailableScenario(): Promise<void> {
 
     const state = useAuthStore.getState()
     assert.equal(state.isAuthenticated, true)
-    assert.equal(state.managementKey, 'memory-key')
+    assert.equal(state.sessionToken, tokenFor('memory-key'))
     assert.equal(state.rememberPassword, false)
     assert.equal(state.storagePersistenceFailed, true)
     for (const storage of [localStorage, sessionStorage]) {
@@ -1649,7 +1693,7 @@ async function runTransientDenialReloadScenario(): Promise<void> {
         value: localStorageValue,
     })
     assert.equal(localStorage.getItem('isLoggedIn'), 'true')
-    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v2::'), true)
+    assert.equal(localStorage.getItem('cli-proxy-auth:credentials')?.startsWith('enc::v3::'), true)
 
     let fetchCallCount = 0
     useConfigStore.setState({
@@ -1665,7 +1709,7 @@ async function runTransientDenialReloadScenario(): Promise<void> {
 
     assert.equal(await freshAuthStore.getState().restoreSession(), false)
     assert.equal(fetchCallCount, 0)
-    assert.equal(freshAuthStore.getState().managementKey, '')
+    assert.equal(freshAuthStore.getState().sessionToken, '')
     assert.equal(freshAuthStore.getState().isAuthenticated, false)
     assert.equal(sessionStorage.getItem('cli-proxy-auth:invalidated'), 'true')
 }
@@ -1697,7 +1741,7 @@ async function runFailedIntentAfterSharedCommitScenario(): Promise<void> {
             localStorage.setItem('cli-proxy-auth:intent', transactionId)
             localStorage.setItem('cli-proxy-auth:transaction', transactionId)
             assert.equal(await secureStorage.setItem('cli-proxy-auth:credentials', {
-                version: 1, apiBase: 'https://newer.test', managementKey: 'newer-key', transactionId,
+                version: 2, apiBase: 'https://newer.test', sessionToken: tokenFor('newer-key'), transactionId,
             }, { persistent: true }), 'stored')
             localStorage.setItem('isLoggedIn', 'true')
         })

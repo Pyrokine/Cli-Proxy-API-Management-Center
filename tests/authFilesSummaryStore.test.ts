@@ -49,7 +49,7 @@ describe('auth-files summary store', () => {
         try {
             const request = useAuthFilesSummaryStore.getState().refresh()
             useAuthFilesSummaryStore.getState().clear()
-            apiClient.setConfig({ apiBase: 'http://example.invalid', managementKey: 'next' })
+            apiClient.setConfig({ apiBase: 'http://example.invalid', sessionToken: 'next' })
             pending.resolve({ files: [{ name: 'stale' }] })
             await request
             expect(useAuthFilesSummaryStore.getState()).toMatchObject({ count: null, loading: false })

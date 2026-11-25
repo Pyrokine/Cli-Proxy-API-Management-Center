@@ -246,7 +246,6 @@ describe('log page connection ownership', () => {
         const old                 = view.requests.errors.begin(3)
         const state               = {
             apiBase: 'fixture',
-            managementKey: 'fixture',
             connectionStatus: 'connected',
             isAuthenticated: true,
         }

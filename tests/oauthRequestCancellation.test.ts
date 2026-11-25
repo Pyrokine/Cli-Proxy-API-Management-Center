@@ -58,7 +58,7 @@ describe('OAuth transport ownership', () => {
                 configurable: true,
                 value: { dispatchEvent: (event: Event) => events.push(event.type) },
             })
-            apiClient.setConfig({ apiBase: 'https://old.example', managementKey: 'old-key' })
+            apiClient.setConfig({ apiBase: 'https://old.example', sessionToken: 'old-key' })
             const attempts = createAttempts()
             const attempt  = attempts.begin('devin')
 
@@ -75,7 +75,7 @@ describe('OAuth transport ownership', () => {
                 expect(current.isCurrent()).toBe(true)
             } finally {
                 attempts.invalidateAll()
-                apiClient.setConfig({ apiBase: '', managementKey: '' })
+                apiClient.setConfig({ apiBase: '', sessionToken: '' })
                 if (originalWindow) {
                     Object.defineProperty(globalThis, 'window', originalWindow)
                 } else {
@@ -91,14 +91,14 @@ describe('OAuth transport ownership', () => {
                 configurable: true,
                 value: { dispatchEvent: (event: Event) => events.push(event.type) },
             })
-            apiClient.setConfig({ apiBase: 'https://old.example', managementKey: 'old-key' })
+            apiClient.setConfig({ apiBase: 'https://old.example', sessionToken: 'old-key' })
             const attempts = createAttempts()
             const attempt  = attempts.begin('devin')
 
             try {
                 const { request, transport } = startDeferredRequest(status, attempt.signal)
                 await transport.started
-                apiClient.setConfig({ apiBase: 'https://new.example', managementKey: 'new-key' })
+                apiClient.setConfig({ apiBase: 'https://new.example', sessionToken: 'new-key' })
                 transport.deliver()
 
                 if (status === 401) {
@@ -110,7 +110,7 @@ describe('OAuth transport ownership', () => {
                 expect(attempt.isCurrent()).toBe(false)
             } finally {
                 attempts.invalidateAll()
-                apiClient.setConfig({ apiBase: '', managementKey: '' })
+                apiClient.setConfig({ apiBase: '', sessionToken: '' })
                 if (originalWindow) {
                     Object.defineProperty(globalThis, 'window', originalWindow)
                 } else {
