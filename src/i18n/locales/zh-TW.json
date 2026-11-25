@@ -2494,7 +2494,9 @@
         "rate_limit_event_manual_unban": "人工解封",
         "rate_limit_unban_history": "人工解封歷史",
         "rate_limit_no_unban_history": "暫無人工解封歷史",
-        "rate_limit_unbanned_at": "解封時間"
+        "rate_limit_unbanned_at": "解封時間",
+        "rate_limit_unban_persistence_pending": "已解除 {{ip}} 的限制，重新啟動後能否保留此變更尚未確認",
+        "rate_limit_already_unbanned": "{{ip}} 目前沒有生效的限制"
     },
     "notification": {
         "debug_updated": "除錯設定已更新",

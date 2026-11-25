@@ -1,4 +1,4 @@
-import {apiClient} from './client'
+import {apiClient, MUTATION_TARGET_REACHED} from './client'
 
 export interface BannedIPEntry {
     ip: string
@@ -31,7 +31,7 @@ interface FailedLoginNoticeEntry {
     last_successful_auth_at: string
 }
 
-interface RateLimitStatusResponse {
+export interface RateLimitStatusResponse {
     banned_ips: BannedIPEntry[]
     failed_login_notices?: FailedLoginNoticeEntry[]
     unban_history: RateLimitUnbanHistoryEntry[]
@@ -45,6 +45,12 @@ interface RateLimitStatusOptions {
     consumeFailedLoginNotices?: boolean
 }
 
+export interface RateLimitUnbanResult {
+    status: string
+    unbanned?: boolean
+    persistence_pending?: boolean
+}
+
 export const rateLimitsApi = {
     getStatus: (options: RateLimitStatusOptions = {}): Promise<RateLimitStatusResponse> =>
         apiClient.get<RateLimitStatusResponse>(
@@ -53,12 +59,22 @@ export const rateLimitsApi = {
             '/rate-limit/status',
         ),
 
-    unban: (ip: string): Promise<{ status: string }> =>
-        apiClient.delete<{ status: string }>(
+    unban: (ip: string, onReadback?: (status: RateLimitStatusResponse) => void) =>
+        apiClient.delete<RateLimitUnbanResult>(
             '/rate-limit/ban',
             {
                 ...({ data: { ip } }),
-                mutationReadback: () => rateLimitsApi.getStatus(),
+                mutationReadback: async (data, receipt) => {
+                    const status = await rateLimitsApi.getStatus()
+                    if (receipt.authGeneration !== apiClient.getAuthGeneration()) {
+                        return
+                    }
+                    onReadback?.(status)
+                    if ((data as RateLimitUnbanResult | undefined)?.unbanned === false &&
+                        Array.isArray(status?.banned_ips) && !status.banned_ips.some((entry) => entry.ip === ip)) {
+                        return MUTATION_TARGET_REACHED
+                    }
+                },
             },
         ),
 }

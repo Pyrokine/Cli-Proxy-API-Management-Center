@@ -2,9 +2,12 @@ import {Sheet, type SheetColumn} from '@/components/common/Sheet'
 import {Button} from '@/components/ui/Button'
 import {Card} from '@/components/ui/Card'
 import '@/i18n'
-import type {BannedIPEntry, RateLimitEventEntry} from '@/services/api/rateLimits'
+import {apiClient} from '@/services/api/client'
+import {type BannedIPEntry, type RateLimitEventEntry, rateLimitsApi} from '@/services/api/rateLimits'
 import {formatDateTime} from '@/utils/format'
+import {getErrorMessage} from '@/utils/helpers'
 import {redactSensitiveText} from '@/utils/redaction'
+import type {AxiosInstance} from 'axios'
 import {describe, expect, mock, test} from 'bun:test'
 import React, {type ReactElement, type ReactNode} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
@@ -39,7 +42,8 @@ function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
 
 function columns(unban = noop, unbanning: string | null = null) {
     const active = sourceInitializer<SheetColumn<BannedIPEntry>[]>(file, 'bannedIPColumns', {
-        React, Button, styles, t, formatDateTime, handleUnban: unban, unbanning,
+        React, Button, styles, t, formatDateTime, handleUnban: unban, authGeneration: 1,
+        unbanning: unbanning === null ? null : { ip: unbanning, generation: 1 },
     })
     const events = sourceInitializer<SheetColumn<RateLimitEventEntry>[]>(file, 'rateLimitEventColumns', {
         React, styles, t, formatDateTime,
@@ -183,39 +187,108 @@ describe('bounded rate limit tables', () => {
         expect(css).toMatch(/\.rateLimitTable th\s*\{[^}]*position: sticky[^}]*top: 0[^}]*white-space: normal/s)
         expect(css).toMatch(/\.rateLimitIPColumn\s*\{[^}]*width: 240px/)
     })
+
+    test('extra table width follows the historical count instead of separating it from the event', () => {
+        const { active, events } = columns()
+        const css                = compile(new URL('../src/pages/SystemPage.module.scss', import.meta.url).pathname).css
+        expect(events.map((column) => column.headerClassName)).toEqual([
+                                                                           'rateLimitTimeColumn',
+                                                                           'rateLimitIPColumn',
+                                                                           'rateLimitEventColumn',
+                                                                           undefined,
+                                                                       ])
+        expect(css).toMatch(/\.rateLimitEventColumn\s*\{[^}]*width: 184px/)
+        expect(active[2].headerClassName).toBe('rateLimitCountColumn')
+        expect(events[3].cell(history[2])).toBe(history[2].ban_count)
+    })
 })
 
 describe('rate limit action and error preservation', () => {
-    test('waits for confirmation and retains visible success or failure outcomes', async () => {
-        for (const fails of [false, true]) {
-            let confirmation: { onConfirm: () => Promise<void> } | undefined
-            const unban         = mock(async (_ip: string) => {
-                if (fails) {
-                    throw new Error('Synthetic unban failure')
+    for (const [outcome, message, tone] of [
+        ['succeeded', 'system_info.rate_limit_unban_success', 'success'],
+        ['partial', 'system_info.rate_limit_unban_persistence_pending', 'warning'],
+        ['unchanged', 'system_info.rate_limit_already_unbanned', 'info'],
+        ['uncertain', 'common.mutation_uncertain', 'warning'],
+    ] as const) {
+        test(`publishes refreshed unban status and distinguishes ${outcome}`, async () => {
+            const instance        = (apiClient as unknown as { instance: AxiosInstance }).instance
+            const adapter         = instance.defaults.adapter
+            const calls: string[] = []
+            const status          = {
+                banned_ips: [],
+                unban_history: [],
+                rate_limit_events: [{ ...history[2], ip: banned.ip }],
+            }
+            let mutationId: string | undefined
+            const result          = () => ({
+                mutation_id: mutationId,
+                request_id: 'fixture',
+                outcome: outcome === 'unchanged' ? 'uncertain' : outcome,
+                confirmed_effect: outcome === 'succeeded' || outcome === 'partial',
+                audit_available: true,
+                effects: outcome === 'succeeded' ? [
+                    { kind: 'security.runtime_applied', target: 'security' },
+                    { kind: 'security.persisted', target: 'security' },
+                ] : outcome === 'partial' ?
+                             [{ kind: 'security.runtime_applied', target: 'security' }] : [],
+            })
+            apiClient.setConfig({ apiBase: 'https://fixture.invalid', sessionToken: '' })
+            instance.defaults.adapter = async (config) => {
+                const { method, url } = config
+                calls.push(`${method} ${url}`)
+                if (method === 'delete' && url === '/rate-limit/ban') {
+                    mutationId = String(config.headers['X-CPA-Mutation-ID'])
+                    expect(JSON.parse(String(config.data))).toEqual({ ip: banned.ip })
+                    return {
+                        config, status: 200, statusText: 'OK',
+                        data: {
+                            status: 'ok',
+                            unbanned: outcome !== 'unchanged',
+                            persistence_pending: outcome === 'partial',
+                        },
+                        headers: { 'X-CPA-Mutation-Result': JSON.stringify(result()) },
+                    }
                 }
-            })
-            const refresh       = mock()
-            const notifications = mock()
-            const busy          = mock()
-            const handleUnban   = sourceCallback<(ip: string) => void>(file, 'handleUnban', {
-                t, rateLimitsApi: { unban }, fetchRateLimitStatus: refresh,
-                setUnbanning: busy, showNotification: notifications,
-                showConfirmation: (value: typeof confirmation) => {
-                    confirmation = value
-                },
-            })
-            handleUnban(banned.ip)
-            expect(unban).not.toHaveBeenCalled()
-            await confirmation!.onConfirm()
-            expect(unban).toHaveBeenCalledWith(banned.ip)
-            expect(busy.mock.calls).toEqual([[banned.ip], [null]])
-            expect(notifications).toHaveBeenCalledWith(
-                fails ? 'system_info.rate_limit_unban_failed' : 'system_info.rate_limit_unban_success',
-                fails ? 'error' : 'success',
-            )
-            expect(refresh).toHaveBeenCalledTimes(fails ? 0 : 1)
-        }
-    })
+                if (method === 'get' && (url === '/rate-limit/status' || url === `/mutations/${mutationId}`)) {
+                    return {
+                        config, status: 200, statusText: 'OK', headers: {},
+                        data: url === '/rate-limit/status' ? status : result(),
+                    }
+                }
+                throw new Error(`Unexpected fixture request ${method} ${url}`)
+            }
+            try {
+                let confirmation: { onConfirm: () => Promise<void> } | undefined
+                const refresh        = mock()
+                const notices        = mock()
+                const busy           = mock()
+                const authGeneration = apiClient.getAuthGeneration()
+                const handleUnban    = sourceCallback<(ip: string) => void>(file, 'handleUnban', {
+                    t, rateLimitsApi, fetchRateLimitStatus: refresh, getErrorMessage,
+                    apiClient, authGeneration, setUnbanning: busy, showNotification: notices,
+                    rateLimitLoaded: { current: true }, setRateLimitStale: noop, setRateLimitLoadState: noop,
+                    showConfirmation: (value: typeof confirmation) => {
+                        confirmation = value
+                    },
+                })
+                handleUnban(banned.ip)
+                expect(calls).toEqual([])
+                await confirmation!.onConfirm()
+                expect(calls.filter((call) => call.startsWith('delete'))).toEqual(['delete /rate-limit/ban'])
+                expect(calls.filter((call) => call === 'get /rate-limit/status')).toHaveLength(1)
+                expect(refresh).toHaveBeenCalledWith(status)
+                expect(busy.mock.calls).toEqual([[{ ip: banned.ip, generation: authGeneration }], [null]])
+                if (outcome === 'uncertain') {
+                    expect(notices).toHaveBeenCalledWith(expect.stringContaining(mutationId!), tone)
+                } else {
+                    expect(notices).toHaveBeenCalledWith(message, tone)
+                }
+            } finally {
+                instance.defaults.adapter = adapter
+                apiClient.setConfig({ apiBase: '', sessionToken: '' })
+            }
+        })
+    }
 
     test('keeps the last result on refresh failure and consumes legacy unban history', async () => {
         const loaded                             = { current: false }
@@ -226,8 +299,15 @@ describe('rate limit action and error preservation', () => {
         let stale                                = false
         let fail                                 = false
         const fetch                              = sourceCallback<() => Promise<void>>(file, 'fetchRateLimitStatus', {
-            t, rateLimitLoaded: loaded, notifiedRateLimitEventKeys: { current: new Set<string>() },
-            addPersistentNotification: noop, showNotification: noop,
+            t,
+            getErrorMessage,
+            apiClient,
+            authGeneration: apiClient.getAuthGeneration(),
+            rateLimitRequest: { current: 0 },
+            rateLimitLoaded: loaded,
+            notifiedRateLimitEventKeys: { current: new Set<string>() },
+            addPersistentNotification: noop,
+            showNotification: noop,
             rateLimitsApi: {
                 getStatus: async () => {
                     if (fail) {
@@ -245,8 +325,10 @@ describe('rate limit action and error preservation', () => {
                     }
                 },
             },
-            setRateLimitLoading: noop, setRateLimitClientIP: noop,
-            setRateLimitClientSource: noop, setRateLimitPersistenceAvailable: noop,
+            setRateLimitLoading: noop,
+            setRateLimitClientIP: noop,
+            setRateLimitClientSource: noop,
+            setRateLimitPersistenceAvailable: noop,
             setBannedIPs: (value: BannedIPEntry[]) => {
                 currentBans = value
             },

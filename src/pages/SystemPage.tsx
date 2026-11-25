@@ -22,10 +22,16 @@ import {Select} from '@/components/ui/Select'
 import {versionApi} from '@/services/api'
 import {apiClient} from '@/services/api/client'
 import {modelCatalogApi, type ModelCatalogRefreshMeta} from '@/services/api/modelCatalog'
-import {type BannedIPEntry, type RateLimitEventEntry, rateLimitsApi} from '@/services/api/rateLimits'
-import {type Release, releasesApi} from '@/services/api/releases'
+import {
+    type BannedIPEntry,
+    type RateLimitEventEntry,
+    rateLimitsApi,
+    type RateLimitStatusResponse,
+    type RateLimitUnbanResult,
+} from '@/services/api/rateLimits'
+import {releasesApi} from '@/services/api/releases'
 import {useAuthStore, useConfigStore, useModelsStore, useNotificationStore, useThemeStore} from '@/stores'
-import {STORAGE_KEY_AUTH} from '@/utils/constants'
+import type {ApiError} from '@/types/api'
 import {formatDateTime} from '@/utils/format'
 import {getErrorMessage} from '@/utils/helpers'
 import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
@@ -159,7 +165,7 @@ export function SystemPage() {
 
     const [rateLimitPersistenceAvailable, setRateLimitPersistenceAvailable] = useState<boolean | null>(null)
 
-    const [unbanning, setUnbanning] = useState<string | null>(null)
+    const [unbanning, setUnbanning] = useState<{ ip: string; generation: number } | null>(null)
 
     const modelsRequestGeneration = useRef(0)
 
@@ -170,7 +176,8 @@ export function SystemPage() {
 
     const notifiedRateLimitEventKeys = useRef<Set<string>>(new Set())
 
-    const rateLimitLoaded = useRef(false)
+    const rateLimitLoaded  = useRef(false)
+    const rateLimitRequest = useRef(0)
 
     const invalidateModelsRequest = useCallback(() => {
         ++modelsRequestGeneration.current
@@ -328,13 +335,21 @@ export function SystemPage() {
         }
     }
 
-    const fetchRateLimitStatus = useCallback(async () => {
+    const fetchRateLimitStatus = useCallback(async (readback?: RateLimitStatusResponse) => {
+        const request   = ++rateLimitRequest.current
+        const isCurrent = () => request === rateLimitRequest.current && authGeneration === apiClient.getAuthGeneration()
+        if (!isCurrent()) {
+            return
+        }
         setRateLimitLoading(true)
         if (!rateLimitLoaded.current) {
             setRateLimitLoadState('loading')
         }
         try {
-            const data       = await rateLimitsApi.getStatus()
+            const data = readback ?? await rateLimitsApi.getStatus()
+            if (!isCurrent()) {
+                return
+            }
             const nextBanned = data.banned_ips ?? []
             const nextEvents = data.rate_limit_events ?? (data.unban_history ?? []).map((entry) => ({
                 type: 'manual_unban' as const,
@@ -390,15 +405,18 @@ export function SystemPage() {
             setRateLimitError('')
             rateLimitLoaded.current = true
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
-            setRateLimitError(message)
-            setRateLimitStale(rateLimitLoaded.current)
-            setRateLimitLoadState(rateLimitLoaded.current ? 'loaded' : 'unavailable')
-            showNotification(t('system_info.rate_limit_refresh_failed'), 'error')
+            if (isCurrent()) {
+                setRateLimitError(getErrorMessage(error))
+                setRateLimitStale(rateLimitLoaded.current)
+                setRateLimitLoadState(rateLimitLoaded.current ? 'loaded' : 'unavailable')
+                showNotification(t('system_info.rate_limit_refresh_failed'), 'error')
+            }
         } finally {
-            setRateLimitLoading(false)
+            if (isCurrent()) {
+                setRateLimitLoading(false)
+            }
         }
-    }, [addPersistentNotification, showNotification, t])
+    }, [addPersistentNotification, authGeneration, showNotification, t])
 
     const handleUnban = useCallback(
         (ip: string) => {
@@ -407,20 +425,63 @@ export function SystemPage() {
                                  message: t('system_info.rate_limit_unban_confirm'),
                                  confirmText: t('common.confirm'),
                                  onConfirm: async () => {
-                                     setUnbanning(ip)
+                                     const isCurrent = () => authGeneration === apiClient.getAuthGeneration()
+                                     if (!isCurrent()) {
+                                         return
+                                     }
+                                     setUnbanning({ ip, generation: authGeneration })
+                                     let readback: RateLimitStatusResponse | undefined
+                                     let result: RateLimitUnbanResult | undefined
+                                     let failure: ApiError | undefined
                                      try {
-                                         await rateLimitsApi.unban(ip)
-                                         showNotification(t('system_info.rate_limit_unban_success', { ip }), 'success')
-                                         void fetchRateLimitStatus()
-                                     } catch {
-                                         showNotification(t('system_info.rate_limit_unban_failed'), 'error')
+                                         result = await rateLimitsApi.unban(ip, (status) => {
+                                             readback = status
+                                         })
+                                     } catch (err: unknown) {
+                                         failure = err as ApiError
+                                         result  = failure.data as RateLimitUnbanResult | undefined
                                      } finally {
-                                         setUnbanning(null)
+                                         if (isCurrent()) {
+                                             setUnbanning(null)
+                                         }
+                                     }
+                                     if (!isCurrent()) {
+                                         return
+                                     }
+                                     const noLongerBanned = Array.isArray(readback?.banned_ips) &&
+                                                            !readback.banned_ips.some((entry) => entry.ip === ip)
+                                     if (readback) {
+                                         await fetchRateLimitStatus(readback)
+                                     } else {
+                                         setRateLimitStale(rateLimitLoaded.current)
+                                         setRateLimitLoadState(rateLimitLoaded.current ? 'loaded' : 'unavailable')
+                                     }
+                                     if (!isCurrent()) {
+                                         return
+                                     }
+                                     if (result?.unbanned && result.persistence_pending) {
+                                         showNotification(
+                                             t('system_info.rate_limit_unban_persistence_pending', { ip }),
+                                             'warning',
+                                         )
+                                     } else if (failure) {
+                                         showNotification(
+                                             getErrorMessage(failure) ||
+                                             t('system_info.rate_limit_unban_failed'),
+                                             failure.mutation?.result?.outcome === 'uncertain' ||
+                                             failure.mutation?.recovery ? 'warning' : 'error',
+                                         )
+                                     } else if (!noLongerBanned) {
+                                         showNotification(t('common.mutation_uncertain'), 'warning')
+                                     } else if (result?.unbanned === false) {
+                                         showNotification(t('system_info.rate_limit_already_unbanned', { ip }), 'info')
+                                     } else {
+                                         showNotification(t('system_info.rate_limit_unban_success', { ip }), 'success')
                                      }
                                  },
                              })
         },
-        [showConfirmation, showNotification, fetchRateLimitStatus, t],
+        [authGeneration, fetchRateLimitStatus, showConfirmation, showNotification, t],
     )
 
     const bannedIPColumns: SheetColumn<BannedIPEntry>[] = [
@@ -451,7 +512,7 @@ export function SystemPage() {
                     variant='danger'
                     size='xs'
                     onClick={() => handleUnban(entry.ip)}
-                    disabled={unbanning === entry.ip}
+                    disabled={unbanning?.generation === authGeneration && unbanning.ip === entry.ip}
                 >
                     {t('system_info.rate_limit_unban')}
                 </Button>
@@ -476,12 +537,12 @@ export function SystemPage() {
         {
             key: 'type',
             header: t('system_info.rate_limit_column_event'),
+            headerClassName: styles.rateLimitEventColumn,
             cell: (entry) => t(`system_info.rate_limit_event_${entry.type}`),
         },
         {
             key: 'count',
             header: t('system_info.rate_limit_column_count'),
-            headerClassName: styles.rateLimitCountColumn,
             cell: (entry) => entry.ban_count ?? 0,
         },
     ]

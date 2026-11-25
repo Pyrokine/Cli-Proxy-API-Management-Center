@@ -2847,7 +2847,9 @@
         "rate_limit_event_manual_unban": "Restriction removed manually",
         "rate_limit_unban_history": "Manual unban history",
         "rate_limit_no_unban_history": "No manual unban history",
-        "rate_limit_unbanned_at": "Unbanned at"
+        "rate_limit_unbanned_at": "Unbanned at",
+        "rate_limit_unban_persistence_pending": "Unbanned {{ip}}. The change has not been confirmed across restarts.",
+        "rate_limit_already_unbanned": "No active restriction on {{ip}}"
     },
     "version_switcher": {
         "target_label": "Target version",

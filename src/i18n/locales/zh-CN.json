@@ -2847,7 +2847,9 @@
         "rate_limit_event_manual_unban": "人工解封",
         "rate_limit_unban_history": "人工解封历史",
         "rate_limit_no_unban_history": "暂无人工解封历史",
-        "rate_limit_unbanned_at": "解封时间"
+        "rate_limit_unbanned_at": "解封时间",
+        "rate_limit_unban_persistence_pending": "已解除 {{ip}} 的限制，重启后是否保留此次变更尚未确认",
+        "rate_limit_already_unbanned": "{{ip}} 当前没有生效的限制"
     },
     "version_switcher": {
         "target_label": "目标版本",

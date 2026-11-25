@@ -2847,7 +2847,9 @@
         "rate_limit_event_manual_unban": "Ограничение снято вручную",
         "rate_limit_unban_history": "История ручных разблокировок",
         "rate_limit_no_unban_history": "Ручных разблокировок нет",
-        "rate_limit_unbanned_at": "Разблокирован"
+        "rate_limit_unbanned_at": "Разблокирован",
+        "rate_limit_unban_persistence_pending": "Блокировка {{ip}} снята. Сохранение изменения после перезапуска не подтверждено.",
+        "rate_limit_already_unbanned": "Для {{ip}} нет активной блокировки"
     },
     "version_switcher": {
         "target_label": "Целевая версия",
