@@ -143,6 +143,8 @@ interface FilterBarProps {
     aliases?: Record<string, string>
     authFileMap?: Map<string, CredentialInfo>
     onExport: () => void
+    exportDisabled?: boolean
+    onClearFilters?: () => void
     onImport: () => void
     onRefresh: () => void
     loading: boolean
@@ -172,6 +174,8 @@ export function FilterBar({
                               aliases,
                               authFileMap,
                               onExport,
+                              exportDisabled,
+                              onClearFilters,
                               onImport,
                               onRefresh,
                               loading,
@@ -346,14 +350,17 @@ export function FilterBar({
                 </div>
             </div>
             <div className={styles.actions}>
+                {onClearFilters && <Button variant='ghost' size='sm' onClick={onClearFilters}>
+                    {t('usage_stats.clear_filters')}
+                </Button>}
                 <Button
                     variant='secondary'
                     size='sm'
                     onClick={onExport}
                     loading={exporting}
-                    disabled={loading || importing}
+                    disabled={loading || importing || exportDisabled}
                 >
-                    {t('usage_stats.export')}
+                    {t('usage_stats.export_backup', { defaultValue: 'Export backup' })}
                 </Button>
                 <Button
                     variant='secondary'

@@ -440,79 +440,135 @@ describe('remaining frontend remediation contracts', () => {
         )
         const failed                = renderToStaticMarkup(render('Synthetic refresh failure'))
         expect(failed).toContain('role="alert"')
-        expect(failed).toContain('Synthetic refresh failure')
+        expect(failed).toContain('requested 2, showing 1: Synthetic refresh failure')
         expect(failed).toContain('Retained event')
+        expect(failed).toContain('data-page="1"')
         const recovered = renderToStaticMarkup(render(null))
         expect(recovered).not.toContain('role="alert"')
         expect(recovered).toContain('Retained event')
+        expect(recovered).toContain('data-page="2"')
     })
 
-    test('exports full event identity without replacing it with display aliases or masked keys', async () => {
-        const event = {
+    test('exports canonical and sealed event identities after the backup password is supplied', async () => {
+        const password = 'fixture-backup-password'
+        const event    = {
             timestamp: '2026-10-23T10:00:00Z',
             model: 'fixture-model',
             source: 'fixture-source',
             auth_index: 'fixture-auth',
-            api_key: 'stable-key-id',
-            raw_api_key: 'synthetic-raw-key',
+            api_key: 'fi...re',
+            raw_api_key: 'canonical-fixture-key-id',
             api_key_alias: 'My alias',
+            import_data: 'usage-event-v1:fixture-salt:fixture-sealed-event',
             tokens: {},
             failed: false,
             cost: 0,
         }
         for (const format of ['json', 'csv'] as const) {
             let blob: Blob | undefined
-            const exportEvents = sourceCallback<(format: string) => Promise<void>>(eventFile, 'exportEvents', {
-                exportControllerRef: { current: null },
-                setExportingFormat: noop,
-                sourceInfoMap: {},
-                authFileMap: new Map(),
-                i18n: { language: 'en' },
-                noApiKeyLabel: '',
-                notRecordedLabel: '',
-                modelAliasLookup: {},
-                t: translate,
-                aliases: {},
-                eventToRow: () => ({
-                    apiKeyMasked: 'My alias',
-                    user: 'Fixture',
-                    requestId: '',
-                    completed: null,
-                    cost: 0,
-                }),
-                createUsageEventExport,
-                UsageEventExportLimitError,
-                USAGE_EVENT_EXPORT_PAGE_SIZE,
-                USAGE_EVENT_CSV_HEADER: sourceInitializer(eventFile, 'USAGE_EVENT_CSV_HEADER', {}),
-                usageApi: {
-                    getEvents: async () => ({
-                        events: [event],
-                        page: 1,
-                        page_size: 500,
-                        total: 1,
-                        total_pages: 1,
+            let confirm: ((password: string) => Promise<void>) | undefined
+            let requests       = 0
+            const exportEvents = sourceCallback<(format: string, password: string) => Promise<void>>(
+                eventFile,
+                'exportEvents',
+                {
+                    apiClient: { getAuthGeneration: () => 1 },
+                    exportControllerRef: { current: null },
+                    setExportingFormat: noop,
+                    sourceInfoMap: {},
+                    authFileMap: new Map(),
+                    i18n: { language: 'en' },
+                    noApiKeyLabel: '',
+                    notRecordedLabel: '',
+                    modelAliasLookup: {},
+                    t: translate,
+                    aliases: {},
+                    eventToRow: () => ({
+                        apiKeyMasked: 'My alias',
+                        user: 'Fixture',
+                        requestId: '',
+                        completed: null,
+                        cost: 0,
                     }),
+                    createUsageEventExport,
+                    UsageEventExportLimitError,
+                    USAGE_EVENT_EXPORT_PAGE_SIZE,
+                    USAGE_EVENT_CSV_HEADER: sourceInitializer(
+                        eventFile,
+                        'USAGE_EVENT_CSV_HEADER',
+                        {},
+                    ),
+                    usageApi: {
+                        getEvents: async (
+                            params: unknown,
+                            options: unknown,
+                        ) => {
+                            requests++
+                            expect(params)
+                                .toEqual({
+                                             page: 1,
+                                             export: true,
+                                         })
+                            expect(options)
+                                .toEqual({
+                                             signal: expect.any(AbortSignal),
+                                             backupPassword: password,
+                                         })
+                            return {
+                                events: [event],
+                                page: 1,
+                                page_size: 500,
+                                total: 1,
+                                total_pages: 1,
+                            }
+                        },
+                    },
+                    buildExportParams: () => ({ page: 1 }),
+                    normalizeUsageThinking: () => null,
+                    sanitizeUpstreamUrl: sourceCallback(
+                        eventFile,
+                        'sanitizeUpstreamUrl',
+                        {},
+                    ),
+                    observedRequestSpeed: sourceCallback(
+                        eventFile,
+                        'observedRequestSpeed',
+                        {},
+                    ),
+                    encodeCsv: sourceInitializer(
+                        eventFile,
+                        'encodeCsv',
+                        {},
+                    ),
+                    downloadBlob: (value: {
+                        blob: Blob
+                    }) => {
+                        blob =
+                            value.blob
+                    },
+                    showNotification: noop,
                 },
-                buildExportParams: () => ({ page: 1 }),
-                normalizeUsageThinking: () => null,
-                sanitizeUpstreamUrl: sourceCallback(eventFile, 'sanitizeUpstreamUrl', {}),
-                observedRequestSpeed: sourceCallback(eventFile, 'observedRequestSpeed', {}),
-                encodeCsv: sourceInitializer(eventFile, 'encodeCsv', {}),
-                downloadBlob: (value: { blob: Blob }) => {
-                    blob = value.blob
+            )
+            sourceInitializer<(format: string) => void>(eventFile, 'handleExport', {
+                t: translate, exportEvents,
+                requestBackupPassword: ({ onConfirm }: { onConfirm: typeof confirm }) => {
+                    confirm = onConfirm
                 },
-                showNotification: noop,
-            })
-            await exportEvents(format)
+            })(format)
+            expect(requests).toBe(0)
+            expect(confirm).toBeDefined()
+            await confirm!(password)
+            expect(requests).toBe(1)
             expect(blob).toBeDefined()
             const text = await blob!.text()
-            expect(text).toContain('stable-key-id')
-            expect(text).toContain('synthetic-raw-key')
+            expect(text).not.toContain(password)
             if (format === 'json') {
-                expect(text).toContain('My alias')
-                expect(text).toContain('raw_api_key')
+                expect(JSON.parse(text)).toMatchObject([event])
             } else {
-                expect(text).toContain('raw_api_key')
+                const [header, row] = text.trimEnd().split('\n').map((line) => line.split(','))
+                expect(row[header.indexOf('api_key')]).toBe(`"${event.api_key}"`)
+                expect(row[header.indexOf('raw_api_key')]).toBe(`"${event.raw_api_key}"`)
+                expect(row[header.indexOf('import_data')]).toBe(`"${event.import_data}"`)
             }
         }
     })

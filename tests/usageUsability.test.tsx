@@ -149,11 +149,16 @@ test(
             expect(earliest).toMatchObject({ api_key_identity: 'canonical', api_key: ['(none)'], page_size: 1 })
             await usageApi.getEvents(earliest)
             expect(String(get.mock.calls[get.mock.calls.length - 1][0])).toContain('api_key_identity=canonical')
-            const handleExport = sourceInitializer<(filters: object) => Promise<void>>(
+            let backupRequest: Promise<void> | undefined
+            const handleExport = sourceInitializer<(filters: object) => void>(
                 'components/usage/hooks/useUsageData.ts',
                 'handleExport',
                 {
                     usageApi,
+                    apiClient,
+                    requestBackupPassword: ({ onConfirm }: { onConfirm: (password: string) => Promise<void> }) => {
+                        backupRequest = onConfirm('fixture-password')
+                    },
                     exportControllerRef: { current: null },
                     setExporting: noop,
                     downloadBlob: noop,
@@ -165,15 +170,15 @@ test(
                 ts.isArrowFunction(node) && ts.isJsxExpression(node.parent) && ts.isJsxAttribute(node.parent.parent) &&
                 node.parent.parent.name.getText(tree) === 'onExport', {
                                                                            handleExport,
-                                                                           effectiveDateFrom: '',
-                                                                           effectiveDateTo: '',
+                                                                           visibleDateRange: { from: '', to: '' },
                                                                            selectedModels: [],
                                                                            selectedApiKeys: ['(none)', firstId],
                                                                            selectedCredentials: [],
                                                                            activeTab: 'events',
                                                                            selectedEventSpeed: '',
                                                                        })
-            await backup()
+            backup()
+            await backupRequest
             const query = new URL(String(getRaw.mock.calls[0][0]), 'https://fixture.invalid').searchParams
             expect(query.get('api_key_identity')).toBe('canonical')
             expect(query.getAll('api_key')).toEqual(['(none)', firstId])

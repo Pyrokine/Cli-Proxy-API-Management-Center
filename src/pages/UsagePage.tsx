@@ -128,6 +128,7 @@ export function UsagePage() {
               handleExport,
               handleImport,
               handleImportChange,
+              backupPasswordDialog,
               importInputRef,
               exporting,
               importing,
@@ -528,8 +529,8 @@ export function UsagePage() {
                     authFileMap={authFileMap}
                     onExport={() =>
                         handleExport({
-                                         from: effectiveDateFrom,
-                                         to: effectiveDateTo,
+                                         from: visibleDateRange.from,
+                                         to: visibleDateRange.to,
                                          model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
                                          api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
                                          api_key_identity: 'canonical',
@@ -539,6 +540,9 @@ export function UsagePage() {
                                          speed: activeTab === 'events' ? selectedEventSpeed : undefined,
                                      })
                     }
+                    exportDisabled={!effectiveRangeReady || !visibleDateRange.from || !visibleDateRange.to}
+                    onClearFilters={!effectiveRangeReady && hasSelectionFilters &&
+             (activeTab === 'overview' || Boolean(rangeResolutionError)) ? clearUsageFilters : undefined}
                     onImport={handleImport}
                     onRefresh={handleRefresh}
                     loading={loading || rangeResolutionLoading}
@@ -555,6 +559,8 @@ export function UsagePage() {
                 style={{ display: 'none' }}
                 onChange={handleImportChange}
             />
+
+            {backupPasswordDialog}
 
             {error && <div className={styles.errorBox}>{error}</div>}
             {rangeResolutionError && <div className={styles.errorBox} role='alert'>
@@ -621,6 +627,7 @@ export function UsagePage() {
                     activePreset={dateRange.preset || undefined}
                     aliases={aliases}
                     autoRefreshConfigSeconds={config?.autoRefreshInterval}
+                    pauseAutoRefresh={Boolean(backupPasswordDialog)}
                     onVisibleDateRangeChange={handleEventsVisibleDateRangeChange}
                     selectedModels={selectedModels}
                     selectedCredentials={selectedCredentials}

@@ -167,6 +167,7 @@ for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW']) {
                     date_range: { oldest: '2026-10-01', newest: '2026-10-03' },
                 }), triggerTrim: async () => {
                     trims += 1
+                    return { deleted: 0 }
                 },
             },
             showNotification: () => {

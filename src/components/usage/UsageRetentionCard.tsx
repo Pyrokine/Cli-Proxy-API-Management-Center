@@ -7,7 +7,7 @@ import {apiClient} from '@/services/api/client'
 import {usageApi, type UsageRetention} from '@/services/api/usage'
 import {useNotificationStore} from '@/stores'
 import {formatFileSize} from '@/utils/format'
-import {useCallback, useEffect, useState} from 'react'
+import {useCallback, useEffect, useId, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './UsageRetentionCard.module.scss'
 
@@ -38,7 +38,7 @@ function toPayload(d: RetentionDraft): Partial<UsageRetention> | null {
         return {
             days: d.daysEnabled ? parseVisualConfigInteger(d.days, 1, Number.MAX_SAFE_INTEGER) : -1,
             max_db_size_mb: parseVisualConfigInteger(d.maxDbSizeMb, limit.minimum, limit.maximum),
-            warning_threshold_pct: parseVisualConfigInteger(d.warningThresholdPct, 0, 100),
+            warning_threshold_pct: parseVisualConfigInteger(d.warningThresholdPct, 1, 100),
         }
     } catch {
         return null
@@ -58,6 +58,7 @@ function hasChanged(draft: RetentionDraft, retention: UsageRetention): boolean {
 export function UsageRetentionCard() {
     const { t }                                  = useTranslation()
     const { showNotification, showConfirmation } = useNotificationStore()
+    const fieldId                                = useId()
     const [retention, setRetention]              = useState<UsageRetention | null>(null)
     const [dbSize, setDbSize]                    = useState<number | null>(null)
     const [dbMaxSize, setDbMaxSize]              = useState<number | null>(null)
@@ -135,6 +136,10 @@ export function UsageRetentionCard() {
                 setDbSizeCapped(Boolean(size.capped))
                 setLoadError(null)
             } catch (error: unknown) {
+                setDbSize(null)
+                setDbMaxSize(null)
+                setDbSizeWarning(false)
+                setDbSizeCapped(false)
                 setLoadError(t('usage_stats.retention_saved_size_failed', {
                     error: error instanceof Error ? error.message : String(error),
                 }))
@@ -178,11 +183,39 @@ export function UsageRetentionCard() {
                                      if (generation !== apiClient.getAuthGeneration()) {
                                          return
                                      }
-                                     await usageApi.triggerTrim()
-                                     if (generation !== apiClient.getAuthGeneration()) {
-                                         return
+                                     try {
+                                         const result = await usageApi.triggerTrim((readback) => {
+                                             if (generation !== apiClient.getAuthGeneration()) {
+                                                 return
+                                             }
+                                             const size = 'data' in readback ? readback.data : null
+                                             setDbSize(size?.size_bytes ?? null)
+                                             setDbMaxSize(size?.max_size_bytes ?? null)
+                                             setDbSizeWarning(Boolean(size?.warning))
+                                             setDbSizeCapped(Boolean(size?.capped))
+                                             setLoadError('error' in readback ? t('usage_stats.trim_size_failed', {
+                                                 error: readback.error,
+                                             }) : null)
+                                         })
+                                         if (generation !== apiClient.getAuthGeneration()) {
+                                             return
+                                         }
+                                         const message = typeof result.deleted === 'number'
+                                                         ?
+                                                         t(
+                                                             'usage_stats.trim_success_deleted',
+                                                             { count: result.deleted },
+                                                         )
+                                                         :
+                                                         t('usage_stats.trim_success')
+                                         showNotification(message, 'success')
+                                     } catch (error: unknown) {
+                                         if (generation === apiClient.getAuthGeneration()) {
+                                             const detail = error instanceof Error ? error.message : String(error)
+                                             showNotification(`${t('usage_stats.trim_failed')}: ${detail}`, 'error')
+                                             throw error
+                                         }
                                      }
-                                     showNotification(t('usage_stats.trim_success'), 'success')
                                  },
                              })
         } catch (err: unknown) {
@@ -235,8 +268,15 @@ export function UsageRetentionCard() {
                         )}
                         <div className={styles.field}>
                             <div className={styles.fieldHeader}>
-                                <label className={styles.label}>{t('usage_stats.retention_days')}</label>
+                                <label
+                                    id={`${fieldId}-days-label`}
+                                    htmlFor={`${fieldId}-days-enabled`}
+                                    className={styles.label}
+                                >
+                                    {t('usage_stats.retention_days')}
+                                </label>
                                 <ToggleSwitch
+                                    id={`${fieldId}-days-enabled`}
                                     checked={draft.daysEnabled}
                                     onChange={(enabled) => setDraft((d) => ({ ...d, daysEnabled: enabled }))}
                                 />
@@ -256,6 +296,8 @@ export function UsageRetentionCard() {
                                         ))}
                                     </div>
                                     <Input
+                                        aria-labelledby={`${fieldId}-days-label`}
+                                        aria-describedby={`${fieldId}-days-hint`}
                                         type='number'
                                         min={1}
                                         step={1}
@@ -267,7 +309,9 @@ export function UsageRetentionCard() {
                             ) : (
                                  <span className={styles.disabledHint}>{t('usage_stats.retention_days_disabled')}</span>
                              )}
-                            <span className={styles.hint}>{t('usage_stats.retention_days_hint')}</span>
+                            <span id={`${fieldId}-days-hint`} className={styles.hint}>
+                                {t('usage_stats.retention_days_hint')}
+                            </span>
                         </div>
 
                         {!draft.daysEnabled && (
@@ -275,8 +319,12 @@ export function UsageRetentionCard() {
                         )}
 
                         <div className={styles.field}>
-                            <label className={styles.label}>{t('usage_stats.retention_max_db_size')}</label>
+                            <label htmlFor={`${fieldId}-max-size`} className={styles.label}>
+                                {t('usage_stats.retention_max_db_size')}
+                            </label>
                             <Input
+                                id={`${fieldId}-max-size`}
+                                aria-describedby={`${fieldId}-max-size-hint`}
                                 type='number'
                                 min={0}
                                 step={1}
@@ -284,12 +332,18 @@ export function UsageRetentionCard() {
                                 onChange={(e) => setDraft((d) => ({ ...d, maxDbSizeMb: e.target.value }))}
                                 className={styles.input}
                             />
-                            <span className={styles.hint}>{t('usage_stats.retention_max_db_size_hint')}</span>
+                            <span id={`${fieldId}-max-size-hint`} className={styles.hint}>
+                                {t('usage_stats.retention_max_db_size_hint')}
+                            </span>
                         </div>
 
                         <div className={styles.field}>
-                            <label className={styles.label}>{t('usage_stats.retention_warning_threshold')}</label>
+                            <label htmlFor={`${fieldId}-warning-threshold`} className={styles.label}>
+                                {t('usage_stats.retention_warning_threshold')}
+                            </label>
                             <Input
+                                id={`${fieldId}-warning-threshold`}
+                                aria-describedby={`${fieldId}-warning-threshold-hint`}
                                 type='number'
                                 min={1}
                                 max={100}
@@ -298,7 +352,9 @@ export function UsageRetentionCard() {
                                 onChange={(e) => setDraft((d) => ({ ...d, warningThresholdPct: e.target.value }))}
                                 className={styles.input}
                             />
-                            <span className={styles.hint}>{t('usage_stats.retention_warning_threshold_hint')}</span>
+                            <span id={`${fieldId}-warning-threshold-hint`} className={styles.hint}>
+                                {t('usage_stats.retention_warning_threshold_hint')}
+                            </span>
                         </div>
 
                         <div className={styles.actions}>

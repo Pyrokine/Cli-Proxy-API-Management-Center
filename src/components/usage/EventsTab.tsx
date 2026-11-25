@@ -19,6 +19,7 @@ interface EventsTabProps {
     activePreset?: string
     aliases?: Record<string, string>
     autoRefreshConfigSeconds?: number | null
+    pauseAutoRefresh?: boolean
     onVisibleDateRangeChange?: (range: { from: string; to: string }) => void
     selectedModels?: string[]
     selectedCredentials?: string[]
@@ -45,6 +46,7 @@ export function EventsTab({
                               activePreset,
                               aliases,
                               autoRefreshConfigSeconds,
+                              pauseAutoRefresh,
                               onVisibleDateRangeChange,
                               selectedModels,
                               selectedCredentials,
@@ -72,6 +74,7 @@ export function EventsTab({
                 activePreset={activePreset}
                 aliases={aliases}
                 autoRefreshConfigSeconds={autoRefreshConfigSeconds}
+                pauseAutoRefresh={pauseAutoRefresh}
                 onVisibleDateRangeChange={onVisibleDateRangeChange}
                 selectedModels={selectedModels}
                 selectedCredentials={selectedCredentials}

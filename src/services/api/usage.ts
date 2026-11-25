@@ -3,9 +3,30 @@
  */
 
 import i18n from '@/i18n'
-import {apiClient} from './client'
+import {apiClient, MUTATION_TARGET_REACHED} from './client'
 
 const USAGE_TIMEOUT_MS = 60 * 1000
+
+interface UsageBackupOptions {
+    signal?: AbortSignal
+    backupPassword?: string
+}
+
+function backupPasswordHeaders(value?: string): Record<string, string> | undefined {
+    if (value === undefined) {
+        return undefined
+    }
+    const password = value.trim()
+    if (!password) {
+        throw new Error(i18n.t('usage_stats.backup_password_required'))
+    }
+    if (/^[ -~]+$/.test(password)) {
+        return { 'X-Usage-Backup-Key': password }
+    }
+    // Browser request headers cannot carry arbitrary UTF-8 bytes.
+    const bytes = new TextEncoder().encode(password)
+    return { 'X-Usage-Backup-Key-Base64': btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')) }
+}
 
 /**
  * 把 datetime-local 字符串(浏览器按本地时区填写,无 timezone 后缀)
@@ -62,6 +83,7 @@ interface UsageImportResponse {
     skipped?: number
     total_requests?: number
     failed_requests?: number
+    warning?: string
 
     [key: string]: unknown
 }
@@ -86,7 +108,18 @@ export interface UsageStorageUpgradeStatus {
 
 interface TrimResponse {
     status: string
+    deleted?: number
 }
+
+export interface UsageDBSize {
+    size_bytes: number
+    max_size_bytes?: number
+    warning_threshold_pct?: number
+    warning?: boolean
+    capped?: boolean
+}
+
+type DBSizeReadback = { data: UsageDBSize } | { error: string }
 
 interface TrimPreviewDateRange {
     oldest: string
@@ -439,7 +472,7 @@ export const usageApi = {
         api_key_identity?: 'canonical'
         credential?: string
         speed?: RequestSpeed | ''
-    }, options?: { signal?: AbortSignal }) => {
+    }, options?: UsageBackupOptions) => {
         const params = new URLSearchParams()
         if (filters) {
             const { from, to, ...rest } = filters
@@ -469,6 +502,7 @@ export const usageApi = {
             timeout: USAGE_TIMEOUT_MS,
             responseType: 'blob',
             signal: options?.signal,
+            headers: backupPasswordHeaders(options?.backupPassword),
         })
         if (filters?.speed) {
             let payload: unknown = response.data
@@ -490,11 +524,21 @@ export const usageApi = {
     /**
      * 导入使用统计快照
      */
-    importUsage: (payload: unknown) =>
+    importUsage: (payload: unknown, options?: UsageBackupOptions) =>
         apiClient.post<UsageImportResponse>('/usage/import', payload, {
             timeout: USAGE_TIMEOUT_MS,
-            headers: typeof payload === 'string' ? { 'Content-Type': 'text/csv' } : undefined,
-            mutationReadback: () => usageApi.getDBSize(),
+            signal: options?.signal,
+            headers: {
+                ...backupPasswordHeaders(options?.backupPassword),
+                ...(typeof payload === 'string' ? { 'Content-Type': 'text/csv' } : {}),
+            },
+            mutationReadback: async (data) => {
+                await usageApi.getDBSize()
+                const result = data as UsageImportResponse | undefined
+                if (result?.added === 0 && typeof result.skipped === 'number' && !result.warning) {
+                    return MUTATION_TARGET_REACHED
+                }
+            },
         }),
 
     /**
@@ -520,23 +564,34 @@ export const usageApi = {
     /**
      * 手动触发数据清理
      */
-    triggerTrim: () => apiClient.post<TrimResponse>(
-        '/usage-retention/trim',
-        {},
-        { mutationReadback: () => usageApi.getDBSize() },
-    ),
+    triggerTrim: async (onSizeReadback?: (result: DBSizeReadback) => void) => {
+        let readback: DBSizeReadback | undefined
+        const result = await apiClient.post<TrimResponse>('/usage-retention/trim', {}, {
+            mutationReadback: async (data) => {
+                try {
+                    readback = { data: await usageApi.getDBSize() }
+                } catch (error: unknown) {
+                    if (!onSizeReadback) {
+                        throw error
+                    }
+                    readback = { error: error instanceof Error ? error.message : String(error) }
+                }
+                const response = data as TrimResponse | undefined
+                if (response?.status === 'ok' && response.deleted === 0) {
+                    return MUTATION_TARGET_REACHED
+                }
+            },
+        })
+        if (readback) {
+            onSizeReadback?.(readback)
+        }
+        return result
+    },
 
     /**
      * 获取数据库文件大小(events.db + WAL + SHM)
      */
-    getDBSize: () =>
-        apiClient.get<{
-            size_bytes: number
-            max_size_bytes?: number
-            warning_threshold_pct?: number
-            warning?: boolean
-            capped?: boolean
-        }>('/usage/db-size'),
+    getDBSize: () => apiClient.get<UsageDBSize>('/usage/db-size'),
 
     /**
      * 获取聚合后的使用统计摘要
@@ -595,7 +650,7 @@ export const usageApi = {
     /**
      * 获取分页事件明细（支持筛选、排序）
      */
-    getEvents: async (params?: EventsParams, options?: { signal?: AbortSignal }) => {
+    getEvents: async (params?: EventsParams, options?: UsageBackupOptions) => {
         const searchParams = new URLSearchParams()
         if (params?.from) {
             searchParams.set('from', localToIsoUtc(params.from))
@@ -647,6 +702,7 @@ export const usageApi = {
         const data = await apiClient.get<EventsResponse>(`/usage/events${qs ? `?${qs}` : ''}`, {
             timeout: USAGE_TIMEOUT_MS,
             signal: options?.signal,
+            headers: params?.export ? backupPasswordHeaders(options?.backupPassword) : undefined,
         })
         if (params?.speed) {
             validateSpeedFilter(data, params.speed)

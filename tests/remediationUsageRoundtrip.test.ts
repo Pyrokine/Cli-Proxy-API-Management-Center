@@ -10,13 +10,18 @@ import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const eventFile = 'components/usage/RequestEventsDetailsCard.tsx'
 
+const usageDataFile  = 'components/usage/hooks/useUsageData.ts'
+const backupPassword = 'fixture-backup-password'
+
 async function importExportFile(text: string, format: string, expectedCount: number): Promise<string> {
-    let onConfirm: (() => Promise<void>) | undefined
+    let onConfirm: ((password: string) => Promise<void>) | undefined
     let imported: unknown
     const handleImportChange = sourceInitializer<(event: unknown) => Promise<void>>(
-        'components/usage/hooks/useUsageData.ts',
+        usageDataFile,
         'handleImportChange',
         {
+            apiClient: { getAuthGeneration: () => 1 },
+            describeUsageImport: sourceCallback(usageDataFile, 'describeUsageImport', {}),
             showNotification: (message: string, kind: string) => {
                 if (kind === 'error') {
                     throw new Error(message)
@@ -25,17 +30,24 @@ async function importExportFile(text: string, format: string, expectedCount: num
             t: (key: string, options?: { count?: number }) => key === 'usage_stats.import_confirm_message' ?
                                                               String(options?.count) :
                                                               key,
-            showConfirmation: (options: { message: string; onConfirm: () => Promise<void> }) => {
-                if (options.message !== String(expectedCount)) {
-                    throw new Error(`Wrong import count ${options.message}, expected ${expectedCount}`)
-                }
+            requestBackupPassword: (options: {
+                mode: string;
+                message: string;
+                onConfirm: (password: string) => Promise<void>
+            }) => {
+                expect(options.mode).toBe('import')
+                expect(options.message).toBe(String(expectedCount))
                 onConfirm = options.onConfirm
+            },
+            showConfirmation: () => {
+                throw new Error('Sealed import should ask for its backup password')
             },
             // noinspection JSUnusedGlobalSymbols
             'setImporting': () => {
             }, usageApi: {
-                importUsage: async (payload: unknown) => {
-                    imported = payload;
+                importUsage: async (payload: unknown, options: { backupPassword?: string }) => {
+                    expect(options.backupPassword).toBe(backupPassword)
+                    imported = payload
                     return { added: 0 }
                 },
             },
@@ -53,67 +65,117 @@ async function importExportFile(text: string, format: string, expectedCount: num
     if (!onConfirm) {
         throw new Error('File import did not reach confirmation')
     }
-    await onConfirm()
+    await onConfirm(backupPassword)
     return typeof imported === 'string' ? imported : JSON.stringify(imported)
 }
 
 async function exportResponses(pages: EventsResponse[]) {
     const exports: Record<string, string> = {}
     for (const format of ['json', 'csv'] as const) {
-        const exportEvents = sourceCallback<(format: string) => Promise<void>>(eventFile, 'exportEvents', {
-            exportControllerRef: { current: null }, setExportingFormat: () => {
-            }, sourceInfoMap: {},
-            authFileMap: new Map(), i18n: { language: 'en' }, noApiKeyLabel: '', notRecordedLabel: '',
-            modelAliasLookup: {}, t: (key: string) => key, aliases: {},
-            eventToRow: (event: EventsResponse['events'][number]) => ({
-                user: 'Display alias',
-                requestId: event.request_id ?? '',
-                completed: event.completed,
-                latencyMs: event.latency_ms,
-                timeToFirstByteMs: event.time_to_first_byte_ms,
-                totalDurationMs: event.total_duration_ms,
-                thinking: event.thinking,
-                inputTokens: event.tokens.input_tokens,
-                outputTokens: event.tokens.output_tokens,
-                reasoningTokens: event.tokens.reasoning_tokens,
-                cachedTokens: event.tokens.cached_tokens,
-                totalTokens: event.tokens.total_tokens,
-                cost: event.cost,
-                clientModel: event.client_model,
-                upstreamUrl: event.upstream_url,
-                upstreamModel: event.upstream_model,
-                responseModel: event.response_model,
-                responseProvider: event.response_provider,
-                responseProviderSource: event.response_provider_source,
-                requestServiceTier: event.request_service_tier ?? event.service_tier,
-                responseServiceTier: event.response_service_tier,
-                requestSpeed: event.request_speed,
-                responseSpeed: event.response_speed,
-            }),
-            createUsageEventExport, UsageEventExportLimitError, USAGE_EVENT_EXPORT_PAGE_SIZE,
-            USAGE_EVENT_CSV_HEADER: sourceInitializer(eventFile, 'USAGE_EVENT_CSV_HEADER', {}),
-            usageApi: {
-                getEvents: async (params: { page: number; export?: boolean }) => {
-                    if (!params.export) {
-                        throw new Error('Export did not request canonical data')
+        const exportEvents = sourceCallback<(format: string, password: string) => Promise<void>>(
+            eventFile,
+            'exportEvents',
+            {
+                apiClient: { getAuthGeneration: () => 1 },
+                exportControllerRef: { current: null },
+                setExportingFormat: () => {
+                },
+                sourceInfoMap: {},
+                authFileMap: new Map(),
+                i18n: { language: 'en' },
+                noApiKeyLabel: '',
+                notRecordedLabel: '',
+                modelAliasLookup: {},
+                t: (key: string) => key,
+                aliases: {},
+                eventToRow: (event: EventsResponse['events'][number]) => ({
+                    user: 'Display alias',
+                    requestId: event.request_id ??
+                               '',
+                    completed: event.completed,
+                    latencyMs: event.latency_ms,
+                    timeToFirstByteMs: event.time_to_first_byte_ms,
+                    totalDurationMs: event.total_duration_ms,
+                    thinking: event.thinking,
+                    inputTokens: event.tokens.input_tokens,
+                    outputTokens: event.tokens.output_tokens,
+                    reasoningTokens: event.tokens.reasoning_tokens,
+                    cachedTokens: event.tokens.cached_tokens,
+                    totalTokens: event.tokens.total_tokens,
+                    cost: event.cost,
+                    clientModel: event.client_model,
+                    upstreamUrl: event.upstream_url,
+                    upstreamModel: event.upstream_model,
+                    responseModel: event.response_model,
+                    responseProvider: event.response_provider,
+                    responseProviderSource: event.response_provider_source,
+                    requestServiceTier: event.request_service_tier ??
+                                        event.service_tier,
+                    responseServiceTier: event.response_service_tier,
+                    requestSpeed: event.request_speed,
+                    responseSpeed: event.response_speed,
+                }),
+                createUsageEventExport,
+                UsageEventExportLimitError,
+                USAGE_EVENT_EXPORT_PAGE_SIZE,
+                USAGE_EVENT_CSV_HEADER: sourceInitializer(
+                    eventFile,
+                    'USAGE_EVENT_CSV_HEADER',
+                    {},
+                ),
+                usageApi: {
+                    getEvents: async (
+                        params: {
+                            page: number;
+                            export?: boolean
+                        },
+                        options: {
+                            backupPassword?: string
+                        },
+                    ) => {
+                        expect(params.export)
+                            .toBe(true)
+                        expect(options.backupPassword)
+                            .toBe(backupPassword)
+                        return pages[params.page -
+                                     1]
+                    },
+                },
+                buildExportParams: (page: number) => ({ page }),
+                normalizeUsageThinking: (thinking: unknown) => thinking,
+                sanitizeUpstreamUrl: sourceCallback(
+                    eventFile,
+                    'sanitizeUpstreamUrl',
+                    {},
+                ),
+                observedRequestSpeed: sourceCallback(
+                    eventFile,
+                    'observedRequestSpeed',
+                    {},
+                ),
+                encodeCsv: sourceInitializer(
+                    eventFile,
+                    'encodeCsv',
+                    {},
+                ),
+                downloadBlob: async ({ blob }: {
+                    blob: Blob
+                }) => {
+                    exports[format] =
+                        await blob.text()
+                },
+                showNotification: (
+                    message: string,
+                    kind: string,
+                ) => {
+                    if (kind ===
+                        'error') {
+                        throw new Error(message)
                     }
-                    return pages[params.page - 1]
                 },
             },
-            buildExportParams: (page: number) => ({ page }), normalizeUsageThinking: (thinking: unknown) => thinking,
-            sanitizeUpstreamUrl: sourceCallback(eventFile, 'sanitizeUpstreamUrl', {}),
-            observedRequestSpeed: sourceCallback(eventFile, 'observedRequestSpeed', {}),
-            encodeCsv: sourceInitializer(eventFile, 'encodeCsv', {}),
-            downloadBlob: async ({ blob }: { blob: Blob }) => {
-                exports[format] = await blob.text()
-            },
-            showNotification: (message: string, kind: string) => {
-                if (kind === 'error') {
-                    throw new Error(message)
-                }
-            },
-        })
-        await exportEvents(format)
+        )
+        await exportEvents(format, backupPassword)
         // downloadBlob is synchronous in the app; let the test's Blob.text finish.
         await Promise.resolve()
         if (!exports[format]) {

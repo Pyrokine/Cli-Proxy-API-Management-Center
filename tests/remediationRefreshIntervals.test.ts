@@ -52,6 +52,7 @@ function eventsFixture(overrides: Record<string, unknown> = {}) {
         sortField: 'timestampMs', sortDir: 'desc', pageSize: 50,
         dateRange: { from: '2026-11-08T23:59:59.250Z', to: '2026-11-09T23:59:59.250Z' },
         topModels: [], topCredentials: [], topApiKeys: [], searchQuery: '', statusFilter: '', speedFilter: '',
+        pauseAutoRefresh: false, backupPasswordDialog: null,
         requestLogPreview: null, requestDetails: null, exportingFormat: null,
         autoRefreshInterval: sourceInitializer<number>(eventsFile, 'configuredAutoRefreshInterval', {
             autoRefreshConfigSeconds: undefined, config: undefined, useMemo, resolveUsageEventsAutoRefreshMs,
@@ -300,6 +301,7 @@ describe('R-030/R-409/R-530 shared refresh contract', () => {
         { autoRefreshEnabled: false }, { enabled: false }, { activePreset: '7d' }, { activePreset: '30d' },
         { activePreset: 'all' }, { activePreset: undefined }, { activePreset: 'custom' },
         { page: 2 }, { sortField: 'model' }, { sortDir: 'asc' },
+        { pauseAutoRefresh: true }, { backupPasswordDialog: {} },
         { requestLogPreview: {} }, { requestDetails: {} }, { exportingFormat: 'csv' },
     ]) {
         test(`details does not schedule periodic requests for ${JSON.stringify(state)}`, async () => {

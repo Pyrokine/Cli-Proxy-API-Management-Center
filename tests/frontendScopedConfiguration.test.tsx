@@ -226,8 +226,9 @@ test(
                 'parseVisualConfigInteger': parseVisualConfigInteger, VISUAL_INTEGER_FIELDS,
             },
         )
-        const draft     = { daysEnabled: true, days: '30', maxDbSizeMb: '8796093022207', warningThresholdPct: '0' }
-        expect(toPayload(draft)).toEqual({ days: 30, max_db_size_mb: 8796093022207, warning_threshold_pct: 0 })
+        const draft     = { daysEnabled: true, days: '30', maxDbSizeMb: '8796093022207', warningThresholdPct: '1' }
+        expect(toPayload(draft)).toEqual({ days: 30, max_db_size_mb: 8796093022207, warning_threshold_pct: 1 })
+        expect(toPayload({ ...draft, warningThresholdPct: '0' })).toBeNull()
         for (const value of ['', '8796093022208', '-1', '1.5', '1e3']) {
             expect(toPayload({ ...draft, maxDbSizeMb: value })).toBeNull()
         }

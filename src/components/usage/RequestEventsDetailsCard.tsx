@@ -46,6 +46,7 @@ import {
 import {Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Link} from 'react-router'
+import {useUsageBackupPassword} from './hooks/useUsageBackupPassword'
 import styles from './RequestEventsDetailsCard.module.scss'
 import {
     createUsageEventExport,
@@ -216,6 +217,7 @@ interface RequestEventsDetailsCardProps {
     activePreset?: string
     aliases?: Record<string, string>
     autoRefreshConfigSeconds?: number | null
+    pauseAutoRefresh?: boolean
     onVisibleDateRangeChange?: (range: { from: string; to: string }) => void
     // Mirrored from the top FilterBar so model / credential / api-key choices
     // filter the events table instead of duplicating the dropdowns inside.
@@ -1055,6 +1057,7 @@ export function RequestEventsDetailsCard({
                                              activePreset,
                                              aliases,
                                              autoRefreshConfigSeconds,
+                                             pauseAutoRefresh,
                                              onVisibleDateRangeChange,
                                              selectedModels,
                                              selectedCredentials,
@@ -1067,6 +1070,8 @@ export function RequestEventsDetailsCard({
     const { t, i18n }      = useTranslation()
     const config           = useConfigStore((state) => state.config)
     const showNotification = useNotificationStore((state) => state.showNotification)
+
+    const { requestBackupPassword, backupPasswordDialog } = useUsageBackupPassword()
 
     // Shared filters come from FilterBar; free-text search is specific to this table.
     const topModels      = useMemo(() => selectedModels ?? [], [selectedModels])
@@ -1299,7 +1304,8 @@ export function RequestEventsDetailsCard({
                                                               pageVisible: true,
                                                               busy: false,
                                                           })
-        if (!scheduleEligible || requestLogPreview !== null || requestDetails !== null || exportingFormat !== null) {
+        if (!scheduleEligible || pauseAutoRefresh || backupPasswordDialog || requestLogPreview !== null ||
+            requestDetails !== null || exportingFormat !== null) {
             return
         }
         const intervalId = window.setInterval(() => {
@@ -1323,9 +1329,11 @@ export function RequestEventsDetailsCard({
                   activePreset,
                   autoRefreshEnabled,
                   autoRefreshInterval,
+                  backupPasswordDialog,
                   enabled,
                   exportingFormat,
                   page,
+                  pauseAutoRefresh,
                   requestLogPreview,
                   requestDetails,
                   sortDir,
@@ -1448,7 +1456,8 @@ export function RequestEventsDetailsCard({
     )
 
     const exportEvents = useCallback(
-        async (format: 'csv' | 'json') => {
+        async (format: 'csv' | 'json', backupPassword: string) => {
+            const generation = apiClient.getAuthGeneration()
             exportControllerRef.current?.abort()
             const controller            = new AbortController()
             exportControllerRef.current = controller
@@ -1472,10 +1481,15 @@ export function RequestEventsDetailsCard({
                                                               format,
                                                               signal: controller.signal,
                                                               csvHeader: USAGE_EVENT_CSV_HEADER,
-                                                              fetchPage: (page, signal) => usageApi.getEvents(
-                                                                  { ...buildExportParams(page), export: true },
-                                                                  { signal },
-                                                              ),
+                                                              fetchPage: async (page, signal) => {
+                                                                  if (generation !== apiClient.getAuthGeneration()) {
+                                                                      throw new Error(t('common.connection_changed'))
+                                                                  }
+                                                                  return usageApi.getEvents(
+                                                                      { ...buildExportParams(page), export: true },
+                                                                      { signal, backupPassword },
+                                                                  )
+                                                              },
                                                               formatCsvRow: (event, index) => {
                                                                   const row = formatRow(event, index)
                                                                   return [
@@ -1566,6 +1580,9 @@ export function RequestEventsDetailsCard({
                 if (!blob || controller.signal.aborted) {
                     return
                 }
+                if (generation !== apiClient.getAuthGeneration()) {
+                    throw new Error(t('common.connection_changed'))
+                }
                 const fileTime = new Date().toISOString().replace(/[:.]/g, '-')
                 downloadBlob({
                                  filename: `usage-events-${fileTime}.${format}`,
@@ -1576,19 +1593,11 @@ export function RequestEventsDetailsCard({
             } catch (err: unknown) {
                 if (!controller.signal.aborted) {
                     if (err instanceof UsageEventExportLimitError) {
-                        showNotification(
-                            t('usage_stats.export_limit_exceeded', {
-                                limit: formatNumber(MAX_USAGE_EVENT_EXPORT_EVENTS, i18n.language),
-                            }),
-                            'warning',
-                        )
-                    } else {
-                        const message = err instanceof Error ? err.message : String(err)
-                        showNotification(
-                            `${t('notification.download_failed')}${message ? `: ${message}` : ''}`,
-                            'error',
-                        )
+                        throw Object.assign(new Error(t('usage_stats.export_limit_exceeded', {
+                            limit: formatNumber(MAX_USAGE_EVENT_EXPORT_EVENTS, i18n.language),
+                        })), { cause: err })
                     }
+                    throw err
                 }
             } finally {
                 if (exportControllerRef.current === controller) {
@@ -1611,8 +1620,22 @@ export function RequestEventsDetailsCard({
         ],
     )
 
-    const handleExportCsv  = useCallback(() => void exportEvents('csv'), [exportEvents])
-    const handleExportJson = useCallback(() => void exportEvents('json'), [exportEvents])
+    const handleExport = (format: 'csv' | 'json') => requestBackupPassword({
+                                                                               title: t(format === 'csv' ?
+                                                                                        'usage_stats.export_csv' :
+                                                                                        'usage_stats.export_json'),
+                                                                               confirmText: t('usage_stats.export'),
+                                                                               message: t(
+                                                                                   'usage_stats.request_events_export_scope',
+                                                                                   {
+                                                                                       defaultValue: 'Exports the displayed time range and all table filters, including result and search',
+                                                                                   },
+                                                                               ),
+                                                                               onConfirm: (backupPassword) => exportEvents(
+                                                                                   format,
+                                                                                   backupPassword,
+                                                                               ),
+                                                                           })
 
     const handleSort = useCallback((field: SortField) => {
         setSortField((prev) => {
@@ -2010,16 +2033,16 @@ export function RequestEventsDetailsCard({
                     <Button
                         variant='secondary'
                         size='sm'
-                        onClick={handleExportCsv}
-                        disabled={fetching || totalCount === 0 || exportingFormat !== null}
+                        onClick={() => handleExport('csv')}
+                        disabled={!canExport}
                     >
                         {t('usage_stats.export_csv')}
                     </Button>
                     <Button
                         variant='secondary'
                         size='sm'
-                        onClick={handleExportJson}
-                        disabled={fetching || totalCount === 0 || exportingFormat !== null}
+                        onClick={() => handleExport('json')}
+                        disabled={!canExport}
                     >
                         {t('usage_stats.export_json')}
                     </Button>
@@ -2131,6 +2154,8 @@ export function RequestEventsDetailsCard({
                         />
                     </div>
                 )}
+
+            {backupPasswordDialog}
 
             <Modal
                 open={requestLogPreview !== null}
