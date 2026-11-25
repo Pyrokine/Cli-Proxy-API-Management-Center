@@ -34,10 +34,11 @@ CPA，先更新后端，再安装新版面板。原浏览器登录需要重新�
 remote-management:
   disable-control-panel: false
   disable-auto-update-panel: false
+  auto-check-update: false
   panel-github-repository: "https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
 ```
 
-需要固定已部署版本时设置 `disable-auto-update-panel: true`。设置 `disable-control-panel: true` 会同时关闭面板文件下载和
+需要固定版本时，手动安装面板并设置 `disable-auto-update-panel: true`。`disable-control-panel: true` 同时关闭面板文件下载和
 `/management.html` 路由
 
 ### 手动安装或更新 `management.html`

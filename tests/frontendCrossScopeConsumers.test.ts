@@ -74,9 +74,7 @@ function releaseLoader(reply: (page: number) => Promise<unknown>, generation = (
         'loadReleases',
         {
             releasesApi: { list: reply },
-            cancelled: false,
-            authGeneration: 1,
-            apiClient: { getAuthGeneration: generation },
+            isCurrent: () => generation() === 1,
             target: 'cpa',
             t: (key: string) => key,
         },

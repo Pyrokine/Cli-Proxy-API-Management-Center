@@ -20,6 +20,7 @@ import {Card} from '@/components/ui/Card'
 import {IconBookOpen, IconCode, IconExternalLink, IconGithub} from '@/components/ui/icons'
 import {Select} from '@/components/ui/Select'
 import {versionApi} from '@/services/api'
+import {apiClient} from '@/services/api/client'
 import {modelCatalogApi, type ModelCatalogRefreshMeta} from '@/services/api/modelCatalog'
 import {type BannedIPEntry, type RateLimitEventEntry, rateLimitsApi} from '@/services/api/rateLimits'
 import {type Release, releasesApi} from '@/services/api/releases'
@@ -54,6 +55,14 @@ const MIN_UPDATE_CHECK_INTERVAL_MINUTES     = 30
 
 type VersionCheckTarget = 'panel' | 'cpa'
 
+interface VersionCheck {
+    generation: number
+    checkedAt: number
+    version?: string
+    publishedAt?: string
+    error?: string
+}
+
 const compareVersions = (latest?: string | null, current?: string | null) => {
     const latestParts  = parseLooseSemver(latest ?? '')
     const currentParts = parseLooseSemver(current ?? '')
@@ -76,7 +85,8 @@ export function SystemPage() {
 
     const pageLayerStatus = transitionLayer?.status ?? 'current'
 
-    const auth = useAuthStore()
+    const auth           = useAuthStore()
+    const authGeneration = apiClient.getAuthGeneration()
 
     const config = useConfigStore((state) => state.config)
 
@@ -117,19 +127,11 @@ export function SystemPage() {
 
     const [modelRequestLoading, setModelRequestLoading] = useState(false)
 
-    const [checkingVersion, setCheckingVersion] = useState(false)
+    const [checkingVersion, setCheckingVersion] = useState<Partial<Record<VersionCheckTarget, number>>>({})
 
-    const [versionHistoryTarget, setVersionHistoryTarget] = useState<'panel' | 'cpa' | null>(null)
+    const [versionHistoryTarget, setVersionHistoryTarget] = useState<VersionCheckTarget | null>(null)
 
-    const [latestPanelVersion, setLatestPanelVersion] = useState<string | null>(null)
-
-    const [latestPanelBuildTime, setLatestPanelBuildTime] = useState<string | null>(null)
-
-    const [latestCpaVersion, setLatestCpaVersion] = useState<string | null>(null)
-
-    const [latestCpaBuildTime, setLatestCpaBuildTime] = useState<string | null>(null)
-
-    const [lastCheckTime, setLastCheckTime] = useState<number | null>(null)
+    const [versionChecks, setVersionChecks] = useState<Partial<Record<VersionCheckTarget, VersionCheck>>>({})
 
     const [catalogMeta, setCatalogMeta] = useState<ModelCatalogRefreshMeta | null>(
         null)
@@ -161,7 +163,10 @@ export function SystemPage() {
 
     const modelsRequestGeneration = useRef(0)
 
-    const versionCheckInFlight = useRef<Promise<void> | null>(null)
+    const versionCheckInFlight = useRef<Partial<Record<VersionCheckTarget, {
+        generation: number;
+        request: Promise<void>
+    }>>>({})
 
     const notifiedRateLimitEventKeys = useRef<Set<string>>(new Set())
 
@@ -215,15 +220,16 @@ export function SystemPage() {
 
     const serverBuildTime = auth.serverBuildDate ? formatDateTime(auth.serverBuildDate, i18n.language) : '-'
 
-    const panelReleaseStatus =
-              compareVersions(latestPanelVersion, appVersion) === 0
-              ? t('system_info.latest_remote_current', { defaultValue: '已是线上最新' })
-              : (latestPanelVersion ?? '-')
+    const panelCheck = versionChecks.panel?.generation === authGeneration ? versionChecks.panel : undefined
+    const cpaCheck   = versionChecks.cpa?.generation === authGeneration ? versionChecks.cpa : undefined
 
-    const cpaReleaseStatus =
-              compareVersions(latestCpaVersion, apiVersion) === 0
-              ? t('system_info.latest_remote_current', { defaultValue: '已是线上最新' })
-              : (latestCpaVersion ?? '-')
+    const releaseStatus = (check: VersionCheck | undefined, currentVersion: string) => {
+        if (check?.error) {
+            return t('system_info.version_check_error')
+        }
+        return compareVersions(check?.version, currentVersion) === 0 ? t('system_info.latest_remote_current') :
+               (check?.version ?? '-')
+    }
 
     const remoteManagement = config?.remoteManagement
 
@@ -497,76 +503,86 @@ export function SystemPage() {
 
     const handleVersionCheck = useCallback(
         ({ silent = false, target = 'cpa' }: { silent?: boolean; target?: VersionCheckTarget } = {}) => {
-            if (versionCheckInFlight.current) {
-                return versionCheckInFlight.current
+            const generation = authGeneration
+            const isCurrent  = () => generation === apiClient.getAuthGeneration()
+            if (!isCurrent()) {
+                return
+            }
+            const pending = versionCheckInFlight.current[target]
+            if (pending?.generation === generation) {
+                return pending.request
+            }
+            setCheckingVersion((previous) => ({ ...previous, [target]: generation }))
+            const publish = (result: Omit<VersionCheck, 'generation' | 'checkedAt'>) => {
+                if (isCurrent()) {
+                    setVersionChecks((previous) => ({
+                        ...previous, [target]: { ...result, generation, checkedAt: Date.now() },
+                    }))
+                }
             }
 
-            const request = (async () => {
-                setCheckingVersion(true)
+            const request                        = (async () => {
                 try {
-                    const [cpaLatest, panelReleases] = await Promise.all([
-                                                                             versionApi.checkLatest(),
-                                                                             releasesApi.list(1, 1, 'panel', !silent),
-                                                                         ])
-
-                    const latestCpaRaw          =
-                              cpaLatest?.['latest-version'] ?? cpaLatest?.latest_version ?? cpaLatest?.latest ?? ''
-                    const latestCpa             = typeof latestCpaRaw === 'string' ?
-                                                  latestCpaRaw :
-                                                  String(latestCpaRaw ?? '')
-                    const latestCpaPublishedRaw = cpaLatest?.['published-at'] ?? cpaLatest?.published_at ?? ''
-                    const latestCpaPublished    = typeof latestCpaPublishedRaw === 'string' ? latestCpaPublishedRaw : ''
-                    const latestPanelRelease    =
-                              (panelReleases.releases ?? []).find((release: Release) => !release.draft) ?? null
-                    const latestPanel           = latestPanelRelease?.tag_name || ''
-
-                    setLastCheckTime(Date.now())
-                    setLatestCpaVersion(latestCpa || null)
-                    setLatestCpaBuildTime(latestCpaPublished || null)
-                    setLatestPanelVersion(latestPanel || null)
-                    setLatestPanelBuildTime(latestPanelRelease?.published_at || null)
-
+                    let version: string | undefined
+                    let publishedAt: string | undefined
+                    if (target === 'panel') {
+                        const response = await releasesApi.list(1, 1, 'panel', !silent)
+                        if (response.target && response.target !== 'panel') {
+                            throw new Error()
+                        }
+                        const release = response.releases?.find((entry) => !entry.draft)
+                        version       = release?.tag_name
+                        publishedAt   = release?.published_at
+                    } else {
+                        const response  = await versionApi.checkLatest()
+                        const latest    = response?.['latest-version'] ?? response?.latest_version ?? response?.latest
+                        const published = response?.['published-at'] ?? response?.published_at
+                        version         = typeof latest === 'string' ? latest : undefined
+                        publishedAt     = typeof published === 'string' ? published : undefined
+                    }
+                    if (!isCurrent()) {
+                        return
+                    }
+                    if (!version) {
+                        throw new Error()
+                    }
+                    publish({ version, publishedAt })
                     if (silent) {
                         return
                     }
-
-                    const latestVersion  = target === 'panel' ? latestPanel : latestCpa
-                    const currentVersion = target === 'panel' ? appVersion : auth.serverVersion
-                    if (!latestVersion) {
-                        showNotification(t('system_info.version_check_error'), 'error')
-                        return
-                    }
-
-                    const comparison = compareVersions(latestVersion, currentVersion)
+                    const current    = target === 'panel' ? appVersion : useAuthStore.getState().serverVersion
+                    const comparison = compareVersions(version, current)
                     if (comparison === null) {
                         showNotification(t('system_info.version_current_missing'), 'warning')
-                        return
-                    }
-
-                    if (comparison > 0) {
-                        const message = t('system_info.version_update_available', { version: latestVersion })
+                    } else if (comparison > 0) {
+                        const message = t('system_info.version_update_available', { version })
                         showNotification(message, 'warning')
                         addPersistentNotification(message, 'warning', 'version')
                     } else {
                         showNotification(t('system_info.version_is_latest'), 'success')
                     }
                 } catch (error: unknown) {
-                    setLastCheckTime(Date.now())
-                    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
-                    const suffix  = message ? `: ${message}` : ''
-                    if (!silent) {
-                        showNotification(`${t('system_info.version_check_error')}${suffix}`, 'error')
+                    if (isCurrent()) {
+                        const detail  = getErrorMessage(error)
+                        const message = `${t('system_info.version_check_error')}${detail ? `: ${detail}` : ''}`
+                        publish({ error: message })
+                        if (!silent) {
+                            showNotification(message, 'error')
+                        }
                     }
                 } finally {
-                    setCheckingVersion(false)
-                    versionCheckInFlight.current = null
+                    if (versionCheckInFlight.current[target]?.generation === generation) {
+                        delete versionCheckInFlight.current[target]
+                    }
+                    if (isCurrent()) {
+                        setCheckingVersion((previous) => ({ ...previous, [target]: undefined }))
+                    }
                 }
             })()
-
-            versionCheckInFlight.current = request
+            versionCheckInFlight.current[target] = { generation, request }
             return request
         },
-        [appVersion, auth.serverVersion, showNotification, addPersistentNotification, t],
+        [addPersistentNotification, appVersion, authGeneration, showNotification, t],
     )
 
     const fetchCatalogMeta = useCallback(async () => {
@@ -648,14 +664,15 @@ export function SystemPage() {
     useEffect(() => {
         let cancelled = false
         queueMicrotask(() => {
-            if (!cancelled && pageLayerStatus === 'current') {
-                void handleVersionCheck({ silent: true })
+            if (!cancelled && pageLayerStatus === 'current' && auth.connectionStatus === 'connected') {
+                void handleVersionCheck({ silent: true, target: 'cpa' })
+                void handleVersionCheck({ silent: true, target: 'panel' })
             }
         })
         return () => {
             cancelled = true
         }
-    }, [handleVersionCheck, pageLayerStatus])
+    }, [auth.connectionStatus, handleVersionCheck, pageLayerStatus])
 
     return (
         <div className={styles.container}>
@@ -678,7 +695,8 @@ export function SystemPage() {
                                         size='sm'
                                         className={styles.tileAction}
                                         onClick={() => void handleVersionCheck({ target: 'panel' })}
-                                        loading={checkingVersion}
+                                        loading={checkingVersion.panel === authGeneration}
+                                        disabled={auth.connectionStatus !== 'connected'}
                                         title={t('system_info.version_check_button')}
                                         aria-label={t('system_info.version_check_button')}
                                     >
@@ -709,20 +727,24 @@ export function SystemPage() {
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.latest_remote')}</span>
-                                    <span className={styles.metaValue}>{panelReleaseStatus}</span>
+                                    <span className={styles.metaValue} title={panelCheck?.error}>
+                                        {releaseStatus(panelCheck, appVersion)}
+                                    </span>
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.latest_remote_build')}</span>
                                     <span className={styles.metaValue}>
-                                        {latestPanelBuildTime
-                                         ? formatDateTime(new Date(latestPanelBuildTime), i18n.language)
-                                         : '-'}
+                                        {panelCheck?.publishedAt ?
+                                         formatDateTime(panelCheck.publishedAt, i18n.language) :
+                                         '-'}
                                     </span>
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.last_checked')}</span>
                                     <span className={styles.metaValue}>
-                                        {lastCheckTime ? formatDateTime(new Date(lastCheckTime), i18n.language) : '-'}
+                                        {panelCheck ?
+                                         formatDateTime(new Date(panelCheck.checkedAt), i18n.language) :
+                                         '-'}
                                     </span>
                                 </div>
                             </div>
@@ -738,7 +760,8 @@ export function SystemPage() {
                                         size='sm'
                                         className={styles.tileAction}
                                         onClick={() => void handleVersionCheck({ target: 'cpa' })}
-                                        loading={checkingVersion}
+                                        loading={checkingVersion.cpa === authGeneration}
+                                        disabled={auth.connectionStatus !== 'connected'}
                                         title={t('system_info.version_check_button')}
                                         aria-label={t('system_info.version_check_button')}
                                     >
@@ -769,20 +792,22 @@ export function SystemPage() {
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.latest_remote')}</span>
-                                    <span className={styles.metaValue}>{cpaReleaseStatus}</span>
+                                    <span className={styles.metaValue} title={cpaCheck?.error}>
+                                        {releaseStatus(cpaCheck, apiVersion)}
+                                    </span>
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.latest_remote_build')}</span>
                                     <span className={styles.metaValue}>
-                                        {latestCpaBuildTime
-                                         ? formatDateTime(new Date(latestCpaBuildTime), i18n.language)
-                                         : '-'}
+                                        {cpaCheck?.publishedAt ?
+                                         formatDateTime(cpaCheck.publishedAt, i18n.language) :
+                                         '-'}
                                     </span>
                                 </div>
                                 <div className={styles.metaRow}>
                                     <span className={styles.metaLabel}>{t('system_info.last_checked')}</span>
                                     <span className={styles.metaValue}>
-                                        {lastCheckTime ? formatDateTime(new Date(lastCheckTime), i18n.language) : '-'}
+                                        {cpaCheck ? formatDateTime(new Date(cpaCheck.checkedAt), i18n.language) : '-'}
                                     </span>
                                 </div>
                             </div>

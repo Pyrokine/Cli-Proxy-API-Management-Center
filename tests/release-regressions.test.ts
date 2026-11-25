@@ -119,8 +119,9 @@ describe('system version checks', () => {
         expect(systemPageSource).toContain(`useEffect(() => {
         let cancelled = false
         queueMicrotask(() => {
-            if (!cancelled && pageLayerStatus === 'current') {
-                void handleVersionCheck({ silent: true })`)
+            if (!cancelled && pageLayerStatus === 'current' && auth.connectionStatus === 'connected') {
+                void handleVersionCheck({ silent: true, target: 'cpa' })
+                void handleVersionCheck({ silent: true, target: 'panel' })`)
         expect(systemPageSource).toContain('releasesApi.list(1, 1, \'panel\', !silent)')
     })
 })

@@ -1,7 +1,9 @@
 import {Button} from '@/components/ui/Button'
 import type {ModelCatalogRefreshMeta} from '@/services/api/modelCatalog'
+import {getErrorMessage} from '@/utils/helpers'
+import {compareLooseSemver, parseLooseSemver} from '@/utils/looseSemver'
 import {redactSensitiveText} from '@/utils/redaction'
-import {describe, expect, test} from 'bun:test'
+import {describe, expect, mock, test} from 'bun:test'
 import {createInstance} from 'i18next'
 import {readFileSync} from 'node:fs'
 import React, {type ReactElement} from 'react'
@@ -88,15 +90,12 @@ for (const [language, panelLabel, serverLabel, metaFailed, refreshFailed] of lan
                                                                 apiVersion,
                                                                 handleVersionCheck: noop,
                                                                 setVersionHistoryTarget: noop,
-                                                                checkingVersion: false,
-                                                                panelBuildTime: '-',
-                                                                serverBuildTime: '-',
-                                                                panelReleaseStatus: '-',
-                                                                cpaReleaseStatus: '-',
-                                                                latestPanelBuildTime: null,
-                                                                latestCpaBuildTime: null,
-                                                                lastCheckTime: null,
-                                                                requiredPanelVersion: '-',
+                                                                checkingVersion: {}, authGeneration: 1,
+                                                                auth: { connectionStatus: 'connected' },
+                                                                panelBuildTime: '-', serverBuildTime: '-',
+                                                                panelCheck: undefined, cpaCheck: undefined,
+                                                                releaseStatus: () => '-', requiredPanelVersion: '-',
+                                                                formatDateTime: () => '-', i18n: { language },
                                                             })
                 const html = renderToStaticMarkup(tile)
                 expect(html).toContain(`<div class="tileLabel">${label}</div>`)
@@ -206,6 +205,74 @@ for (const [language, panelLabel, serverLabel, metaFailed, refreshFailed] of lan
             }
         })
     })
+}
+
+for (const failingTarget of ['cpa', 'panel'] as const) {
+    test(
+        `manual version check only reads its target and silent ${failingTarget} failure stays on that card`,
+        async () => {
+            type Target = 'cpa' | 'panel'
+            type Checks = Partial<Record<Target, { version?: string; publishedAt?: string; error?: string }>>
+            let checks: Checks = {}
+            const published    = '2026-11-23T12:00:00Z'
+            const failure      = new Error('synthetic release read failed')
+            const cpa          = mock(async () => {
+                if (failingTarget === 'cpa') {
+                    throw failure
+                }
+                return { 'latest-version': 'v8.0.0', 'published-at': published }
+            })
+            const panel        = mock(async (..._args: unknown[]) => {
+                if (failingTarget === 'panel') {
+                    throw failure
+                }
+                return { target: 'panel', releases: [{ tag_name: 'v2.0.0', published_at: published, draft: false }] }
+            })
+            const notify       = mock()
+            const check        = sourceCallback<(options: { target: Target; silent?: boolean }) => Promise<void>>(
+                file, 'handleVersionCheck', {
+                    authGeneration: 1,
+                    apiClient: { getAuthGeneration: () => 1 },
+                    versionCheckInFlight: { current: {} },
+                    setCheckingVersion: noop,
+                    versionApi: { checkLatest: cpa },
+                    releasesApi: { list: panel },
+                    appVersion: 'v1.0.0',
+                    useAuthStore: { getState: () => ({ serverVersion: 'v7.0.0' }) },
+                    setVersionChecks: (update: (previous: Checks) => Checks) => {
+                        checks = update(checks)
+                    },
+                    compareVersions: sourceInitializer(
+                        file,
+                        'compareVersions',
+                        { parseLooseSemver, compareLooseSemver },
+                    ),
+                    showNotification: notify,
+                    addPersistentNotification: noop,
+                    getErrorMessage,
+                    t: (key: string) => key,
+                },
+            )
+            const success      = failingTarget === 'cpa' ? 'panel' : 'cpa'
+            await check({ target: success })
+            expect(failingTarget === 'cpa' ? cpa : panel).not.toHaveBeenCalled()
+            if (success === 'panel') {
+                expect(panel).toHaveBeenCalledWith(1, 1, 'panel', true)
+            }
+            expect(notify).toHaveBeenCalledWith('system_info.version_update_available', 'warning')
+            await Promise.all([check({ target: 'cpa', silent: true }), check({ target: 'panel', silent: true })])
+            expect(panel).toHaveBeenCalledWith(1, 1, 'panel', false)
+            expect(checks[success]).toMatchObject({
+                                                      version: success === 'cpa' ? 'v8.0.0' : 'v2.0.0',
+                                                      publishedAt: published,
+                                                  })
+            expect(checks[failingTarget]).toHaveProperty(
+                'error',
+                'system_info.version_check_error: synthetic release read failed',
+            )
+            expect(notify).toHaveBeenCalledTimes(1)
+        },
+    )
 }
 
 test('R-523 an existing error follows a language change without refetching', async () => {

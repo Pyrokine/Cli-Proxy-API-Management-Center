@@ -320,15 +320,15 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         viewGeneration.current += 1
         submittedUpdate.current = null
     }, [])
-    const [previousView, setPreviousView] = useState({ open: false, target, authGeneration })
-    if (open !==
-        previousView.open ||
-        target !==
-        previousView.target ||
-        authGeneration !==
-        previousView.authGeneration) {
+    const [previousView, setPreviousView] = useState({ open: false, target, repository, authGeneration })
+    const [releaseRetry, setReleaseRetry] = useState(0)
+    if (open !== previousView.open || target !== previousView.target || repository !== previousView.repository ||
+        authGeneration !== previousView.authGeneration) {
         viewGeneration.current += 1
-        setPreviousView({ open, target, authGeneration })
+        setPreviousView({ open, target, repository, authGeneration })
+        setReleases([])
+        setPageIndex(0)
+        setError(null)
         const retained = open && target === 'cpa' ? submittedUpdate.current : null
         setCheckingVersion(null)
         setUpdateStatus(retained?.status ?? null)
@@ -337,17 +337,17 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                            null)
         setPollError(retained?.pollError ?? null)
         setPollingReady(open && target === 'cpa' && (retained?.pollingReady ?? true))
-        if (open) {
-            setLoading(true)
-            setError(null)
-        }
+        setLoading(open)
     }
 
     useEffect(() => {
         if (!open) {
             return
         }
-        let cancelled = false
+        const generation = viewGeneration.current
+        let cancelled    = false
+        const isCurrent  = () => !cancelled && generation === viewGeneration.current &&
+                                 authGeneration === apiClient.getAuthGeneration()
 
         const loadReleases = async () => {
             const releases: Release[] = []
@@ -355,11 +355,18 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
             let page                  = 1
             while (true) {
                 const response = await releasesApi.list(page, 100, target)
-                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
+                if (!isCurrent()) {
                     return null
                 }
-                if (!Array.isArray(response.releases) || response.page !== page || response.per_page !== 100 ||
-                    !Number.isSafeInteger(response.total) || response.total < 0 ||
+                if (!Array.isArray(response.releases) ||
+                    (response.target && response.target !== target) ||
+                    response.page !==
+                    page ||
+                    response.per_page !==
+                    100 ||
+                    !Number.isSafeInteger(response.total) ||
+                    response.total <
+                    0 ||
                     response.releases.some((release) => !release.tag_name || seen.has(release.tag_name))) {
                     throw new Error(t('version_history.pagination_incomplete'))
                 }
@@ -378,23 +385,20 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         }
         loadReleases()
             .then((res) => {
-                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
-                    return
+                if (isCurrent() && res !== null) {
+                    setReleases(res)
+                    setError(null)
+                    setPageIndex(0)
                 }
-                if (res === null) {
-                    return
-                }
-                setReleases(res)
-                setPageIndex(0)
             })
             .catch((err) => {
-                if (cancelled || authGeneration !== apiClient.getAuthGeneration()) {
-                    return
+                if (isCurrent()) {
+                    setReleases([])
+                    setError(err instanceof Error && err.message ? err.message : t('common.unknown_error'))
                 }
-                setError(err instanceof Error ? err.message : String(err))
             })
             .finally(() => {
-                if (!cancelled && authGeneration === apiClient.getAuthGeneration()) {
+                if (isCurrent()) {
                     setLoading(false)
                 }
             })
@@ -402,7 +406,7 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
         return () => {
             cancelled = true
         }
-    }, [authGeneration, open, target, t])
+    }, [authGeneration, open, target, repository, releaseRetry, t])
 
     // Flat sorted list of all non-draft releases (newest first)
     const sortedReleases = useMemo(() => {
@@ -995,14 +999,25 @@ export function VersionHistoryModal({ open, onClose, currentVersion, target, rep
                 </div>
             )}
 
-            {loading && <div className={styles.status}>{t('common.loading')}</div>}
-            {error && <div className={styles.status}>{error}</div>}
+            {loading && <div className={styles.status} role='status'>{t('common.loading')}</div>}
+            {error && (
+                <div className={styles.status}>
+                    <p role='alert'>{error}</p>
+                    <Button variant='secondary' size='sm' onClick={() => {
+                        setError(null)
+                        setLoading(true)
+                        setReleaseRetry((attempt) => attempt + 1)
+                    }}>
+                        {t('common.retry')}
+                    </Button>
+                </div>
+            )}
 
             {!loading && !error && totalReleases === 0 && (
                 <div className={styles.status}>{t('version_history.empty')}</div>
             )}
 
-            {!loading && totalReleases > 0 && (
+            {!loading && !error && totalReleases > 0 && (
                 <>
                     <div className={styles.listHeader}>
                         <span className={styles.listCount}>

@@ -37,11 +37,13 @@ to check for new versions periodically.
 remote-management:
   disable-control-panel: false
   disable-auto-update-panel: false
+  auto-check-update: false
   panel-github-repository: "https://github.com/Pyrokine/Cli-Proxy-API-Management-Center"
 ```
 
-Set `disable-auto-update-panel: true` when the deployed panel must remain fixed. Set `disable-control-panel: true` to
-disable both the asset download and `/management.html` route
+To pin the panel version, install it manually and set `disable-auto-update-panel: true`. Set
+`disable-control-panel: true`
+to disable both the asset download and `/management.html` route.
 
 ### Install or update `management.html` manually
 

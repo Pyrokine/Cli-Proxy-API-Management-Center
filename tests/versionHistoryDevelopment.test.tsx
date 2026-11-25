@@ -1,4 +1,5 @@
 import {apiClient} from '@/services/api/client'
+import type {releasesApi} from '@/services/api/releases'
 import type {UpdateStatus} from '@/services/api/update'
 import {updateApi} from '@/services/api/update'
 import type {AxiosInstance} from 'axios'
@@ -41,7 +42,7 @@ const originalAdapter = transport.defaults.adapter
 
 afterEach(() => {
     transport.defaults.adapter = originalAdapter
-    apiClient.setConfig({ apiBase: '', managementKey: '' })
+    apiClient.setConfig({ apiBase: '', sessionToken: '' })
 })
 
 function publishedReleaseBody(tag: string): string {
@@ -103,9 +104,11 @@ function harness({
                      authGeneration = 0,
                      supportsClientAttemptID = true,
                      releaseHistory,
+                     historyList,
                      api,
                  }: {
     api?: typeof updateApi
+    historyList?: typeof releasesApi.list
     releaseHistory?: Array<{ tag_name: string; body: string }>
     supportsClientAttemptID?: boolean | null
     authGeneration?: number
@@ -152,11 +155,13 @@ function harness({
         pollingReady,
         pollError,
         { authGeneration: 0, ...previousView },
+        0,
     ]
     let stateIndex                      = 0
     let refIndex                        = 0
     const refs: { current: unknown }[]  = []
     let unmountCleanup: (() => void) | undefined
+    let loadHistory: (() => (() => void) | void) | undefined
     const compatibility                 = mock(async () => {
         if (compatibilityError) {
             throw new Error('compatibility unavailable')
@@ -212,9 +217,9 @@ function harness({
             ) => {
                 if (dependencies.length ===
                     0) {
-                    unmountCleanup =
-                        callback() ??
-                        undefined
+                    unmountCleanup = callback() ?? undefined
+                } else if (historyList && callback.toString().includes('loadReleases')) {
+                    loadHistory = callback
                 }
             },
             useTranslation: () => ({
@@ -235,7 +240,7 @@ function harness({
                     panelUpdate,
                 },
             releasesApi: {
-                list: mock(async () => ({ releases })),
+                list: historyList ?? mock(async () => ({ releases })),
             },
             // noinspection JSUnusedGlobalSymbols
             'formatDate': (value: string) => value,
@@ -329,12 +334,55 @@ function harness({
     return {
         markup, action, confirmations, confirmationView, compatibility, trigger, panelUpdate, showNotification,
         addPersistentNotification, refreshServerVersion: auth.refreshServerVersion, targetVersion, states, render,
+        loadHistory: () => loadHistory?.(),
         changeConnection: () => {
             ++generation
         }, closeView: () => {
             render({ open: false })
         }, unmount: () => unmountCleanup?.(),
     }
+}
+
+for (const previous of ['panel', 'cpa'] as const) {
+    test(`failed history load after ${previous} never offers the previous target's release`, async () => {
+        const target      = previous === 'panel' ? 'cpa' : 'panel'
+        const oldTag      = 'v2.0.0-old'
+        const newTag      = 'v3.0.0-current'
+        const historyList = mock(async (page = 1, per_page = 100, requested = target) => {
+            if (historyList.mock.calls.length === 1) {
+                throw new Error('Synthetic release history unavailable')
+            }
+            return {
+                page, per_page, target: requested, total: 1, releases: [
+                    {
+                        tag_name: newTag, name: '', body: '', draft: false, prerelease: false, published_at: '',
+                        html_url: '', assets: [],
+                    },
+                ],
+            }
+        })
+        const view        = harness({ target: previous, locale: 'en', targetVersion: oldTag, historyList })
+        expect(view.markup).toContain(oldTag)
+        view.closeView()
+        expect(view.render({ open: true, target })).not.toContain(oldTag)
+        view.loadHistory()
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        const failed = view.render()
+        expect(failed).toContain('Synthetic release history unavailable')
+        expect(failed).not.toContain(oldTag)
+        expect(view.action('Install')).toBeUndefined()
+        const retry = view.action('Retry')
+        expect(retry).toBeDefined()
+        await retry?.onClick?.()
+        view.render()
+        view.loadHistory()
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(view.render()).toContain(newTag)
+        expect(view.render()).not.toContain(oldTag)
+        expect(historyList.mock.calls).toEqual([[1, 100, target], [1, 100, target]])
+        expect(view.compatibility).not.toHaveBeenCalled()
+        expect(view.panelUpdate).not.toHaveBeenCalled()
+    })
 }
 
 async function openInstall(view: ReturnType<typeof harness>, label = '安装') {
@@ -825,7 +873,7 @@ describe('release confirmation contracts', () => {
             expect(body).toContain('Full changelog:')
             expect(body).not.toContain('## v1.26.0-aug.4 -')
             const calls: Array<{ method: string; url: string; body: unknown }> = []
-            apiClient.setConfig({ apiBase: 'http://release.synthetic.invalid', managementKey: 'synthetic-release-key' })
+            apiClient.setConfig({ apiBase: 'http://release.synthetic.invalid', sessionToken: 'synthetic-release-key' })
             transport.defaults.adapter = async (config) => {
                 calls.push({
                                method: config.method ?? '',
@@ -928,7 +976,7 @@ describe('release confirmation contracts', () => {
                 params?: { attempt_id: string };
                 body?: { version: string; attempt_id: string }
             }>                   = []
-            apiClient.setConfig({ apiBase: 'http://release.synthetic.invalid', managementKey: 'synthetic-release-key' })
+            apiClient.setConfig({ apiBase: 'http://release.synthetic.invalid', sessionToken: 'synthetic-release-key' })
             transport.defaults.adapter = async (config) => {
                 const payload = config.data ? JSON.parse(config.data) : undefined
                 requests.push({
