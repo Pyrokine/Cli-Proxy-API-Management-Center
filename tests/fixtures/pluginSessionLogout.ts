@@ -101,5 +101,4 @@ if (scenario === 'old-backend') {
         assert.equal(localStorage.getItem('cli-proxy-auth:credentials'), null)
     }
 }
-
 console.log(`plugin-session-logout:${scenario}=PASS`)

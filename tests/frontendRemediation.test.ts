@@ -148,9 +148,7 @@ describe('frontend remediation shared contracts', () => {
         }
         setSystemTime(new Date('2026-10-23T09:23:42.125Z'))
         const select = sourceCallback<(value: typeof preset) => void>(
-            'components/ui/DateRangePicker.tsx',
-            'handlePreset',
-            scope,
+            'components/ui/DateRangePicker.tsx', 'handlePreset', scope,
         )
         select(preset)
         expect(calls[0]).toEqual(['2026-10-22T09:23:42.125Z', '2026-10-23T09:23:42.125Z', '24h'])

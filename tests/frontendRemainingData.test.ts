@@ -405,7 +405,7 @@ test('event rows and expanded pricing details retain amounts and cost explanatio
                             node.openingElement.getText(tree).includes('styles.requestPricingSection'),
             { React, styles: { requestEventsCostReason: 'cost-reason' }, row, t },
         )
-        const html = renderToStaticMarkup(details)
+        const html    = renderToStaticMarkup(details)
         expect(html).toContain('<p class="cost-reason">Price not configured</p>')
         expect(html).toContain(expectedCost)
     }

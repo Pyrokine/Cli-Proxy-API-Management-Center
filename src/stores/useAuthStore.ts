@@ -1189,7 +1189,6 @@ export const useAuthStore = create<AuthStoreState>()(
                         set({ apiBase: resolvedBase, sessionRestoreStatus: 'skipped', sessionRestoreError: null })
                         return false
                     }
-
                     try {
                         await connect(restoredCredentials, set, get)
                         return true

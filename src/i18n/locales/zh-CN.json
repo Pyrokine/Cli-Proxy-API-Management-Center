@@ -2962,7 +2962,7 @@
         "codex_config_added": "Codex配置添加成功",
         "codex_config_updated": "Codex配置更新成功",
         "codex_config_deleted": "Codex配置删除成功",
-        "codex_base_url_required": "请填写Codex Base URL",
+        "codex_base_url_required": "请填写 Codex Base URL",
         "xai_config_added": "xAI 配置添加成功",
         "xai_config_updated": "xAI 配置更新成功",
         "xai_key_required": "请填写 xAI API 密钥",
