@@ -75,7 +75,7 @@ export const useClaudeEditDraftStore = create<ClaudeEditDraftState>((set, get) =
             return {
                 drafts: {
                     ...state.drafts,
-                    [key]: { ...existing, initialized: true, apiKeyEdited: true },
+                    [key]: { ...existing, apiKeyEdited: true },
                 },
             }
         })
@@ -93,7 +93,6 @@ export const useClaudeEditDraftStore = create<ClaudeEditDraftState>((set, get) =
                     ...state.drafts,
                     [key]: {
                         ...existing,
-                        initialized: true,
                         editedCredentialHeaderNames: Array.from(edited),
                     },
                 },

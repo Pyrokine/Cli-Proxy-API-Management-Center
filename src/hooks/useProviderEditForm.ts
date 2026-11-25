@@ -152,9 +152,14 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
         }
     }, [clearCache, fetchConfig, isCurrent, t, updateConfigValue])
 
+    const hasIndexParam                             = typeof params.index === 'string'
+    const editIndex                                 = useMemo(() => parseIndexParam(params.index), [params.index])
+    const invalidIndexParam                         = hasIndexParam && editIndex === null
     const [storedConfigs, setConfigs]               = useState<TConfig[]>([])
-    const [configGeneration, setConfigGeneration]   = useState<number | null>(null)
-    const [loading, setLoading]                     = useState(true)
+    const [loadedSource, setLoadedSource]           = useState<{
+                                                                   generation: number;
+                                                                   index: number | null
+                                                               } | null>(null)
     const [savingGeneration, setSavingGeneration]   = useState<number | null>(null)
     const saving                                    = savingGeneration === authGeneration
     const setSaving                                 = useCallback((value: boolean) => {
@@ -163,35 +168,26 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
         }
     }, [authGeneration, isCurrent])
     const [error, setError]                         = useState('')
-    const [storedForm, setStoredForm]               = useState<TForm>(() => config.buildEmptyForm())
-    const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(config.buildEmptyForm()))
-    const sourceLoaded                              = configGeneration === authGeneration
+    const [emptyForm]                               = useState(config.buildEmptyForm)
+    const [storedForm, setStoredForm]               = useState(emptyForm)
+    const [baselineSignature, setBaselineSignature] = useState(() => config.buildSignature(emptyForm))
+    const sourceLoaded                              = loadedSource?.generation ===
+                                                      authGeneration &&
+                                                      loadedSource.index ===
+                                                      editIndex
     const configs                                   = useMemo(
         () => sourceLoaded ? storedConfigs : [],
         [sourceLoaded, storedConfigs],
     )
-    const form                                      = sourceLoaded ? storedForm : config.buildEmptyForm()
-    const resolvedLoading                           = loading || !sourceLoaded
+    const form                                      = sourceLoaded ? storedForm : emptyForm
+    const resolvedLoading                           = !sourceLoaded
     const setForm: Dispatch<SetStateAction<TForm>>  = useCallback((action) => {
         if (isCurrent()) {
             setStoredForm(action)
         }
     }, [isCurrent])
 
-    // ---- Index parsing ----
-
-    const hasIndexParam     = typeof params.index === 'string'
-    const editIndex         = useMemo(() => parseIndexParam(params.index), [params.index])
-    const invalidIndexParam = hasIndexParam && editIndex === null
-
-    const initialData = useMemo(() => {
-        if (editIndex === null) {
-            return undefined
-        }
-        return configs[editIndex]
-    }, [configs, editIndex])
-
-    const invalidIndex = editIndex !== null && !initialData
+    const invalidIndex = editIndex !== null && !configs[editIndex]
 
     const title = editIndex !== null ? t(config.i18n.editTitle) : t(config.i18n.addTitle)
 
@@ -207,10 +203,9 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
             if (cancelled || !isCurrent()) {
                 return
             }
-            setLoading(true)
+            setLoadedSource(null)
             setError('')
             setConfigs([])
-            const emptyForm = config.buildEmptyForm()
             setStoredForm(emptyForm)
             setBaselineSignature(config.buildSignature(emptyForm))
 
@@ -220,7 +215,12 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
                     if (cancelled || !isCurrent()) {
                         return
                     }
+                    const entry     = editIndex === null ? undefined : result[editIndex]
+                    const nextForm  = entry ? config.configToForm(entry) : emptyForm
+                    const signature = config.buildSignature(nextForm)
                     setConfigs(result)
+                    setStoredForm(nextForm)
+                    setBaselineSignature(signature)
                 })
                 .catch((err: unknown) => {
                     if (cancelled || !isCurrent()) {
@@ -233,8 +233,7 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
                     if (cancelled || !isCurrent()) {
                         return
                     }
-                    setConfigGeneration(authGeneration)
-                    setLoading(false)
+                    setLoadedSource({ generation: authGeneration, index: editIndex })
                 })
         })
 
@@ -242,28 +241,7 @@ export function useProviderEditForm<TForm extends BaseFormState, TConfig extends
             cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [authGeneration, fetchConfig, isCurrent])
-
-    // ---- Populate form from loaded data ----
-
-    useEffect(() => {
-        if (resolvedLoading) {
-            return
-        }
-        let cancelled = false
-        queueMicrotask(() => {
-            if (cancelled || !isCurrent()) {
-                return
-            }
-            const nextForm = initialData ? config.configToForm(initialData) : config.buildEmptyForm()
-            setStoredForm(nextForm)
-            setBaselineSignature(config.buildSignature(nextForm))
-        })
-        return () => {
-            cancelled = true
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [initialData, isCurrent, resolvedLoading])
+    }, [authGeneration, editIndex, emptyForm, fetchConfig, isCurrent])
 
     // ---- Dirty tracking ----
 

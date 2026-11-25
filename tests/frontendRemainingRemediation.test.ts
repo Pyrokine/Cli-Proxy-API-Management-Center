@@ -177,7 +177,7 @@ describe('remaining frontend remediation contracts', () => {
                 prepareApiCallAuth,
                 getErrorMessage,
                 t: translate,
-                buildCodexChatCompletionsEndpoint: () => 'https://fixture.invalid/v1/chat/completions',
+                buildCodexResponsesEndpoint: () => 'https://fixture.invalid/responses',
                 showTestError: (value: string) => errors.push(value),
                 runConnectivityTest: () => {
                     requests++

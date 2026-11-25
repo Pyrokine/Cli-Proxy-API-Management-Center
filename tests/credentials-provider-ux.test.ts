@@ -30,6 +30,7 @@ import {calculateStatusBarDataFromSummaryPoints} from '@/utils/usage'
 import {describe, expect, test} from 'bun:test'
 import {readFileSync} from 'node:fs'
 
+import {sourceCallback} from './sourceCallbacks'
 import {expectSourceToContain} from './sourceContractAssertions'
 
 const icon          = () => null
@@ -249,7 +250,7 @@ describe(
             expect(oauthLoginActionSource).toContain('onClick={resumePolling}')
             expectSourceToContain(
                 oauthLoginActionSource,
-                'disabled={!callbackUrl.trim() || (!plugin && provider === \'devin\' && canContinueAfterError)}',
+                'disabled={cancelSubmitting || !callbackUrl.trim() || (!plugin && provider === \'devin\' && canContinueAfterError)}',
             )
         })
 
@@ -258,7 +259,10 @@ describe(
             const submitEnd   = oauthLoginActionSource.indexOf('const handleCancel', submitStart)
             const submitBody  = oauthLoginActionSource.slice(submitStart, submitEnd)
 
-            expect(submitBody).toContain('await oauthApi.submitCallback(provider, redirectUrl, attempt.signal, plugin)')
+            expectSourceToContain(
+                submitBody,
+                'await oauthApi.submitCallback(provider, redirectUrl, nonceRef.current, attempt.signal, plugin)',
+            )
             expect(submitBody).toContain('if (attempt.isCurrent())')
             expect(submitBody).toContain('setCallbackAccepted(true)')
             expect(submitBody).not.toContain('setStatus(\'success\')')
@@ -341,9 +345,20 @@ describe(
             expect(query.get('auth_index_granularity')).toBe('10m')
         })
 
-        test('refreshes credential cards and auth-index insights as one operation', () => {
+        test('refreshes credential cards, aliases and auth-index insights as one operation', async () => {
             expect(credentialsPageSource).toContain('createLatestCredentialsRequestTracker()')
-            expect(credentialsPageSource).toContain('await Promise.all([refresh(), refreshCredentialInsights()])')
+            const calls: string[] = []
+            const refreshAll      = sourceCallback<() => Promise<void>>(
+                'pages/CredentialsPage.tsx',
+                'refreshAllCredentials',
+                {
+                    refresh: async () => calls.push('credentials'),
+                    refreshCredentialInsights: async () => calls.push('insights'),
+                    refreshAliases: async () => calls.push('aliases'),
+                },
+            )
+            await refreshAll()
+            expect(calls).toEqual(['credentials', 'insights', 'aliases'])
             expectSourceToContain(credentialsPageSource, 'useAutoRefresh(\n        refreshAllCredentials,')
             expect(credentialsPageSource).toContain('useHeaderRefresh(handleRefresh)')
             expect(credentialsPageSource).not.toContain('useAutoRefresh(refresh, autoRefreshMs)')
@@ -365,9 +380,7 @@ describe(
             expect(vendorSectionSource).toContain(
                 '((usageStatisticsEnabled && !authIndexUsageLoadFailed) || series !== undefined)',
             )
-            expect(
-                vendorSectionSource.match(/disabled=\{runtimeState\.status === 'disabled'}/g),
-            ).toHaveLength(1)
+            expectSourceToContain(vendorSectionSource, 'disabled={item.disabled}')
             expect(vendorSectionSource).toContain(
                 'disabled={entry ? Boolean(entry.disabled) : runtimeState.status === \'disabled\'}')
         })

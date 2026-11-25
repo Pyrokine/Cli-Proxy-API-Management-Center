@@ -35,6 +35,7 @@ export interface ModelAlias {
 export interface ApiKeyEntry {
     disabled?: boolean
     apiKey: string
+    aliasRef?: string
     proxyUrl?: string
     headers?: Record<string, string>
     authIndex?: string
@@ -63,6 +64,8 @@ export interface RequestScopedErrorRule {
 export interface GeminiKeyConfig extends CredentialOverrides {
     requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
+    aliasRef?: string
+    entryRef?: string
     authIndex?: string
     priority?: number
     weight?: number
@@ -77,6 +80,8 @@ export interface GeminiKeyConfig extends CredentialOverrides {
 export interface ProviderKeyConfig extends CredentialOverrides {
     requestScopedErrors?: RequestScopedErrorRule[]
     apiKey: string
+    aliasRef?: string
+    entryRef?: string
     authIndex?: string
     priority?: number
     weight?: number
@@ -84,6 +89,7 @@ export interface ProviderKeyConfig extends CredentialOverrides {
     baseUrl?: string
     websockets?: boolean
     alphaSearch?: boolean
+    interactions?: boolean
     disableCodexCloaking?: boolean
     rebuildMidSystemMessage?: boolean
     proxyUrl?: string

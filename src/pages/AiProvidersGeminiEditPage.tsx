@@ -109,6 +109,7 @@ export function AiProvidersGeminiEditPage() {
         createConfig: (config) => providersApi.createGeminiKey(config),
         updateConfig: (index, config, original) => providersApi.patchGeminiKey(index, config, original),
         validateBeforeSave: (form, original) =>
+            !form.apiKey.trim() ? 'ai_providers.api_key_required' :
             getCredentialWeightValidationKey(form.weight) ??
             getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors),
         i18n: {

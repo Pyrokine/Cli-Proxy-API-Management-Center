@@ -1,5 +1,5 @@
 import {describe, expect, mock, test} from 'bun:test'
-import {sourceCallback} from './sourceCallbacks'
+import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const formFile   = 'hooks/useProviderEditForm.ts'
 const layoutFile = 'hooks/useProviderEditLayout.ts'
@@ -14,6 +14,71 @@ const flush      = async () => {
 describe(
     'provider editor connection lifecycle',
     () => {
+        test('Codex exposes stable discovery inputs while the configuration request is pending', () => {
+            const config      = {
+                buildEmptyForm: sourceInitializer<() => { headers: unknown[]; modelEntries: unknown[] }>(
+                    'pages/AiProvidersCodexEditPage.tsx',
+                    'buildEmptyForm',
+                    {},
+                ),
+            }
+            const [emptyForm] = sourceInitializer<[ReturnType<typeof config.buildEmptyForm>]>(formFile, 'emptyForm', {
+                config, useState: (init: typeof config.buildEmptyForm) => [init()],
+            })
+            const storedForm  = { ...emptyForm, authIndex: 'previous-connection' }
+            const render      = (sourceLoaded: boolean) => sourceInitializer<typeof storedForm>(formFile, 'form', {
+                config, emptyForm, sourceLoaded, storedForm,
+            })
+            const pending     = render(false)
+            expect(pending.authIndex).toBeUndefined()
+            expect(render(false).headers).toBe(pending.headers)
+            expect(render(false).modelEntries).toBe(pending.modelEntries)
+            expect(render(true)).toBe(storedForm)
+        })
+
+        test('the selected entry and baseline are initialized before the editor is enabled', async () => {
+            const entry                            = { authIndex: 'fixture-entry', prefix: 'fixture prefix' }
+            const pending                          = Promise.withResolvers<typeof entry[]>()
+            const events: Array<[string, unknown]> = []
+            const record                           = (name: string) => (value: unknown) => events.push([name, value])
+            const effect                           = sourceCallback<() => () => void>(formFile, 'useEffect', {
+                authGeneration: 2,
+                editIndex: 1,
+                isCurrent: () => true,
+                t,
+                configHelpers: {},
+                emptyForm: {},
+                config: {
+                    loadConfigs: () => pending.promise,
+                    configToForm: (value: typeof entry) => ({ prefix: value.prefix }),
+                    buildSignature: (value: { prefix?: string }) => value.prefix ?? '',
+                },
+                setStoredForm: record('form'),
+                setBaselineSignature: record('baseline'),
+                setLoadedSource: record('owner'),
+                setConfigs: mock(),
+                setError: mock(),
+            }, 0)
+            const cleanup                          = effect()
+            await flush()
+            expect(events).toContainEqual(['owner', null])
+            events.length = 0
+            pending.resolve([{ ...entry, authIndex: 'different', prefix: 'different' }, entry])
+            await flush()
+            expect(events).toEqual([
+                                       ['form', { prefix: entry.prefix }], ['baseline', entry.prefix],
+                                       ['owner', { generation: 2, index: 1 }],
+                                   ])
+            const loadedSource = { generation: 2, index: 1 }
+            expect(sourceInitializer(formFile, 'sourceLoaded', { loadedSource, authGeneration: 2, editIndex: 1 })).toBe(
+                true)
+            expect(sourceInitializer(formFile, 'sourceLoaded', { loadedSource, authGeneration: 2, editIndex: 0 })).toBe(
+                false)
+            expect(sourceInitializer(formFile, 'sourceLoaded', { loadedSource, authGeneration: 3, editIndex: 1 })).toBe(
+                false)
+            cleanup()
+        })
+
         for (const file of [formFile, layoutFile]) {
             for (const outcome of ['success', 'failure'] as const) {
                 test(`${file} ignores an old load ${outcome} before effect cleanup`, async () => {
@@ -31,11 +96,25 @@ describe(
                     const setSaving           = mock()
                     const setError            = mock()
                     const setConfigGeneration = mock()
+                    const setLoadedSource     = mock()
                     const showNotification    = mock()
                     const scope               = {
-                        isCurrent, authGeneration: 1, t, loadConfigs, setConfigs, setLoading, setSaving,
-                        setError, setConfigGeneration, showNotification,
-                        setStoredForm: mock(), setBaselineSignature: mock(), configHelpers: {},
+                        isCurrent,
+                        authGeneration: 1,
+                        editIndex: null,
+                        t,
+                        loadConfigs,
+                        setConfigs,
+                        setLoading,
+                        setSaving,
+                        setError,
+                        setConfigGeneration,
+                        setLoadedSource,
+                        showNotification,
+                        setStoredForm: mock(),
+                        setBaselineSignature: mock(),
+                        configHelpers: {},
+                        emptyForm: {},
                         getErrorMessage: (error: unknown) => error instanceof Error ? error.message : '',
                         config: { loadConfigs, buildEmptyForm: () => ({}), buildSignature: () => 'empty' },
                     }
@@ -49,7 +128,8 @@ describe(
                     await flush()
                     expect(loadConfigs).toHaveBeenCalledTimes(1)
                     expect(setSaving).not.toHaveBeenCalled()
-                    for (const fn of [setConfigs, setLoading, setSaving, setError, setConfigGeneration]) {
+                    for (const fn of
+                        [setConfigs, setLoading, setSaving, setError, setConfigGeneration, setLoadedSource]) {
                         fn.mockClear()
                     }
                     generation = 2
@@ -64,6 +144,7 @@ describe(
                     expect(setSaving).not.toHaveBeenCalled()
                     expect(setError).not.toHaveBeenCalled()
                     expect(setConfigGeneration).not.toHaveBeenCalled()
+                    expect(setLoadedSource).not.toHaveBeenCalled()
                     expect(showNotification).not.toHaveBeenCalled()
                     cleanup()
                 })

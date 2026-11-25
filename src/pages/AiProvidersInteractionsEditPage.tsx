@@ -71,6 +71,7 @@ export function AiProvidersInteractionsEditPage() {
         createConfig: (config) => providersApi.createInteractionsKey(config),
         updateConfig: (index, config, original) => providersApi.patchInteractionsKey(index, config, original),
         validateBeforeSave: (form, original) =>
+            !form.apiKey.trim() ? 'ai_providers.api_key_required' :
             getCredentialWeightValidationKey(form.weight) ??
             getRequestScopedErrorsValidationKey(form.requestScopedErrors, original?.requestScopedErrors),
         i18n: {

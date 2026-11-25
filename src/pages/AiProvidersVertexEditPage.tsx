@@ -1,6 +1,8 @@
 import type {VertexFormState} from '@/components/providers'
+import {excludedModelsToText, parseTextList} from '@/components/providers/utils'
 import {ModelInputList} from '@/components/ui/ModelInputList'
 import {entriesToModels, modelsToEntries} from '@/components/ui/modelInputListUtils'
+import {Select} from '@/components/ui/Select'
 import {
     buildBaseSignatureFields,
     normalizeModelEntriesForSignature,
@@ -13,7 +15,7 @@ import {getCredentialWeightValidationKey} from '@/utils/credentialWeight'
 import {buildHeaderObject, headersToEntries} from '@/utils/headers'
 import {useTranslation} from 'react-i18next'
 import {ProviderEditShell} from './ProviderEditShell'
-import {ProviderConnectionFields} from './ProviderFormFields'
+import {ExcludedModelsField, ProviderConnectionFields} from './ProviderFormFields'
 
 // ---- Form helpers ----
 
@@ -27,12 +29,15 @@ const buildEmptyForm = (): VertexFormState => ({
     headers: [],
     models: [],
     modelEntries: [{ name: '', alias: '' }],
+    excludedText: '',
 })
 
 const buildSignature = (form: VertexFormState) =>
     JSON.stringify({
                        ...buildBaseSignatureFields(form),
                        models: normalizeModelEntriesForSignature(form.modelEntries),
+                       interactions: form.interactions ?? null,
+                       excludedModels: parseTextList(form.excludedText, /\r?\n/),
                    })
 
 // ---- Page component ----
@@ -49,6 +54,7 @@ export function AiProvidersVertexEditPage() {
             ...config,
             headers: headersToEntries(config.headers),
             modelEntries: modelsToEntries(config.models),
+            excludedText: excludedModelsToText(config.excludedModels),
         }),
         formToPayload: (form) => ({
             apiKey: form.apiKey.trim(),
@@ -61,12 +67,14 @@ export function AiProvidersVertexEditPage() {
             baseUrl: (form.baseUrl ?? '').trim() || undefined,
             proxyUrl: form.proxyUrl?.trim() || undefined,
             headers: buildHeaderObject(form.headers),
-            excludedModels: form.excludedModels,
+            interactions: form.interactions,
+            excludedModels: parseTextList(form.excludedText, /\r?\n/),
             models: entriesToModels(form.modelEntries),
         }),
         createConfig: (config) => providersApi.createVertexConfig(config),
         updateConfig: (index, config, original) => providersApi.patchVertexConfig(index, config, original),
-        validateBeforeSave: (form) => getCredentialWeightValidationKey(form.weight),
+        validateBeforeSave: (form) =>
+            !form.apiKey.trim() ? 'ai_providers.api_key_required' : getCredentialWeightValidationKey(form.weight),
         i18n: {
             editTitle: 'ai_providers.vertex_edit_modal_title',
             addTitle: 'ai_providers.vertex_add_modal_title',
@@ -115,6 +123,27 @@ export function AiProvidersVertexEditPage() {
                 baseUrlPlaceholder={t('ai_providers.vertex_add_modal_url_placeholder')}
                 proxyUrlLabel={t('ai_providers.vertex_add_modal_proxy_label')}
                 proxyUrlPlaceholder={t('ai_providers.vertex_add_modal_proxy_placeholder')}
+            />
+            <div className='form-group'>
+                <label id='vertex-interactions-label'>{t('ai_providers.vertex_interactions_label')}</label>
+                <Select
+                    ariaLabelledBy='vertex-interactions-label'
+                    disabled={disabled}
+                    value={form.interactions === undefined ? 'default' : String(form.interactions)}
+                    options={[
+                        { value: 'default', label: t('ai_providers.vertex_interactions_default') },
+                        { value: 'true', label: t('common.enabled') },
+                        { value: 'false', label: t('common.disabled') },
+                    ]}
+                    onChange={(value) => setForm((prev) => ({
+                        ...prev, interactions: value === 'default' ? undefined : value === 'true',
+                    }))}
+                />
+            </div>
+            <ExcludedModelsField
+                value={form.excludedText}
+                disabled={disabled}
+                onChange={(excludedText) => setForm((prev) => ({ ...prev, excludedText }))}
             />
             <div className='form-group'>
                 <label>{t('ai_providers.vertex_models_label')}</label>

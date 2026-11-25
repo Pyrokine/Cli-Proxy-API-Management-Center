@@ -3,11 +3,12 @@ import {Input} from '@/components/ui/Input'
 import {Pagination} from '@/components/ui/Pagination'
 import {SelectionCheckbox} from '@/components/ui/SelectionCheckbox'
 import {invalidateAuthFileModelsCache, loadAuthFileModels} from '@/features/authFiles/authFileModelsCache'
+import {authFileSelectionKey} from '@/features/authFiles/identity'
 import {usePagination} from '@/hooks/usePagination'
 import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
 import {useAuthStore} from '@/stores'
-import type {AuthFileModelItem} from '@/types/authFile'
+import type {AuthFileItem, AuthFileModelItem} from '@/types/authFile'
 import {
     formatExcludedModelsText,
     hasExcludedModelRule,
@@ -25,6 +26,7 @@ import styles from './AuthFileExcludedModelsField.module.scss'
 
 interface AuthFileExcludedModelsFieldProps {
     fileName: string
+    authIndex?: AuthFileItem['authIndex']
     value: string
     disabled: boolean
     onChange: (value: string) => void
@@ -50,6 +52,7 @@ const mergeConfiguredModels = (models: AuthFileModelItem[], rules: string[]): Au
 
 export function AuthFileExcludedModelsField({
                                                 fileName,
+                                                authIndex,
                                                 value,
                                                 disabled,
                                                 onChange,
@@ -59,7 +62,7 @@ export function AuthFileExcludedModelsField({
     const [search, setSearch]                 = useState('')
     const [retry, setRetry]                   = useState(0)
     const [loadedIdentity, setLoadedIdentity] = useState('')
-    const identity                            = `${generation}:${fileName}`
+    const identity                            = `${generation}:${authFileSelectionKey({ name: fileName, authIndex })}`
     const rules                               = useMemo(() => parseExcludedModelsText(value), [value])
     const [models, setModels]                 = useState<AuthFileModelItem[]>([])
     const [loading, setLoading]               = useState(true)
@@ -73,7 +76,7 @@ export function AuthFileExcludedModelsField({
                 setLoadFailed(false)
             }
         })
-        void loadAuthFileModels(fileName, authFilesApi.getModelsForAuthFile)
+        void loadAuthFileModels(fileName, authFilesApi.getModelsForAuthFile, authIndex)
             .then((items) => {
                 if (!active) {
                     return
@@ -98,7 +101,7 @@ export function AuthFileExcludedModelsField({
         return () => {
             active = false
         }
-    }, [fileName, generation, identity, retry])
+    }, [authIndex, fileName, generation, identity, retry])
 
     const mergedModels = useMemo(
         () => mergeConfiguredModels(loadedIdentity === identity ? models : [], rules),

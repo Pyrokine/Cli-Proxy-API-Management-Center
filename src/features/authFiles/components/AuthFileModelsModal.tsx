@@ -4,6 +4,7 @@ import {Modal} from '@/components/ui/Modal'
 import {Pagination} from '@/components/ui/Pagination'
 import {invalidateAuthFileModelsCache, loadAuthFileModels} from '@/features/authFiles/authFileModelsCache'
 import {normalizeAuthFileProvider} from '@/features/authFiles/constants'
+import {authFileSelectionKey} from '@/features/authFiles/identity'
 import {usePagination} from '@/hooks/usePagination'
 import {authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
@@ -36,7 +37,7 @@ export function AuthFileModelsModal({ file, onClose }: { file: AuthFileItem | nu
                                                         error: null,
                                                         unsupported: false,
                                                     })
-    const identity          = `${generation}:${file?.name ?? ''}`
+    const identity          = `${generation}:${file ? authFileSelectionKey(file) : ''}`
     const current           = state.identity === identity ?
                               state :
         { identity, models: [], loading: true, error: null, unsupported: false }
@@ -54,7 +55,7 @@ export function AuthFileModelsModal({ file, onClose }: { file: AuthFileItem | nu
                 setState({ identity, models: [], loading: true, error: null, unsupported: false })
             }
         })
-        void loadAuthFileModels(file.name, authFilesApi.getModelsForAuthFile)
+        void loadAuthFileModels(file.name, authFilesApi.getModelsForAuthFile, file.authIndex)
             .then((models) => {
                 if (!active || generation !== apiClient.getAuthGeneration()) {
                     return

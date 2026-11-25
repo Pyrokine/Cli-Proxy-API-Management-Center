@@ -76,7 +76,7 @@ export function createDraftSlice<D extends BaseDraft, S extends DraftSliceState<
         return {
             drafts: {
                 ...state.drafts,
-                [key]: { ...existing, initialized: true, ...patch } as D,
+                [key]: { ...existing, ...patch } as D,
             },
         }
     }

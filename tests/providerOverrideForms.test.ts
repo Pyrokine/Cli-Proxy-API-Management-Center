@@ -312,6 +312,29 @@ for (const provider of ['Claude', 'OpenAI'] as const) {
             store.releaseDraft(key)
             expect(useStore.getState().drafts[key]).toBeUndefined()
         })
+        test('updates transient draft fields without marking a pending configuration as loaded', () => {
+            const useStore = provider === 'Claude' ? useClaudeEditDraftStore : useOpenAIEditDraftStore
+            const store    = useStore.getState()
+            const key      = `${provider}:pending-config`
+            store.acquireDraft(key)
+            try {
+                store.setDraftTestStatus(key, 'idle')
+                store.setDraftTestMessage(key, '')
+                if (provider === 'OpenAI') {
+                    const openAI = useOpenAIEditDraftStore.getState()
+                    openAI.setDraftKeyTestStatus(key, 0, { status: 'idle', message: '' })
+                    openAI.setDraftKeyTestStatuses(key, [])
+                    openAI.resetDraftKeyTestStatuses(key, 1)
+                } else {
+                    const claude = useClaudeEditDraftStore.getState()
+                    claude.markDraftApiKeyEdited(key)
+                    claude.markDraftCredentialHeadersEdited(key, ['X-Fixture'])
+                }
+                expect(useStore.getState().drafts[key].initialized).toBe(false)
+            } finally {
+                store.releaseDraft(key)
+            }
+        })
         test('retains overrides in the draft and includes all three cooling states in dirty checks', () => {
             const baseline = seed(original).form
             for (const state of states) {

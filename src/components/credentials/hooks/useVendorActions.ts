@@ -15,17 +15,17 @@ import type {AuthFileItem} from '@/types/authFile'
 import {useCallback, useSyncExternalStore} from 'react'
 import {useTranslation} from 'react-i18next'
 
-type ApiKeyDeleter = (identifier: string, baseUrl?: string) => Promise<unknown>
+type ApiKeyDeleter = (identifier: string, baseUrl?: string, entryRef?: string) => Promise<unknown>
 type MutationCompleter = (mutation: AuthFileMutation | AuthFileMutation[]) => Promise<void>
 
 const API_KEY_DELETERS: Record<string, ApiKeyDeleter> = {
-    gemini: (key, baseUrl) => providersApi.deleteGeminiKey(key, baseUrl),
-    interactions: (key, baseUrl) => providersApi.deleteInteractionsKey(key, baseUrl),
-    claude: (key, baseUrl) => providersApi.deleteClaudeConfig(key, baseUrl),
-    codex: (key, baseUrl) => providersApi.deleteCodexConfig(key, baseUrl),
-    meta: (key, baseUrl) => providersApi.deleteMetaConfig(key, baseUrl),
-    xai: (key, baseUrl) => providersApi.deleteXAIConfig(key, baseUrl),
-    vertex: (key, baseUrl) => providersApi.deleteVertexConfig(key, baseUrl),
+    gemini: (...args) => providersApi.deleteGeminiKey(...args),
+    interactions: (...args) => providersApi.deleteInteractionsKey(...args),
+    claude: (...args) => providersApi.deleteClaudeConfig(...args),
+    codex: (...args) => providersApi.deleteCodexConfig(...args),
+    meta: (...args) => providersApi.deleteMetaConfig(...args),
+    xai: (...args) => providersApi.deleteXAIConfig(...args),
+    vertex: (...args) => providersApi.deleteVertexConfig(...args),
     openai: (name) => providersApi.deleteOpenAIProvider(name),
 }
 
@@ -76,23 +76,39 @@ export function useVendorActions(
                         if (generation !== apiClient.getAuthGeneration()) {
                             throw new Error(t('common.connection_changed'))
                         }
-                        if (deletingEntry && item) {
-                            const original = item.config as OpenAIProviderConfig
-                            const next     = {
-                                ...original,
-                                apiKeyEntries: original.apiKeyEntries.filter((_, index) => index !==
-                                                                                           item.entryIndex),
+                        try {
+                            if (deletingEntry && item) {
+                                const original = item.config as OpenAIProviderConfig
+                                const next     = {
+                                    ...original,
+                                    apiKeyEntries: original.apiKeyEntries.filter((_, index) => index !==
+                                                                                               item.entryIndex),
+                                }
+                                await providersApi.patchOpenAIProvider(item.configIndex, next, original)
+                            } else {
+                                const ref = item?.config.entryRef
+                                await deleter(identifier, baseUrl, typeof ref === 'string' ? ref : undefined)
                             }
-                            await providersApi.patchOpenAIProvider(item.configIndex, next, original)
-                        } else {
-                            await deleter(identifier, baseUrl)
+                        } catch (error: unknown) {
+                            if (generation === apiClient.getAuthGeneration()) {
+                                showNotification(error instanceof Error ?
+                                                 error.message :
+                                                 t('notification.delete_failed'), 'error')
+                            }
+                            throw error
                         }
                         if (generation !== apiClient.getAuthGeneration()) {
                             return
                         }
-                        await onRefresh()
-                        if (generation === apiClient.getAuthGeneration()) {
-                            showNotification(t('common.success'), 'success')
+                        try {
+                            await onRefresh()
+                            if (generation === apiClient.getAuthGeneration()) {
+                                showNotification(t('common.success'), 'success')
+                            }
+                        } catch {
+                            if (generation === apiClient.getAuthGeneration()) {
+                                showNotification(t('common.mutation_uncertain'), 'warning')
+                            }
                         }
                     },
                 })
@@ -163,17 +179,26 @@ export function useVendorActions(
                                      if (generation !== apiClient.getAuthGeneration()) {
                                          throw new Error(t('common.connection_changed'))
                                      }
-                                     const result = await authFilesApi.deleteFile(name)
-                                     if (generation !== apiClient.getAuthGeneration()) {
-                                         return
-                                     }
-                                     if (result.failed.length > 0) {
-                                         throw new Error(result.failed[0]?.error || t('common.error'))
-                                     }
-                                     const deletedNames = result.files.length > 0 ? result.files : [name]
-                                     await completeMutation({ kind: 'delete', names: deletedNames })
-                                     if (generation === apiClient.getAuthGeneration()) {
-                                         showNotification(t('common.success'), 'success')
+                                     try {
+                                         const result = await authFilesApi.deleteFile(name)
+                                         if (generation !== apiClient.getAuthGeneration()) {
+                                             return
+                                         }
+                                         if (result.failed.length > 0) {
+                                             throw new Error(result.failed[0]?.error || t('notification.delete_failed'))
+                                         }
+                                         const deletedNames = result.files.length > 0 ? result.files : [name]
+                                         await completeMutation({ kind: 'delete', names: deletedNames })
+                                         if (generation === apiClient.getAuthGeneration()) {
+                                             showNotification(t('common.success'), 'success')
+                                         }
+                                     } catch (error: unknown) {
+                                         if (generation === apiClient.getAuthGeneration()) {
+                                             showNotification(error instanceof Error ?
+                                                              error.message :
+                                                              t('notification.delete_failed'), 'error')
+                                         }
+                                         throw error
                                      }
                                  },
                              })

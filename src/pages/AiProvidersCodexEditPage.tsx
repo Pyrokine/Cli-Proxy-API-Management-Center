@@ -30,8 +30,44 @@ import {CODEX_QUICK_FILL_PRESETS} from './providerQuickFill'
 const CODEX_TEST_TIMEOUT_MS    = 30000
 const DEFAULT_CODEX_TEST_MODEL = 'gpt-5.4-mini'
 
-const buildCodexChatCompletionsEndpoint = (baseUrl: string) =>
-    modelsApi.buildV1ModelsEndpoint(baseUrl).replace(/\/models$/i, '/chat/completions')
+const buildCodexResponsesEndpoint = (baseUrl: string) => `${baseUrl.replace(/\/$/, '')}/responses`
+
+type CodexProbeResult = Awaited<ReturnType<typeof apiCallApi.request>>
+
+const validateCodexProbeResponse = (result: CodexProbeResult, unfinishedMessage: string): CodexProbeResult => {
+    if (result.statusCode < 200 || result.statusCode >= 300) {
+        return result
+    }
+    if (result.body && typeof result.body === 'object') {
+        if ('error' in result.body && result.body.error ||
+            'object' in result.body && result.body.object === 'response' &&
+            'status' in result.body && result.body.status === 'completed') {
+            return result
+        }
+    }
+    for (const line of result.bodyText.split(/\r?\n/)) {
+        if (!line.startsWith('data:')) {
+            continue
+        }
+        let event: { type?: string; error?: unknown; response?: { error?: unknown } } | null
+        try {
+            event = JSON.parse(line.slice(5)) as typeof event
+        } catch {
+            continue
+        }
+        if (event?.type === 'response.completed') {
+            return result
+        }
+        if (event?.type === 'error' || event?.type === 'response.failed' || event?.type === 'response.incomplete') {
+            return {
+                ...result,
+                bodyText: '',
+                body: { error: event.response?.error ?? event.error ?? { message: unfinishedMessage } },
+            }
+        }
+    }
+    return { ...result, bodyText: '', body: { error: { message: unfinishedMessage } } }
+}
 
 const buildEmptyForm = (): ProviderFormState => ({
     apiKey: '',
@@ -209,12 +245,7 @@ export function AiProvidersCodexEditPage() {
                 return
             }
 
-            const endpoint = buildCodexChatCompletionsEndpoint(baseUrl)
-            if (!endpoint) {
-                showTestError(t('notification.codex_base_url_required'))
-                return
-            }
-
+            const endpoint                        = buildCodexResponsesEndpoint(baseUrl)
             const preparedAuth                    = prepareApiCallAuth({
                                                                            headers: customHeaders,
                                                                            apiKey,
@@ -224,26 +255,40 @@ export function AiProvidersCodexEditPage() {
                                                                        })
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
+                ...(hasHeader(preparedAuth.headers, 'accept') ? {} : { Accept: 'text/event-stream' }),
                 ...preparedAuth.headers,
             }
 
             await runConnectivityTest(
-                () => apiCallApi.request(
-                    {
-                        method: 'POST',
-                        url: endpoint,
-                        header: headers,
-                        data: JSON.stringify({
-                                                 model: modelName,
-                                                 messages: [{ role: 'user', content: 'Hi' }],
-                                                 max_tokens: 8,
-                                             }),
-                        proxyUrl: form.proxyUrl?.trim() || undefined,
-                        authIndex: form.authIndex?.trim() || undefined,
-                        draftToken: preparedAuth.draftToken,
-                    },
-                    { timeout: CODEX_TEST_TIMEOUT_MS },
-                ),
+                async () => {
+                    const result = await apiCallApi.request(
+                        {
+                            method: 'POST',
+                            url: endpoint,
+                            header: headers,
+                            data: JSON.stringify({
+                                                     model: modelName,
+                                                     instructions: 'Reply with OK.',
+                                                     input: [
+                                                         {
+                                                             type: 'message',
+                                                             role: 'user',
+                                                             content: [{ type: 'input_text', text: 'Hi' }],
+                                                         },
+                                                     ],
+                                                     stream: true,
+                                                     store: false,
+                                                 }),
+                            proxyUrl: form.proxyUrl?.trim() || undefined,
+                            authIndex: form.authIndex?.trim() || undefined,
+                            draftToken: preparedAuth.draftToken,
+                        },
+                        { timeout: CODEX_TEST_TIMEOUT_MS },
+                    )
+                    return validateCodexProbeResponse(result, t('ai_providers.codex_test_unfinished', {
+                        defaultValue: 'The upstream did not complete the Responses request',
+                    }))
+                },
                 {
                     running: t('ai_providers.codex_test_running'),
                     success: t('ai_providers.codex_test_success'),

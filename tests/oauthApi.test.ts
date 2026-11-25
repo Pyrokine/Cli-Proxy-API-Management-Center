@@ -12,33 +12,40 @@ describe('OAuth API lifecycle contract', () => {
         try {
             await oauthApi.startAuth('devin', { nonce: 'nonce-a', signal: controller.signal })
             expect(get).toHaveBeenLastCalledWith('/devin-auth-url', {
-                params: { is_webui: true, nonce: 'nonce-a' },
+                params: { is_webui: true },
+                headers: { 'X-CPA-OAuth-Token': 'nonce-a' },
                 signal: controller.signal,
                 mutationReadback: expect.any(Function),
             })
 
             await oauthApi.getAuthStatus('state-a', 'nonce-a', controller.signal)
             expect(get).toHaveBeenLastCalledWith('/get-auth-status', {
-                params: { state: 'state-a', nonce: 'nonce-a' },
+                params: { state: 'state-a' },
+                headers: { 'X-CPA-OAuth-Token': 'nonce-a' },
                 signal: controller.signal,
             })
 
             await oauthApi.submitCallback(
                 'devin',
                 'http://127.0.0.1:1455/callback?code=fixture&state=state-a',
+                'nonce-a',
                 controller.signal,
             )
             expect(post).toHaveBeenLastCalledWith('/oauth-callback', {
                 provider: 'devin',
                 redirect_url: 'http://127.0.0.1:1455/callback?code=fixture&state=state-a',
-            }, { ...({ signal: controller.signal }), mutationReadback: expect.any(Function) })
+            }, {
+                                                      headers: { 'X-CPA-OAuth-Token': 'nonce-a' },
+                                                      signal: controller.signal,
+                                                      mutationReadback: expect.any(Function),
+                                                  })
 
             await oauthApi.cancelSession('state-a', 'nonce-a', controller.signal)
             expect(remove).toHaveBeenLastCalledWith('/oauth-session', {
-                ...({
-                    params: { state: 'state-a', nonce: 'nonce-a' },
-                    signal: controller.signal,
-                }), mutationReadback: expect.any(Function),
+                params: { state: 'state-a' },
+                headers: { 'X-CPA-OAuth-Token': 'nonce-a' },
+                signal: controller.signal,
+                mutationReadback: expect.any(Function),
             })
         } finally {
             get.mockRestore()

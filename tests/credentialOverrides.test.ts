@@ -406,7 +406,13 @@ describe('provider request-scoped error rules', () => {
             const page   = readFileSync(new URL(`../src/pages/AiProviders${name}EditPage.tsx`, import.meta.url), 'utf8')
             expect(layout).toContain('requestScopedErrors: form.requestScopedErrors')
             expect(layout).toContain('getRequestScopedErrorsValidationKey(')
-            expect(page).toContain('<RequestScopedErrorsField')
+            if (name === 'Claude') {
+                expect(page).toContain('<ProviderConnectionFields')
+                expect(page).not.toContain('supportsErrorRules={false}')
+                expect(page).not.toContain('<RequestScopedErrorsField')
+            } else {
+                expect(page).toContain('<RequestScopedErrorsField')
+            }
         }
         const vertex = readFileSync(new URL('../src/pages/AiProvidersVertexEditPage.tsx', import.meta.url), 'utf8')
         expect(vertex).toContain('supportsErrorRules={false}')

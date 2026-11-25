@@ -148,7 +148,13 @@ describe('xAI OAuth callback assembly', () => {
                         await handle()
                         if (state) {
                             expect(submit).toHaveBeenCalledTimes(1)
-                            expect(submit).toHaveBeenCalledWith('xai', expect.any(String), signal, false)
+                            expect(submit).toHaveBeenCalledWith(
+                                'xai',
+                                expect.any(String),
+                                'fixture-nonce',
+                                signal,
+                                false,
+                            )
                             const submitted = new URL(submit.mock.calls[0][1])
                             expect(`${submitted.origin}${submitted.pathname}`).toBe('http://127.0.0.1:56121/callback')
                             expect(submitted.searchParams.get('code')).toBe(code)

@@ -1,5 +1,5 @@
 import {buildClaudeMessagesEndpoint} from '@/components/providers/utils'
-import {getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api/apiCall'
+import {apiCallApi, getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api/apiCall'
 import {apiClient} from '@/services/api/client'
 import {modelsApi} from '@/services/api/models'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
@@ -54,6 +54,7 @@ function probe(provider: 'Claude' | 'OpenAI') {
         maskedCredentialHeaderNames: [],
         testModel: 'synthetic-model',
         resolvedTestModel: 'synthetic-model',
+        tokenLimitField: 'max_tokens',
         availableModels: [],
         apiCallApi: { request },
         buildHeaderObject,
@@ -209,6 +210,113 @@ for (const provider of ['Claude', 'OpenAI'] as const) {
         })
     })
 }
+
+const completionTokenError = 'Unsupported parameter: \'max_tokens\' is not supported with this model. ' +
+                             'Use \'max_completion_tokens\' instead.'
+
+for (const { selected, model, flag, rejected, fields, message } of [
+    {
+        selected: 'gpt-6-sol', model: 'gpt-6-sol', flag: true,
+        fields: ['max_completion_tokens'], message: 'ai_providers.openai_test_success',
+    },
+    {
+        selected: 'removed-model', model: 'legacy-chat', flag: false,
+        fields: ['max_tokens'], message: 'ai_providers.openai_test_success',
+    },
+    {
+        selected: 'gpt-6-sol', model: 'gpt-6-sol', rejected: completionTokenError,
+        fields: ['max_tokens', 'max_completion_tokens'],
+        message: 'ai_providers.openai_test_success · ai_providers.model_max_completion_tokens_label',
+    },
+    {
+        selected: 'legacy-chat', model: 'legacy-chat', rejected: 'Unsupported parameter: temperature',
+        fields: ['max_tokens'], message: 'ai_providers.openai_test_failed: 400 Unsupported parameter: temperature',
+    },
+]) {
+    test(`OpenAI probe sends ${fields.join(' then ')} for ${selected} and displays its result`, async () => {
+        const current = probe('OpenAI')
+        const post    = spyOn(apiClient, 'post').mockResolvedValue({ status_code: 200 })
+        try {
+            if (rejected) {
+                post.mockResolvedValueOnce({ status_code: 400, body: JSON.stringify({ error: { message: rejected } }) })
+            }
+            const selection = { testModel: selected, availableModels: [model, 'other-upstream-model'] }
+            const scope     = {
+                ...current.scope, ...selection, apiCallApi,
+                form: {
+                    ...current.scope.form, modelEntries: [
+                        { name: ` ${model} `, alias: 'client-model', useMaxCompletionTokens: flag },
+                        { name: 'other-upstream-model', alias: '', useMaxCompletionTokens: !flag },
+                    ],
+                },
+                resolvedTestModel: sourceInitializer<string>(current.file, 'resolvedTestModel', selection),
+            }
+            const run       = sourceInitializer<Run>(current.file, 'runOpenAIConnectivityTest', {
+                ...scope, tokenLimitField: sourceInitializer(current.file, 'tokenLimitField', scope),
+            })
+            await run()
+
+            expect(post).toHaveBeenCalledTimes(fields.length)
+            for (const [index, [path, payload, options]] of post.mock.calls.entries()) {
+                expect(path).toBe('/api-call')
+                expect(payload).toMatchObject({
+                                                  method: 'POST',
+                                                  url: 'https://fixture.invalid/v1/chat/completions',
+                                                  authIndex: 'synthetic-index',
+                                                  proxyUrl: 'http://proxy.invalid',
+                                                  draftToken: 'synthetic',
+                                                  header: {
+                                                      'Content-Type': 'application/json',
+                                                      Authorization: 'Bearer $TOKEN$',
+                                                  },
+                                              })
+                expect(JSON.parse((payload as { data: string }).data)).toEqual({
+                                                                                   model,
+                                                                                   messages: [
+                                                                                       {
+                                                                                           role: 'user',
+                                                                                           content: 'Hi',
+                                                                                       },
+                                                                                   ],
+                                                                                   [fields[index]]: 8,
+                                                                               })
+                expect(options?.signal).toBe(post.mock.calls[0]?.[2]?.signal)
+                expect(options?.timeout).toBeGreaterThan(0)
+                expect(options?.timeout).toBeLessThanOrEqual(30_000)
+            }
+
+            const outcome = rejected && rejected !== completionTokenError ? 'error' : 'success'
+            const updates = Object.fromEntries(current.updates)
+            expect(updates).toMatchObject({ status: outcome, message, 'key-0': { status: outcome, message } })
+            expect(current.showNotification).toHaveBeenCalledWith(message, outcome)
+            const badge = sourceExpression<ReactElement>(
+                'components/common/ModelTestPanel.tsx',
+                (node, tree) => ts.isJsxElement(node) && node.openingElement.getText(tree).includes('status-badge'),
+                { React, testStatus: updates.status, testMessage: updates.message },
+            )
+            const html  = renderToStaticMarkup(badge)
+            expect(html).toContain(`status-badge ${outcome}`)
+            expect(html).toContain(message)
+        } finally {
+            post.mockRestore()
+            current.generation.mockRestore()
+        }
+    })
+}
+
+test('OpenAI does not retry a token-field rejection from an old connection', async () => {
+    const current = probe('OpenAI')
+    try {
+        const pending = current.run(0)
+        current.generation.mockReturnValue(2)
+        current.response.resolve({ statusCode: 400, header: {}, bodyText: '', body: completionTokenError })
+        await pending
+        expect(current.request).toHaveBeenCalledTimes(1)
+        expect(current.showNotification).not.toHaveBeenCalled()
+    } finally {
+        current.generation.mockRestore()
+    }
+})
 
 describe(
     'OpenAI explicit all-key connectivity',

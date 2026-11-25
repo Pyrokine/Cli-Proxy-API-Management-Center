@@ -273,6 +273,7 @@ export default function CredentialsPage() {
     const config = useConfigStore((s) => s.config)
 
     const connectionStatus = useAuthStore((state) => state.connectionStatus)
+    const authGeneration   = useAuthStore(() => apiClient.getAuthGeneration())
 
     const showNotification = useNotificationStore((s) => s.showNotification)
 
@@ -426,7 +427,12 @@ export default function CredentialsPage() {
               completeMutation,
           } = useCredentialsData(vendors)
 
-    const [aliases, setAliases] = useState<Record<string, string>>({})
+    const [aliasState, setAliasState] = useState<{ generation: number; values: Record<string, string> } | null>(null)
+    const aliases                     = aliasState?.generation === authGeneration ?
+                                        aliasState.values :
+                                        EMPTY_CREDENTIAL_ALIASES
+    const aliasRequests               = useRef(createLatestCredentialsRequestTracker())
+    const pendingAliasSaves           = useRef(new Set<string>())
 
     const [authIndexUsageStats, setAuthIndexUsageStats] = useState<Record<string, SummaryApiKeyStats>>({})
 
@@ -495,13 +501,37 @@ export default function CredentialsPage() {
         }
     }, [searchQuery, statusFilter, typeFilter, selectedVendors, quotaSort, quotaPageSize, initialUIState])
 
-    // Load API key aliases
+    const refreshAliases = useCallback(async () => {
+        if (connectionStatus !== 'connected' || authGeneration !== apiClient.getAuthGeneration()) {
+            return
+        }
+        const tracker = aliasRequests.current
+        const token   = tracker.begin(authGeneration)
+        try {
+            const values = await apiKeyAliasApi.listCredentials()
+            if (tracker.isCurrent(token, apiClient.getAuthGeneration())) {
+                setAliasState({ generation: authGeneration, values })
+            }
+        } catch {
+            if (tracker.isCurrent(token, apiClient.getAuthGeneration())) {
+                console.warn('Failed to load credential aliases')
+            }
+        }
+    }, [authGeneration, connectionStatus])
+
     useEffect(() => {
-        apiKeyAliasApi
-            .list()
-            .then(setAliases)
-            .catch((err) => console.warn('Failed to load aliases:', err))
-    }, [vendorData])
+        let cancelled = false
+        const tracker = aliasRequests.current
+        queueMicrotask(() => {
+            if (!cancelled) {
+                void refreshAliases()
+            }
+        })
+        return () => {
+            cancelled = true
+            tracker.invalidate()
+        }
+    }, [refreshAliases])
 
     const refreshCredentialInsights = useCallback(async () => {
         const authGeneration                  = apiClient.getAuthGeneration()
@@ -560,8 +590,8 @@ export default function CredentialsPage() {
     }, [])
 
     const refreshAllCredentials                            = useCallback(async () => {
-        await Promise.all([refresh(), refreshCredentialInsights()])
-    }, [refresh, refreshCredentialInsights])
+        await Promise.all([refresh(), refreshCredentialInsights(), refreshAliases()])
+    }, [refresh, refreshCredentialInsights, refreshAliases])
     const { lastRefreshedAt, isRefreshing, markRefreshed } = useAutoRefresh(
         refreshAllCredentials,
         autoRefreshMs,
@@ -639,21 +669,56 @@ export default function CredentialsPage() {
     }, [completeMutation, markRefreshed, refreshCredentialInsights])
 
     const handleAliasChange = useCallback(
-        async (apiKey: string, alias: string) => {
+        async (reference: string, alias: string): Promise<boolean> => {
+            const isCurrent = () => authGeneration === apiClient.getAuthGeneration()
+            if (!isCurrent() || connectionStatus !== 'connected') {
+                return false
+            }
+            const pending    = pendingAliasSaves.current
+            const requestKey = `${authGeneration}:${reference}`
+            if (pending.has(requestKey)) {
+                showNotification(t('common.loading'), 'warning')
+                return false
+            }
+            pending.add(requestKey)
             try {
-                if (alias) {
-                    await apiKeyAliasApi.set(apiKey, alias)
-                } else {
-                    await apiKeyAliasApi.remove(apiKey)
+                let snapshot: Record<string, string> | undefined
+                await apiKeyAliasApi.setCredential(reference, alias, async () => {
+                    snapshot = await apiKeyAliasApi.listCredentials()
+                    if ((snapshot[reference] ?? '') !== alias) {
+                        throw new Error(t('credentials.alias_save_failed'))
+                    }
+                })
+                if (!isCurrent()) {
+                    return false
                 }
-                const updated = await apiKeyAliasApi.list()
-                setAliases(updated)
-            } catch (err) {
-                showNotification(t('credentials.alias_save_failed', { defaultValue: 'Failed to save alias' }), 'error')
-                console.warn('Alias operation failed:', err)
+                const confirmed = snapshot
+                if (!confirmed) {
+                    throw new Error(t('credentials.alias_save_failed'))
+                }
+                aliasRequests.current.invalidate()
+                setAliasState((previous) => {
+                    const values = { ...(previous?.generation === authGeneration ? previous.values : confirmed) }
+                    if (alias) {
+                        values[reference] = alias
+                    } else {
+                        delete values[reference]
+                    }
+                    return { generation: authGeneration, values }
+                })
+                return true
+            } catch (error) {
+                if (isCurrent()) {
+                    const message = t('credentials.alias_save_failed')
+                    const detail  = getErrorMessage(error)
+                    showNotification(detail && detail !== message ? `${message}: ${detail}` : message, 'error')
+                }
+                return false
+            } finally {
+                pending.delete(requestKey)
             }
         },
-        [showNotification, t],
+        [authGeneration, connectionStatus, showNotification, t],
     )
 
     // Batch operations
@@ -775,6 +840,13 @@ export default function CredentialsPage() {
                                                  'warning',
                                              )
                                          }
+                                     } catch (error: unknown) {
+                                         if (generation === apiClient.getAuthGeneration()) {
+                                             showNotification(error instanceof Error ?
+                                                              error.message :
+                                                              t('notification.delete_failed'), 'error')
+                                         }
+                                         throw error
                                      } finally {
                                          setBatchGeneration((previous) => previous === generation ? null : previous)
                                      }

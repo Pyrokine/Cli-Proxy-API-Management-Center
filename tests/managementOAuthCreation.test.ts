@@ -93,7 +93,9 @@ for (const provider of providers) {
                                                                           'get /get-auth-status',
                                                                       ])
         expect(wire.calls[0].headers['X-CPA-Mutation-ID']).toMatch(/^[0-9a-f-]{36}$/)
-        expect(wire.calls[1].params).toEqual({ state, nonce })
+        expect(wire.calls[0].headers['X-CPA-OAuth-Token']).toBe(nonce)
+        expect(wire.calls[1].params).toEqual({ state })
+        expect(wire.calls[1].headers['X-CPA-OAuth-Token']).toBe(nonce)
         expect(wire.result().effects).toEqual([{ kind: 'task.created', target: 'task' }])
     })
 }
@@ -310,6 +312,7 @@ for (const callbackProvider of ['codex', 'synthetic-plugin']) {
             expect(onSuccess).not.toHaveBeenCalled()
             expect(wire.calls.map((c) => `${c.method} ${c.url}`)).toEqual(['post /oauth-callback', 'get /auth-files'])
             expect(JSON.parse(String(wire.calls[0].data))).toHaveProperty('provider', callbackProvider)
+            expect(wire.calls[0].headers['X-CPA-OAuth-Token']).toBe(nonce)
         },
     )
 }
@@ -487,10 +490,12 @@ test('dynamic plugin creation carries one UUID, nonce and signal while status re
                                                                                'get /synthetic-plugin-auth-url',
                                                                                'get /get-auth-status',
                                                                            ])
-    expect(wire.calls[0].params).toEqual({ is_webui: true, nonce })
+    expect(wire.calls[0].params).toEqual({ is_webui: true })
+    expect(wire.calls[0].headers['X-CPA-OAuth-Token']).toBe(nonce)
     expect(wire.calls[0].headers['X-CPA-Mutation-ID']).toMatch(/^[0-9a-f-]{36}$/)
     expect(wire.calls[1].headers['X-CPA-Mutation-ID']).toBeUndefined()
-    expect(wire.calls[1].params).toEqual({ state, nonce })
+    expect(wire.calls[1].params).toEqual({ state })
+    expect(wire.calls[1].headers['X-CPA-OAuth-Token']).toBe(nonce)
     expect(wire.calls[1].signal).toBe(controller.signal)
 })
 

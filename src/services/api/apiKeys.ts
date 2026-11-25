@@ -32,6 +32,24 @@ export const apiKeyAliasApi = {
         return (data['api-key-aliases'] ?? {}) as Record<string, string>
     },
 
+    async listCredentials(): Promise<Record<string, string>> {
+        const data    = await apiClient.get<{ 'aliases-by-ref'?: unknown }>('/api-key-aliases', {
+            params: { by: 'credential-ref' },
+        })
+        const aliases = data?.['aliases-by-ref']
+        if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases) ||
+            Object.values(aliases).some((alias) => typeof alias !== 'string')) {
+            throw new Error('Invalid credential aliases response')
+        }
+        return aliases as Record<string, string>
+    },
+
+    setCredential: (keyRef: string, alias: string, readback: () => Promise<void>) => apiClient.patch(
+        '/api-key-aliases',
+        { 'key-ref': keyRef, alias },
+        { mutationReadback: () => readback() },
+    ),
+
     set: (key: string, alias: string) => apiClient.patch(
         '/api-key-aliases',
         { key, alias },

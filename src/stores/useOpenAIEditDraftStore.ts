@@ -72,7 +72,7 @@ export const useOpenAIEditDraftStore = create<OpenAIEditDraftState>((set, get) =
             return {
                 drafts: {
                     ...state.drafts,
-                    [draftKey]: { ...existing, initialized: true, keyTestStatuses: nextStatuses },
+                    [draftKey]: { ...existing, keyTestStatuses: nextStatuses },
                 },
             }
         })
@@ -87,7 +87,7 @@ export const useOpenAIEditDraftStore = create<OpenAIEditDraftState>((set, get) =
             return {
                 drafts: {
                     ...state.drafts,
-                    [draftKey]: { ...existing, initialized: true, keyTestStatuses: statuses },
+                    [draftKey]: { ...existing, keyTestStatuses: statuses },
                 },
             }
         })
@@ -104,7 +104,6 @@ export const useOpenAIEditDraftStore = create<OpenAIEditDraftState>((set, get) =
                     ...state.drafts,
                     [draftKey]: {
                         ...existing,
-                        initialized: true,
                         keyTestStatuses: Array.from({ length: count }, () => ({
                             status: 'idle' as const,
                             message: '',

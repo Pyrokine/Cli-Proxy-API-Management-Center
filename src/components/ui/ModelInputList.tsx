@@ -25,7 +25,6 @@ const ADVANCED_BOOLEAN_FIELDS = [
     { field: 'isCompat', label: 'ai_providers.model_is_compat_label' },
     { field: 'forceMapping', label: 'ai_providers.model_force_mapping_label' },
     { field: 'supportConfigurationUpdate', label: 'ai_providers.model_configuration_update_label' },
-    { field: 'useMaxCompletionTokens', label: 'ai_providers.model_max_completion_tokens_label' },
     { field: 'image', label: 'ai_providers.model_image_label' },
 ] as const
 
@@ -69,6 +68,7 @@ export function ModelInputList({
                                    provider,
                                }: ModelInputListProps) {
     const { t }                             = useTranslation()
+    const tokenLimitFieldLabel              = t('ai_providers.model_token_limit_field_label')
     const [search, setSearch]               = useState('')
     const [page, setPage]                   = useState(1)
     const [focusedIndex, setFocusedIndex]   = useState<number | null>(null)
@@ -120,17 +120,12 @@ export function ModelInputList({
     }, [entries])
     const advancedFlags = ADVANCED_BOOLEAN_FIELDS.filter(({ field }) =>
                                                              (field === 'isCompat' && provider !== 'vertex') ||
-                                                             (field ===
-                                                              'forceMapping' &&
-                                                              ['codex', 'xai', 'meta'].includes(provider)) ||
+                                                             field === 'forceMapping' ||
                                                              (field ===
                                                               'supportConfigurationUpdate' &&
                                                               provider ===
                                                               'codex') ||
-                                                             ([
-                                                                  'useMaxCompletionTokens',
-                                                                  'image',
-                                                              ].includes(field) && provider === 'openai'),
+                                                             (field === 'image' && provider === 'openai'),
     )
 
     const updateMetadata = (index: number, patch: Partial<ModelEntry>) => {
@@ -276,6 +271,28 @@ export function ModelInputList({
                                 >
                                     <IconX size={14} />
                                 </Button>
+                                {metadataEditing && provider === 'openai' && (
+                                    <div className={styles.metadataFields}>
+                                        <label className={styles.metadataField}>
+                                            <span>{tokenLimitFieldLabel}</span>
+                                            <Select
+                                                ariaLabel={entry.name ? `${tokenLimitFieldLabel}: ${entry.name}` :
+                                                           tokenLimitFieldLabel}
+                                                options={[
+                                                    { value: 'max_tokens', label: 'max_tokens' },
+                                                    { value: 'max_completion_tokens', label: 'max_completion_tokens' },
+                                                ]}
+                                                value={entry.useMaxCompletionTokens ?
+                                                       'max_completion_tokens' :
+                                                       'max_tokens'}
+                                                onChange={(value) => updateMetadata(index, {
+                                                    useMaxCompletionTokens: value === 'max_completion_tokens',
+                                                })}
+                                                disabled={disabled}
+                                            />
+                                        </label>
+                                    </div>
+                                )}
                                 {metadataEditing && (
                                     <details className={styles.entryDetails} open={validationKey ? true : undefined}>
                                         <summary>{t('ai_providers.model_details_label')}</summary>

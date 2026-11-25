@@ -974,10 +974,11 @@ export const authFilesApi = {
         return blob.text()
     },
 
-    getModelsForAuthFile: async (name: string): Promise<AuthFileModelItem[]> => {
-        const data = await apiClient.get<Record<string, unknown>>(
-            `/auth-files/models?name=${encodeURIComponent(name)}`,
-        )
+    getModelsForAuthFile: async (name: string, authIndex?: AuthFileItem['authIndex']): Promise<AuthFileModelItem[]> => {
+        const identity = String(authIndex ?? '').trim()
+        const data     = await apiClient.get<Record<string, unknown>>('/auth-files/models', {
+            params: { name, ...(identity ? { auth_index: identity } : {}) },
+        })
         return Array.isArray(data.models) ? (data.models as AuthFileModelItem[]) : []
     },
 

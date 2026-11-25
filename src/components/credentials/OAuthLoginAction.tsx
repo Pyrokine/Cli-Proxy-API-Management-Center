@@ -314,7 +314,7 @@ export function OAuthLoginAction({
         setCallbackSubmitting(true)
         setError('')
         try {
-            await oauthApi.submitCallback(provider, redirectUrl, attempt.signal, plugin)
+            await oauthApi.submitCallback(provider, redirectUrl, nonceRef.current, attempt.signal, plugin)
             if (attempt.isCurrent()) {
                 setCallbackAccepted(true)
                 if (oauthState && nonceRef.current && !attempt.isPolling()) {
@@ -358,7 +358,7 @@ export function OAuthLoginAction({
         loginAttempt?.invalidate()
         setCallbackSubmitting(false)
 
-        if ((!plugin && provider !== 'devin') || !stateValue || !ownsLoginFlow) {
+        if (!stateValue || !nonce || !ownsLoginFlow) {
             nonceRef.current = ''
             setOauthState('')
             setUserCode('')
@@ -387,9 +387,7 @@ export function OAuthLoginAction({
             if (!cancelAttempt.isCurrent()) {
                 return
             }
-            setError(err instanceof Error ?
-                     err.message :
-                     t(plugin ? 'common.unknown_error' : 'auth_login.devin_oauth_cancel_error'))
+            setError(err instanceof Error ? err.message : t('credentials.oauth_cancel_failed'))
         }
         if (!cancelAttempt.isCurrent()) {
             return
@@ -397,7 +395,7 @@ export function OAuthLoginAction({
         setCancelSubmitting(false)
         setStatus('waiting')
         startPolling(stateValue, nonce, cancelAttempt)
-    }, [oauthState, onCancel, provider, plugin, startPolling, t])
+    }, [oauthState, onCancel, provider, startPolling, t])
 
     const canContinueAfterError = status === 'error' && Boolean(
                                   url &&
@@ -475,7 +473,7 @@ export function OAuthLoginAction({
                         <div className={styles.errorArea}>
                             <IconX size={16} />
                             <span>{error || t('credentials.oauth_error')}</span>
-                            <Button variant='secondary' size='sm' onClick={resumePolling}>
+                            <Button variant='secondary' size='sm' onClick={resumePolling} disabled={cancelSubmitting}>
                                 {t('common.refresh')}
                             </Button>
                         </div>
@@ -560,7 +558,7 @@ export function OAuthLoginAction({
                                     size='sm'
                                     onClick={submitCallback}
                                     loading={callbackSubmitting}
-                                    disabled={!callbackUrl.trim() ||
+                                    disabled={cancelSubmitting || !callbackUrl.trim() ||
                                               (!plugin && provider === 'devin' && canContinueAfterError)}
                                 >
                                     {t('credentials.oauth_callback_submit')}
@@ -573,9 +571,9 @@ export function OAuthLoginAction({
                                    ? t('auth_login.devin_callback_hint')
                                    : t('auth_login.oauth_callback_hint')}
                             </div>
-                            {status === 'waiting' && error && <div className={styles.callbackError}>{error}</div>}
                         </div>
                     )}
+                    {status === 'waiting' && error && <div className={styles.callbackError} role='alert'>{error}</div>}
 
                     <Button
                         variant='secondary'

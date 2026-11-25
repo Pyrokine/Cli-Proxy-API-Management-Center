@@ -273,6 +273,7 @@ describe('provider mutation contract', () => {
             await providersApi.patchInteractionsKey(0, { ...keys[0]!, weight: 3 }, keys[0]!)
             expect(patch).toHaveBeenCalledWith('/interactions-api-key', {
                 index: 0,
+                'keep-entry': true,
                 'auth-index': 'interactions-auth',
                 value: expect.objectContaining({ weight: 3 }),
             }, { ...({ __authGeneration: apiClient.getAuthGeneration() }), mutationReadback: expect.any(Function) })

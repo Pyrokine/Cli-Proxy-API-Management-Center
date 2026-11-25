@@ -27,8 +27,8 @@ function card(
             usageStatisticsEnabled: true, authIndexUsageLoadFailed: false,
             resolveRuntimeState: () => ({ status: 'normal' }), resolveUsageError: () => undefined,
             providerEditTriggerId: () => 'synthetic-trigger', openProviderEditor: noop,
-            resolveApiKeyTitle: () => 'Synthetic', highlightMatch: (value: string) => value,
-            aliases: {}, onAliasChange: undefined, t, disableControls: false, manualStatusRequests: new Map(),
+            aliasFor: () => undefined, maskApiKey, highlightMatch: (value: string) => value,
+            onAliasChange: undefined, t, disableControls: false, manualStatusRequests: new Map(),
             authFileStatusRequestKey: () => 'synthetic-status', apiClient: { getAuthGeneration: () => 1 },
             toggleApiKey, deleteApiKey: noop, CredentialCard: () => null,
         },
@@ -209,9 +209,9 @@ test('migrated per-brand text filters actual cards together with global filters 
         },
     ])
     const backendMaskedApiKey = sourceInitializer<(value: string) => string>(file, 'backendMaskedApiKey', {})
-    const apiKeyAliasTokens   = sourceInitializer<(value: string, aliases: Record<string, string>) => string[]>(
+    const apiKeySearchTokens  = sourceInitializer<(value: string) => string[]>(
         file,
-        'apiKeyAliasTokens',
+        'apiKeySearchTokens',
         {
             maskApiKey,
             backendMaskedApiKey,
@@ -228,11 +228,11 @@ test('migrated per-brand text filters actual cards together with global filters 
         typeFilter: 'api-key', manualKeyItems: items, accountHealthByAuthIndex: {},
         statusFilter: 'all', query: '', wildcardQuery: null,
         resourceQuery: JSON.parse(restored.storage.get('cpa-credentials-openai-resource-filter')!), selectedModels: [],
-        resourceSort: 'name', resourceDirection: 'asc', aliases: {}, authIndexUsageStats: {},
+        resourceSort: 'name', resourceDirection: 'asc', aliasFor: () => undefined, authIndexUsageStats: {},
         vendor: { id: 'openai', label: 'OpenAI' }, maskApiKey,
         // noinspection JSUnusedGlobalSymbols
         'apiKeyMatchesStatus': apiKeyMatchesStatus,
-        apiKeyAliasTokens, joinSearchTokens, matchesSearchQuery, modelSearchTokens,
+        apiKeySearchTokens, joinSearchTokens, matchesSearchQuery, modelSearchTokens,
     }
     const read                = (overrides: Record<string, unknown> = {}) => sourceCallback<() => typeof items>(
         file,

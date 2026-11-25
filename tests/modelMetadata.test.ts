@@ -123,7 +123,7 @@ describe('provider model metadata', () => {
             expect(markup).toContain(i18n.t('ai_providers.model_thinking_levels_label'))
             expect(markup.includes(labels.context)).toBe(provider !== 'vertex')
             expect(markup.includes(labels.compat)).toBe(provider !== 'vertex')
-            expect(markup.includes(labels.mapping)).toBe(['codex', 'xai', 'meta'].includes(provider))
+            expect(markup).toContain(labels.mapping)
             expect(markup.includes(labels.update)).toBe(provider === 'codex')
             expect(markup.includes(labels.image)).toBe(provider === 'openai')
             expect(markup.includes(labels.input)).toBe(provider === 'openai')
@@ -157,8 +157,20 @@ describe('provider model metadata', () => {
         }, { name: 'test', baseUrl: 'https://example.test', apiKeyEntries: [] }).value
         const vertex = buildVertexConfigPatchRequest(0, {
             ...key,
-            models: [{ name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model' }],
-        }, key).value
+            interactions: false,
+            excludedModels: ['*-preview'],
+            models: [
+                {
+                    name: 'upstream-model',
+                    alias: 'public-model',
+                    displayName: 'Friendly model',
+                    forceMapping: true,
+                },
+            ],
+        }, { ...key, interactions: true }).value
+        expect(vertex).toMatchObject({ interactions: false, 'excluded-models': ['*-preview'] })
+        expect(buildVertexConfigPatchRequest(0, key, { ...key, interactions: false }).value)
+            .toHaveProperty('interactions', null)
 
         const expected = {
             name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model',
@@ -181,7 +193,7 @@ describe('provider model metadata', () => {
         ])
         expect(vertex).toHaveProperty('models', [
             {
-                name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model',
+                name: 'upstream-model', alias: 'public-model', 'display-name': 'Friendly model', 'force-mapping': true,
             },
         ])
         expect(entriesToModels([{ name: 'upstream-model', alias: 'public-model', displayName: 'Friendly model' }]))

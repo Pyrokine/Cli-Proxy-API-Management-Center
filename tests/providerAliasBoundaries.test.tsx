@@ -134,8 +134,9 @@ for (const [alias, canonical] of aliases) {
                     )()
                     const attempt = attempts.get(canonical)
                     expect(attempt?.isCurrent()).toBe(true)
+                    const headers = { 'X-CPA-OAuth-Token': 'synthetic-nonce' }
                     expect(get).toHaveBeenLastCalledWith(`/${canonical}-auth-url`, {
-                        params: { is_webui: true, nonce: 'synthetic-nonce' }, signal: attempt?.signal,
+                        params: { is_webui: true }, headers, signal: attempt?.signal,
                         mutationReadback: expect.any(Function),
                     })
                     expect(scope.setStatus).toHaveBeenLastCalledWith('waiting')
@@ -153,7 +154,7 @@ for (const [alias, canonical] of aliases) {
                     await callback()
                     expect(post).toHaveBeenCalledWith('/oauth-callback', {
                         provider: canonical, redirect_url: 'https://callback.invalid/?state=synthetic-state',
-                    }, { signal: attempt?.signal, mutationReadback: expect.any(Function) })
+                    }, { headers, signal: attempt?.signal, mutationReadback: expect.any(Function) })
                     expect(scope.setCallbackAccepted).toHaveBeenLastCalledWith(true)
                     expect(plugin.oauth_provider).toBe(declared ? ` ${alias.toUpperCase()} ` : undefined)
                 } finally {

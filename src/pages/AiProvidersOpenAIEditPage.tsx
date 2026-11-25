@@ -83,7 +83,9 @@ export function AiProvidersOpenAIEditPage() {
         [availableModels],
     )
 
-    const resolvedTestModel = testModel || availableModels[0] || ''
+    const resolvedTestModel = availableModels.includes(testModel) ? testModel : availableModels[0] ?? ''
+    const tokenLimitField   = form.modelEntries.find((entry) => entry.name.trim() === resolvedTestModel)
+                                  ?.useMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens'
 
     const connectivityConfigSignature   = useMemo(
         () => JSON.stringify({
@@ -91,14 +93,18 @@ export function AiProvidersOpenAIEditPage() {
                                  baseUrl: form.baseUrl.trim(),
                                  headers: form.headers.map((entry) => [entry.key.trim(), entry.value.trim()]),
                                  authIndex: form.authIndex?.trim() ?? '',
-                                 model: resolvedTestModel.trim(),
+                                 model: resolvedTestModel,
+                                 tokenLimitField,
                                  keys: form.apiKeyEntries.map((entry) => ({
                                      apiKey: entry.apiKey.trim(),
                                      authIndex: entry.authIndex?.trim() ?? '',
                                      proxyUrl: entry.proxyUrl?.trim() ?? '',
                                  })),
                              }),
-        [authGeneration, form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers, resolvedTestModel],
+        [
+            authGeneration, form.apiKeyEntries, form.authIndex, form.baseUrl, form.headers,
+            resolvedTestModel, tokenLimitField,
+        ],
     )
     const previousConnectivityConfigRef = useRef(connectivityConfigSignature)
 
@@ -155,10 +161,9 @@ export function AiProvidersOpenAIEditPage() {
             return
         }
 
-        const baseUrl   = form.baseUrl.trim()
-        const modelName = resolvedTestModel.trim()
-        const endpoint  = baseUrl ? buildOpenAIChatCompletionsEndpoint(baseUrl) : ''
-        if (!endpoint || !modelName) {
+        const baseUrl  = form.baseUrl.trim()
+        const endpoint = baseUrl ? buildOpenAIChatCompletionsEndpoint(baseUrl) : ''
+        if (!endpoint || !resolvedTestModel) {
             const message = t(!endpoint ?
                               'notification.openai_test_url_required' :
                               'notification.openai_test_model_required')
@@ -196,6 +201,8 @@ export function AiProvidersOpenAIEditPage() {
         const requestId            = ++activeTestRequestIdRef.current
         const controller           = new AbortController()
         activeTestAbortRef.current = controller
+        const isCurrentTest        = () => authGeneration === apiClient.getAuthGeneration() &&
+                                           requestId === activeTestRequestIdRef.current && !controller.signal.aborted
         const runningMessage       = t('ai_providers.openai_test_running')
         setIsTesting(true)
         setTestStatus('loading')
@@ -205,11 +212,7 @@ export function AiProvidersOpenAIEditPage() {
 
         try {
             for (const index of indices) {
-                if (authGeneration !==
-                    apiClient.getAuthGeneration() ||
-                    requestId !==
-                    activeTestRequestIdRef.current ||
-                    controller.signal.aborted) {
+                if (!isCurrentTest()) {
                     return
                 }
                 const keyEntry                  = form.apiKeyEntries[index]
@@ -222,41 +225,49 @@ export function AiProvidersOpenAIEditPage() {
                 }
                 try {
                     if (apiKey || authIndex || hasHeader(headerObject, 'authorization')) {
-                        const preparedAuth = prepareApiCallAuth({
-                                                                    headers: headerObject,
-                                                                    apiKey,
-                                                                    authIndex,
-                                                                    preferredHeader: 'Authorization',
-                                                                    authorizationScheme: 'Bearer',
-                                                                })
-                        const result       = await apiCallApi.request(
+                        const preparedAuth     = prepareApiCallAuth({
+                                                                        headers: headerObject,
+                                                                        apiKey,
+                                                                        authIndex,
+                                                                        preferredHeader: 'Authorization',
+                                                                        authorizationScheme: 'Bearer',
+                                                                    })
+                        const sendProbe        = (
+                            limitField: typeof tokenLimitField,
+                            timeout: number,
+                        ) => apiCallApi.request(
                             {
                                 method: 'POST',
                                 url: endpoint,
                                 header: { 'Content-Type': 'application/json', ...preparedAuth.headers },
                                 data: JSON.stringify({
-                                                         model: modelName,
-                                                         messages: [
-                                                             {
-                                                                 role: 'user',
-                                                                 content: 'Hi',
-                                                             },
-                                                         ],
-                                                         max_tokens: 8,
+                                                         model: resolvedTestModel,
+                                                         messages: [{ role: 'user', content: 'Hi' }],
+                                                         [limitField]: 8,
                                                      }),
-                                proxyUrl: keyEntry?.proxyUrl?.trim() ||
-                                          undefined,
+                                proxyUrl: keyEntry?.proxyUrl?.trim() || undefined,
                                 authIndex,
                                 draftToken: preparedAuth.draftToken,
                             },
-                            {
-                                timeout: OPENAI_TEST_TIMEOUT_MS,
-                                signal: controller.signal,
-                            },
+                            { timeout, signal: controller.signal },
                         )
+                        const startedAt        = performance.now()
+                        let result             = await sendProbe(tokenLimitField, OPENAI_TEST_TIMEOUT_MS)
+                        const remainingTimeout = OPENAI_TEST_TIMEOUT_MS - Math.ceil(performance.now() - startedAt)
+                        const adaptTokenLimit  = tokenLimitField === 'max_tokens' && result.statusCode === 400 &&
+                                                 remainingTimeout > 0 && isCurrentTest() &&
+                                                 /\bmax_tokens\b.*\buse ['"]?max_completion_tokens['"]? instead\b/is.test(
+                                                     getApiCallErrorMessage(result),
+                                                 )
+                        if (adaptTokenLimit) {
+                            result = await sendProbe('max_completion_tokens', remainingTimeout)
+                        }
                         if (result.statusCode >= 200 && result.statusCode < 300) {
                             status  = 'success'
                             message = t('ai_providers.openai_test_success')
+                            if (adaptTokenLimit) {
+                                message += ` · ${t('ai_providers.model_max_completion_tokens_label')}`
+                            }
                         } else {
                             message =
                                 `${t('ai_providers.openai_test_failed')}: ${getApiCallErrorMessage(result) ||
@@ -278,11 +289,7 @@ export function AiProvidersOpenAIEditPage() {
                                       :
                                       `${t('ai_providers.openai_test_failed')}: ${detail || t('common.unknown_error')}`
                 }
-                if (authGeneration !==
-                    apiClient.getAuthGeneration() ||
-                    requestId !==
-                    activeTestRequestIdRef.current ||
-                    controller.signal.aborted) {
+                if (!isCurrentTest()) {
                     return
                 }
                 if (index >= 0) {
@@ -623,7 +630,7 @@ export function AiProvidersOpenAIEditPage() {
                     disabled={controlsDisabled}
                 >
                     <ModelTestPanel
-                        testModel={testModel}
+                        testModel={resolvedTestModel}
                         setTestModel={setTestModel}
                         testStatus={testStatus}
                         setTestStatus={setTestStatus}

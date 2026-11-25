@@ -96,7 +96,11 @@ const cases: Array<{ name: string; readback: string; send: () => Promise<unknown
     {
         name: 'OAuth callback',
         readback: '/auth-files',
-        send: () => oauthApi.submitCallback('synthetic', 'https://callback.synthetic.invalid?code=synthetic'),
+        send: () => oauthApi.submitCallback(
+            'synthetic',
+            'https://callback.synthetic.invalid?code=synthetic',
+            'synthetic-nonce',
+        ),
     },
     {
         name: 'OAuth cancel',

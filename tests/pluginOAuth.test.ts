@@ -63,42 +63,44 @@ describe('plugin OAuth routing', () => {
         const post       = spyOn(apiClient, 'post').mockResolvedValue({ status: 'ok' })
         const remove     = spyOn(apiClient, 'delete').mockResolvedValue({ status: 'ok', cancelled: true })
         const controller = new AbortController()
+        const headers    = { 'X-CPA-OAuth-Token': 'plugin-nonce' }
         try {
             await oauthApi.startAuth(
                 'custom-provider',
                 { plugin: true, nonce: 'plugin-nonce', signal: controller.signal },
             )
             expect(get).toHaveBeenLastCalledWith('/custom-provider-auth-url', {
-                params: { is_webui: true, nonce: 'plugin-nonce' }, signal: controller.signal,
+                params: { is_webui: true }, headers, signal: controller.signal,
                 mutationReadback: expect.any(Function),
             })
             await oauthApi.getAuthStatus('plugin-state', 'plugin-nonce', controller.signal)
             expect(get).toHaveBeenLastCalledWith('/get-auth-status', {
-                params: { state: 'plugin-state', nonce: 'plugin-nonce' }, signal: controller.signal,
+                params: { state: 'plugin-state' }, headers, signal: controller.signal,
             })
             await oauthApi.submitCallback(
                 'gemini-cli',
                 'https://callback.invalid/?state=plugin-state',
+                'plugin-nonce',
                 controller.signal,
                 true,
             )
             expect(post).toHaveBeenLastCalledWith('/oauth-callback', {
                 provider: 'gemini-cli', redirect_url: 'https://callback.invalid/?state=plugin-state',
-            }, { ...({ signal: controller.signal }), mutationReadback: expect.any(Function) })
+            }, { headers, signal: controller.signal, mutationReadback: expect.any(Function) })
             await oauthApi.cancelSession('plugin-state', 'plugin-nonce', controller.signal)
             expect(remove).toHaveBeenLastCalledWith('/oauth-session', {
-                ...({
-                    params: { state: 'plugin-state', nonce: 'plugin-nonce' }, signal: controller.signal,
-                }), mutationReadback: expect.any(Function),
+                params: { state: 'plugin-state' }, headers, signal: controller.signal,
+                mutationReadback: expect.any(Function),
             })
             await oauthApi.submitCallback(
                 'gemini-cli',
                 'https://callback.invalid/?state=builtin-state',
+                'plugin-nonce',
                 controller.signal,
             )
             expect(post).toHaveBeenLastCalledWith('/oauth-callback', {
                 provider: 'gemini', redirect_url: 'https://callback.invalid/?state=builtin-state',
-            }, { ...({ signal: controller.signal }), mutationReadback: expect.any(Function) })
+            }, { headers, signal: controller.signal, mutationReadback: expect.any(Function) })
         } finally {
             get.mockRestore()
             post.mockRestore()
@@ -133,7 +135,13 @@ describe('plugin OAuth login consumers', () => {
             const handle  = sourceCallback<() => Promise<void>>(actionFile, 'submitCallback', scope)
             try {
                 await handle()
-                expect(submit).toHaveBeenCalledWith(provider, scope.callbackUrl.trim(), attempt.signal, true)
+                expect(submit).toHaveBeenCalledWith(
+                    provider,
+                    scope.callbackUrl.trim(),
+                    'plugin-nonce',
+                    attempt.signal,
+                    true,
+                )
                 expect(scope.setCallbackAccepted).toHaveBeenCalledWith(true)
                 expect(scope.startPolling).toHaveBeenCalledWith('plugin-state', 'plugin-nonce', attempt)
                 expect(scope.setCallbackSubmitting.mock.calls.map((call) => call[0])).toEqual([true, false])

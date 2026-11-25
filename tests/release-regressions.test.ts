@@ -189,7 +189,7 @@ describe('management authentication lifecycle', () => {
         expect(vendorSectionSource).toContain('deriveAuthFileIdentity')
         expect(vendorSectionSource).toContain('uploadInFlight')
         expect(vendorSectionSource).toContain('AuthFileModelsModal')
-        expect(vendorSectionSource).toContain('onModels={() => setModelsFileName(file.name)}')
+        expect(vendorSectionSource).toContain('onModels={() => setModelsFileKey(authFileSelectionKey(file))}')
     })
 })
 

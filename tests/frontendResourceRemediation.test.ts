@@ -1,6 +1,7 @@
 import {apiKeyMatchesStatus, buildManualKeyCardItems} from '@/components/credentials/apiKeyStatus'
 import {filterAuthFiles} from '@/components/credentials/authFileListLogic'
 import {normalizeAuthFileProvider} from '@/features/authFiles/constants'
+import {authFileSelectionKey} from '@/features/authFiles/identity'
 import {buildOpenAIProviderPatchRequest} from '@/services/api/providers'
 import type {OpenAIProviderConfig} from '@/types'
 import {isModelExcludedByRules} from '@/utils/excludedModels'
@@ -175,7 +176,7 @@ test('resource models and all three bidirectional sorts preserve original config
         resourceQuery: '',
         resourceSort: 'name',
         resourceDirection: 'asc',
-        aliases: {},
+        aliasFor: () => undefined,
         maskApiKey,
         authIndexUsageStats: { z1: { success: 3 }, z2: { success: 8 }, a: { success: 1 } },
         // noinspection JSUnusedGlobalSymbols
@@ -223,9 +224,9 @@ test('filtered resource card edit and delete callbacks retain their original con
         resolveUsageError: () => undefined,
         providerEditTriggerId: (_vendor: string, identity: string) => identity,
         openProviderEditor: (...args: unknown[]) => edits.push(args),
-        resolveApiKeyTitle: () => 'Synthetic key',
+        aliasFor: () => undefined,
+        maskApiKey,
         highlightMatch: (value: string) => value,
-        aliases: {},
         onAliasChange: undefined,
         t,
         disableControls: false,
@@ -342,7 +343,7 @@ test('supported-model loading ignores a closed viewer and classifies unsupported
             {
                 file: { name: 'synthetic.json' },
                 generation: 1,
-                identity: '1:synthetic.json',
+                identity: `1:${authFileSelectionKey({ name: 'synthetic.json' })}`,
                 apiClient: { getAuthGeneration: () => 1 },
                 t,
                 loadAuthFileModels: () => response.promise,
@@ -373,7 +374,7 @@ test('supported-model loading ignores a closed viewer and classifies unsupported
     sourceCallback<() => void>('features/authFiles/components/AuthFileModelsModal.tsx', 'useEffect', {
         file: { name: 'synthetic.json' },
         generation: 1,
-        identity: '1:synthetic.json',
+        identity: `1:${authFileSelectionKey({ name: 'synthetic.json' })}`,
         apiClient: { getAuthGeneration: () => 1 },
         t,
         loadAuthFileModels: async () => {
@@ -391,7 +392,7 @@ test('supported-model view distinguishes loading, empty, unsupported and typed e
     for (const variant of ['loading', 'empty', 'unsupported', 'models'] as const) {
         let stateIndex = 0
         const state    = {
-            identity: '1:synthetic.json',
+            identity: `1:${authFileSelectionKey({ name: 'synthetic.json' })}`,
             models: variant === 'models' ? [{ id: 'Model-A', type: 'chat' }] : [],
             loading: variant === 'loading',
             error: variant === 'unsupported' ? '404' : null,
@@ -421,6 +422,7 @@ test('supported-model view distinguishes loading, empty, unsupported and typed e
                 goToPage: noop,
             }),
             normalizeAuthFileProvider,
+            authFileSelectionKey,
             isModelExcludedByRules,
             Modal: ({ children }: { children: React.ReactNode }) => React.createElement('section', {}, children),
             EmptyState: ({ title }: { title: string }) => React.createElement('div', {}, title),
@@ -613,9 +615,9 @@ test('flat manual credential cards dispatch their stable auth-index and reflect 
         providerEditTriggerId: () => 'trigger',
         openProviderEditor: () => {
         },
-        resolveApiKeyTitle: () => 'Synthetic',
+        aliasFor: () => undefined,
+        maskApiKey,
         highlightMatch: (value: string) => value,
-        aliases: {},
         onAliasChange: undefined,
         t,
         disableControls: false,

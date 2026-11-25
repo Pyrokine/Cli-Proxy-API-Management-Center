@@ -739,7 +739,6 @@ describe('metadata Select consumers: R-221', () => {
     test('provider-specific advanced flags keep all three values through the shared Select callbacks', () => {
         for (const [provider, label, field] of [
             ['codex', 'ai_providers.model_configuration_update_label', 'supportConfigurationUpdate'],
-            ['openai', 'ai_providers.model_max_completion_tokens_label', 'useMaxCompletionTokens'],
             ['openai', 'ai_providers.model_image_label', 'image'],
         ] as const) {
             for (const choice of ['', 'true', 'false']) {
@@ -749,6 +748,19 @@ describe('metadata Select consumers: R-221', () => {
                 ;(select.props.onChange as (value: string) => void)(choice)
                 expect(rendered.updated()[0][field]).toBe(choice === '' ? undefined : choice === 'true')
             }
+        }
+    })
+
+    test('OpenAI exposes the request token limit outside collapsed model options', () => {
+        const label = 'ai_providers.model_token_limit_field_label: fixture'
+        for (const flag of [undefined, true, false]) {
+            const rendered = modelSelectors({ name: 'fixture', alias: '', useMaxCompletionTokens: flag }, 'openai')
+            const select   = rendered.selectors.find((element) => element.props.ariaLabel === label)!
+            expect(select.props.value).toBe(flag ? 'max_completion_tokens' : 'max_tokens')
+            expect(elements(rendered.tree).filter((element) => element.type === 'details')
+                                          .some((details) => elements(details).includes(select))).toBe(false)
+            ;(select.props.onChange as (value: string) => void)(flag ? 'max_tokens' : 'max_completion_tokens')
+            expect(rendered.updated()[0].useMaxCompletionTokens).toBe(!flag)
         }
     })
 

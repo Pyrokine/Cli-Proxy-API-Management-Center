@@ -259,6 +259,7 @@ export function AuthFilesPrefixProxyEditorModal({
                                     )}
                                     <AuthFileExcludedModelsField
                                         fileName={editor.fileName}
+                                        authIndex={editor.authIndex}
                                         value={editor.excludedModelsText}
                                         disabled={fieldsDisabled}
                                         onChange={(value) => onChange('excludedModelsText', value)}

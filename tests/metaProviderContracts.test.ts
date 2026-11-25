@@ -113,18 +113,21 @@ describe('Meta Muse provider contracts', () => {
     test('carries device-code nonce and abort signal through Meta and international Kimi OAuth', async () => {
         const get        = spyOn(apiClient, 'get').mockResolvedValue({ status: 'wait' })
         const controller = new AbortController()
+        const headers    = { 'X-CPA-OAuth-Token': 'nonce-a' }
         try {
             for (const provider of ['meta', 'kimi-ai'] as const) {
                 await oauthApi.startAuth(provider, { nonce: 'nonce-a', signal: controller.signal })
                 expect(get).toHaveBeenLastCalledWith(`/${provider}-auth-url`, {
-                    params: { nonce: 'nonce-a' },
+                    params: undefined,
+                    headers,
                     signal: controller.signal,
                     mutationReadback: expect.any(Function),
                 })
             }
             await oauthApi.getAuthStatus('state-a', 'nonce-a', controller.signal)
             expect(get).toHaveBeenLastCalledWith('/get-auth-status', {
-                params: { state: 'state-a', nonce: 'nonce-a' },
+                params: { state: 'state-a' },
+                headers,
                 signal: controller.signal,
             })
             expect(oauthActionSource).toContain('setUserCode(response.user_code?.trim() ?? \'\')')

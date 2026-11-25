@@ -1,7 +1,6 @@
 import {ModelConfigSection} from '@/components/common/ModelConfigSection'
 import {ModelTestPanel} from '@/components/common/ModelTestPanel'
 import {ClaudeCodeConfigPanel} from '@/components/providers/ClaudeCodeConfigPanel'
-import {RequestScopedErrorsField} from '@/components/providers/CredentialOverrideFields'
 import {buildClaudeMessagesEndpoint, parseTextList} from '@/components/providers/utils'
 import {getModelEntriesValidationKey} from '@/components/ui/modelInputListUtils'
 import {Select} from '@/components/ui/Select'
@@ -357,11 +356,6 @@ export function AiProvidersClaudeEditPage() {
                     proxyUrlLabel={t('ai_providers.claude_add_modal_proxy_label')}
                     onApiKeyChange={updateApiKey}
                     onHeadersChange={updateHeaders}
-                />
-                <RequestScopedErrorsField
-                    rules={form.requestScopedErrors}
-                    onChange={(rules) => setForm((previous) => ({ ...previous, requestScopedErrors: rules }))}
-                    disabled={controlsDisabled}
                 />
 
                 <div className='form-group'>

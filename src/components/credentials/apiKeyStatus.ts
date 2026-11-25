@@ -1,4 +1,5 @@
 import type {GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig} from '@/types'
+import {hasExcludedModelRule} from '@/utils/excludedModels'
 
 type ApiKeyStatusFilter = 'all' | 'available' | 'exhausted' | 'error' | 'disabled' | 'problem' | 'disabled-problem'
 export type ManualKeyConfig = GeminiKeyConfig | ProviderKeyConfig | OpenAIProviderConfig
@@ -8,6 +9,7 @@ export interface ManualKeyCardItem {
     configIndex: number
     entryIndex?: number
     apiKey: string
+    aliasRef?: string
     authIndex?: string
     disabled: boolean
 }
@@ -25,8 +27,9 @@ export function buildManualKeyCardItems(vendorId: string, values: ManualKeyConfi
                 config,
                 configIndex,
                 apiKey: key.apiKey,
+                ...(key.aliasRef ? { aliasRef: key.aliasRef } : {}),
                 authIndex: key.authIndex,
-                disabled: false,
+                disabled: hasExcludedModelRule(key.excludedModels ?? [], '*'),
             }
         })
     }
@@ -49,6 +52,7 @@ export function buildManualKeyCardItems(vendorId: string, values: ManualKeyConfi
             configIndex,
             entryIndex,
             apiKey: entry.apiKey,
+            ...(entry.aliasRef ? { aliasRef: entry.aliasRef } : {}),
             authIndex: entry.authIndex,
             disabled: Boolean(provider.disabled || entry.disabled),
         }))
@@ -64,10 +68,10 @@ export function apiKeyMatchesStatus(
         return true
     }
 
-    const configuredDisabled = Boolean(
-        value && typeof value === 'object' && 'disabled' in value && (value as { disabled?: unknown }).disabled,
-    )
-    const disabled           = configuredDisabled || runtimeStatus?.status === 'disabled'
+    const configuredDisabled = value && typeof value === 'object' && 'disabled' in value ? value.disabled : undefined
+    const disabled           = typeof configuredDisabled === 'boolean' ?
+                               configuredDisabled :
+                               runtimeStatus?.status === 'disabled'
     if (statusFilter === 'problem' || statusFilter === 'disabled-problem') {
         const hasProblem = runtimeStatus?.status === 'unavailable' && Boolean(runtimeStatus.reason)
         return hasProblem && (statusFilter !== 'disabled-problem' || disabled)

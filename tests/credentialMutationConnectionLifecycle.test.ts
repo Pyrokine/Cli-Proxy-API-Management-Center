@@ -104,6 +104,25 @@ describe('credential mutation connection ownership', () => {
         })
     }
 
+    for (const action of confirmedActions) {
+        test(`${action} displays the current rejection without announcing a deletion`, async () => {
+            const current = context()
+            const request = mock(async () => {
+                throw new Error('Synthetic delete rejected')
+            })
+            try {
+                await expect(invoke(action, { ...current.scope, ...mutationScope(action, request) }, current.confirm))
+                    .rejects.toThrow('Synthetic delete rejected')
+                expect(current.scope.showNotification).toHaveBeenCalledWith('Synthetic delete rejected', 'error')
+                expect(current.scope.showNotification).toHaveBeenCalledTimes(1)
+                expect(current.scope.completeMutation).not.toHaveBeenCalled()
+                expect(current.scope.onRefresh).not.toHaveBeenCalled()
+            } finally {
+                current.restore()
+            }
+        })
+    }
+
     for (const action of mutations) {
         for (const outcome of ['success', 'failure'] as const) {
             test(`${action} does not publish an old ${outcome} into a new connection`, async () => {

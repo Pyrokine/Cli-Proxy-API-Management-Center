@@ -1,4 +1,5 @@
 import {inferProviderFromAuthFileName} from '@/features/authFiles/constants'
+import {authFileSelectionKey} from '@/features/authFiles/identity'
 import type {AuthFileFieldsPatch} from '@/services/api/authFiles'
 import type {AuthFileItem} from '@/types/authFile'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
@@ -40,8 +41,7 @@ const normalizedNames = (names: string[]): string[] =>
 const normalizeAuthIndex = (value: string | number | null | undefined): string =>
     String(value ?? '').trim()
 
-export const authFileSelectionKey = (file: Pick<AuthFileItem, 'name' | 'authIndex'>): string =>
-    JSON.stringify([file.name, normalizeAuthIndex(file.authIndex)])
+export {authFileSelectionKey}
 
 export const selectedPhysicalFileNames = (
     files: AuthFileItem[],

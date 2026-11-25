@@ -49,6 +49,7 @@ interface RequestStats {
 
 export interface CredentialRuntimeState {
     status: 'normal' | 'unavailable' | 'unknown' | 'disabled'
+    label?: string
     reason?: string
     checkedAt?: string
     nextRetryAfter?: string
@@ -98,7 +99,7 @@ interface CredentialCardProps {
     /** Current alias for this credential (displayed as subtitle) */
     alias?: string
     /** Callback to set/update alias */
-    onAliasChange?: (alias: string) => void
+    onAliasChange?: (alias: string) => Promise<boolean>
     /** Colored badge (e.g. "API Key", "gemini-cli") */
     badge?: { label: string; color?: string; bgColor?: string; premium?: boolean }
     planComparison?: { configured: string; quota: string; direction: string }
@@ -499,6 +500,7 @@ export function CredentialCard({
 
     const [editingAlias, setEditingAlias] = useState(false)
     const [aliasInput, setAliasInput]     = useState('')
+    const [savingAlias, setSavingAlias]   = useState(false)
     const subscriptionOnlyError           = quotaFreshness === 'partial' && Boolean(quotaSubscriptionError?.trim()) &&
                                             quotaError?.trim() === quotaSubscriptionError?.trim()
     const quotaErrorText                  = !subscriptionOnlyError && quotaError ?
@@ -627,22 +629,25 @@ export function CredentialCard({
         setEditingAlias(true)
     }, [alias])
 
-    const handleAliasEditConfirm = useCallback(() => {
+    const handleAliasEditConfirm = useCallback(async (event: React.FormEvent) => {
+        event.preventDefault()
+        if (!onAliasChange || disableControls || savingAlias) {
+            return
+        }
         const trimmed = aliasInput.trim()
-        onAliasChange?.(trimmed)
-        setEditingAlias(false)
-    }, [aliasInput, onAliasChange])
-
-    const handleAliasKeyDown = useCallback(
-        (e: React.KeyboardEvent) => {
-            if (e.key === 'Enter') {
-                handleAliasEditConfirm()
-            } else if (e.key === 'Escape') {
+        if (trimmed === (alias ?? '')) {
+            setEditingAlias(false)
+            return
+        }
+        setSavingAlias(true)
+        try {
+            if (await onAliasChange(trimmed)) {
                 setEditingAlias(false)
             }
-        },
-        [handleAliasEditConfirm],
-    )
+        } finally {
+            setSavingAlias(false)
+        }
+    }, [alias, aliasInput, disableControls, onAliasChange, savingAlias])
 
     return (
         <div className={`${styles.card} ${disabled ? styles.disabled : ''} ${selected ? styles.selected : ''}`}>
@@ -670,19 +675,36 @@ export function CredentialCard({
                 </h3>
                 {onAliasChange &&
                  (editingAlias ? (
-                     <span className={styles.aliasEdit}>
-                            <input
-                                className={styles.aliasInput}
-                                value={aliasInput}
-                                onChange={(e) => setAliasInput(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
-                                onKeyDown={handleAliasKeyDown}
-                                onBlur={handleAliasEditConfirm}
-                                placeholder={t('credentials.alias_placeholder', { defaultValue: 'alias' })}
-                                maxLength={20}
-                                pattern='[a-zA-Z0-9_-]+'
-                                autoFocus
-                            />
-                        </span>
+                     <form
+                         className={styles.aliasEdit}
+                         onSubmit={handleAliasEditConfirm}
+                         onKeyDown={(event) => {
+                             if (event.key === 'Escape' && !savingAlias) {
+                                 event.preventDefault()
+                                 setEditingAlias(false)
+                             }
+                         }}
+                     >
+                         <input
+                             className={styles.aliasInput}
+                             value={aliasInput}
+                             onChange={(e) => setAliasInput(e.target.value)}
+                             aria-label={t('credentials.edit_alias')}
+                             placeholder={t('credentials.alias_placeholder')}
+                             title={t('config_management.visual.api_keys.alias_error_format')}
+                             pattern='[A-Za-z0-9_\-]*'
+                             maxLength={20}
+                             disabled={disableControls || savingAlias}
+                             autoFocus
+                         />
+                         <Button type='submit' size='xs' loading={savingAlias} disabled={disableControls}>
+                             {t('common.save')}
+                         </Button>
+                         <Button type='button' variant='ghost' size='xs' disabled={savingAlias}
+                                 onClick={() => setEditingAlias(false)}>
+                             {t('common.cancel')}
+                         </Button>
+                     </form>
                  ) : (
                       <button
                           type='button'
@@ -786,7 +808,8 @@ export function CredentialCard({
                 <div className={styles.runtimeSection}>
                     <div className={styles.runtimeHeader}>
                         <span className={styles.sectionLabel}>
-                            {t('credentials.inspection_runtime_status', { defaultValue: '运行状态' })}
+                            {runtimeState.label ??
+                             t('credentials.inspection_runtime_status', { defaultValue: '运行状态' })}
                         </span>
                         <span className={`${styles.runtimeStatus} ${runtimeStatusClass(runtimeState.status)}`}>
                             {t(`credentials.inspection_status_${runtimeState.status}`, {

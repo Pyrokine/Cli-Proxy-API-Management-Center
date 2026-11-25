@@ -1,6 +1,5 @@
 import {getApiCallErrorMessage, prepareApiCallAuth} from '@/services/api/apiCall'
 import {apiClient} from '@/services/api/client'
-import {modelsApi} from '@/services/api/models'
 import {providersApi} from '@/services/api/providers'
 import {normalizeConfigResponse} from '@/services/api/transformers'
 import {buildHeaderObject, hasHeader} from '@/utils/headers'
@@ -8,10 +7,15 @@ import {getErrorMessage} from '@/utils/helpers'
 import {expect, spyOn, test} from 'bun:test'
 import {sourceInitializer} from './sourceCallbacks'
 
-const buildCodexChatCompletionsEndpoint = sourceInitializer<(baseUrl: string) => string>(
+const buildCodexResponsesEndpoint = sourceInitializer<(baseUrl: string) => string>(
     'pages/AiProvidersCodexEditPage.tsx',
-    'buildCodexChatCompletionsEndpoint',
-    { modelsApi },
+    'buildCodexResponsesEndpoint',
+    {},
+)
+const validateCodexProbeResponse  = sourceInitializer(
+    'pages/AiProvidersCodexEditPage.tsx',
+    'validateCodexProbeResponse',
+    {},
 )
 
 test('both Meta management consumers preserve all eleven adopted flat fields and stable identity', async () => {
@@ -53,7 +57,7 @@ test('both Meta management consumers preserve all eleven adopted flat fields and
     }
 })
 
-for (const scenario of ['body-error', 'timeout', 'success'] as const) {
+for (const scenario of ['body-error', 'stream-error', 'unfinished', 'timeout', 'success'] as const) {
     test(`the actual Codex entry and shared connectivity consumer handle ${scenario}`, async () => {
         const statuses: string[]                                              = []
         const errors: string[]                                                = []
@@ -97,7 +101,7 @@ for (const scenario of ['body-error', 'timeout', 'success'] as const) {
             {
                 isTesting: false,
                 form: {
-                    baseUrl: 'https://codex.synthetic.invalid',
+                    baseUrl: 'https://codex.synthetic.invalid/backend-api/codex/',
                     apiKey: 'synthetic-key',
                     headers: [],
                     proxyUrl: 'http://proxy.synthetic.invalid',
@@ -107,7 +111,8 @@ for (const scenario of ['body-error', 'timeout', 'success'] as const) {
                 DEFAULT_CODEX_TEST_MODEL: 'default',
                 buildHeaderObject,
                 hasHeader,
-                buildCodexChatCompletionsEndpoint,
+                buildCodexResponsesEndpoint,
+                validateCodexProbeResponse,
                 prepareApiCallAuth,
                 runConnectivityTest,
                 showTestError,
@@ -120,10 +125,18 @@ for (const scenario of ['body-error', 'timeout', 'success'] as const) {
                         if (scenario === 'timeout') {
                             throw Object.assign(new Error('request timed out'), { code: 'ECONNABORTED' })
                         }
-                        const body = scenario === 'body-error' ?
-                            { error: { message: 'synthetic provider rejection' } } :
-                            { choices: [{ message: { content: 'Hi' } }] }
-                        return { statusCode: 200, header: {}, bodyText: JSON.stringify(body), body }
+                        if (scenario === 'body-error') {
+                            const body = { error: { message: 'synthetic provider rejection' } }
+                            return { statusCode: 200, header: {}, bodyText: JSON.stringify(body), body }
+                        }
+                        const event = scenario === 'stream-error' ?
+                            {
+                                type: 'response.failed',
+                                response: { error: { message: 'synthetic stream rejection' } },
+                            } :
+                            { type: scenario === 'unfinished' ? 'response.created' : 'response.completed' }
+                        const body  = `data: ${JSON.stringify(event)}\r\n\r\n`
+                        return { statusCode: 200, header: {}, bodyText: body, body }
                     },
                 },
             },
@@ -132,9 +145,19 @@ for (const scenario of ['body-error', 'timeout', 'success'] as const) {
         expect(requests).toHaveLength(1)
         expect(requests[0][0]).toMatchObject({
                                                  method: 'POST',
-                                                 url: 'https://codex.synthetic.invalid/v1/chat/completions',
+                                                 url: 'https://codex.synthetic.invalid/backend-api/codex/responses',
                                                  proxyUrl: 'http://proxy.synthetic.invalid',
                                              })
+        const payload = JSON.parse(String(requests[0][0].data))
+        expect(payload).toMatchObject({
+                                          model: 'synthetic-model',
+                                          input: [{ role: 'user' }],
+                                          stream: true,
+                                          store: false,
+                                      })
+        expect(payload).not.toHaveProperty('max_tokens')
+        expect(payload).not.toHaveProperty('max_completion_tokens')
+        expect(payload).not.toHaveProperty('max_output_tokens')
         expect(requests[0][1].timeout).toBe(timeout)
         expect(timeout).toBeGreaterThan(0)
         if (scenario === 'success') {
@@ -144,9 +167,13 @@ for (const scenario of ['body-error', 'timeout', 'success'] as const) {
             expect(statuses).toContain('error')
             expect(statuses).not.toContain('success')
             expect(notices.some(([, kind]) => kind === 'success')).toBe(false)
-            expect(errors.join(' ')).toContain(scenario === 'body-error' ?
-                                               'synthetic provider rejection' :
-                                               'ai_providers.codex_test_timeout')
+            const expectedError = {
+                'body-error': 'synthetic provider rejection',
+                'stream-error': 'synthetic stream rejection',
+                unfinished: 'ai_providers.codex_test_unfinished',
+                timeout: 'ai_providers.codex_test_timeout',
+            }[scenario]
+            expect(errors.join(' ')).toContain(expectedError)
         }
     })
 }

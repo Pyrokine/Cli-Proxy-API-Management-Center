@@ -42,7 +42,10 @@ const extractArrayPayload = (data: unknown, key: string): unknown[] => {
     return Array.isArray(candidate) ? candidate : []
 }
 
-const providerDeleteBody = (apiKey: string, baseUrl?: string) => {
+const providerDeleteBody = (apiKey: string, baseUrl?: string, entryRef?: string) => {
+    if (entryRef) {
+        return { 'entry-ref': entryRef }
+    }
     const payload: Record<string, string> = { 'api-key': apiKey.trim() }
     const trimmedBaseUrl                  = (baseUrl ?? '').trim()
     if (trimmedBaseUrl) {
@@ -299,9 +302,10 @@ const serializeVertexModelAliases = (models?: ModelAlias[]) =>
             }
             return {
                 name,
-                ...(alias ? { alias } : {}),
+                ...(alias && alias !== name ? { alias } : {}),
                 ...(model.displayName ? { 'display-name': model.displayName } : {}),
                 ...getUnknownModelMetadata(model),
+                ...(model.forceMapping !== undefined ? { 'force-mapping': model.forceMapping } : {}),
                 ...serializeModelThinkingForManagement(model.thinking),
             }
         })
@@ -310,7 +314,10 @@ const serializeVertexModelAliases = (models?: ModelAlias[]) =>
 
 const serializeVertexKey = (config: ProviderKeyConfig) => {
     const payload = serializeBaseKeyPayload(config)
-    const models  = serializeVertexModelAliases(config.models)
+    if (config.interactions !== undefined) {
+        payload.interactions = config.interactions
+    }
+    const models = serializeVertexModelAliases(config.models)
     if (models && models.length) {
         payload.models = models
     }
@@ -393,6 +400,7 @@ export const buildGeminiConfigPatchRequest = (
     original: GeminiKeyConfig,
 ) => ({
     index,
+    'keep-entry': true,
     ...(original.authIndex?.trim() ? { 'auth-index': original.authIndex.trim() } : {}),
     value: {
         ...changedApiKeyPayload(config.apiKey, original.apiKey),
@@ -467,7 +475,24 @@ export const buildVertexConfigPatchRequest = (
     index: number,
     config: ProviderKeyConfig,
     original: ProviderKeyConfig,
-) => buildProviderKeyPatchRequest(index, config, original, serializeVertexModelAliases(config.models) ?? [], false)
+) => {
+    const patch                          = buildProviderKeyPatchRequest(
+        index,
+        config,
+        original,
+        serializeVertexModelAliases(config.models) ?? [],
+        false,
+    )
+    const value: Record<string, unknown> = patch.value
+    if (value['base-url'] === '') {
+        delete value['base-url']
+        value['clear-base-url'] = true
+    }
+    if (config.interactions !== original.interactions) {
+        value.interactions = config.interactions ?? null
+    }
+    return { ...patch, 'keep-entry': true, value }
+}
 
 const openAIProviderPatchFields = (provider: OpenAIProviderConfig) => ({
     ...(provider.requestScopedErrors !== undefined ?
@@ -522,11 +547,11 @@ export const providersApi = {
         )
     },
 
-    deleteGeminiKey: (apiKey: string, baseUrl?: string) =>
+    deleteGeminiKey: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/gemini-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getGeminiKeys(),
             },
         ),
@@ -556,11 +581,11 @@ export const providersApi = {
         )
     },
 
-    deleteInteractionsKey: (apiKey: string, baseUrl?: string) =>
+    deleteInteractionsKey: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/interactions-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getInteractionsKeys(),
             },
         ),
@@ -589,11 +614,11 @@ export const providersApi = {
         )
     },
 
-    deleteCodexConfig: (apiKey: string, baseUrl?: string) =>
+    deleteCodexConfig: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/codex-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getCodexConfigs(),
             },
         ),
@@ -617,11 +642,11 @@ export const providersApi = {
         ), { ...({ __authGeneration: generation }), mutationReadback: () => providersApi.getMetaConfigs() })
     },
 
-    deleteMetaConfig: (apiKey: string, baseUrl?: string) =>
+    deleteMetaConfig: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/meta-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getMetaConfigs(),
             },
         ),
@@ -650,11 +675,11 @@ export const providersApi = {
         )
     },
 
-    deleteXAIConfig: (apiKey: string, baseUrl?: string) =>
+    deleteXAIConfig: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/xai-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getXAIConfigs(),
             },
         ),
@@ -684,11 +709,11 @@ export const providersApi = {
         )
     },
 
-    deleteClaudeConfig: (apiKey: string, baseUrl?: string) =>
+    deleteClaudeConfig: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/claude-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getClaudeConfigs(),
             },
         ),
@@ -717,11 +742,11 @@ export const providersApi = {
         )
     },
 
-    deleteVertexConfig: (apiKey: string, baseUrl?: string) =>
+    deleteVertexConfig: (apiKey: string, baseUrl?: string, entryRef?: string) =>
         apiClient.delete(
             '/vertex-api-key',
             {
-                ...({ data: providerDeleteBody(apiKey, baseUrl) }),
+                ...({ data: providerDeleteBody(apiKey, baseUrl, entryRef) }),
                 mutationReadback: () => providersApi.getVertexConfigs(),
             },
         ),

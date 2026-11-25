@@ -1,3 +1,4 @@
+import {parseTextList} from '@/components/providers/utils'
 import {entriesToModels} from '@/components/ui/modelInputListUtils'
 import {isDefaultPluginStoreSource} from '@/pages/pluginResources'
 import {apiCallApi} from '@/services/api/apiCall'
@@ -103,7 +104,7 @@ describe('frontend discovery and plugin remediation', () => {
             {
                 providersApi: {}, buildEmptyForm: () => ({}), buildSignature: () => '',
                 getCredentialWeightValidationKey: () => undefined, entriesToModels,
-                buildHeaderObject, headersToEntries: () => [], modelsToEntries: () => [],
+                buildHeaderObject, headersToEntries: () => [], modelsToEntries: () => [], parseTextList,
             },
         )
         const payload = options.formToPayload({
@@ -113,7 +114,7 @@ describe('frontend discovery and plugin remediation', () => {
                                                       { name: 'Model-A', alias: '' },
                                                       { name: 'model-a', alias: 'lower' },
                                                   ],
-                                                  excludedModels: ['Claude-*'],
+                                                  excludedText: ' Claude-* \n',
                                               }) as ProviderKeyConfig
         expect(payload).toMatchObject({
                                           models: [{ name: 'Model-A' }, { name: 'model-a', alias: 'lower' }],

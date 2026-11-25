@@ -185,9 +185,22 @@ const normalizeRequestScopedErrors = (value: unknown): RequestScopedErrorRule[] 
     })
 }
 
+const readAliasRef = (record: Record<string, unknown> | null): string | undefined => {
+    const ref = record?.['alias-ref']
+    return typeof ref === 'string' && /^alias_[0-9a-f]{32}$/.test(ref) ? ref : undefined
+}
+
 const normalizeProviderKeyBase = (record: Record<string, unknown> | null): Partial<ProviderKeyConfig> => {
     const config: Partial<ProviderKeyConfig> = normalizeCredentialOverrides(record)
-    const requestScopedErrors                = normalizeRequestScopedErrors(record?.['request-scoped-errors'])
+    const aliasRef                           = readAliasRef(record)
+    if (aliasRef) {
+        config.aliasRef = aliasRef
+    }
+    const entryRef = record?.['entry-ref']
+    if (typeof entryRef === 'string' && /^entry_[0-9a-f]{32}$/.test(entryRef)) {
+        config.entryRef = entryRef
+    }
+    const requestScopedErrors = normalizeRequestScopedErrors(record?.['request-scoped-errors'])
     if (requestScopedErrors !== undefined) {
         config.requestScopedErrors = requestScopedErrors
     }
@@ -229,9 +242,11 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
     const headers    = record ? normalizeHeaders(record.headers) : undefined
     const authIndex  = record?.['auth-index']
     const normalized = typeof authIndex === 'string' || typeof authIndex === 'number' ? String(authIndex).trim() : ''
+    const aliasRef   = readAliasRef(record)
 
     return {
         apiKey: trimmed,
+        ...(aliasRef ? { aliasRef } : {}),
         proxyUrl: proxyUrl ? String(proxyUrl) : undefined,
         headers,
         authIndex: normalized || undefined,
@@ -263,8 +278,11 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
     }
 
     const config: ProviderKeyConfig = { apiKey: trimmed, ...normalizeProviderKeyBase(record) }
-    const proxyUrl                  = record?.['proxy-url']
-    const websockets                = normalizeBoolean(record?.websockets)
+    if (typeof record?.interactions === 'boolean') {
+        config.interactions = record.interactions
+    }
+    const proxyUrl   = record?.['proxy-url']
+    const websockets = normalizeBoolean(record?.websockets)
     if (websockets !== undefined) {
         config.websockets = websockets
     }

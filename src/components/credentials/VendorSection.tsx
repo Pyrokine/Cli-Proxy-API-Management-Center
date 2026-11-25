@@ -78,7 +78,7 @@ interface VendorSectionProps {
     vendor: VendorDefinition
     data: VendorData
     aliases?: Record<string, string>
-    onAliasChange?: (apiKey: string, alias: string) => void
+    onAliasChange?: (reference: string, alias: string) => Promise<boolean>
     disableControls: boolean
     onRefresh: () => Promise<void>
     onAuthFileMutation: (mutation: AuthFileMutation | AuthFileMutation[]) => Promise<void>
@@ -146,10 +146,6 @@ const modelSearchTokens = (models?: GeminiKeyConfig['models']): string[] =>
         .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
     : []
 
-type SearchableKeyConfig = Partial<GeminiKeyConfig & ProviderKeyConfig & OpenAIProviderConfig> & {
-    upstreamApiKey?: string
-}
-
 const backendMaskedApiKey = (key: string): string => {
     if (key.length > 8) {
         return `${key.slice(0, 4)}...${key.slice(-4)}`
@@ -163,23 +159,10 @@ const backendMaskedApiKey = (key: string): string => {
     return key
 }
 
-const apiKeyAliasTokens = (apiKey: string | undefined, aliases: Record<string, string>): string[] => {
-    const trimmed = apiKey?.trim()
-    if (!trimmed) {
-        return []
-    }
-    return [trimmed, maskApiKey(trimmed), backendMaskedApiKey(trimmed), aliases[trimmed]].filter(
-        (item): item is string => typeof item === 'string' && item.trim() !== '',
-    )
+const apiKeySearchTokens = (apiKey: string | undefined): string[] => {
+    const key = apiKey?.trim()
+    return key ? [key, maskApiKey(key), backendMaskedApiKey(key)] : []
 }
-
-const apiKeySearchTokens = (key: SearchableKeyConfig, aliases: Record<string, string>): string[] => [
-    ...apiKeyAliasTokens(key.apiKey, aliases),
-    ...(Array.isArray(key.apiKeyEntries)
-        ? key.apiKeyEntries.flatMap((entry) => apiKeyAliasTokens(entry.apiKey, aliases))
-        : []),
-    ...apiKeyAliasTokens(key.upstreamApiKey, aliases),
-]
 
 const formatSize = (bytes: number): string => {
     if (bytes < 1024) {
@@ -451,14 +434,14 @@ export function VendorSection({
                                   accountHealthLoadFailed = false,
                                   scheduler,
                               }: VendorSectionProps) {
-    const { t }                               = useTranslation()
-    const navigate                            = useNavigate()
-    const location                            = useLocation()
-    const [expanded, setExpanded]             = useState(data.apiKeys.length > 0 || data.authFiles.length > 0)
-    const [userToggled, setUserToggled]       = useState(false)
-    const [activeFlow, setActiveFlow]         = useState<ActiveFlow>(null)
-    const fileInputRef                        = useRef<HTMLInputElement>(null)
-    const [modelsFileName, setModelsFileName] = useState<string | null>(null)
+    const { t }                             = useTranslation()
+    const navigate                          = useNavigate()
+    const location                          = useLocation()
+    const [expanded, setExpanded]           = useState(data.apiKeys.length > 0 || data.authFiles.length > 0)
+    const [userToggled, setUserToggled]     = useState(false)
+    const [activeFlow, setActiveFlow]       = useState<ActiveFlow>(null)
+    const fileInputRef                      = useRef<HTMLInputElement>(null)
+    const [modelsFileKey, setModelsFileKey] = useState<string | null>(null)
 
     type SortField = 'default' | 'name' | 'type' | 'status' | 'requests' | 'priority'
     type SortDir = 'asc' | 'desc'
@@ -539,6 +522,10 @@ export function VendorSection({
         () => buildManualKeyCardItems(vendor.id, data.apiKeys),
         [data.apiKeys, vendor.id],
     )
+    const aliasFor             = useCallback(
+        (item: ManualKeyCardItem) => item.aliasRef ? aliases[item.aliasRef] : undefined,
+        [aliases],
+    )
     const apiKeyCount          = manualKeyItems.length
     const showResourceControls = typeFilter !==
                                  'auth-file' &&
@@ -567,22 +554,20 @@ export function VendorSection({
                 return true
             }
 
-            const config     = item.config as SearchableKeyConfig
+            const config     = item.config
             const entry      = vendor.id === 'openai' && item.entryIndex !== undefined
-                               ? (item.config as OpenAIProviderConfig).apiKeyEntries[item.entryIndex]
+                               ? (config as OpenAIProviderConfig).apiKeyEntries[item.entryIndex]
                                : undefined
-            const keyTokens  = vendor.id === 'openai'
-                               ? apiKeyAliasTokens(item.apiKey, aliases)
-                               : apiKeySearchTokens(config, aliases)
             const searchable = joinSearchTokens([
                                                     vendor.label,
                                                     vendor.id,
-                                                    config.name,
+                                                    'name' in config ? config.name : undefined,
                                                     config.baseUrl,
                                                     config.prefix,
                                                     entry?.proxyUrl,
                                                     item.entryIndex !== undefined ? item.entryIndex + 1 : undefined,
-                                                    ...keyTokens,
+                                                    aliasFor(item),
+                                                    ...apiKeySearchTokens(item.apiKey),
                                                     ...modelSearchTokens(config.models),
                                                     runtimeStatus?.status,
                                                     runtimeStatus?.reason,
@@ -591,12 +576,8 @@ export function VendorSection({
                    searchable.toLowerCase().includes(resourceQuery.trim().toLowerCase())
         }).sort((left, right) => {
             const direction = resourceDirection === 'asc' ? 1 : -1
-            const leftName  = (left.config as OpenAIProviderConfig).name ||
-                              aliases[left.apiKey] ||
-                              maskApiKey(left.apiKey)
-            const rightName = (right.config as OpenAIProviderConfig).name ||
-                              aliases[right.apiKey] ||
-                              maskApiKey(right.apiKey)
+            const leftName  = aliasFor(left) || (left.config as OpenAIProviderConfig).name || maskApiKey(left.apiKey)
+            const rightName = aliasFor(right) || (right.config as OpenAIProviderConfig).name || maskApiKey(right.apiKey)
             const order     = resourceSort === 'priority'
                               ?
                               (left.config.priority ?? Number.MAX_SAFE_INTEGER) -
@@ -623,7 +604,7 @@ export function VendorSection({
                                         resourceQuery,
                                         resourceSort,
                                         resourceDirection,
-                                        aliases,
+                                        aliasFor,
                                         manualKeyItems,
                                         query,
                                         statusFilter,
@@ -827,19 +808,6 @@ export function VendorSection({
         [query, wildcardQuery],
     )
 
-    // --- Resolve display name for API key (alias > masked key) ---
-
-    const resolveApiKeyTitle = useCallback(
-        (apiKey: string | undefined): string => {
-            if (!apiKey) {
-                return ''
-            }
-            const alias = aliases[apiKey]
-            return alias || maskApiKey(apiKey)
-        },
-        [aliases],
-    )
-
     const openProviderEditor = useCallback(
         (route: string, returnFocusId: string) => {
             navigate(route, {
@@ -864,7 +832,7 @@ export function VendorSection({
                 )
                               : undefined
 
-            if (item.disabled) {
+            if (vendor.id === 'openai' && item.disabled) {
                 return {
                     status: 'disabled',
                     reason: 'disabled',
@@ -904,7 +872,7 @@ export function VendorSection({
                 warning,
             }
         },
-        [accountHealthByAuthIndex, accountHealthLoadFailed, t],
+        [accountHealthByAuthIndex, accountHealthLoadFailed, t, vendor.id],
     )
 
     const resolveUsageError = useCallback(
@@ -975,13 +943,17 @@ export function VendorSection({
         const onEdit         = vendor.editRoute
                                ? () => openProviderEditor(`${vendor.editRoute}/${item.configIndex}`, editButtonId)
                                : undefined
+        const { aliasRef }   = item
+        const alias          = aliasFor(item)
+        const changeAlias    = onAliasChange && aliasRef ? (next: string) => onAliasChange(aliasRef, next) : undefined
+        const keyTitle       = alias || maskApiKey(item.apiKey)
 
         if (vendor.id === 'openai') {
             const provider       = item.config as OpenAIProviderConfig
             const entry          = item.entryIndex !== undefined
                                    ? provider.apiKeyEntries[item.entryIndex]
                                    : undefined
-            const title          = resolveApiKeyTitle(item.apiKey) ||
+            const title          = keyTitle ||
                                    provider.name ||
                                    t('credentials.api_key_not_configured', {
                                        defaultValue: '未配置 API Key',
@@ -996,15 +968,13 @@ export function VendorSection({
             }
             return (
                 <CredentialCard
-                    key={`api-${vendor.id}-${item.configIndex}-${item.entryIndex ?? 'root'}-${authIndex ?? ''}`}
+                    key={`api-${vendor.id}-${cardIdentity}-${authIndex ?? ''}-${aliasRef ?? ''}`}
                     category='api-key'
                     title={title}
                     controlLabel={controlLabel}
                     highlightTitle={highlightMatch(title)}
-                    alias={aliases[item.apiKey]}
-                    onAliasChange={onAliasChange && item.apiKey
-                                   ? (newAlias) => onAliasChange(item.apiKey, newAlias)
-                                   : undefined}
+                    alias={alias}
+                    onAliasChange={changeAlias}
                     badge={{ label: 'API', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
                     fields={[
                         ...(provider.name ?
@@ -1066,21 +1036,19 @@ export function VendorSection({
         if (vendor.id === 'xai' && key.disableCooling) {
             tags.push(t('ai_providers.xai_disable_cooling_label'))
         }
-        const title = resolveApiKeyTitle(item.apiKey) || t('credentials.api_key_not_configured', {
+        const title = keyTitle || t('credentials.api_key_not_configured', {
             defaultValue: '未配置 API Key',
         })
 
         return (
             <CredentialCard
-                key={`api-${vendor.id}-${item.configIndex}-${authIndex ?? ''}`}
+                key={`api-${vendor.id}-${cardIdentity}-${authIndex ?? ''}-${aliasRef ?? ''}`}
                 category='api-key'
                 title={title}
                 controlLabel={controlLabel}
                 highlightTitle={highlightMatch(title)}
-                alias={aliases[item.apiKey]}
-                onAliasChange={onAliasChange && item.apiKey
-                               ? (newAlias) => onAliasChange(item.apiKey, newAlias)
-                               : undefined}
+                alias={alias}
+                onAliasChange={changeAlias}
                 badge={{ label: 'API', color: 'var(--text-secondary)', bgColor: 'var(--bg-tertiary)' }}
                 fields={[
                     ...(key.priority !== undefined
@@ -1094,8 +1062,8 @@ export function VendorSection({
                     ...(key.proxyUrl ? [{ id: 'proxy-url', label: t('common.proxy_url'), value: key.proxyUrl }] : []),
                 ]}
                 tags={tags.length ? tags : undefined}
-                disabled={runtimeState.status === 'disabled'}
-                runtimeState={runtimeState}
+                disabled={item.disabled}
+                runtimeState={{ ...runtimeState, label: t('credentials.latest_inspection_status') }}
                 quotaCapability='unsupported'
                 stats={stats}
                 statsError={statsError}
@@ -1104,7 +1072,7 @@ export function VendorSection({
                 onToggle={onToggle}
                 editButtonId={editButtonId}
                 onEdit={onEdit}
-                onDelete={() => void deleteApiKey(item.apiKey, key.baseUrl)}
+                onDelete={() => void deleteApiKey(item.apiKey, key.baseUrl, item)}
             />
         )
     }
@@ -1160,20 +1128,26 @@ export function VendorSection({
                                 <span>{t('credentials.manual_config')}</span>
                             </Button>
                         )}
-                        {vendor.oauthProviders.map((provider) => (
-                            <Button
-                                key={provider}
-                                variant='secondary'
-                                size='xs'
-                                onClick={() => toggleFlow({ type: 'oauth', provider })}
-                                disabled={disableControls}
-                            >
-                                <IconLogIn size={11} />
-                                <span>{t(`auth_login.${provider.replace('-', '_')}_oauth_title`, {
-                                    defaultValue: `OAuth (${provider})`,
-                                })}</span>
-                            </Button>
-                        ))}
+                        {vendor.oauthProviders.map((provider) => {
+                            const open = activeFlow?.type === 'oauth' && activeFlow.provider === provider
+                            return (
+                                <Button
+                                    key={provider}
+                                    variant='secondary'
+                                    size='xs'
+                                    onClick={() => toggleFlow({ type: 'oauth', provider })}
+                                    disabled={disableControls}
+                                    aria-expanded={open}
+                                >
+                                    {!open && <IconLogIn size={11} />}
+                                    <span>{open ?
+                                           t('common.close') :
+                                           t(`auth_login.${provider.replace('-', '_')}_oauth_title`, {
+                                               defaultValue: `OAuth (${provider})`,
+                                           })}</span>
+                                </Button>
+                            )
+                        })}
                         {vendor.supportsFileUpload && (
                             <Button
                                 variant='secondary'
@@ -1271,8 +1245,9 @@ export function VendorSection({
                  </div>
              )}
 
-            <AuthFileModelsModal file={data.authFiles.find((file) => file.name === modelsFileName) ?? null}
-                                 onClose={() => setModelsFileName(null)} />
+            <AuthFileModelsModal
+                file={data.authFiles.find((file) => authFileSelectionKey(file) === modelsFileKey) ?? null}
+                onClose={() => setModelsFileKey(null)} />
             {/* Credential cards */}
             <AuthFilesPrefixProxyEditorModal
                 editor={prefixProxyEditor}
@@ -1406,7 +1381,7 @@ export function VendorSection({
                                             onEdit={openPrefixProxyEditor}
                                             onDelete={deleteAuthFile}
                                             onDownload={downloadAuthFile}
-                                            onModels={() => setModelsFileName(file.name)}
+                                            onModels={() => setModelsFileKey(authFileSelectionKey(file))}
                                         />
                                     </div>
                                 ))}

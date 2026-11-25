@@ -57,6 +57,9 @@ const WEBUI_SUPPORTED: OAuthProvider[]                              = [
 const CALLBACK_PROVIDER_MAP: Partial<Record<OAuthProvider, string>> = {
     'gemini-cli': 'gemini',
 }
+const oauthProof                                                    = (nonce?: string) => nonce ?
+    { 'X-CPA-OAuth-Token': nonce } :
+                                                                                          undefined
 
 export const oauthApi = {
     startAuth: (provider: OAuthProvider, options?: OAuthRequestOptions) => {
@@ -67,11 +70,9 @@ export const oauthApi = {
         if (!options?.plugin && provider === 'gemini-cli' && options?.projectId) {
             params.project_id = options.projectId
         }
-        if (options?.nonce) {
-            params.nonce = options.nonce
-        }
         return apiClient.get<OAuthStartResponse>(`/${encodeURIComponent(provider)}-auth-url`, {
             params: Object.keys(params).length ? params : undefined,
+            headers: oauthProof(options?.nonce),
             signal: options?.signal,
             mutationReadback: async (data, receipt) => {
                 if (!receipt.metadata_present || options?.signal?.aborted ||
@@ -99,24 +100,35 @@ export const oauthApi = {
 
     getAuthStatus: (state: string, nonce?: string, signal?: AbortSignal) =>
         apiClient.get<OAuthStatusResponse>(`/get-auth-status`, {
-            params: nonce ? { state, nonce } : { state },
+            params: { state },
+            headers: oauthProof(nonce),
             signal,
         }),
 
     cancelSession: (state: string, nonce?: string, signal?: AbortSignal) =>
         apiClient.delete<OAuthCancelResponse>('/oauth-session', {
-            ...({
-                params: nonce ? { state, nonce } : { state },
-                signal,
-            }), mutationReadback: () => oauthApi.getAuthStatus(state, nonce),
+            params: { state },
+            headers: oauthProof(nonce),
+            signal,
+            mutationReadback: async () => {
+                if (!signal?.aborted) {
+                    await oauthApi.getAuthStatus(state, nonce, signal)
+                }
+            },
         }),
 
-    submitCallback: (provider: OAuthProvider, redirectUrl: string, signal?: AbortSignal, plugin = false) => {
+    submitCallback: (
+        provider: OAuthProvider,
+        redirectUrl: string,
+        nonce: string,
+        signal?: AbortSignal,
+        plugin = false,
+    ) => {
         const callbackProvider = plugin ? provider : CALLBACK_PROVIDER_MAP[provider] ?? provider
         return apiClient.post<OAuthCallbackResponse>('/oauth-callback', {
             provider: callbackProvider,
             redirect_url: redirectUrl,
-        }, { ...({ signal }), mutationReadback: () => apiClient.get('/auth-files') })
+        }, { headers: oauthProof(nonce), signal, mutationReadback: () => apiClient.get('/auth-files') })
     },
 
     /** iFlow cookie 认证 */

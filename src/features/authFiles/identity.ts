@@ -1,6 +1,9 @@
 import {readAuthFileDisableCooling, readAuthFileRequestRetry} from '@/features/authFiles/constants'
 import type {AuthFileItem} from '@/types/authFile'
 
+export const authFileSelectionKey = (file: Pick<AuthFileItem, 'name' | 'authIndex'>): string =>
+    JSON.stringify([file.name, String(file.authIndex ?? '').trim()])
+
 type AuthFileIdentityKind = 'email' | 'projectId' | 'fileName'
 
 interface AuthFileIdentity {

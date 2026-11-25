@@ -1,9 +1,11 @@
 import {apiClient} from '@/services/api/client'
-import type {AuthFileModelItem} from '@/types/authFile'
+import type {AuthFileItem, AuthFileModelItem} from '@/types/authFile'
+import {authFileSelectionKey} from './identity'
 
-type AuthFileModelsLoader = (name: string) => Promise<AuthFileModelItem[]>
+type AuthFileModelsLoader = (name: string, authIndex?: AuthFileItem['authIndex']) => Promise<AuthFileModelItem[]>
 
 type CacheEntry = {
+    fileName: string
     authGeneration: number
     cacheGeneration: number
     fileGeneration: number
@@ -59,15 +61,17 @@ const fileGenerationFor = (name: string): number => fileGenerations.get(name) ??
 export async function loadAuthFileModels(
     name: string,
     loader: AuthFileModelsLoader,
+    authIndex?: AuthFileItem['authIndex'],
 ): Promise<AuthFileModelItem[] | null> {
-    const cacheKey = name.trim()
-    if (!cacheKey) {
+    const fileName = name.trim()
+    if (!fileName) {
         return []
     }
 
+    const cacheKey               = authFileSelectionKey({ name: fileName, authIndex })
     const authGeneration         = apiClient.getAuthGeneration()
     const currentCacheGeneration = cacheGeneration
-    const currentFileGeneration  = fileGenerationFor(cacheKey)
+    const currentFileGeneration  = fileGenerationFor(fileName)
     const cached                 = cache.get(cacheKey)
     if (
         cached &&
@@ -85,17 +89,18 @@ export async function loadAuthFileModels(
         return result ? [...result] : null
     }
 
-    const promise = loader(cacheKey)
+    const promise = loader(fileName, authIndex)
         .then((models) => normalizeModelItems(models))
         .then((models) => {
             const current =
                       authGeneration === apiClient.getAuthGeneration() &&
                       currentCacheGeneration === cacheGeneration &&
-                      currentFileGeneration === fileGenerationFor(cacheKey)
+                      currentFileGeneration === fileGenerationFor(fileName)
             if (!current) {
                 return null
             }
             cache.set(cacheKey, {
+                fileName,
                 authGeneration,
                 cacheGeneration: currentCacheGeneration,
                 fileGeneration: currentFileGeneration,
@@ -123,22 +128,27 @@ export function invalidateAuthFileModelsCache(names?: string[]): void {
     }
 
     const normalized = new Set(names.map((name) => name.trim()).filter(Boolean))
-    normalized.forEach((name) => {
-        cache.delete(name)
-        fileGenerations.set(name, fileGenerationFor(name) + 1)
-    })
+    for (const [key, entry] of cache) {
+        if (normalized.has(entry.fileName)) {
+            cache.delete(key)
+        }
+    }
+    normalized.forEach((name) => fileGenerations.set(name, fileGenerationFor(name) + 1))
 }
 
 export const clearAuthFileModelsCache = (): void => invalidateAuthFileModelsCache()
 
-export const getCachedAuthFileModels = (name: string): AuthFileModelItem[] | null => {
-    const cacheKey = name.trim()
-    const entry    = cache.get(cacheKey)
+export const getCachedAuthFileModels = (
+    name: string,
+    authIndex?: AuthFileItem['authIndex'],
+): AuthFileModelItem[] | null => {
+    const fileName = name.trim()
+    const entry    = cache.get(authFileSelectionKey({ name: fileName, authIndex }))
     if (
         !entry ||
         entry.authGeneration !== apiClient.getAuthGeneration() ||
         entry.cacheGeneration !== cacheGeneration ||
-        entry.fileGeneration !== fileGenerationFor(cacheKey)
+        entry.fileGeneration !== fileGenerationFor(fileName)
     ) {
         return null
     }
