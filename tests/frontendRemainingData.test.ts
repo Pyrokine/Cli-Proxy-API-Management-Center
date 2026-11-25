@@ -1,6 +1,6 @@
 import {Button} from '@/components/ui/Button'
 import type {UsageEvent} from '@/services/api/usage'
-import {formatDateTime, formatNumber, toLocalDateTimeString} from '@/utils/format'
+import {formatDateTime, formatNumber} from '@/utils/format'
 import {
     extractLatencyMs,
     formatDurationMs,
@@ -17,76 +17,77 @@ import {compile} from 'sass'
 import ts from 'typescript'
 import {sourceCallback, sourceExpression, sourceInitializer} from './sourceCallbacks'
 
-const noop = () => {
+const noop      = () => {
 }
-const file = 'components/usage/RequestEventsDetailsCard.tsx'
+const file      = 'components/usage/RequestEventsDetailsCard.tsx'
+const usagePage = 'pages/UsagePage.tsx'
+type AllRangeResolution = { key: string; from?: string; error?: string } | null
+
+function allRangeEffect(scope: Record<string, unknown>) {
+    return sourceCallback<() => (() => void) | undefined>(usagePage, 'useEffect', {
+        isAllPreset: true, usageStatsTabActive: true, t: (key: string) => key,
+        ALL_PRESET_PLACEHOLDER_FROM: sourceInitializer<string>(usagePage, 'ALL_PRESET_PLACEHOLDER_FROM', {}),
+        ...scope,
+    }, 'void usageApi')()
+}
+
+function resolvedAll(allSummaryResolution: AllRangeResolution, allSummaryResolutionKey: string) {
+    return sourceInitializer<AllRangeResolution>(usagePage, 'resolvedAll', {
+        isAllPreset: true, allSummaryResolution, allSummaryResolutionKey,
+    })
+}
 
 test('all-range summary failures expose an error, release loading and recover on an explicit retry', async () => {
-    const frames                                         = new Map<number, () => void>()
-    let failure: { key: string; message: string } | null = null
-    let resolution                                       = { key: '', from: '', resolved: false }
-    let loading                                          = false
-    let fail                                             = true
-    let requests                                         = 0
-    const scope                                          = {
-        isAllPreset: true,
-        allSummaryResolved: false,
-        allSummaryResolutionKey: 'fixture-range',
-        ALL_PRESET_PLACEHOLDER_FROM: '2020-01-01T00:00',
-        effectiveDateTo: '2026-10-23T20:00',
+    let resolution: AllRangeResolution = null
+    let fail                           = true
+    let requests                       = 0
+    let summaryRefreshToken            = 0
+    const effectiveDateTo              = '2026-10-23T20:00:00.000Z'
+    const filters                      = {
+        effectiveDateTo,
         selectedModels: [],
         selectedCredentials: [],
         selectedApiKeys: [],
-        requestAnimationFrame: (fn: () => void) => {
-            frames.set(1, fn);
-            return 1
-        },
-        cancelAnimationFrame: (id: number) => frames.delete(id),
-        setAllSummaryResolving: (value: boolean) => {
-            loading = value
-        },
-        setAllSummaryFailure: (value: typeof failure) => {
-            failure = value
-        },
-        setAllSummaryResolution: (updater: (previous: typeof resolution) => typeof resolution) => {
-            resolution = updater(resolution)
+    }
+    const key                          = () => sourceInitializer<string>(
+        usagePage,
+        'allSummaryResolutionKey',
+        { ...filters, summaryRefreshToken },
+    )
+    const scope                        = {
+        ...filters,
+        setAllSummaryResolution: (result: AllRangeResolution) => {
+            resolution = result
         },
         usageApi: {
             getEvents: async () => {
-                requests++;
+                requests++
                 if (fail) {
                     throw new Error('Synthetic earliest-event failure')
                 }
-
-                return { events: [{ timestamp: '2026-10-22T10:00:00Z' }] }
+                return { events: [{ timestamp: '2026-10-22T10:00:00Z' }], total: 1 }
             },
         },
-        toLocalDateTimeString,
     }
-    const effect                                         = sourceCallback<() => () => void>(
-        'pages/UsagePage.tsx',
-        'useEffect',
-        scope,
-        'void usageApi',
-    )
-    const cleanup                                        = effect()
-    for (let i = 0; i < 5; i++) {
+    const cleanup                      = allRangeEffect({ ...scope, allSummaryResolutionKey: key() })
+    for (let i = 0; i < 3; i++) {
         await Promise.resolve()
     }
-    for (const frame of frames.values()) {
-        frame()
-    }
-    expect<{ key: string; message: string } | null>(failure).toEqual({
-                                                                         key: 'fixture-range',
-                                                                         message: 'Synthetic earliest-event failure',
-                                                                     })
-    expect(loading).toBe(false)
-    expect(resolution.resolved).toBe(false)
-    const rangeError = sourceInitializer<string>(
-        'pages/UsagePage.tsx',
-        'rangeResolutionError',
-        { ...scope, allSummaryFailure: failure },
-    )
+    const result = resolvedAll(resolution, key())
+    expect(result).toEqual({ key: key(), error: 'Synthetic earliest-event failure' })
+    expect(sourceInitializer<boolean>(usagePage, 'rangeResolutionLoading', {
+        isAllPreset: true, resolvedAll: result,
+    })).toBe(false)
+    expect(sourceInitializer<boolean>(usagePage, 'effectiveRangeReady', {
+        isAllPreset: true, resolvedAll: result,
+    })).toBe(false)
+    const rangeError = sourceInitializer<string>(usagePage, 'rangeResolutionError', { resolvedAll: result })
+    const refresh    = sourceCallback<() => void>(usagePage, 'handleRefresh', {
+        activeTab: 'overview', needsRawUsage: false, setDateRange: noop, setLiveWindowAnchorMs: noop,
+        setSummaryRefreshToken: (update: (value: number) => number) => {
+            summaryRefreshToken = update(summaryRefreshToken)
+        },
+    })
     const errorView  = sourceExpression<ReactElement>(
         'pages/UsagePage.tsx',
         (node, tree) => ts.isBinaryExpression(node) &&
@@ -98,23 +99,25 @@ test('all-range summary failures expose an error, release loading and recover on
             styles: {},
             rangeResolutionError: rangeError,
             t: (key: string) => key,
-            handleRefresh: noop,
+            handleRefresh: refresh,
         },
     )
     const html       = renderToStaticMarkup(errorView)
     expect(html).toContain('role="alert"')
     expect(html).toContain('Synthetic earliest-event failure')
     expect(html).toContain('common.retry')
-    cleanup()
-    fail            = false
-    const recovered = effect()
-    for (let i = 0; i < 5; i++) {
+    cleanup?.()
+    fail = false
+    refresh()
+    expect(summaryRefreshToken).toBe(1)
+    expect(resolvedAll(resolution, key())).toBeNull()
+    const recovered = allRangeEffect({ ...scope, allSummaryResolutionKey: key() })
+    for (let i = 0; i < 3; i++) {
         await Promise.resolve()
     }
-    expect(failure).toBeNull()
-    expect(resolution.resolved).toBe(true)
+    expect(resolvedAll(resolution, key())).toEqual({ key: key(), from: '2026-10-22T10:00:00Z' })
     expect(requests).toBe(2)
-    recovered()
+    recovered?.()
 })
 
 test('live-summary failure exposes retry and preserves range totals until an authoritative recovery', async () => {
@@ -157,16 +160,48 @@ test('live-summary failure exposes retry and preserves range totals until an aut
             },
         },
     )
-    await reload()
+    const loadLive           = async (refreshToken: number) => {
+        const options = sourceExpression<{ enabled: boolean; refreshToken: number }>(usagePage, (node, tree) =>
+            ts.isCallExpression(node) && node.expression.getText(tree) === 'useUsageSummary' &&
+            node.arguments[0]?.getText(tree) === 'liveSummaryParams', {
+                                                                                         usageStatsTabActive: true,
+                                                                                         effectiveRangeReady: true,
+                                                                                         reuseSummaryForLive: false,
+                                                                                         summaryRefreshToken: refreshToken,
+                                                                                         liveSummaryParams: {},
+                                                                                         useUsageSummary: (
+                                                                                             _params: unknown,
+                                                                                             options: unknown,
+                                                                                         ) => options,
+                                                                                     })
+        expect(options).toEqual({ enabled: true, refreshToken })
+        let pending: Promise<unknown> | undefined
+        sourceExpression('components/usage/hooks/useUsageSummary.ts', (node, tree) =>
+            ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' &&
+            node.arguments[0]?.getText(tree).includes('queueMicrotask('), {
+                             ...options,
+                             useEffect: (effect: () => void, dependencies: unknown[]) => {
+                                 expect(dependencies).toContain(refreshToken)
+                                 effect()
+                             },
+                             reload: () => {
+                                 pending = reload()
+                             },
+                         })
+        await Promise.resolve()
+        expect(pending).toBeDefined()
+        await pending
+    }
+    await loadLive(0)
     expect(loading).toBe(false)
     expect(liveSummary).toBeNull()
     expect(liveSummaryError).toBe('Synthetic live-summary failure')
-    const refresh = sourceCallback<() => void>('pages/UsagePage.tsx', 'handleRefresh', {
-        dateRange: { preset: 'all' }, activeTab: 'overview', setLiveWindowAnchorMs: noop,
+    const refresh = sourceCallback<() => void>(usagePage, 'handleRefresh', {
+        activeTab: 'overview', setLiveWindowAnchorMs: noop,
         setDateRange: noop, setSummaryRefreshToken: (update: (value: number) => number) => {
             token = update(token)
         },
-        setEventsRefreshToken: noop, needsRawUsage: false, loadUsage: noop, toLocalDateTimeString,
+        setEventsRefreshToken: noop, needsRawUsage: false, loadUsage: noop,
     })
     const view    = sourceExpression<ReactElement>('pages/UsagePage.tsx', (node, tree) =>
         ts.isBinaryExpression(node) &&
@@ -197,22 +232,11 @@ test('live-summary failure exposes retry and preserves range totals until an aut
     expect(values()).toEqual({ total: '100', live: '--' })
     fail = false
     refresh()
-    sourceCallback<() => void>('pages/UsagePage.tsx', 'useEffect', {
-        summaryRefreshToken: token, effectiveRangeReady: true, reuseSummaryForHeatmap: true, reuseSummaryForLive: false,
-        hasSelectionFilters: false,
-        // noinspection JSUnusedGlobalSymbols
-        'reloadSummary': async () => mainSummary, reloadLiveSummary: reload,
-        setSummaryRefreshToken: (update: (value: number) => number) => {
-            token = update(token)
-        },
-    }, 'const reloads = [reloadSummary()]')()
-    for (let index = 0; index < 6; index++) {
-        await Promise.resolve()
-    }
+    expect(token).toBe(1)
+    await loadLive(token)
     expect(requests).toBe(2)
     expect(liveSummaryError).toBe('')
     expect(loading).toBe(false)
-    expect(token).toBe(0)
     expect(values()).toEqual({ total: '100', live: '0' })
 })
 
@@ -233,7 +257,6 @@ test('all-range retry schedules summary reload before deferred React state updat
             setEventsRefreshToken: noop,
             needsRawUsage: false,
             loadUsage: noop,
-            toLocalDateTimeString,
         },
     )
     refresh()
@@ -242,62 +265,58 @@ test('all-range retry schedules summary reload before deferred React state updat
 })
 
 test('all-range selection and sequential filter clearing replace the resolved earliest event', async () => {
-    const placeholder = '2020-01-01T00:00'
-    let range         = { from: '2026-10-22T09:00', to: '2026-10-23T09:00', preset: '24h' }
-    const select      = sourceCallback<(from: string, to: string, preset: string) => void>(
-        'pages/UsagePage.tsx',
-        'handleDateRangeChange',
-        {
-            ALL_PRESET_PLACEHOLDER_FROM: placeholder,
+    const to     = '2026-10-23T09:00:00.000Z'
+    let range    = { from: '2026-10-22T09:00:00.000Z', to, preset: '24h' }
+    const select = sourceCallback<(from: string, to: string, preset: string) => void>(
+        usagePage, 'handleDateRangeChange', {
             setDateRange: (value: typeof range) => {
                 range = value
             },
         },
     )
-    select(range.from, range.to, 'all')
-    expect(range).toEqual({ from: placeholder, to: '2026-10-23T09:00', preset: 'all' })
-    let resolution = { key: 'previous-window', from: '2026-10-22T09:00', resolved: true }
+    select('', to, 'all')
+    expect(range).toEqual({ from: '', to, preset: 'all' })
+    let resolution: AllRangeResolution = { key: 'previous-window', from: '2026-10-22T09:00:00Z' }
     for (const [selectedModels, selectedApiKeys, selectedCredentials, timestamp] of [
-        [['model'], ['client-key'], ['credential'], '2026-10-20T00:00:00Z'],
+        [['model'], ['client-key'], ['credential'], '2026-10-20T00:00:00.123456789Z'],
         [[], ['client-key'], ['credential'], '2026-10-18T00:00:00Z'],
         [[], [], ['credential'], '2026-10-15T00:00:00Z'],
-        [[], [], [], '2026-10-01T00:00:00Z'],
+        [[], [], [], '2019-10-01T00:00:00Z'],
     ] as const) {
-        const selection = { selectedModels, selectedApiKeys, selectedCredentials }
-        const key       = sourceInitializer<string>('pages/UsagePage.tsx', 'allSummaryResolutionKey', {
-            ...selection, dateRange: range, useMemo: (fn: () => unknown) => fn(),
-        })
-        const ready     = sourceInitializer<boolean>('pages/UsagePage.tsx', 'allSummaryResolved', {
-            isAllPreset: true, allSummaryResolution: resolution, allSummaryResolutionKey: key,
-        })
-        expect(ready).toBe(false)
+        const selection = { selectedModels, selectedApiKeys, selectedCredentials, effectiveDateTo: range.to }
+        const key       = sourceInitializer<string>(
+            usagePage,
+            'allSummaryResolutionKey',
+            { ...selection, summaryRefreshToken: 0 },
+        )
+        expect(resolvedAll(resolution, key)).toBeNull()
         let query: Record<string, unknown> | undefined
-        const effect  = sourceCallback<() => () => void>('pages/UsagePage.tsx', 'useEffect', {
-            ...selection, isAllPreset: true, allSummaryResolved: ready, allSummaryResolutionKey: key,
-            ALL_PRESET_PLACEHOLDER_FROM: placeholder, effectiveDateTo: range.to,
-            requestAnimationFrame: () => 1, cancelAnimationFrame: noop,
-            setAllSummaryResolving: noop, setAllSummaryFailure: noop,
-            setAllSummaryResolution: (update: (value: typeof resolution) => typeof resolution) => {
-                resolution = update(resolution)
-            },
-            usageApi: {
-                getEvents: async (params: Record<string, unknown>) => {
-                    query = params;
-                    return { events: [{ timestamp }] }
-                },
-            },
-            toLocalDateTimeString,
-        }, 'void usageApi')
-        const cleanup = effect()
-        for (let i = 0; i < 5; i++) {
-            await Promise.resolve()
-        }
-        expect(query).toMatchObject({ from: placeholder, to: range.to, order: 'asc', sort: 'timestamp' })
+        const cleanup = allRangeEffect({
+                                           ...selection, allSummaryResolutionKey: key,
+                                           setAllSummaryResolution: (result: AllRangeResolution) => {
+                                               resolution = result
+                                           },
+                                           usageApi: {
+                                               getEvents: async (params: Record<string, unknown>) => {
+                                                   query = params
+                                                   return { events: [{ timestamp }], total: 1 }
+                                               },
+                                           },
+                                       })
+        await Promise.resolve()
+        expect(query).toMatchObject({
+                                        from: '1677-09-21T00:12:43.145224192Z', to, order: 'asc', sort: 'timestamp',
+                                        page: 1, page_size: 1, api_key_identity: 'canonical', view: 'compact',
+                                    })
         expect(query?.model).toBe(selectedModels.length ? selectedModels.join(',') : undefined)
         expect(query?.api_key).toEqual(selectedApiKeys.length ? selectedApiKeys : undefined)
         expect(query?.source).toBe(selectedCredentials.length ? selectedCredentials.join(',') : undefined)
-        expect(resolution).toEqual({ key, from: toLocalDateTimeString(new Date(timestamp)), resolved: true })
-        cleanup()
+        const result = resolvedAll(resolution, key)
+        expect(result).toEqual({ key, from: timestamp })
+        expect(sourceInitializer<string>(usagePage, 'effectiveDateFrom', {
+            isAllPreset: true, resolvedAll: result,
+        })).toBe(timestamp)
+        cleanup?.()
     }
 })
 

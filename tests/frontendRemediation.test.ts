@@ -1,6 +1,6 @@
 import {createProviderEditModalState, resolveProviderEditModalState} from '@/hooks/useProviderEditPresentation'
 import {parseLogLine} from '@/pages/hooks/logParsing'
-import {parseLogTimestamp, toLocalDateTimeString} from '@/utils/format'
+import {parseLogTimestamp, toLocalDateTimeSecondsString} from '@/utils/format'
 import {parseIndexParam} from '@/utils/helpers'
 import {afterEach, describe, expect, setSystemTime, test} from 'bun:test'
 import {createInstance} from 'i18next'
@@ -143,40 +143,37 @@ describe('frontend remediation shared contracts', () => {
         const preset             = build((key) => key)[0]
         const calls: unknown[][] = []
         const scope              = {
-            presets: undefined, t: (key: string) => key, earliestDate: undefined,
-            buildDefaultPresets: build, toLocalDateTimeString, onChange: (...args: unknown[]) => calls.push(args),
+            presets: undefined, t: (key: string) => key,
+            buildDefaultPresets: build, onChange: (...args: unknown[]) => calls.push(args),
         }
-        setSystemTime(new Date('2026-10-23T09:23:00Z'))
+        setSystemTime(new Date('2026-10-23T09:23:42.125Z'))
         const select = sourceCallback<(value: typeof preset) => void>(
             'components/ui/DateRangePicker.tsx',
             'handlePreset',
             scope,
         )
         select(preset)
-        expect(calls[0]).toEqual([
-                                     toLocalDateTimeString(new Date('2026-10-22T09:23:00Z')),
-                                     toLocalDateTimeString(new Date('2026-10-23T09:23:00Z')),
-                                     '24h',
-                                 ])
+        expect(calls[0]).toEqual(['2026-10-22T09:23:42.125Z', '2026-10-23T09:23:42.125Z', '24h'])
         sourceCallback<typeof select>(
-            'components/ui/DateRangePicker.tsx',
-            'handlePreset',
-            { ...scope, presets: [preset] },
-        )(
-            preset)
-        expect(calls[1]?.[1]).toBe(toLocalDateTimeString(preset.to))
+            'components/ui/DateRangePicker.tsx', 'handlePreset', { ...scope, presets: [preset] },
+        )(preset)
+        expect(calls[1]).toEqual([preset.from.toISOString(), preset.to.toISOString(), '24h'])
+        select({ ...preset, key: 'all' })
+        expect(calls[2]).toEqual(['', '2026-10-23T09:23:42.125Z', 'all'])
     })
 
     test('renders selected date preset titles from the committed query range', () => {
         setSystemTime(new Date('2026-10-23T09:30:00Z'))
-        const build  = sourceCallback('components/ui/DateRangePicker.tsx', 'buildDefaultPresets', {})
-        const Picker = sourceCallback<(props: object) => ReturnType<typeof createElement>>(
+        const build     = sourceCallback('components/ui/DateRangePicker.tsx', 'buildDefaultPresets', {})
+        const Picker    = sourceCallback<(props: object) => ReturnType<typeof createElement>>(
             'components/ui/DateRangePicker.tsx',
             'DateRangePicker',
             {
                 React, useTranslation: () => ({ t: (key: string) => key }), useMemo: (fn: () => unknown) => fn(),
-                useCallback: (fn: unknown) => fn, buildDefaultPresets: build, toLocalDateTimeString,
-                ALL_PRESET_PLACEHOLDER_FROM: '2020-01-01T00:00',
+                useCallback: (fn: unknown) => fn, buildDefaultPresets: build, toLocalDateTimeSecondsString,
+                asDateTimeInputValue: sourceCallback('components/ui/DateRangePicker.tsx', 'asDateTimeInputValue', {
+                    toLocalDateTimeSecondsString,
+                }),
                 styles: {
                     container: 'range',
                     dateInputs: 'inputs',
@@ -188,31 +185,27 @@ describe('frontend remediation shared contracts', () => {
                 },
             },
         )
-        const to     = '2026-10-23T09:23'
-        for (const [activePreset, from] of
-            [['24h', '2026-10-22T09:23'], ['7d', '2026-10-16T09:23'], ['30d', '2026-09-23T09:23']]) {
-            const html = renderToStaticMarkup(Picker({
-                                                         from, to, activePreset, onChange() {
+        const to        = '2026-10-23T09:23:42.125Z'
+        const displayTo = toLocalDateTimeSecondsString(new Date(to))
+        for (const [activePreset, from] of [
+            ['24h', '2026-10-22T09:23:42.125Z'], ['7d', '2026-10-16T09:23:42.125Z'],
+            ['30d', '2026-09-23T09:23:42.125Z'], ['all', '2024-04-03T08:21:37.000Z'],
+        ]) {
+            const html        = renderToStaticMarkup(Picker({
+                                                                from, to, activePreset, onChange() {
                 },
-                                                     }))
-            expect(html).toContain(`class="active" title="${from} ~ ${to}"`)
+                                                            }))
+            const displayFrom = toLocalDateTimeSecondsString(new Date(from))
+            expect(html).toContain(`class="active" title="${displayFrom} ~ ${displayTo}"`)
+            expect(html).toContain(`value="${displayFrom}"`)
+            expect(html).toContain(`value="${displayTo}"`)
         }
-        const earliestDate = new Date('2024-04-03T08:21:00Z')
-        const all          = renderToStaticMarkup(Picker({
-                                                             from: '2020-01-01T00:00',
-                                                             to,
-                                                             activePreset: 'all',
-                                                             earliestDate,
-                                                             onChange() {
-                                                             },
-                                                         }))
-        expect(all).toContain(`class="active" title="${toLocalDateTimeString(earliestDate)} ~ ${to}"`)
         const pending = renderToStaticMarkup(Picker({
-                                                        from: '2020-01-01T00:00', to, activePreset: 'all', onChange() {
+                                                        from: '', to, activePreset: 'all', onChange() {
             },
                                                     }))
         expect(pending).toContain('class="active" title="usage_stats.range_all"')
-        expect(pending).not.toContain('title="2020-01-01T00:00')
+        expect(pending).toContain('value=""')
     })
 
     test('interprets timezone-less backend log timestamps as UTC and retains explicit offsets', () => {

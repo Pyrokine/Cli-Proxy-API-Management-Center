@@ -193,7 +193,7 @@ export interface SummaryTimePoint {
 }
 
 export interface UsageSummary {
-    period: { from: string; to: string }
+    period: { from: string; to: string; granularity?: 'hourly' | 'daily' }
     totals: SummaryTotals
     by_model: Record<string, SummaryModelStats>
     by_credential: Record<string, SummaryCredentialStats>
@@ -401,6 +401,7 @@ export interface EventsParams {
     status?: 'success' | 'failure' | ''
     speed?: RequestSpeed | ''
     search?: string
+    request_id?: string
     sort?: string
     order?: 'asc' | 'desc'
     view?: 'compact'
@@ -413,6 +414,8 @@ export interface EventsResponse {
     page: number
     page_size: number
     total_pages: number
+    accessible_pages?: number
+    request_id_filter?: string
 }
 
 export const usageApi = {
@@ -627,6 +630,9 @@ export const usageApi = {
         }
         if (params?.search) {
             searchParams.set('search', params.search)
+        }
+        if (params?.request_id) {
+            searchParams.set('request_id', params.request_id)
         }
         if (params?.sort) {
             searchParams.set('sort', params.sort)

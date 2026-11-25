@@ -252,7 +252,7 @@ describe('request log lifecycle contracts', () => {
         }) as typeof apiClient.get
         apiClient.getRaw     = (async (url: string, config?: { params?: unknown }) => {
             seenRequests.push({ raw: true, url, params: config?.params })
-            return { data: new Blob(['full log']), headers: {} }
+            return { data: new Blob(['full log']), headers: {}, status: 200 }
         }) as typeof apiClient.getRaw
 
         try {

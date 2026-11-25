@@ -146,6 +146,7 @@ function eventCard(
             setRequestLogPreview: noop,
             setRequestLogError: noop,
             downloadRequestLog: noop,
+            previewRequestLog: noop,
             requestLogDownloading: new Set(),
             requestLogError: '',
             requestLogPreviewing: new Set(),
@@ -605,8 +606,9 @@ describe('visible metric and log guidance: R-593 R-658 R-613', () => {
                                                                       tokens,
                                                                       __modelName: 'fixture',
                                                                       __endpoint: '/v1/responses',
-                                                                  }, timeDeltaMs: null,
+                                                                  }, timeDeltaMs: null, requestIdMatched: true,
                                                               }))
+            expect(html).toContain('logs.trace_request_id_matched')
             expect(html).toContain(`logs.trace_cache_hit</span><span class="traceInfoValue">${expected}</span>`)
         }
     })
@@ -630,6 +632,7 @@ describe('visible metric and log guidance: R-593 R-658 R-613', () => {
             expect(render(rows, '', true)).toContain('Retained event')
             expect(render(rows, '', true)).not.toContain('aria-busy="true"')
             expect(render(rows, 'Synthetic failure', false)).toContain('role="alert"')
+            expect(render(rows, 'Synthetic failure', false)).toContain('usage_stats.request_events_page_load_failed')
             expect(render(rows, 'Synthetic failure', false)).toContain('Retained event')
             expect(render(rows, '', false)).not.toContain('Synthetic failure')
             expect(render([], '', false)).toContain('usage_stats.request_events_empty_title')

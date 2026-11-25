@@ -6,7 +6,6 @@ import {
     shouldRefreshUsageEvents,
     USAGE_EVENTS_AUTO_REFRESH_INTERVALS,
 } from '@/utils/autoRefresh'
-import {toLocalDateTimeSecondsString} from '@/utils/format'
 import {describe, expect, mock, test} from 'bun:test'
 import ts from 'typescript'
 import {sourceCallback, sourceExpression, sourceInitializer} from './sourceCallbacks'
@@ -43,14 +42,15 @@ function eventsFixture(overrides: Record<string, unknown> = {}) {
     const getEvents                                              = mock(async (
         _params: unknown,
         _options: unknown,
-    ) => ({ events: [] }))
+    ) => ({ events: [], page: 1, page_size: 50, total: 0, total_pages: 0, accessible_pages: 0 }))
     const clearInterval                                          = mock()
-    let clock                                                    = new Date(2026, 10, 9, 23, 59, 59).getTime()
+    const onVisibleDateRangeChange                               = mock()
+    let clock                                                    = Date.parse('2026-11-09T23:59:59.250Z')
     let updatedClock: number | undefined
     const scope                                                  = {
         activePreset: '24h', enabled: true, autoRefreshEnabled: true, page: 1,
         sortField: 'timestampMs', sortDir: 'desc', pageSize: 50,
-        dateRange: { from: '2026-11-08T23:59:59', to: '2026-11-09T23:59:59' },
+        dateRange: { from: '2026-11-08T23:59:59.250Z', to: '2026-11-09T23:59:59.250Z' },
         topModels: [], topCredentials: [], topApiKeys: [], searchQuery: '', statusFilter: '', speedFilter: '',
         requestLogPreview: null, requestDetails: null, exportingFormat: null,
         autoRefreshInterval: sourceInitializer<number>(eventsFile, 'configuredAutoRefreshInterval', {
@@ -90,12 +90,13 @@ function eventsFixture(overrides: Record<string, unknown> = {}) {
                 ),
                 autoRefreshClockMs: updatedClock,
                 dateRange: scope.dateRange,
-                // noinspection JSUnusedGlobalSymbols
-                'toLocalDateTimeSecondsString': toLocalDateTimeSecondsString,
             },
         )()
         updatedClock             = undefined
-        const eventsParams       = sourceCallback<() => Record<string, unknown>>(eventsFile, 'eventsParams', {
+        sourceCallback<() => void>(eventsFile, 'useEffect', {
+            effectiveDateRange, onVisibleDateRangeChange,
+        }, 'onVisibleDateRangeChange?.(effectiveDateRange)')()
+        const eventsParams = sourceCallback<() => Record<string, unknown>>(eventsFile, 'eventsParams', {
             ...scope, effectiveDateRange,
             toBackendSortField: sourceCallback(eventsFile, 'toBackendSortField', {}),
             applyFilters: sourceCallback(eventsFile, 'applyFilters', {}),
@@ -103,7 +104,7 @@ function eventsFixture(overrides: Record<string, unknown> = {}) {
         sourceCallback<() => Cleanup>(eventsFile, 'useEffect', {
             enabled: scope.enabled, eventsRequestControllerRef, eventsParams,
             eventsRequestSignature: JSON.stringify(eventsParams), usageApi: { getEvents },
-            setEventsData: noop, setFetchError: noop, setSettledRequestSignature: noop,
+            setEventsData: noop, setFetchError: noop, setSettledRequestSignature: noop, setPage: noop,
         }, '.getEvents(eventsParams')()
         await Promise.resolve()
         await Promise.resolve()
@@ -111,6 +112,7 @@ function eventsFixture(overrides: Record<string, unknown> = {}) {
     }
     return {
         scope, timers, pageDocument, eventsRequestControllerRef, getEvents, clearInterval, schedule, flushClock,
+        onVisibleDateRangeChange,
         advance: (ms: number) => {
             clock += ms
         },
@@ -288,10 +290,9 @@ describe('R-030/R-409/R-530 shared refresh contract', () => {
         view.advance(3000)
         view.timers[0]!.callback()
         await view.flushClock()
-        expect(view.getEvents.mock.calls[0]![0]).toMatchObject({
-                                                                   from: '2026-11-09T00:00:02',
-                                                                   to: '2026-11-10T00:00:02',
-                                                               })
+        const range = { from: '2026-11-09T00:00:02.250Z', to: '2026-11-10T00:00:02.250Z' }
+        expect(view.getEvents.mock.calls[0]![0]).toMatchObject(range)
+        expect(view.onVisibleDateRangeChange).toHaveBeenCalledWith(range)
         cleanup!()
     })
 

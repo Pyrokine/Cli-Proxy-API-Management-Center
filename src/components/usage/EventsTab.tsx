@@ -5,6 +5,8 @@ import {RequestEventsDetailsCard} from './RequestEventsDetailsCard'
 
 interface EventsTabProps {
     enabled?: boolean
+    rangeLoading?: boolean
+    onClearFilters?: () => void
     refreshToken?: number
     geminiKeys: GeminiKeyConfig[]
     claudeConfigs: ProviderKeyConfig[]
@@ -29,6 +31,8 @@ interface EventsTabProps {
 
 export function EventsTab({
                               enabled = true,
+                              rangeLoading,
+                              onClearFilters,
                               refreshToken,
                               geminiKeys,
                               claudeConfigs,
@@ -54,6 +58,8 @@ export function EventsTab({
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <RequestEventsDetailsCard
                 enabled={enabled}
+                rangeLoading={rangeLoading}
+                onClearFilters={onClearFilters}
                 refreshToken={refreshToken}
                 geminiKeys={geminiKeys}
                 claudeConfigs={claudeConfigs}

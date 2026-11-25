@@ -106,6 +106,35 @@ const eventToTraceDetail = (event: UsageEvent, line: ParsedLogLine, logPath: str
     }
 }
 
+async function lookupTraceEvents(
+    timestampMs: number,
+    requestId: string,
+    isCurrent: () => boolean,
+): Promise<{ events: UsageEvent[]; exactLookupUnavailable: boolean }> {
+    const rangeParams          = {
+        from: new Date(timestampMs - TRACE_LOOKUP_WINDOW_MS).toISOString(),
+        to: new Date(timestampMs + TRACE_LOOKUP_WINDOW_MS).toISOString(),
+        page: 1,
+        sort: 'timestamp',
+        order: 'desc' as const,
+    }
+    let exactLookupUnavailable = false
+    if (requestId) {
+        const exact   = await usageApi.getEvents({
+                                                     ...rangeParams,
+                                                     page_size: TRACE_MAX_CANDIDATES,
+                                                     request_id: requestId,
+                                                 })
+        const matches = exact.events.filter((event) => event.request_id === requestId)
+        if (matches.length > 0 || !isCurrent()) {
+            return { events: matches, exactLookupUnavailable: false }
+        }
+        exactLookupUnavailable = exact.request_id_filter !== requestId
+    }
+    const nearby = await usageApi.getEvents({ ...rangeParams, page_size: TRACE_EVENT_PAGE_SIZE })
+    return { events: nearby.events, exactLookupUnavailable }
+}
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -152,6 +181,7 @@ interface UseTraceResolverReturn {
     traceLogLine: ParsedLogLine | null
     traceLoading: boolean
     traceError: string
+    traceExactLookupUnavailable: boolean
     traceCandidates: TraceCandidate[]
     routeDecisionTrace: RouteDecisionTraceState
     requestLogHomeIp: string | null
@@ -166,13 +196,14 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
     const { traceScopeKey, connectionStatus, config, requestLogDownloading } = options
     const { t }                                                              = useTranslation()
 
-    const [traceLogLine, setTraceLogLine]             = useState<ParsedLogLine | null>(null)
-    const [traceUsageDetails, setTraceUsageDetails]   = useState<UsageDetailWithEndpoint[]>([])
-    const [traceAuthFileMap, setTraceAuthFileMap]     = useState<Map<string, CredentialInfo>>(new Map())
-    const [traceLoading, setTraceLoading]             = useState(false)
-    const [traceError, setTraceError]                 = useState('')
-    const [requestLogHomeIp, setRequestLogHomeIp]     = useState<string | null>(null)
-    const [routeDecisionTrace, setRouteDecisionTrace] = useState<RouteDecisionTraceState>(
+    const [traceLogLine, setTraceLogLine]                               = useState<ParsedLogLine | null>(null)
+    const [traceUsageDetails, setTraceUsageDetails]                     = useState<UsageDetailWithEndpoint[]>([])
+    const [traceAuthFileMap, setTraceAuthFileMap]                       = useState<Map<string, CredentialInfo>>(new Map())
+    const [traceLoading, setTraceLoading]                               = useState(false)
+    const [traceError, setTraceError]                                   = useState('')
+    const [traceExactLookupUnavailable, setTraceExactLookupUnavailable] = useState(false)
+    const [requestLogHomeIp, setRequestLogHomeIp]                       = useState<string | null>(null)
+    const [routeDecisionTrace, setRouteDecisionTrace]                   = useState<RouteDecisionTraceState>(
         createRouteDecisionTraceState('idle'),
     )
 
@@ -194,6 +225,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                 setTraceAuthFileMap(new Map())
                 setTraceUsageDetails([])
                 setTraceError('')
+                setTraceExactLookupUnavailable(false)
                 setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
             }
 
@@ -242,20 +274,10 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                 })
             }
 
-            // noinspection ES6MissingAwait
             const eventsPromise              = Number.isNaN(logTimestampMs)
-                                               ? Promise.resolve(null)
-                                               : usageApi.getEvents(
-                    {
-                        from: new Date(logTimestampMs -
-                                       TRACE_LOOKUP_WINDOW_MS).toISOString(),
-                        to: new Date(logTimestampMs +
-                                     TRACE_LOOKUP_WINDOW_MS).toISOString(),
-                        page: 1,
-                        page_size: TRACE_EVENT_PAGE_SIZE,
-                        sort: 'timestamp',
-                        order: 'desc',
-                    })
+                                               ?
+                                               Promise.resolve(null) :
+                                               lookupTraceEvents(logTimestampMs, requestId, requestIsCurrent)
             // noinspection ES6MissingAwait
             const authPromise                = authFresh
                                                ?
@@ -278,11 +300,10 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                     'logs.trace_timestamp_required',
                     { defaultValue: '日志时间缺失，不能安全匹配 usage 事件' },
                 ))
-            } else if (eventsResult.status === 'fulfilled') {
-                const events = Array.isArray(eventsResult.value?.events) ? eventsResult.value.events : []
-                setTraceUsageDetails(events.map((event) => eventToTraceDetail(event, line, logPath)))
-            } else {
-                setTraceUsageDetails([])
+            } else if (eventsResult.status === 'fulfilled' && eventsResult.value) {
+                setTraceUsageDetails(eventsResult.value.events.map((event) => eventToTraceDetail(event, line, logPath)))
+                setTraceExactLookupUnavailable(eventsResult.value.exactLookupUnavailable)
+            } else if (eventsResult.status === 'rejected') {
                 setTraceError(getErrorMessage(eventsResult.reason) || t('logs.trace_usage_load_error'))
             }
 
@@ -333,6 +354,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             setTraceUsageDetails([])
             setTraceLoading(false)
             setTraceError('')
+            setTraceExactLookupUnavailable(false)
             setRequestLogHomeIp(null)
             setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
         })
@@ -344,21 +366,14 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
         }
 
         const logTimestampMs = traceLogLine.timestamp ? parseLogTimestamp(traceLogLine.timestamp) : Number.NaN
-        const requestId      = traceLogLine.requestId?.trim().toLowerCase()
-        const requestMatched = requestId
-                               ?
-                               traceUsageDetails.filter((detail) => detail.request_id?.trim().toLowerCase() ===
-                                                                    requestId)
-                               :
-            []
-        const requestScoped  = requestMatched.length > 0 ? requestMatched : traceUsageDetails
-
-        const logModel     = extractModelFromMessage(traceLogLine.message)
-        const modelMatched = logModel
-                             ? requestScoped.filter((d) => d.__modelName?.toLowerCase() === logModel.toLowerCase())
-                             : []
-        const useModelSet  = modelMatched.length > 0
-        const source       = useModelSet ? modelMatched : requestScoped
+        const requestId      = traceLogLine.requestId?.trim()
+        const requestMatched = requestId ? traceUsageDetails.filter((detail) => detail.request_id === requestId) : []
+        const logModel       = extractModelFromMessage(traceLogLine.message)?.toLowerCase()
+        const matchesModel   = (detail: UsageDetailWithEndpoint) =>
+            Boolean(logModel && detail.__modelName?.toLowerCase() === logModel)
+        const modelMatched   = traceUsageDetails.filter(matchesModel)
+        const source         = requestMatched.length > 0 ? requestMatched :
+                               modelMatched.length > 0 ? modelMatched : traceUsageDetails
 
         return source
             .map((detail) => {
@@ -368,7 +383,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
                           : null
                 return {
                     detail,
-                    modelMatched: useModelSet,
+                    modelMatched: matchesModel(detail),
                     requestIdMatched: requestMatched.includes(detail),
                     timeDeltaMs,
                 } satisfies TraceCandidate
@@ -402,6 +417,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
             traceRequestHomeIpRef.current = frozenHomeIp
             setRequestLogHomeIp(frozenHomeIp || null)
             setTraceError('')
+            setTraceExactLookupUnavailable(false)
             setTraceUsageDetails([])
             setRouteDecisionTrace(createRouteDecisionTraceState('loading'))
             setTraceLogLine(line)
@@ -421,6 +437,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
         setTraceUsageDetails([])
         setTraceLoading(false)
         setTraceError('')
+        setTraceExactLookupUnavailable(false)
         setRouteDecisionTrace(createRouteDecisionTraceState('idle'))
     }, [requestLogDownloading])
 
@@ -428,6 +445,7 @@ export function useTraceResolver(options: UseTraceResolverOptions): UseTraceReso
         traceLogLine,
         traceLoading,
         traceError,
+        traceExactLookupUnavailable,
         traceCandidates,
         routeDecisionTrace,
         requestLogHomeIp,

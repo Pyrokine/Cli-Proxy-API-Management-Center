@@ -7,6 +7,7 @@ interface PaginationProps {
     total: number
     page: number
     pageSize: number
+    maxPage?: number
     pageSizeOptions?: number[]
     onPageChange: (page: number) => void
     onPageSizeChange?: (size: number) => void
@@ -38,13 +39,14 @@ export function Pagination({
                                total,
                                page,
                                pageSize,
+                               maxPage,
                                pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
                                onPageChange,
                                onPageSizeChange,
                            }: PaginationProps) {
     const { t } = useTranslation()
 
-    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const totalPages = Math.max(1, Math.min(maxPage ?? Infinity, Math.ceil(total / pageSize)))
     const safePage   = Math.max(1, Math.min(page, totalPages))
     const rangeStart = total === 0 ? 0 : (safePage - 1) * pageSize + 1
     const rangeEnd   = Math.min(safePage * pageSize, total)
@@ -57,12 +59,14 @@ export function Pagination({
             if (Number.isFinite(newSize) && newSize > 0) {
                 onPageSizeChange?.(newSize)
                 const newTotalPages = Math.ceil(total / newSize)
-                if (safePage > newTotalPages) {
+                if (maxPage !== undefined) {
+                    onPageChange(1)
+                } else if (safePage > newTotalPages) {
                     onPageChange(newTotalPages)
                 }
             }
         },
-        [onPageSizeChange, onPageChange, total, safePage],
+        [onPageSizeChange, onPageChange, total, safePage, maxPage],
     )
 
     if (total === 0) {

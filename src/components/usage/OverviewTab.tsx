@@ -35,6 +35,7 @@ interface OverviewTabProps {
     summary?: UsageSummary | null
     liveSummary?: UsageSummary | null
     heatmapSummary?: UsageSummary | null
+    heatmapGranularity?: 'hourly' | 'daily'
     fromMs: number
     toMs: number
     modelPrices?: Record<string, ModelPrice>
@@ -58,6 +59,7 @@ export function OverviewTab({
                                 summary,
                                 liveSummary,
                                 heatmapSummary,
+                                heatmapGranularity,
                                 fromMs,
                                 toMs,
                                 modelPrices,
@@ -107,6 +109,7 @@ export function OverviewTab({
             <ServiceHealthCard
                 loading={heatmapLoading ?? loading}
                 summary={heatmapSummary ?? null}
+                granularity={heatmapGranularity}
                 fromMs={fromMs}
                 toMs={toMs}
                 error={heatmapError}

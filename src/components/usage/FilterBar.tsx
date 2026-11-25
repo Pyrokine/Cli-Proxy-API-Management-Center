@@ -6,7 +6,7 @@ import {formatAuthFileDisplayName, inferProviderFromAuthFileName} from '@/featur
 import {REQUEST_SPEEDS, type RequestSpeed, type UsageSummary} from '@/services/api/usage'
 import type {CredentialInfo} from '@/types/sourceInfo'
 import {formatDateTime} from '@/utils/format'
-import {getCredentialSourcesFromUsage, getModelNamesFromUsage, getSummaryDataStart} from '@/utils/usage'
+import {getCredentialSourcesFromUsage, getModelNamesFromUsage} from '@/utils/usage'
 import {summaryToApiKeyStats, summaryToCredentialEntries} from '@/utils/usage/summaryHelpers'
 import {useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
@@ -256,8 +256,6 @@ export function FilterBar({
         [t],
     )
 
-    const earliestDate = useMemo(() => getSummaryDataStart(summary), [summary])
-
     return (
         <div className={styles.filterBar}>
             <div className={styles.filters}>
@@ -268,7 +266,6 @@ export function FilterBar({
                         to={dateTo}
                         onChange={(from, to, preset) => onDateRangeChange(from, to, preset)}
                         activePreset={activePreset}
-                        earliestDate={earliestDate}
                     />
                 </div>
                 <div className={styles.criteriaFilters}>

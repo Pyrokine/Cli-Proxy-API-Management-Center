@@ -35,10 +35,11 @@ import {compile} from 'sass'
 import ts from 'typescript'
 import {sourceCallback, sourceExpression, sourceInitializer} from './sourceCallbacks'
 
-const file   = 'components/usage/RequestEventsDetailsCard.tsx'
-const styles = new Proxy<Record<string, string>>({}, { get: (_target, key) => String(key) })
-const noop   = () => {
+const file            = 'components/usage/RequestEventsDetailsCard.tsx'
+const styles          = new Proxy<Record<string, string>>({}, { get: (_target, key) => String(key) })
+const noop            = () => {
 }
+const fixturePassword = 'fixture-password'
 type Row = {
     id: string
     model: string
@@ -185,26 +186,57 @@ async function locale(language: string) {
 
 async function exportFixture(format: 'json' | 'csv', response: EventsResponse = fixture) {
     let output: Blob | undefined
-    const exportEvents = sourceCallback<(format: string) => Promise<void>>(file, 'exportEvents', {
-        exportControllerRef: { current: null }, setExportingFormat: noop,
-        sourceInfoMap: sourceMap, authFileMap: new Map(), i18n: { language: 'en' },
-        noApiKeyLabel: '', notRecordedLabel: '', modelAliasLookup: new Map(),
-        t, aliases: {}, eventToRow: convert, observedRequestSpeed: helpers.observedRequestSpeed,
-        createUsageEventExport, UsageEventExportLimitError, USAGE_EVENT_EXPORT_PAGE_SIZE,
-        USAGE_EVENT_CSV_HEADER: sourceInitializer(file, 'USAGE_EVENT_CSV_HEADER', {}),
-        usageApi: { getEvents: async () => response },
-        buildExportParams: () => ({ page: 1 }), normalizeUsageThinking,
-        sanitizeUpstreamUrl: sanitizeUrl, encodeCsv: sourceInitializer(file, 'encodeCsv', {}),
-        downloadBlob: ({ blob }: { blob: Blob }) => {
-            output = blob
+    const exportEvents = sourceCallback<(format: string, backupPassword: string) => Promise<void>>(
+        file,
+        'exportEvents',
+        {
+            apiClient,
+            exportControllerRef: { current: null },
+            setExportingFormat: noop,
+            sourceInfoMap: sourceMap,
+            authFileMap: new Map(),
+            i18n: { language: 'en' },
+            noApiKeyLabel: '',
+            notRecordedLabel: '',
+            modelAliasLookup: new Map(),
+            t,
+            aliases: {},
+            eventToRow: convert,
+            observedRequestSpeed: helpers.observedRequestSpeed,
+            createUsageEventExport,
+            UsageEventExportLimitError,
+            USAGE_EVENT_EXPORT_PAGE_SIZE,
+            USAGE_EVENT_CSV_HEADER: sourceInitializer(
+                file,
+                'USAGE_EVENT_CSV_HEADER',
+                {},
+            ),
+            usageApi: { getEvents: async () => response },
+            buildExportParams: () => ({ page: 1 }),
+            normalizeUsageThinking,
+            sanitizeUpstreamUrl: sanitizeUrl,
+            encodeCsv: sourceInitializer(
+                file,
+                'encodeCsv',
+                {},
+            ),
+            downloadBlob: ({ blob }: {
+                blob: Blob
+            }) => {
+                output = blob
+            },
+            showNotification: (
+                message: string,
+                kind: string,
+            ) => {
+                if (kind ===
+                    'error') {
+                    throw new Error(message)
+                }
+            },
         },
-        showNotification: (message: string, kind: string) => {
-            if (kind === 'error') {
-                throw new Error(message)
-            }
-        },
-    })
-    await exportEvents(format)
+    )
+    await exportEvents(format, fixturePassword)
     return output!.text()
 }
 
@@ -308,6 +340,9 @@ test('summary keeps unrecorded performance explicit instead of displaying measur
     expect(html).toContain('unknown')
     expect(html).not.toContain('0 tok/s')
     expect(html).not.toContain('0ms')
+    const measured = rowFor({ ...baseEvent, latency_ms: 0 })
+    expect(measured).toMatchObject({ latencyMs: 0, latencyLabel: '0ms' })
+    expect(renderToStaticMarkup(renderDetails({ row: measured, t }))).toContain('0ms')
 })
 
 test('R-712 each request expands into a full-width detail row and collapses without fetching history', () => {
@@ -681,15 +716,14 @@ test('actual usage API serializes the speed, raw export flag and cancellation si
 test(
     'missing or mismatched speed-filter echoes reject list and both export actions, including empty results',
     async () => {
-        const empty               = { ...fixture, events: [], total: 0 }
-        const get                 = spyOn(apiClient, 'get').mockResolvedValue(empty)
-        const getRaw              = spyOn(apiClient, 'getRaw').mockResolvedValue({
-                                                                                     data: new Blob([JSON.stringify({ usage: {} })]),
-                                                                                     headers: {},
-                                                                                 } as Awaited<ReturnType<typeof apiClient.getRaw>>)
-        const message             = i18n.t('usage_stats.request_events_speed_filter_unsupported')
-        const notices: string[][] = []
-        let downloaded            = false
+        const empty    = { ...fixture, events: [], total: 0 }
+        const get      = spyOn(apiClient, 'get').mockResolvedValue(empty)
+        const getRaw   = spyOn(apiClient, 'getRaw').mockResolvedValue({
+                                                                          data: new Blob([JSON.stringify({ usage: {} })]),
+                                                                          headers: {},
+                                                                      } as Awaited<ReturnType<typeof apiClient.getRaw>>)
+        const message  = i18n.t('usage_stats.request_events_speed_filter_unsupported')
+        let downloaded = false
         try {
             for (const view of [undefined, 'compact'] as const) {
                 for (const echo of [undefined, 'batch']) {
@@ -700,37 +734,70 @@ test(
             get.mockResolvedValue({ ...empty, speed_filter: 'fast' })
             expect((await usageApi.getEvents({ speed: 'fast', view: 'compact' })).total).toBe(0)
             get.mockResolvedValue(empty)
-            const exportEvents = sourceCallback<(format: string) => Promise<void>>(file, 'exportEvents', {
-                exportControllerRef: { current: null }, setExportingFormat: noop,
-                sourceInfoMap: sourceMap, authFileMap: new Map(), i18n: { language: 'en' },
-                noApiKeyLabel: '', notRecordedLabel: '', modelAliasLookup: new Map(), t, aliases: {},
-                eventToRow: convert, observedRequestSpeed: helpers.observedRequestSpeed,
-                createUsageEventExport, UsageEventExportLimitError, USAGE_EVENT_EXPORT_PAGE_SIZE,
-                USAGE_EVENT_CSV_HEADER: sourceInitializer(file, 'USAGE_EVENT_CSV_HEADER', {}), usageApi,
-                buildExportParams: () => ({ page: 1, speed: 'fast' }), normalizeUsageThinking,
-                sanitizeUpstreamUrl: sanitizeUrl, encodeCsv: sourceInitializer(file, 'encodeCsv', {}),
-                downloadBlob: () => {
-                    downloaded = true
+            const exportEvents = sourceCallback<(format: string, backupPassword: string) => Promise<void>>(
+                file,
+                'exportEvents',
+                {
+                    apiClient,
+                    exportControllerRef: { current: null },
+                    setExportingFormat: noop,
+                    sourceInfoMap: sourceMap,
+                    authFileMap: new Map(),
+                    i18n: { language: 'en' },
+                    noApiKeyLabel: '',
+                    notRecordedLabel: '',
+                    modelAliasLookup: new Map(),
+                    t,
+                    aliases: {},
+                    eventToRow: convert,
+                    observedRequestSpeed: helpers.observedRequestSpeed,
+                    createUsageEventExport,
+                    UsageEventExportLimitError,
+                    USAGE_EVENT_EXPORT_PAGE_SIZE,
+                    USAGE_EVENT_CSV_HEADER: sourceInitializer(
+                        file,
+                        'USAGE_EVENT_CSV_HEADER',
+                        {},
+                    ),
+                    usageApi,
+                    buildExportParams: () => ({
+                        page: 1,
+                        speed: 'fast',
+                    }),
+                    normalizeUsageThinking,
+                    sanitizeUpstreamUrl: sanitizeUrl,
+                    encodeCsv: sourceInitializer(
+                        file,
+                        'encodeCsv',
+                        {},
+                    ),
+                    downloadBlob: () => {
+                        downloaded =
+                            true
+                    },
+                    showNotification: noop,
                 },
-                showNotification: (text: string, kind: string) => notices.push([text, kind]),
-            })
-            await exportEvents('csv')
+            )
+            await expect(exportEvents('csv', fixturePassword)).rejects.toThrow(message)
             expect(downloaded).toBe(false)
-            expect(notices[0]).toEqual([`notification.download_failed: ${message}`, 'error'])
-            const backup = sourceInitializer<(filters: object) => Promise<void>>(
+            let confirmation: Promise<void> | undefined
+            const backup = sourceInitializer<(filters: object) => void>(
                 'components/usage/hooks/useUsageData.ts',
                 'handleExport',
                 {
-                    exportControllerRef: { current: null }, setExporting: noop, usageApi, t,
+                    exportControllerRef: { current: null }, setExporting: noop, usageApi, t, apiClient,
+                    requestBackupPassword: ({ onConfirm }: { onConfirm: (password: string) => Promise<void> }) => {
+                        confirmation = onConfirm(fixturePassword)
+                    },
                     downloadBlob: () => {
                         downloaded = true
                     },
-                    showNotification: (text: string, kind: string) => notices.push([text, kind]),
+                    showNotification: noop,
                 },
             )
-            await backup({ speed: 'fast' })
+            backup({ speed: 'fast' })
+            await expect(confirmation!).rejects.toThrow(`notification.download_failed: ${message}`)
             expect(downloaded).toBe(false)
-            expect(notices[1]).toEqual([`notification.download_failed: ${message}`, 'error'])
             for (const body of ['not-json', JSON.stringify({ speed_filter: 'batch', usage: {} })]) {
                 getRaw.mockResolvedValue({
                                              data: new Blob([body]),
@@ -798,8 +865,7 @@ test('the six-option filter and unchanged backup action carry speed only in the 
             node.parent.parent.name.getText(tree) === 'onExport', {
                                                           activeTab,
                                                           selectedEventSpeed: 'fast',
-                                                          effectiveDateFrom: 'from',
-                                                          effectiveDateTo: 'to',
+                                                          visibleDateRange: { from: 'from', to: 'to' },
                                                           selectedModels: ['model'],
                                                           selectedApiKeys: ['client'],
                                                           selectedCredentials: ['credential'],
@@ -825,6 +891,7 @@ test('the six-option filter and unchanged backup action carry speed only in the 
     const card     = elements(tab).find((element) => element.props.selectedSpeed === 'batch')!
     expect(card.props.onSelectedSpeedChange).toBe(setSpeed)
     const clear = sourceInitializer<() => void>(file, 'handleClearFilters', {
+        onClearFilters: undefined,
         onSelectedStatusChange: noop,
         onSelectedSpeedChange: (value: string) => expect(value).toBe(''),
         setSearchInput: noop,
@@ -909,35 +976,46 @@ test(
         for (const format of ['csv', 'json'] as const) {
             const requests: EventsParams[] = []
             let downloaded: Blob | undefined
-            const exportEvents             = sourceCallback<(format: string) => Promise<void>>(file, 'exportEvents', {
-                exportControllerRef: { current: null }, setExportingFormat: noop,
-                sourceInfoMap: sourceMap, authFileMap: new Map(), i18n: { language: 'en' },
-                noApiKeyLabel: '', notRecordedLabel: '', modelAliasLookup: new Map(), t, aliases: {},
-                eventToRow: convert, observedRequestSpeed: helpers.observedRequestSpeed,
-                createUsageEventExport, UsageEventExportLimitError, USAGE_EVENT_EXPORT_PAGE_SIZE,
-                USAGE_EVENT_CSV_HEADER: sourceInitializer(file, 'USAGE_EVENT_CSV_HEADER', {}),
-                usageApi: {
-                    getEvents: async (params: EventsParams) => {
-                        requests.push(params)
-                        const events = Array.from({ length: params.page === 1 ? 500 : 1 }, (_, index) => ({
-                            ...baseEvent, request_id: `page-${params.page}-${index}`, speed: 'ultrafast',
-                            request_service_tier: 'priority', response_service_tier: 'ultrafast', failed: true,
-                        }))
-                        return { events, total: 501, page: params.page, page_size: 500, total_pages: 2 }
+            let generation                 = 1
+            let changeConnectionAfterRead  = false
+            const exportEvents             = sourceCallback<(format: string, backupPassword: string) => Promise<void>>(
+                file,
+                'exportEvents',
+                {
+                    apiClient: { getAuthGeneration: () => generation },
+                    exportControllerRef: { current: null }, setExportingFormat: noop,
+                    sourceInfoMap: sourceMap, authFileMap: new Map(), i18n: { language: 'en' },
+                    noApiKeyLabel: '', notRecordedLabel: '', modelAliasLookup: new Map(), t, aliases: {},
+                    eventToRow: convert, observedRequestSpeed: helpers.observedRequestSpeed,
+                    createUsageEventExport, UsageEventExportLimitError, USAGE_EVENT_EXPORT_PAGE_SIZE,
+                    USAGE_EVENT_CSV_HEADER: sourceInitializer(file, 'USAGE_EVENT_CSV_HEADER', {}),
+                    usageApi: {
+                        getEvents: async (params: EventsParams, options: { backupPassword?: string }) => {
+                            expect(options.backupPassword).toBe(fixturePassword)
+                            requests.push(params)
+                            if (changeConnectionAfterRead) {
+                                ++generation
+                            }
+                            const events = Array.from({ length: params.page === 1 ? 500 : 1 }, (_, index) => ({
+                                ...baseEvent, request_id: `page-${params.page}-${index}`, speed: 'ultrafast',
+                                request_service_tier: 'priority', response_service_tier: 'ultrafast', failed: true,
+                            }))
+                            return { events, total: 501, page: params.page, page_size: 500, total_pages: 2 }
+                        },
+                    },
+                    buildExportParams, normalizeUsageThinking, sanitizeUpstreamUrl: sanitizeUrl,
+                    encodeCsv: sourceInitializer(file, 'encodeCsv', {}),
+                    downloadBlob: ({ blob }: { blob: Blob }) => {
+                        downloaded = blob
+                    },
+                    showNotification: (message: string, kind: string) => {
+                        if (kind === 'error') {
+                            throw new Error(message)
+                        }
                     },
                 },
-                buildExportParams, normalizeUsageThinking, sanitizeUpstreamUrl: sanitizeUrl,
-                encodeCsv: sourceInitializer(file, 'encodeCsv', {}),
-                downloadBlob: ({ blob }: { blob: Blob }) => {
-                    downloaded = blob
-                },
-                showNotification: (message: string, kind: string) => {
-                    if (kind === 'error') {
-                        throw new Error(message)
-                    }
-                },
-            })
-            await exportEvents(format)
+            )
+            await exportEvents(format, fixturePassword)
             expect(requests.map((params) => params.page)).toEqual([1, 2])
             for (const request of requests) {
                 expect(request).toMatchObject({ speed: 'ultrafast', status: 'failure', export: true })
@@ -954,6 +1032,13 @@ test(
                                                                 failed: true,
                                                                 request_service_tier: 'priority',
                                                             })
+            } else {
+                requests.length           = 0
+                downloaded                = undefined
+                changeConnectionAfterRead = true
+                await expect(exportEvents(format, fixturePassword)).rejects.toThrow('common.connection_changed')
+                expect(requests.map((params) => params.page)).toEqual([1])
+                expect(downloaded).toBeUndefined()
             }
         }
     },

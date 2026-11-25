@@ -6,14 +6,60 @@ import {downloadAuthFilesBatch} from '@/features/authFiles/batchDownload'
 import type {UsageSummary} from '@/services/api/usage'
 import {useTimezoneStore} from '@/stores/useTimezoneStore'
 import type {AuthFileItem} from '@/types/authFile'
-import {toLocalDateTimeString} from '@/utils/format'
 import {buildChartDataFromSummary, formatCompactNumber, formatUsd, type ServiceHealthData} from '@/utils/usage'
 import {summaryToApiKeyStats} from '@/utils/usage/summaryHelpers'
 import {describe, expect, test} from 'bun:test'
-import {createElement} from 'react'
-import {sourceCallback, sourceInitializer} from './sourceCallbacks'
+import {Children, createElement, isValidElement, type ReactElement, type ReactNode} from 'react'
+import ts from 'typescript'
+import {sourceCallback, sourceExpression, sourceInitializer} from './sourceCallbacks'
 
-const file = (name: string, extra: object = {}) => ({ name, ...extra }) as AuthFileItem
+const file       = (name: string, extra: object = {}) => ({ name, ...extra }) as AuthFileItem
+const healthCard = 'components/usage/ServiceHealthCard.tsx'
+
+function expectLatestHealthCellAtBottomRight(healthData: ServiceHealthData) {
+    const leadingSlots = sourceInitializer<number>(healthCard, 'leadingSlots', { healthData })
+    const latest       = healthData.blockDetails.length - 1
+    const grid         = sourceExpression<ReactElement<{ children: ReactNode }>>(
+        healthCard,
+        (node, tree) =>
+            ts.isJsxElement(node) &&
+            node.openingElement.attributes.getText(tree).includes('className={styles.healthGrid}'),
+        {
+            React: { createElement },
+            healthData,
+            leadingSlots,
+            activeTooltip: latest,
+            gridRef: null,
+            styles: {
+                healthGrid: 'health-grid',
+                healthBlockWrapper: 'cell',
+                healthBlockActive: 'latest-cell',
+            },
+            rateToColor: () => '',
+            renderTooltip: () => null,
+            handlePointerLeave: () => {
+            },
+        },
+    )
+    const slots        = Children.toArray(grid.props.children)
+                                 .filter(isValidElement<{ 'aria-hidden'?: boolean; className?: string }>)
+    expect(slots).toHaveLength(healthData.cols * healthData.rows)
+    expect(slots.filter((slot) => slot.props['aria-hidden'])).toEqual(slots.slice(0, leadingSlots))
+    expect(leadingSlots).toBeLessThan(healthData.rows)
+    const latestSlot = slots.findIndex((slot) => slot.props.className?.includes('latest-cell'))
+    expect(Math.floor(latestSlot / healthData.rows)).toBe(healthData.cols - 1)
+    expect(latestSlot % healthData.rows).toBe(7)
+    const getTooltipVerticalClass = sourceInitializer<(index: number) => string>(
+        healthCard,
+        'getTooltipVerticalClass',
+        {
+            healthData,
+            leadingSlots,
+            styles: { healthTooltipBelow: 'below' },
+        },
+    )
+    expect(getTooltipVerticalClass(latest)).toBe('')
+}
 
 describe('frontend credential and usage remediation', () => {
     test('stops a selected-file download before saving or dispatching on another connection', async () => {
@@ -119,7 +165,7 @@ describe('frontend credential and usage remediation', () => {
         const calculate = sourceCallback<(points: unknown[], from: number, to: number) => {
             totalSuccess: number;
             blockDetails: { totalTokens: number }[]
-        }>('components/usage/ServiceHealthCard.tsx', 'calculateServiceHealthFromSummary', {})
+        }>(healthCard, 'calculateServiceHealthFromSummary', {})
         const result    = calculate([
                                         { time: '2026-10-23T11:00:00Z', requests: 1, success: 1, tokens: 14 },
                                         { time: '2026-10-23T12:00:00Z', requests: 2, success: 2, tokens: 99 },
@@ -130,7 +176,7 @@ describe('frontend credential and usage remediation', () => {
 
     test('retains thirty-day hourly health history and moves whole cells across hour and day boundaries', () => {
         const hour      = 3600000
-        const anchor    = Date.parse('2026-10-23T11:59:00Z')
+        const anchor    = Date.parse('2026-10-23T11:59:30.125Z')
         const initRange = sourceCallback<() => { from: string; to: string; preset: string }>(
             'pages/UsagePage.tsx',
             'initDateRange',
@@ -141,7 +187,6 @@ describe('frontend credential and usage remediation', () => {
                               anchor)
                     }
                 },
-                toLocalDateTimeString,
                 DEFAULT_PRESET: sourceInitializer<string>(
                     'pages/UsagePage.tsx',
                     'DEFAULT_PRESET',
@@ -153,13 +198,11 @@ describe('frontend credential and usage remediation', () => {
         const from      = Date.parse(range.from)
         const to        = Date.parse(range.to)
         expect(range.preset).toBe('30d')
-        expect(range.from).toBe(toLocalDateTimeString(new Date(anchor - 30 * 24 * hour)))
-        expect(range.to).toBe(toLocalDateTimeString(new Date(anchor)))
-        const calculate = sourceCallback<(points: unknown[], from: number, to: number) => ServiceHealthData>(
-            'components/usage/ServiceHealthCard.tsx',
-            'calculateServiceHealthFromSummary',
-            {},
-        )
+        expect(range.from).toBe('2026-09-23T11:59:30.125Z')
+        expect(range.to).toBe('2026-10-23T11:59:30.125Z')
+        const calculate = sourceCallback<(
+            points: unknown[], from: number, to: number, granularity?: 'hourly' | 'daily',
+        ) => ServiceHealthData>(healthCard, 'calculateServiceHealthFromSummary', {})
         const points    = Array.from({ length: 721 }, (_, index) => ({
             time: new Date(Math.floor(from / hour) * hour + index * hour).toISOString(),
             requests: 1,
@@ -168,6 +211,7 @@ describe('frontend credential and usage remediation', () => {
         }))
         const history   = calculate(points, from, to)
         expect(history.totalSuccess).toBe(721)
+        expect(history.blockDetails).toHaveLength(721)
         expect(history.blockDetails.filter((detail) => detail.success > 0)).toHaveLength(721)
         expect(history.rows).toBe(8)
         expect(history.blockDetails.every((detail) => detail.startTime %
@@ -178,13 +222,27 @@ describe('frontend credential and usage remediation', () => {
                                                       hour)).toBe(true)
         const newestIndex = history.blockDetails.findIndex((detail) => detail.totalTokens === 721)
         expect(newestIndex).toBe(history.blockDetails.length - 1)
-        expect(newestIndex % history.rows).toBe(7)
-        expect(Math.floor(newestIndex / history.rows)).toBe(history.cols - 1)
+        expectLatestHealthCellAtBottomRight(history)
         for (const shift of [1, 24]) {
             const shifted = calculate(points, from + shift * hour, to + shift * hour)
             expect(shifted.blockDetails.findIndex((detail) => detail.totalTokens === 721)).toBe(newestIndex - shift)
         }
         expect(calculate(points, from + 20000, to + 20000).blockDetails).toEqual(history.blockDetails)
+
+        const summary           = {
+            period: { from: '2026-10-15T15:14:00Z', to: '2026-10-19T00:00:00Z', granularity: 'daily' },
+            time_series: [{ time: '2026-10-19T00:00:00Z', requests: 4, success: 3, failure: 1, tokens: 12 }],
+        }
+        const bucketGranularity = sourceInitializer(healthCard, 'bucketGranularity', { summary, granularity: 'hourly' })
+        const daily             = sourceCallback<() => ServiceHealthData>(healthCard, 'healthData', {
+            bucketGranularity, summary, fromMs: 0, toMs: 0, calculateServiceHealthFromSummary: calculate,
+        })()
+        expect(daily.blockDetails).toHaveLength(5)
+        expect(daily.blockDetails.map(({ startTime, endTime }) => endTime - startTime)).toEqual(Array(5).fill(24 *
+                                                                                                              hour))
+        expect(daily).toMatchObject({ totalSuccess: 3, totalFailure: 1 })
+        expect(daily.blockDetails[4]).toMatchObject({ totalTokens: 12, startTime: Date.parse('2026-10-19T00:00:00Z') })
+        expectLatestHealthCellAtBottomRight(daily)
     })
 
     test('propagates each active selection and filter clear to summary, live totals and the hourly heatmap', () => {
@@ -247,7 +305,6 @@ describe('frontend credential and usage remediation', () => {
         const now   = Date.parse('2026-10-23T12:08:35.123Z')
         const range = sourceCallback<() => { from: string; to: string }>('pages/UsagePage.tsx', 'liveSummaryRange', {
             liveWindowAnchorMs: now,
-            toLocalDateTimeString,
             effectiveDateFrom: '2026-10-22T00:00',
             effectiveDateTo: '2026-10-24T23:59',
         })()

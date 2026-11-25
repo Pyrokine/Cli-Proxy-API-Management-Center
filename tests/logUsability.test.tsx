@@ -240,6 +240,7 @@ describe('compact error request logs', () => {
                 t,
                 errorLogs: rows,
                 errorLogColumns: columns,
+                errorLogsError: '',
                 loadingErrors: false,
             },
         )

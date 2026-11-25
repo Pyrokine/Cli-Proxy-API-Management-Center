@@ -123,7 +123,7 @@ describe('log API cancellation', () => {
         }) as typeof apiClient.delete
         apiClient.getRaw     = (async (url: string, config?: { signal?: AbortSignal }) => {
             seenSignals.set(`raw:${url}`, config?.signal)
-            return { data: new Blob([]), headers: {} }
+            return { data: new Blob([]), headers: {}, status: 200 }
         }) as typeof apiClient.getRaw
 
         const controller = new AbortController()

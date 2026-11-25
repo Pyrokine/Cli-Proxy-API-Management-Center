@@ -9,7 +9,8 @@ import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
 import {useDebounce} from '@/hooks/useDebounce'
 import {authFilesApi} from '@/services/api/authFiles'
-import {logsApi} from '@/services/api/logs'
+import {apiClient} from '@/services/api/client'
+import {logsApi, PendingRequestLogError} from '@/services/api/logs'
 import {
     type EventsParams,
     type EventsResponse,
@@ -31,7 +32,7 @@ import {
     USAGE_EVENTS_AUTO_REFRESH_INTERVALS,
 } from '@/utils/autoRefresh'
 import {downloadBlob} from '@/utils/download'
-import {formatDateTime, formatNumber, maskApiKey, toLocalDateTimeSecondsString} from '@/utils/format'
+import {formatDateTime, formatNumber, maskApiKey} from '@/utils/format'
 import {redactSensitiveText} from '@/utils/redaction'
 import {buildSourceInfoMap, resolveSourceDisplay} from '@/utils/sourceResolver'
 import {
@@ -53,9 +54,10 @@ import {
     UsageEventExportLimitError,
 } from './usageEventExport'
 
-const STATUS_ALL             = ''
-const DEFAULT_PAGE_SIZE      = 50
-const USAGE_EVENT_CSV_HEADER = [
+const STATUS_ALL              = ''
+const DEFAULT_PAGE_SIZE       = 50
+const LEGACY_MAX_EVENT_OFFSET = 100_000
+const USAGE_EVENT_CSV_HEADER  = [
     'timestamp',
     'model',
     'speed',
@@ -200,6 +202,8 @@ type RequestEventRow = {
 
 interface RequestEventsDetailsCardProps {
     enabled?: boolean
+    rangeLoading?: boolean
+    onClearFilters?: () => void
     refreshToken?: number
     geminiKeys: GeminiKeyConfig[]
     claudeConfigs: ProviderKeyConfig[]
@@ -1037,6 +1041,8 @@ function eventToRow(
 
 export function RequestEventsDetailsCard({
                                              enabled = true,
+                                             rangeLoading,
+                                             onClearFilters,
                                              refreshToken = 0,
                                              geminiKeys,
                                              claudeConfigs,
@@ -1070,7 +1076,8 @@ export function RequestEventsDetailsCard({
     const statusFilter                  = selectedStatus ?? STATUS_ALL
     const speedFilter                   = selectedSpeed ?? ''
     const [searchInput, setSearchInput] = useState('')
-    const searchQuery                   = useDebounce(searchInput, 300)
+    const debouncedSearch               = useDebounce(searchInput, 300)
+    const searchQuery                   = searchInput.trim() ? debouncedSearch : ''
     const [sortField, setSortField]     = useState<SortField>('timestampMs')
     const [sortDir, setSortDir]         = useState<SortDir>('desc')
     const [page, setPage]               = useState(1)
@@ -1098,6 +1105,8 @@ export function RequestEventsDetailsCard({
                                                                                content: string
                                                                                truncated: boolean
                                                                                totalLines: number
+                                                                               state?: RequestLogState | ''
+                                                                               message?: string
                                                                                observations?: RequestEventRow
                                                                            } | null>(null)
     const [requestDetails, setRequestDetails]                   = useState<RequestEventRow | null>(null)
@@ -1126,10 +1135,10 @@ export function RequestEventsDetailsCard({
         if (!autoRefresh) {
             return { from: dateRange.from, to: dateRange.to }
         }
-        const now = new Date(autoRefreshClockMs)
+        const nowMs = Math.max(autoRefreshClockMs, Date.parse(dateRange.to) || 0)
         return {
-            from: toLocalDateTimeSecondsString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-            to: toLocalDateTimeSecondsString(now),
+            from: new Date(nowMs - 24 * 60 * 60 * 1000).toISOString(),
+            to: new Date(nowMs).toISOString(),
         }
     }, [autoRefresh, autoRefreshClockMs, dateRange.from, dateRange.to])
 
@@ -1249,8 +1258,13 @@ export function RequestEventsDetailsCard({
             .getEvents(eventsParams, { signal: controller.signal })
             .then((data) => {
                 if (eventsRequestControllerRef.current === controller && !controller.signal.aborted) {
-                    setEventsData(data)
-                    setFetchError('')
+                    const lastPage = data.accessible_pages ?? data.total_pages
+                    if (lastPage > 0 && data.page > lastPage) {
+                        setPage(lastPage)
+                    } else {
+                        setEventsData(data)
+                        setFetchError('')
+                    }
                 }
             })
             .catch((err: unknown) => {
@@ -1372,7 +1386,14 @@ export function RequestEventsDetailsCard({
     const fetching         = enabled && settledRequestSignature !== eventsRequestSignature
     const isInitialLoading = fetching && !eventsData
     const isRefreshingRows = fetching && rows.length > 0
-    const isLoading        = !enabled || fetching
+    const isLoading        = rangeLoading || fetching
+    const accessiblePages  = eventsData && (eventsData.accessible_pages ??
+                                            Math.min(
+                                                eventsData.total_pages,
+                                                Math.floor(LEGACY_MAX_EVENT_OFFSET / eventsData.page_size) + 1,
+                                            ))
+    const canExport        = enabled && !fetching && !fetchError && totalCount > 0 && exportingFormat === null &&
+                             searchInput.trim() === searchQuery.trim()
 
     const hasActiveFilters =
               statusFilter !== STATUS_ALL ||
@@ -1383,8 +1404,12 @@ export function RequestEventsDetailsCard({
               topApiKeys.length > 0
 
     const handleClearFilters = () => {
-        onSelectedStatusChange?.(STATUS_ALL)
-        onSelectedSpeedChange?.('')
+        if (onClearFilters) {
+            onClearFilters()
+        } else {
+            onSelectedStatusChange?.(STATUS_ALL)
+            onSelectedSpeedChange?.('')
+        }
         setSearchInput('')
     }
 
@@ -1609,25 +1634,35 @@ export function RequestEventsDetailsCard({
             return
         }
         const seq                          = ++requestLogPreviewSeqRef.current
+        const generation                   = apiClient.getAuthGeneration()
+        const isCurrent                    = () => requestLogPreviewSeqRef.current ===
+                                                   seq &&
+                                                   activeRequestLogPreviewRef.current ===
+                                                   requestId &&
+                                                   generation ===
+                                                   apiClient.getAuthGeneration()
         activeRequestLogPreviewRef.current = requestId
-        setRequestLogPreview({ id: requestId, homeIp, content: '', truncated: false, totalLines: 0, observations })
+        setRequestLogPreview((previous) => previous?.id === requestId && previous.homeIp === homeIp ? previous :
+            { id: requestId, homeIp, content: '', truncated: false, totalLines: 0, observations })
         setRequestLogError('')
         setRequestLogPreviewing((prev) => new Set(prev).add(requestId))
         try {
             const preview = await logsApi.previewRequestLogById(requestId, 300, homeIp || undefined)
-            if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
+            if (isCurrent()) {
                 setRequestLogPreview({
                                          id: requestId,
-                                         homeIp,
+                                         homeIp: preview.requestLogHomeIp || homeIp,
                                          content: redactSensitiveText(preview.content),
                                          truncated: preview.truncated,
                                          totalLines: preview.total_lines,
+                                         state: preview.requestLogState,
+                                         message: redactSensitiveText(preview.message ?? ''),
                                          observations,
                                      })
             }
         } catch (err) {
-            if (requestLogPreviewSeqRef.current === seq && activeRequestLogPreviewRef.current === requestId) {
-                setRequestLogError(errorMessage(err) || 'request log unavailable')
+            if (isCurrent()) {
+                setRequestLogError(redactSensitiveText(errorMessage(err)) || t('notification.load_failed'))
             }
         } finally {
             setRequestLogPreviewing((prev) => {
@@ -1636,30 +1671,44 @@ export function RequestEventsDetailsCard({
                 return next
             })
         }
-    }, [])
+    }, [t])
 
     const downloadRequestLog = useCallback(async (requestId: string, homeIp: string) => {
         if (!requestId) {
             return
         }
+        const generation = apiClient.getAuthGeneration()
         setRequestLogError('')
         setRequestLogDownloading((prev) => new Set(prev).add(requestId))
         try {
             const response = await logsApi.downloadRequestLogById(requestId, homeIp || undefined)
             const content  = redactSensitiveText(await responseDataToText(response.data))
-            downloadBlob({
-                             filename: safeRequestLogFilename(requestId),
-                             blob: new Blob([content], { type: 'text/plain' }),
-                         })
+            if (generation === apiClient.getAuthGeneration()) {
+                downloadBlob({
+                                 filename: safeRequestLogFilename(requestId),
+                                 blob: new Blob([content], { type: 'text/plain' }),
+                             })
+            }
         } catch (err) {
-            setRequestLogError(errorMessage(err) || 'request log download failed')
-            setRequestLogPreview((prev) => prev ?? {
-                id: requestId,
-                homeIp,
-                content: '',
-                truncated: false,
-                totalLines: 0,
-            })
+            if (generation !== apiClient.getAuthGeneration()) {
+                return
+            }
+            if (err instanceof PendingRequestLogError) {
+                const { preview } = err
+                setRequestLogPreview((prev) => ({
+                    ...(prev?.id === requestId && prev.homeIp === homeIp ? prev : {
+                        id: requestId, content: '', truncated: false, totalLines: 0,
+                    }),
+                    homeIp: preview.requestLogHomeIp || homeIp,
+                    state: preview.requestLogState,
+                    message: redactSensitiveText(preview.message ?? ''),
+                }))
+            } else {
+                setRequestLogError(redactSensitiveText(errorMessage(err)) || t('notification.download_failed'))
+                setRequestLogPreview((prev) => prev ?? {
+                    id: requestId, homeIp, content: '', truncated: false, totalLines: 0,
+                })
+            }
         } finally {
             setRequestLogDownloading((prev) => {
                 const next = new Set(prev)
@@ -1667,7 +1716,7 @@ export function RequestEventsDetailsCard({
                 return next
             })
         }
-    }, [])
+    }, [t])
 
     const renderSortableHeader = useCallback((field: SortField, label: string) => (
         <button type='button' className={styles.sortHeaderButton} onClick={() => handleSort(field)}>
@@ -1698,7 +1747,20 @@ export function RequestEventsDetailsCard({
                             {t('common.download')}
                         </Button>
                     </div>
-                ) : <span className={styles.requestEventsLogDisabled}>{stateLabel}</span>}
+                ) : (
+                     <div className={styles.requestLogButtonRow}>
+                         <span className={styles.requestEventsLogDisabled}>{stateLabel}</span>
+                         {row.requestLogState === 'pending' && <Button variant='secondary' size='sm'
+                                                                       loading={requestLogPreviewing.has(row.requestId)}
+                                                                       onClick={() => void previewRequestLog(
+                                                                           row.requestId,
+                                                                           row.requestLogHomeIp,
+                                                                           row,
+                                                                       )}>
+                             {t('usage_stats.request_events_log_preview')}
+                         </Button>}
+                     </div>
+                 )}
             </div>
         )
     }, [
@@ -2016,7 +2078,13 @@ export function RequestEventsDetailsCard({
                 />
             ) : (
                     <div className={styles.cardLoadingShell}>
-                        {fetchError && <div className='error-box' role='alert'>{fetchError}</div>}
+                        {!fetching && fetchError && <div className='error-box' role='alert'>
+                            {t('usage_stats.request_events_page_load_failed', {
+                                requested: page, shown: eventsData?.page ?? page,
+                                defaultValue: 'Could not load page {{requested}}; ' +
+                                              'showing the last loaded results (page {{shown}})',
+                            })}: {fetchError}
+                        </div>}
                         <div className={styles.requestEventsMeta}>
                             <span>{t('usage_stats.request_events_count', { count: totalCount })}</span>
                             <span className={styles.requestEventsLimitHint}>
@@ -2046,10 +2114,18 @@ export function RequestEventsDetailsCard({
                             tableClassName={styles.table}
                         />
 
+                        {accessiblePages != null && eventsData && accessiblePages < eventsData.total_pages && (
+                            <div className={styles.hint}>{t('usage_stats.request_events_paging_limit', {
+                                maxPage: formatNumber(accessiblePages, i18n.language),
+                                defaultValue: 'Pages 1–{{maxPage}} are available; ' +
+                                              'narrow the time range or filters to see more matches',
+                            })}</div>
+                        )}
                         <Pagination
                             total={totalCount}
-                            page={page}
-                            pageSize={pageSize}
+                            page={eventsData?.page ?? page}
+                            pageSize={eventsData?.page_size ?? pageSize}
+                            maxPage={accessiblePages ?? undefined}
                             onPageChange={setPage}
                             onPageSizeChange={setPageSize}
                         />
@@ -2058,6 +2134,7 @@ export function RequestEventsDetailsCard({
 
             <Modal
                 open={requestLogPreview !== null}
+                closeDisabled={requestLogPreview !== null && requestLogDownloading.has(requestLogPreview.id)}
                 onClose={() => {
                     ++requestLogPreviewSeqRef.current
                     activeRequestLogPreviewRef.current = null
@@ -2077,6 +2154,7 @@ export function RequestEventsDetailsCard({
                     <>
                         <Button
                             variant='secondary'
+                            disabled={requestLogPreview !== null && requestLogDownloading.has(requestLogPreview.id)}
                             onClick={() => {
                                 ++requestLogPreviewSeqRef.current
                                 activeRequestLogPreviewRef.current = null
@@ -2086,6 +2164,14 @@ export function RequestEventsDetailsCard({
                         >
                             {t('common.close')}
                         </Button>
+                        {requestLogPreview && (requestLogPreview.state === 'pending' || requestLogError) && (
+                            <Button variant='secondary' loading={requestLogPreviewing.has(requestLogPreview.id)}
+                                    onClick={() => void previewRequestLog(
+                                        requestLogPreview.id, requestLogPreview.homeIp, requestLogPreview.observations,
+                                    )}>
+                                {t('common.retry')}
+                            </Button>
+                        )}
                         <Button
                             onClick={() => {
                                 if (requestLogPreview?.id) {
@@ -2093,7 +2179,8 @@ export function RequestEventsDetailsCard({
                                 }
                             }}
                             loading={requestLogPreview ? requestLogDownloading.has(requestLogPreview.id) : false}
-                            disabled={!requestLogPreview?.id}
+                            disabled={!requestLogPreview?.id || requestLogPreviewing.has(requestLogPreview.id) ||
+                                      Boolean(requestLogPreview.state && requestLogPreview.state !== 'available')}
                         >
                             {t('common.download')}
                         </Button>
@@ -2103,8 +2190,14 @@ export function RequestEventsDetailsCard({
                 {requestLogPreview?.observations && (
                     <RequestObservationDetails row={requestLogPreview.observations} t={t} />
                 )}
-                {requestLogError && <div className={styles.requestLogError}>{requestLogError}</div>}
-                {requestLogPreviewing.size > 0 && !requestLogPreview?.content ? (
+                {requestLogError && <div className={styles.requestLogError} role='alert'>{requestLogError}</div>}
+                {requestLogPreview?.state && requestLogPreview.state !== 'available' && (
+                    <div className={styles.hint} role='status'>
+                        {requestLogStateLabel(requestLogPreview.state, t)}
+                        {requestLogPreview.message && <> · {requestLogPreview.message}</>}
+                    </div>
+                )}
+                {requestLogPreview && requestLogPreviewing.has(requestLogPreview.id) && !requestLogPreview.content ? (
                     <div className={styles.hint}>{t('common.loading')}</div>
                 ) : requestLogPreview?.content ? (
                     <>

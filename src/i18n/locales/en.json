@@ -1739,7 +1739,8 @@
         "newest": "Newest",
         "oldest": "Oldest",
         "no_requests": "No requests",
-        "refresh": "Refresh"
+        "refresh": "Refresh",
+        "daily_buckets": "Grouped by UTC day within the selected range"
     },
     "logs": {
         "request_log_disabled_status": "Full request logging is off; failed requests are still recorded",
@@ -1751,7 +1752,7 @@
         "column_summary": "Request / message",
         "title": "Logs Viewer",
         "refresh_button": "Refresh Logs",
-        "clear_button": "Clear Logs",
+        "clear_button": "Clear application logs",
         "download_button": "Download Logs",
         "fullscreen_enter": "Fullscreen",
         "fullscreen_exit": "Exit Fullscreen",
@@ -1798,9 +1799,9 @@
         "read_failed": "Could not read logs",
         "last_read": "Last read at {{time}}",
         "history_evicted": "Older logs are no longer in the list · View newest",
-        "clear_confirm_title": "Clear Logs",
-        "clear_confirm": "Are you sure you want to clear all logs? This action cannot be undone!",
-        "clear_success": "Logs cleared successfully",
+        "clear_confirm_title": "Clear application logs",
+        "clear_confirm": "Clear the application log and its rotated files? Request logs and error request logs will be kept. This action cannot be undone.",
+        "clear_success": "Application logs cleared",
         "download_success": "Logs downloaded successfully",
         "auto_refresh": "Auto Refresh",
         "refresh_interval": "Page auto refresh",
@@ -1832,7 +1833,7 @@
         "clear_filters": "Clear Filters",
         "trace_button": "Trace",
         "trace_title": "Request Trace (V1)",
-        "trace_notice": "Route Decision comes directly from the request log. Usage Match Candidates use heuristic correlation with usage events. Proxy log latency comes from the log line; usage total duration comes from usage metadata total_duration_ms.",
+        "trace_notice": "Route decisions come from the request log. Usage events match by request ID or appear as nearby candidates. Proxy latency comes from the log line; usage total duration comes from the usage event.",
         "trace_usage_field_guide": "Input tokens are the input usage reported for the request. Cache hit = cache-read tokens / input tokens; older records use cached tokens. Cache writes do not count as hits. Thinking shows recorded settings or reasoning effort; missing fields show Not recorded.",
         "trace_log_info": "Log Event",
         "trace_candidates_title": "Usage Match Candidates",
@@ -1954,7 +1955,15 @@
         "column_ip": "IP",
         "column_trace": "Trace",
         "trace_short": "Trace",
-        "trace_timestamp_required": "The log line has no timestamp and cannot be matched with usage events"
+        "trace_timestamp_required": "The log line has no timestamp and cannot be matched with usage events",
+        "request_log_download_pending": "The request log is being generated. Retry the download in a moment",
+        "error_log_tail_preview": "Showing the last {{shown}} lines; download the full log to see earlier lines",
+        "disk_usage_stale": "Disk: {{size}} (last read; refresh failed)",
+        "disk_usage_unavailable": "Disk usage unavailable",
+        "trace_exact_lookup_unavailable": "This server could not search by request ID; only nearby events were checked",
+        "trace_request_id_matched": "Exact request ID",
+        "trace_nearby_model": "Candidate · model and time",
+        "trace_nearby_time": "Candidate · time only"
     },
     "config_management": {
         "oauth_alias_source_scope": "This editor accepts the oauth-model-alias section only.",

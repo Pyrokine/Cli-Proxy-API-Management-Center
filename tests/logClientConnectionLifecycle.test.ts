@@ -1,6 +1,6 @@
 import {createLogRequestGuard, createLogRequestQueue} from '@/pages/hooks/logRequests'
 import {apiClient} from '@/services/api/client'
-import {logsApi} from '@/services/api/logs'
+import {logsApi, PendingRequestLogError} from '@/services/api/logs'
 import {describe, expect, mock, spyOn, test} from 'bun:test'
 import * as React from 'react'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
@@ -41,6 +41,7 @@ function fixture() {
     const requests                       = {
         session: createLogRequestGuard(),
         logs: createLogRequestQueue(),
+        diskSize: createLogRequestGuard(),
         errors: createLogRequestGuard(),
         preview: createLogRequestGuard(),
         errorDownload: createLogRequestGuard(),
@@ -76,6 +77,8 @@ function fixture() {
         INITIAL_RETRY_MS: 8000,
         MAX_RETRY_MS: 60000,
         LONG_PRESS_MS: 650,
+        ERROR_LOG_PREVIEW_LINES: 500,
+        PendingRequestLogError,
         longPressRef: { current: null },
         clearLongPressTimer: mock(),
         window: {
@@ -92,14 +95,15 @@ function fixture() {
         t: (key: string) => key,
     }
     for (const name of [
-        'setLoading', 'setLogDiskSize', 'setTotalLogLines', 'setLogState', 'setHistoryEvicted',
+        'setLoading', 'setLogDiskSize', 'setLogDiskSizeError', 'setTotalLogLines', 'setLogState', 'setHistoryEvicted',
         'setLogPage', 'setExpandedLogId', 'setCatchingUp', 'setLastUpdated', 'setError', 'setLoadingErrors',
         'setErrorLogsError', 'setErrorLogs', 'setErrorLogDownloading', 'setRequestLogDownloading',
         'setClearingLogs',
     ]) {
         scope[name] = mock()
     }
-    const callback = <T>(name: string) => sourceInitializer<T>(file, name, scope)
+    const callback        = <T>(name: string) => sourceInitializer<T>(file, name, scope)
+    scope.loadLogDiskSize = callback('loadLogDiskSize')
     return {
         calls, requests, scope, timers, mountedRef, callback,
         changeConnection: (value: number) => {

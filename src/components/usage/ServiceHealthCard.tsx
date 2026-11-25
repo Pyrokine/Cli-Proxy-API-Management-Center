@@ -8,36 +8,21 @@ import {rateToColor, type ServiceHealthData, type StatusBlockDetail} from '@/uti
 import {type PointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 
-/** Builds the service-health heat map from summary.time_series.
- *
- *  The grid follows the active filter window (from/to) so it always shows
- *  exactly the period the trend chart is showing. Buckets default to 1 hour.
- *  They expand automatically once the window is too wide to draw in 1-hour
- *  cells without creating too many DOM nodes. MAX_COLS also protects the page
- *  while the "all" preset is still resolving. */
 function calculateServiceHealthFromSummary(
     timeSeries: SummaryTimePoint[],
     fromMs: number,
     toMs: number,
+    granularity: 'hourly' | 'daily' = 'hourly',
 ): ServiceHealthData {
-    const ROWS     = 8
-    const HOUR_MS  = 60 * 60 * 1000
-    const MIN_COLS = 8
-    const MAX_COLS = 200 // 8 × 200 = 1600 cells — keeps render snappy
-
-    // Align edges to whole-hour boundaries so cell counts are stable.
-    const alignedEnd   = Math.ceil(toMs / HOUR_MS) * HOUR_MS
-    const alignedStart = Math.floor(fromMs / HOUR_MS) * HOUR_MS
-    const span         = Math.max(alignedEnd - alignedStart, HOUR_MS * MIN_COLS * ROWS)
-
-    // Compute the ideal cell count assuming 1-hour buckets, then clamp. When
-    // the window is wider than MAX_COLS × ROWS hours we widen each bucket so
-    // every bucket is still rendered exactly once.
-    const idealCols     = Math.ceil(span / (HOUR_MS * ROWS))
-    const cols          = Math.min(MAX_COLS, Math.max(MIN_COLS, idealCols))
-    const blockCount    = ROWS * cols
-    const blockDuration = idealCols > MAX_COLS ? Math.ceil(span / (blockCount * HOUR_MS)) * HOUR_MS : HOUR_MS
-    const windowStart   = alignedEnd - blockCount * blockDuration
+    const rows           = 8
+    const bucketDuration = (granularity === 'daily' ? 24 : 1) * 3600_000
+    const alignedStart   = Math.floor(fromMs / bucketDuration) * bucketDuration
+    const alignedEnd     = (Math.floor(toMs / bucketDuration) + 1) * bucketDuration
+    const bucketCount    = Math.max(0, (alignedEnd - alignedStart) / bucketDuration)
+    const maxBlocks      = rows * 200
+    const blockDuration  = bucketDuration * Math.max(1, Math.ceil(bucketCount / maxBlocks))
+    const blockCount     = Math.ceil((bucketCount * bucketDuration) / blockDuration)
+    const cols           = Math.ceil(blockCount / rows)
 
     const blockStats: Array<{ success: number; failure: number; tokens: number }> = Array.from(
         { length: blockCount },
@@ -47,18 +32,9 @@ function calculateServiceHealthFromSummary(
     let totalSuccess = 0
     let totalFailure = 0
 
-    // Backend timePoint.Time is the start of an hour bucket (e.g. "19:00:00Z"
-    // covers 19:00-20:00). Subtract one hour so the bucket-start maps into
-    // [bucket-start, bucket-end] when locating the cell.
     for (const pt of timeSeries) {
-        const timestamp = new Date(pt.time).getTime()
-        if (!Number.isFinite(timestamp) || timestamp < windowStart || timestamp >= alignedEnd) {
-            continue
-        }
-
-        const ageMs      = alignedEnd - timestamp - HOUR_MS
-        const blockIndex = blockCount - 1 - Math.floor(ageMs / blockDuration)
-
+        const timestamp  = Date.parse(pt.time)
+        const blockIndex = Math.floor((timestamp - alignedStart) / blockDuration)
         if (blockIndex >= 0 && blockIndex < blockCount) {
             const failure = pt.failure ?? 0
             // Compat: old data may only have requests without success/failure breakdown
@@ -74,9 +50,8 @@ function calculateServiceHealthFromSummary(
     }
 
     const blockDetails: StatusBlockDetail[] = blockStats.map((stats, idx) => {
-        const blockAge  = (blockCount - 1 - idx) * blockDuration
-        const startTime = alignedEnd - blockAge - blockDuration
-        const endTime   = alignedEnd - blockAge
+        const startTime = alignedStart + idx * blockDuration
+        const endTime   = Math.min(startTime + blockDuration, alignedEnd)
         const total     = stats.success + stats.failure
 
         if (total === 0) {
@@ -106,7 +81,7 @@ function calculateServiceHealthFromSummary(
                                             : ('mixed' as const),
     )
 
-    return { blocks, blockDetails, totalSuccess, totalFailure, successRate, rows: ROWS, cols }
+    return { blocks, blockDetails, totalSuccess, totalFailure, successRate, rows, cols }
 }
 
 interface ServiceHealthCardProps {
@@ -114,8 +89,7 @@ interface ServiceHealthCardProps {
     summary?: UsageSummary | null
     fromMs: number
     toMs: number
-    /** Optional explicit error from upstream — when provided, the card renders
-     *  the DataStatusCard error state instead of the heat map. */
+    granularity?: 'hourly' | 'daily'
     error?: unknown
     /** Refresh handler wired into both empty and error states so users can
      *  retry without leaving the card. Hidden when not provided. */
@@ -130,6 +104,7 @@ export function ServiceHealthCard({
                                       summary,
                                       fromMs,
                                       toMs,
+                                      granularity = 'hourly',
                                       error,
                                       onRefresh,
                                       refreshing,
@@ -154,12 +129,20 @@ export function ServiceHealthCard({
         }
     }, [onRefresh])
 
-    const healthData: ServiceHealthData = useMemo(
-        () => calculateServiceHealthFromSummary(summary?.time_series ?? [], fromMs, toMs),
-        [summary, fromMs, toMs],
-    )
+    const bucketGranularity             = summary?.period?.granularity ?? granularity
+    const healthData: ServiceHealthData = useMemo(() => {
+        const periodFrom = Date.parse(summary?.period?.from ?? '')
+        const periodTo   = Date.parse(summary?.period?.to ?? '')
+        return calculateServiceHealthFromSummary(
+            summary?.time_series ?? [],
+            Number.isFinite(periodFrom) ? periodFrom : fromMs,
+            Number.isFinite(periodTo) ? periodTo : toMs,
+            bucketGranularity,
+        )
+    }, [summary, fromMs, toMs, bucketGranularity])
 
-    const hasData = healthData.totalSuccess + healthData.totalFailure > 0
+    const hasData      = healthData.totalSuccess + healthData.totalFailure > 0
+    const leadingSlots = healthData.cols * healthData.rows - healthData.blockDetails.length
 
     useEffect(() => {
         if (activeTooltip === null) {
@@ -202,7 +185,7 @@ export function ServiceHealthCard({
     }, [])
 
     const getTooltipPositionClass = (idx: number): string => {
-        const col = Math.floor(idx / healthData.rows)
+        const col = Math.floor((idx + leadingSlots) / healthData.rows)
         if (col <= 2) {
             return styles.healthTooltipLeft
         }
@@ -213,7 +196,7 @@ export function ServiceHealthCard({
     }
 
     const getTooltipVerticalClass = (idx: number): string => {
-        const row = idx % healthData.rows
+        const row = (idx + leadingSlots) % healthData.rows
         if (row <= 1) {
             return styles.healthTooltipBelow
         }
@@ -291,16 +274,7 @@ export function ServiceHealthCard({
     // 26px slot.
     const labelStep = Math.max(5, Math.floor(healthData.cols / 8))
 
-    // DataStatusCard takes loading/empty/error/ready and decides which
-    // state-screen to render. We keep the heat-map mounted only when status
-    // === 'ready' — otherwise initial loads, fetch errors and "no data in
-    // window" all share the same visual language with the rest of the page
-    // (CardSkeleton vs error-with-retry vs "no data" hint).
-    //
-    // Subtle: 已有 hasData 时,refresh 不应再降级成 skeleton(否则用户点刷新
-    // 后整个卡片(含刷新按钮本身)会消失 1s,视觉上像点击没生效).只在首次拉取
-    // 没数据时才走 loading 状态;后续刷新由刷新按钮自己的 spinner 反馈.
-    const status       = error ? 'error' : loading && !hasData ? 'loading' : !loading && !hasData ? 'empty' : 'ready'
+    const status       = hasData ? 'ready' : error ? 'error' : loading ? 'loading' : 'empty'
     const errorMessage = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined
 
     if (status !== 'ready') {
@@ -328,7 +302,7 @@ export function ServiceHealthCard({
                 <h3 className={styles.healthTitle}>{t('service_health.title')}</h3>
                 <div className={styles.healthMeta}>
                     <span className={`${styles.healthRate} ${rateClass}`}>
-                        {loading ? '--' : hasData ? `${healthData.successRate.toFixed(1)}%` : '--'}
+                        {`${healthData.successRate.toFixed(1)}%`}
                     </span>
                     {onRefresh && (
                         <Button
@@ -352,7 +326,7 @@ export function ServiceHealthCard({
                         if (col % labelStep !== 0) {
                             return <span key={col} />
                         }
-                        const blockIdx = col * healthData.rows
+                        const blockIdx = Math.max(0, col * healthData.rows - leadingSlots)
                         const detail   = healthData.blockDetails[blockIdx]
                         if (!detail) {
                             return <span key={col} />
@@ -368,6 +342,7 @@ export function ServiceHealthCard({
                     })}
                 </div>
                 <div className={styles.healthGrid} ref={gridRef}>
+                    {Array.from({ length: leadingSlots }, (_, index) => <span key={`empty-${index}`} aria-hidden />)}
                     {healthData.blockDetails.map((detail, idx) => {
                         const isIdle     = detail.rate === -1
                         const blockStyle = isIdle ? undefined : { backgroundColor: rateToColor(detail.rate) }
@@ -391,6 +366,14 @@ export function ServiceHealthCard({
                     })}
                 </div>
             </div>
+            {errorMessage && <div className={styles.hint} role='alert'>
+                {errorMessage} · {t('usage_stats.previous_results_shown', {
+                defaultValue: 'Showing the last loaded results',
+            })}
+            </div>}
+            {bucketGranularity === 'daily' && <div className={styles.hint}>
+                {t('service_health.daily_buckets', { defaultValue: 'Grouped by UTC day within the selected range' })}
+            </div>}
             <div className={styles.healthLegend}>
                 <div className={styles.healthLegendItem}>
                     <div className={`${styles.healthLegendBlock} ${styles.healthBlockIdle}`} />

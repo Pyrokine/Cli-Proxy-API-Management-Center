@@ -6,7 +6,7 @@ import type {ParsedLogLine} from '@/pages/hooks/logTypes'
 import {apiClient} from '@/services/api/client'
 import {buildClaudeConfigPatchPayload} from '@/services/api/providers'
 import {normalizeProviderKeyConfig} from '@/services/api/transformers'
-import type {UsageEvent, UsageSummary} from '@/services/api/usage'
+import type {EventsParams, UsageEvent, UsageSummary} from '@/services/api/usage'
 import {useTimezoneStore} from '@/stores/useTimezoneStore'
 import {formatDateTime, parseLogTimestamp} from '@/utils/format'
 import {buildChartDataFromSummary, buildTokenBreakdownChartData, type UsageDetailWithEndpoint} from '@/utils/usage'
@@ -334,119 +334,146 @@ test(
     },
 )
 
-test('the actual trace loader and candidate ranking retain the UTC window in a non-UTC browser timezone', async () => {
-    const previousTimezone = process.env.TZ
-    try {
-        process.env.TZ = 'Asia/Tokyo'
-        expect(new Date('2026-10-23T10:00:00Z').getTimezoneOffset()).toBe(-540)
-        const file               = 'pages/hooks/useTraceResolver.ts'
-        const eventToTraceDetail = sourceInitializer<(
-            event: UsageEvent,
-            line: ParsedLogLine,
-            path: string,
-        ) => UsageDetailWithEndpoint>(file, 'eventToTraceDetail', {
-            parseLogTimestamp,
-            // noinspection JSUnusedGlobalSymbols
-            'buildEndpointLabel': (_line: ParsedLogLine, path: string) => path,
-        })
-        const event: UsageEvent  = {
-            timestamp: '2026-10-23T10:00:00Z',
-            model: 'synthetic',
-            source: 'synthetic',
-            auth_index: '1',
-            api_key: 'synthetic',
-            request_id: '0123456789abcdef0123456789abcdef',
-            failed: false,
-            tokens: { input_tokens: 5, output_tokens: 3, cached_tokens: 0, reasoning_tokens: 0, total_tokens: 8 },
-        }
-        for (const timestamp of ['2026-10-23 10:00:00', '2026-10-23T10:00:00Z', '2026-10-23T19:00:00+09:00']) {
-            const line = parseLogLine(`[${timestamp}] [${event.request_id
-            }] [info] [request.go:42] 200 | POST /v1/responses`)
+test(
+    'the trace loader keeps the UTC window for exact matches and nearby candidates in a non-UTC timezone',
+    async () => {
+        const previousTimezone = process.env.TZ
+        try {
+            process.env.TZ = 'Asia/Tokyo'
+            expect(new Date('2026-10-23T10:00:00Z').getTimezoneOffset()).toBe(-540)
+            const file               = 'pages/hooks/useTraceResolver.ts'
+            const eventToTraceDetail = sourceInitializer<(
+                event: UsageEvent,
+                line: ParsedLogLine,
+                path: string,
+            ) => UsageDetailWithEndpoint>(file, 'eventToTraceDetail', {
+                parseLogTimestamp,
+                // noinspection JSUnusedGlobalSymbols
+                'buildEndpointLabel': (_line: ParsedLogLine, path: string) => path,
+            })
+            const requestId          = '0123456789abcdef0123456789abcdef'
+            const event: UsageEvent  = {
+                timestamp: '2026-10-23T10:00:00Z',
+                model: 'synthetic',
+                source: 'synthetic',
+                auth_index: '1',
+                api_key: 'synthetic',
+                request_id: requestId,
+                failed: false,
+                tokens: { input_tokens: 5, output_tokens: 3, cached_tokens: 0, reasoning_tokens: 0, total_tokens: 8 },
+            }
+            for (const timestamp of ['2026-10-23 10:00:00', '2026-10-23T10:00:00Z', '2026-10-23T19:00:00+09:00']) {
+                const line = parseLogLine(`[${timestamp}] [${requestId}] [info] [request.go:42] 200 | POST /v1/responses`)
 
-            const queries: unknown[] = []
-
-            let details: UsageDetailWithEndpoint[] = []
-
-            const load = sourceCallback<(line: ParsedLogLine) => Promise<void>>(
-                file,
-                'loadTraceUsageDetailsInternal',
-                {
-                    traceScopeKey: 'fixture',
-                    traceScopeKeyRef: { current: 'fixture' },
-                    latestTraceScopeKeyRef: { current: 'fixture' },
-                    traceRequestIdRef: { current: 0 },
-                    traceRequestHomeIpRef: { current: '' },
-                    traceAuthLoadedAtRef: { current: Date.now() },
-                    TRACE_AUTH_CACHE_MS: 60000,
-                    TRACE_LOOKUP_WINDOW_MS: 120000,
-                    TRACE_EVENT_PAGE_SIZE: 500,
-                    TRACE_REQUEST_LOG_LINES: 300,
-                    apiClient: { getAuthGeneration: () => 1 },
-                    parseLogTimestamp,
-                    // noinspection JSUnusedGlobalSymbols
-                    'normalizeTracePath': (path: string) => path,
-                    // noinspection JSUnusedGlobalSymbols
-                    'createRouteDecisionTraceState': () => ({}),
-                    // noinspection JSUnusedGlobalSymbols
-                    'requestLogPreviewState': () => ({}),
-                    // noinspection JSUnusedGlobalSymbols
-                    'requestLogFailureState': () => ({}),
-                    setTraceAuthFileMap: noop,
-                    setTraceError: noop,
-                    setTraceLoading: noop,
-                    setRouteDecisionTrace: noop,
-                    setRequestLogHomeIp: noop,
-                    // noinspection JSUnusedGlobalSymbols
-                    'setTraceUsageDetails': (value: UsageDetailWithEndpoint[]) => {
-                        details =
-                            value
-                    },
-                    eventToTraceDetail,
-                    logsApi: { previewRequestLogById: async () => ({ requestLogHomeIp: '' }) },
-                    authFilesApi: {
-                        list: async () => {
-                            throw new Error('Fresh auth cache must avoid another request')
-                        },
-                    },
+                const queries: EventsParams[]          = []
+                let details: UsageDetailWithEndpoint[] = []
+                let exactUnavailable                   = false
+                let serverSupportsExactLookup          = true
+                const nearby                           = {
+                    ...event,
+                    request_id: requestId.toUpperCase(),
+                    timestamp: '2026-10-23T10:00:01Z',
+                }
+                const lookupTraceEvents                = sourceCallback(file, 'lookupTraceEvents', {
+                    TRACE_LOOKUP_WINDOW_MS: 120000, TRACE_MAX_CANDIDATES: 5, TRACE_EVENT_PAGE_SIZE: 500,
                     usageApi: {
-                        getEvents: async (query: unknown) => {
-                            queries.push(query);
-                            return { events: [event] }
+                        getEvents: async (query: EventsParams) => {
+                            queries.push(query)
+                            return serverSupportsExactLookup && query.request_id
+                                   ? { events: [event], request_id_filter: query.request_id }
+                                   : { events: [nearby] }
                         },
                     },
-                },
-            )
-            await load(line)
-            expect(queries).toEqual([
-                                        {
-                                            from: '2026-10-23T09:58:00.000Z', to: '2026-10-23T10:02:00.000Z',
-                                            page: 1, page_size: 500, sort: 'timestamp', order: 'desc',
-                                        },
-                                    ])
-            expect(details[0]?.__timestampMs).toBe(Date.parse(event.timestamp))
-            const candidates = sourceCallback<() => Array<{ timeDeltaMs: number; requestIdMatched: boolean }>>(
-                file,
-                'traceCandidates',
-                {
-                    traceLogLine: line,
-                    traceUsageDetails: details,
-                    parseLogTimestamp,
-                    TRACE_MAX_CANDIDATES: 5,
-                    // noinspection JSUnusedGlobalSymbols
-                    'extractModelFromMessage': () => undefined,
-                },
-            )()
-            expect(candidates).toHaveLength(1)
-            expect(candidates[0]).toMatchObject({ timeDeltaMs: 0, requestIdMatched: true })
+                })
+
+                const load                = sourceCallback<(line: ParsedLogLine) => Promise<void>>(
+                    file,
+                    'loadTraceUsageDetailsInternal',
+                    {
+                        traceScopeKey: 'fixture',
+                        traceScopeKeyRef: { current: 'fixture' },
+                        latestTraceScopeKeyRef: { current: 'fixture' },
+                        traceRequestIdRef: { current: 0 },
+                        traceRequestHomeIpRef: { current: '' },
+                        traceAuthLoadedAtRef: { current: Date.now() },
+                        TRACE_AUTH_CACHE_MS: 60000,
+                        TRACE_REQUEST_LOG_LINES: 300,
+                        lookupTraceEvents,
+                        apiClient: { getAuthGeneration: () => 1 },
+                        parseLogTimestamp,
+                        // noinspection JSUnusedGlobalSymbols
+                        'normalizeTracePath': (path: string) => path,
+                        // noinspection JSUnusedGlobalSymbols
+                        'createRouteDecisionTraceState': () => ({}),
+                        // noinspection JSUnusedGlobalSymbols
+                        'requestLogPreviewState': () => ({}),
+                        // noinspection JSUnusedGlobalSymbols
+                        'requestLogFailureState': () => ({}),
+                        setTraceAuthFileMap: noop,
+                        setTraceError: (error: string) => expect(error).toBe(''),
+                        setTraceExactLookupUnavailable: (value: boolean) => {
+                            exactUnavailable = value
+                        },
+                        setTraceLoading: noop,
+                        setRouteDecisionTrace: noop,
+                        setRequestLogHomeIp: noop,
+                        // noinspection JSUnusedGlobalSymbols
+                        'setTraceUsageDetails': (value: UsageDetailWithEndpoint[]) => {
+                            details =
+                                value
+                        },
+                        eventToTraceDetail,
+                        logsApi: { previewRequestLogById: async () => ({ requestLogHomeIp: '' }) },
+                        authFilesApi: {
+                            list: async () => {
+                                throw new Error('Fresh auth cache must avoid another request')
+                            },
+                        },
+                        getErrorMessage: (error: Error) => error.message,
+                    },
+                )
+                const range: EventsParams = {
+                    from: '2026-10-23T09:58:00.000Z', to: '2026-10-23T10:02:00.000Z',
+                    page: 1, sort: 'timestamp', order: 'desc',
+                }
+                const exactQuery          = { ...range, page_size: 5, request_id: requestId }
+                await load(line)
+                expect(queries).toEqual([exactQuery])
+                expect(exactUnavailable).toBe(false)
+                expect(details[0]?.__timestampMs).toBe(Date.parse(event.timestamp))
+                const candidates = () => sourceCallback<() => Array<{
+                    timeDeltaMs: number;
+                    requestIdMatched: boolean
+                }>>(
+                    file,
+                    'traceCandidates',
+                    {
+                        traceLogLine: line,
+                        traceUsageDetails: details,
+                        parseLogTimestamp,
+                        TRACE_MAX_CANDIDATES: 5,
+                        // noinspection JSUnusedGlobalSymbols
+                        'extractModelFromMessage': () => undefined,
+                    },
+                )()
+                expect(candidates()).toMatchObject([{ timeDeltaMs: 0, requestIdMatched: true }])
+
+                serverSupportsExactLookup = false
+                queries.length            = 0
+                await load(line)
+                expect(queries).toEqual([exactQuery, { ...range, page_size: 500 }])
+                expect(exactUnavailable).toBe(true)
+                expect(candidates()).toMatchObject([{ timeDeltaMs: 1000, requestIdMatched: false }])
+            }
+        } finally {
+            if (previousTimezone === undefined) {
+                delete process.env.TZ
+            } else {
+                process.env.TZ = previousTimezone
+            }
         }
-    } finally {
-        if (previousTimezone === undefined) {
-            delete process.env.TZ
-        } else {
-            process.env.TZ = previousTimezone
-        }
-    }
-})
+    },
+)
 
 test('both activity trend builders consume the selected timezone through the rendered chart callback', () => {
     for (const { time, labels } of [

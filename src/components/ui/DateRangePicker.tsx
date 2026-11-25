@@ -1,4 +1,4 @@
-import {toLocalDateTimeString} from '@/utils/format'
+import {toLocalDateTimeSecondsString} from '@/utils/format'
 import {type ChangeEvent, useCallback, useMemo} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './DateRangePicker.module.scss'
@@ -16,14 +16,10 @@ interface DateRangePickerProps {
     onChange: (from: string, to: string, presetKey?: string) => void
     presets?: DateRangePreset[]
     activePreset?: string
-    earliestDate?: Date
 }
 
-const ALL_PRESET_PLACEHOLDER_FROM = '2020-01-01T00:00'
-
-function buildDefaultPresets(t: (key: string) => string, earliestDate?: Date): DateRangePreset[] {
-    const now     = new Date()
-    const allFrom = earliestDate ?? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+function buildDefaultPresets(t: (key: string) => string): DateRangePreset[] {
+    const now = new Date()
     return [
         {
             key: '24h',
@@ -46,16 +42,24 @@ function buildDefaultPresets(t: (key: string) => string, earliestDate?: Date): D
         {
             key: 'all',
             label: t('usage_stats.range_all'),
-            from: allFrom,
+            from: now,
             to: now,
         },
     ]
 }
 
-export function DateRangePicker({ from, to, onChange, presets, activePreset, earliestDate }: DateRangePickerProps) {
+function asDateTimeInputValue(value: string): string {
+    if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(value)) {
+        return value
+    }
+    const date = new Date(value)
+    return Number.isFinite(date.getTime()) ? toLocalDateTimeSecondsString(date) : ''
+}
+
+export function DateRangePicker({ from, to, onChange, presets, activePreset }: DateRangePickerProps) {
     const { t } = useTranslation()
 
-    const defaultPresets   = useMemo(() => buildDefaultPresets(t, earliestDate), [t, earliestDate])
+    const defaultPresets   = useMemo(() => buildDefaultPresets(t), [t])
     const effectivePresets = presets ?? defaultPresets
 
     const handleFromChange = useCallback(
@@ -76,20 +80,14 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
         (preset: DateRangePreset) => {
             const current = presets ?
                             preset :
-                            buildDefaultPresets(t, earliestDate).find((entry) => entry.key === preset.key)!
-            onChange(toLocalDateTimeString(current.from), toLocalDateTimeString(current.to), current.key)
+                            buildDefaultPresets(t).find((entry) => entry.key === preset.key)!
+            onChange(current.key === 'all' ? '' : current.from.toISOString(), current.to.toISOString(), current.key)
         },
-        [onChange, presets, t, earliestDate],
+        [onChange, presets, t],
     )
 
-    // R-027:preset==='all' 时把 input 的展示值替换成 summary 真实最早时间,
-    // 内部 from 仍保留 epoch 占位给后端 API 用,但 UI 不再把这个占位值直接暴露
-    // 给用户,summary 尚未返回真实最早时间时显示空串,避免把 2020-01-01 误展示
-    // 成业务数据
-    const isAllPreset     = activePreset === 'all'
-    const resolvedAllFrom = useMemo(() => (earliestDate ? toLocalDateTimeString(earliestDate) : ''), [earliestDate])
-
-    const displayFrom = isAllPreset ? resolvedAllFrom || (from === ALL_PRESET_PLACEHOLDER_FROM ? '' : from) : from
+    const displayFrom = asDateTimeInputValue(from)
+    const displayTo   = asDateTimeInputValue(to)
 
     return (
         <div className={styles.container}>
@@ -98,6 +96,7 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                     type='datetime-local'
                     className={styles.dateInput}
                     value={displayFrom}
+                    step={1}
                     onChange={handleFromChange}
                     aria-label={t('usage_stats.range_from')}
                 />
@@ -105,7 +104,8 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                 <input
                     type='datetime-local'
                     className={styles.dateInput}
-                    value={to}
+                    value={displayTo}
+                    step={1}
                     onChange={handleToChange}
                     aria-label={t('usage_stats.range_to')}
                 />
@@ -118,8 +118,9 @@ export function DateRangePicker({ from, to, onChange, presets, activePreset, ear
                         className={activePreset === preset.key ? styles.presetActive : styles.preset}
                         onClick={() => handlePreset(preset)}
                         title={activePreset === preset.key
-                               ? displayFrom ? `${displayFrom} ~ ${to}` : preset.label
-                               : `${toLocalDateTimeString(preset.from)} ~ ${toLocalDateTimeString(preset.to)}`}
+                               ? displayFrom ? `${displayFrom} ~ ${displayTo}` : preset.label :
+                               preset.key === 'all' ? preset.label :
+                               `${toLocalDateTimeSecondsString(preset.from)} ~ ${toLocalDateTimeSecondsString(preset.to)}`}
                     >
                         {preset.label}
                     </button>

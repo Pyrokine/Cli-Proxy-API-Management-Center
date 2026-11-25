@@ -1739,7 +1739,8 @@
         "newest": "最新",
         "oldest": "最早",
         "no_requests": "无请求",
-        "refresh": "刷新"
+        "refresh": "刷新",
+        "daily_buckets": "所选时段内按 UTC 日期汇总"
     },
     "logs": {
         "request_log_disabled_status": "完整请求日志已关闭，失败请求仍会记录",
@@ -1751,7 +1752,7 @@
         "column_summary": "请求 / 消息",
         "title": "日志查看",
         "refresh_button": "刷新日志",
-        "clear_button": "清空日志",
+        "clear_button": "清空应用日志",
         "download_button": "下载日志",
         "fullscreen_enter": "全屏查看",
         "fullscreen_exit": "退出全屏",
@@ -1798,9 +1799,9 @@
         "read_failed": "读取日志失败",
         "last_read": "上次读取 {{time}}",
         "history_evicted": "较早日志已移出列表 · 查看最新",
-        "clear_confirm_title": "清空日志",
-        "clear_confirm": "确定要清空所有日志吗？此操作不可恢复！",
-        "clear_success": "日志已清空",
+        "clear_confirm_title": "清空应用日志",
+        "clear_confirm": "清空应用主日志及其轮转文件？请求日志和错误请求日志会保留，清空后无法恢复",
+        "clear_success": "已清空应用日志",
         "download_success": "日志下载成功",
         "auto_refresh": "自动刷新",
         "refresh_interval": "页面自动刷新",
@@ -1832,7 +1833,7 @@
         "clear_filters": "清空筛选",
         "trace_button": "请求追踪",
         "trace_title": "请求追踪 (V1)",
-        "trace_notice": "路由决策直接来自请求日志，Usage 候选通过日志与 usage 事件做启发式关联；代理日志耗时来自日志行，Usage 总耗时来自 usage metadata 的 total_duration_ms",
+        "trace_notice": "路由决策来自请求日志，用量事件按请求 ID 匹配，或显示为时间相近的候选项，代理耗时来自日志行，用量总耗时来自用量事件",
         "trace_usage_field_guide": "输入 Tokens 是请求回报的输入用量；缓存命中 = 缓存读取 Tokens / 输入 Tokens，旧记录使用缓存 Tokens，缓存写入不计入命中；思考记录显示已记录的设置或思考强度；缺失字段显示未记录",
         "trace_log_info": "日志事件",
         "trace_candidates_title": "Usage 候选匹配",
@@ -1954,7 +1955,15 @@
         "column_ip": "IP",
         "column_trace": "追踪",
         "trace_short": "追踪",
-        "trace_timestamp_required": "日志行缺少时间戳，无法匹配 usage 事件"
+        "trace_timestamp_required": "日志行缺少时间戳，无法匹配 usage 事件",
+        "request_log_download_pending": "请求日志正在生成，请稍后重试下载",
+        "error_log_tail_preview": "当前显示最后 {{shown}} 行，下载完整日志可查看前面的内容",
+        "disk_usage_stale": "磁盘占用：{{size}}（刷新失败，显示上次读数）",
+        "disk_usage_unavailable": "无法读取磁盘占用",
+        "trace_exact_lookup_unavailable": "当前服务无法按请求 ID 查找，已检查时间相近的事件",
+        "trace_request_id_matched": "请求 ID 精确匹配",
+        "trace_nearby_model": "候选 · 模型和时间",
+        "trace_nearby_time": "候选 · 时间"
     },
     "config_management": {
         "oauth_alias_source_scope": "此处只编辑 oauth-model-alias 配置",

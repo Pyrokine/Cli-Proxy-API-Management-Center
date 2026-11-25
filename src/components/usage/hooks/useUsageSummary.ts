@@ -47,21 +47,22 @@ interface UseUsageSummaryReturn {
 
 interface UseUsageSummaryOptions {
     enabled?: boolean
+    refreshToken?: number
 }
 
 export function useUsageSummary(
     params?: UsageSummaryParams,
     options?: UseUsageSummaryOptions,
 ): UseUsageSummaryReturn {
-    const enabled               = options?.enabled ?? true
-    const [summary, setSummary] = useState<UsageSummary | null>(null)
-    const [loading, setLoading] = useState(enabled)
-    const [error, setError]     = useState('')
-    const inflightRef           = useRef<AbortController | null>(null)
-    const visibleSummary        = enabled ? summary : null
-    const visibleLoading        = enabled ? loading : false
-    const visibleError          = enabled ? error : ''
-    const resolved              = enabled && !visibleLoading && !visibleError && visibleSummary !== null
+    const { enabled = true, refreshToken } = options ?? {}
+    const [summary, setSummary]            = useState<UsageSummary | null>(null)
+    const [loading, setLoading]            = useState(enabled)
+    const [error, setError]                = useState('')
+    const inflightRef                      = useRef<AbortController | null>(null)
+    const visibleSummary                   = enabled ? summary : null
+    const visibleLoading                   = enabled ? loading : false
+    const visibleError                     = enabled ? error : ''
+    const resolved                         = enabled && !visibleLoading && !visibleError && visibleSummary !== null
 
     const reload = useCallback(
         async (overrides?: UsageSummaryParams) => {
@@ -88,7 +89,6 @@ export function useUsageSummary(
                 if (controller.signal.aborted) {
                     return null
                 }
-                setSummary(null)
                 setError(err instanceof Error ? err.message : 'Failed to load usage summary')
                 return null
             } finally {
@@ -110,7 +110,7 @@ export function useUsageSummary(
         queueMicrotask(() => {
             void reload()
         })
-    }, [enabled, reload])
+    }, [enabled, refreshToken, reload])
 
     useEffect(
         () => () => {

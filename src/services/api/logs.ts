@@ -59,6 +59,13 @@ export interface RequestLogPreview extends ErrorLogPreview {
     message: string
 }
 
+export class PendingRequestLogError extends Error {
+    constructor(readonly preview: RequestLogPreview) {
+        super(preview.message || 'Request log is still being published')
+        this.name = 'PendingRequestLogError'
+    }
+}
+
 type RawLogRecord = Record<string, unknown>
 
 const requestLogStates = new Set<RequestLogState>([
@@ -234,40 +241,56 @@ function normalizeErrorLogsResponse(raw: unknown): ErrorLogsResponse {
     }
 }
 
+async function parseLogErrorBody(body: unknown): Promise<RawLogRecord | null> {
+    if (body instanceof Blob || typeof body === 'string') {
+        try {
+            return asRecord(JSON.parse(body instanceof Blob ? await body.text() : body))
+        } catch {
+            return null
+        }
+    }
+    return asRecord(body)
+}
+
+function logErrorMessage(record: RawLogRecord | null): string | undefined {
+    return stringValue(record?.error) ?? stringValue(asRecord(record?.error)?.message) ?? stringValue(record?.message)
+}
+
 async function downloadLog(path: string, options?: { signal?: AbortSignal }, params?: { home_ip: string }) {
-    try {
-        return await apiClient.getRaw(path, {
-            params,
-            responseType: 'blob',
-            timeout: LOGS_TIMEOUT_MS,
-            signal: options?.signal,
-        })
-    } catch (error: unknown) {
+    const response = await apiClient.getRaw(path, {
+        params,
+        responseType: 'blob',
+        timeout: LOGS_TIMEOUT_MS,
+        signal: options?.signal,
+    }).catch(async (error: unknown) => {
         if (error instanceof Error) {
             const apiError = error as ApiError
             const body     = apiError.data instanceof Blob ? apiError.data : apiError.details
             if (body instanceof Blob) {
-                try {
-                    const parsed: unknown = JSON.parse(await body.text())
-                    const record          = asRecord(parsed)
-                    const nestedError     = asRecord(record?.error)
-                    const message         = stringValue(record?.error) ??
-                                            stringValue(nestedError?.message) ??
-                                            stringValue(record?.message)
-                    if (message) {
-                        apiError.message = message
-                    }
-                    const backendCode = stringValue(record?.code) ?? stringValue(nestedError?.code)
-                    if (backendCode) {
-                        apiError.backendCode = backendCode
-                    }
-                } catch {
-                    // Keep the original transport error if its body is not readable JSON.
+                const record      = await parseLogErrorBody(body)
+                apiError.message  = logErrorMessage(record) ?? apiError.message
+                const backendCode = stringValue(record?.code) ?? stringValue(asRecord(record?.error)?.code)
+                if (backendCode) {
+                    apiError.backendCode = backendCode
                 }
             }
         }
         throw error
+    })
+
+    const fileBody    = response.data instanceof Blob || typeof response.data === 'string'
+    const contentType = String(response.headers?.['content-type'] ??
+                               (response.data instanceof Blob ? response.data.type : '')).split(';')[0].trim()
+    const attachment  = /^attachment(?:\s*;|$)/i.test(String(response.headers?.['content-disposition'] ?? ''))
+    if (response.status === 200 && fileBody && (attachment || !/(?:\/|\+)json$|^text\/html$/i.test(contentType))) {
+        return response
     }
+
+    const record = await parseLogErrorBody(response.data)
+    if (response.status === 202) {
+        throw new PendingRequestLogError({ ...normalizeRequestLogPreview(record), requestLogState: 'pending' })
+    }
+    throw new Error(logErrorMessage(record) ?? 'Invalid log download response')
 }
 
 async function fetchCompleteHomeLogs(

@@ -1403,7 +1403,8 @@
         "total_requests": "總請求",
         "tokens": "Tokens",
         "no_requests": "無請求",
-        "refresh": "重新整理"
+        "refresh": "重新整理",
+        "daily_buckets": "所選時段內按 UTC 日期彙總"
     },
     "logs": {
         "request_log_disabled_status": "完整請求日誌已關閉，失敗請求仍會記錄",
@@ -1415,7 +1416,7 @@
         "column_summary": "請求 / 訊息",
         "title": "記錄檢視",
         "refresh_button": "重新整理記錄",
-        "clear_button": "清空記錄",
+        "clear_button": "清空應用程式日誌",
         "download_button": "下載記錄",
         "fullscreen_enter": "全螢幕檢視",
         "fullscreen_exit": "退出全螢幕",
@@ -1503,13 +1504,13 @@
         "upgrade_required_desc": "目前伺服器版本不支援記錄檢視功能，請升級到最新版本的 CLI Proxy API 以使用此功能，",
         "error_logs_retention": "後端最多保留 {{count}} 份錯誤請求記錄",
         "error_logs_preview": "預覽",
-        "clear_confirm_title": "清空記錄",
+        "clear_confirm_title": "清空應用程式日誌",
         "buffered_lines": "前端緩衝 {{count}} 行",
         "total_lines": "伺服器端總計 {{count}} 行",
         "filtered_timeline_notice": "目前已屏蔽管理記錄，時間軸可能不連續",
         "trace_button": "請求追蹤",
         "trace_title": "請求追蹤 (V1)",
-        "trace_notice": "路由決策直接來自請求日誌，Usage 候選透過記錄與 usage 事件做啟發式關聯；代理日誌耗時來自日誌行，Usage 總耗時來自 usage metadata 的 total_duration_ms",
+        "trace_notice": "路由決策來自請求日誌，用量事件按請求 ID 比對，或顯示為時間相近的候選項目，代理耗時來自日誌行，用量總耗時來自用量事件",
         "trace_usage_field_guide": "輸入 Tokens 是請求回報的輸入用量；快取命中 = 快取讀取 Tokens / 輸入 Tokens，舊記錄使用快取 Tokens，快取寫入不計入命中；思考記錄顯示已記錄的設定或思考強度；缺失欄位顯示未記錄",
         "trace_log_info": "記錄事件",
         "trace_candidates_title": "Usage 候選符合",
@@ -1618,7 +1619,15 @@
         "column_ip": "IP",
         "column_trace": "追蹤",
         "trace_short": "追蹤",
-        "trace_timestamp_required": "日誌列缺少時間戳，無法匹配 usage 事件"
+        "trace_timestamp_required": "日誌列缺少時間戳，無法匹配 usage 事件",
+        "request_log_download_pending": "請求日誌正在產生，請稍後重試下載",
+        "error_log_tail_preview": "目前顯示最後 {{shown}} 行，下載完整日誌可查看較早的內容",
+        "disk_usage_stale": "磁碟用量：{{size}}（重新讀取失敗，顯示上次讀數）",
+        "disk_usage_unavailable": "無法讀取磁碟用量",
+        "trace_exact_lookup_unavailable": "目前服務無法按請求 ID 查找，已查看時間相近的事件",
+        "trace_request_id_matched": "請求 ID 完全相符",
+        "trace_nearby_model": "候選 · 模型與時間",
+        "trace_nearby_time": "候選 · 時間"
     },
     "config_management": {
         "oauth_alias_source_scope": "此處只編輯 oauth-model-alias 設定",

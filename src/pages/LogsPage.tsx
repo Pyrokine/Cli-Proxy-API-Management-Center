@@ -30,7 +30,7 @@ import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useLocalStorage} from '@/hooks/useLocalStorage'
 import {apiClient} from '@/services/api/client'
 import {configApi} from '@/services/api/config'
-import {type ErrorLogFile, logsApi, type LogsQuery} from '@/services/api/logs'
+import {type ErrorLogFile, logsApi, type LogsQuery, PendingRequestLogError} from '@/services/api/logs'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import {AUTO_REFRESH_INTERVALS, resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {copyToClipboard} from '@/utils/clipboard'
@@ -66,6 +66,7 @@ const FAST_CATCH_UP_MS          = 1000
 const INITIAL_RETRY_MS          = 8000
 const MAX_RETRY_MS              = 60000
 const DEFAULT_LOG_PAGE_SIZE     = 50
+const ERROR_LOG_PREVIEW_LINES   = 500
 const LONG_PRESS_MS             = 650
 const LONG_PRESS_MOVE_THRESHOLD = 10
 const LOG_LINE_TIMESTAMP_REGEX  =
@@ -316,6 +317,7 @@ export function LogsPage() {
                                                                                    totalBytes: number;
                                                                                    fileCount: number
                                                                                } | null>(null)
+    const [logDiskSizeError, setLogDiskSizeError]                   = useState('')
     const [totalLogLines, setTotalLogLines]                         = useState<number | null>(null)
     const notRecordedLabel                                          = t('usage_stats.request_events_not_recorded', {
         defaultValue: 'Not recorded',
@@ -463,6 +465,7 @@ export function LogsPage() {
     const [requests]                = useState(() => ({
         session: createLogRequestGuard(),
         logs: createLogRequestQueue(),
+        diskSize: createLogRequestGuard(),
         errors: createLogRequestGuard(),
         preview: createLogRequestGuard(),
         errorDownload: createLogRequestGuard(),
@@ -484,6 +487,23 @@ export function LogsPage() {
     const [logPageSize, setLogPageSize]     = useLocalStorage('logsPage.pageSize', DEFAULT_LOG_PAGE_SIZE)
     const [expandedLogId, setExpandedLogId] = useState<number | null>(null)
 
+    const loadLogDiskSize = async () => {
+        const request = requests.diskSize.begin(authGeneration)
+        try {
+            const size = await logsApi.fetchLogSize({ signal: request.controller.signal })
+            if (requests.diskSize.isCurrent(request, apiClient.getAuthGeneration())) {
+                setLogDiskSize({ totalBytes: size.total_bytes, fileCount: size.file_count })
+                setLogDiskSizeError('')
+            }
+        } catch (err: unknown) {
+            if (requests.diskSize.isCurrent(request, apiClient.getAuthGeneration())) {
+                setLogDiskSizeError(redactSensitiveText(getErrorMessage(err) || t('common.unknown_error')))
+            }
+        } finally {
+            requests.diskSize.finish(request)
+        }
+    }
+
     const loadLogs = async (incremental = false) => {
         if (!isCurrentConnection()) {
             return
@@ -501,6 +521,7 @@ export function LogsPage() {
 
         if (!incremental) {
             setLoading(true)
+            void loadLogDiskSize()
         }
 
         try {
@@ -515,29 +536,9 @@ export function LogsPage() {
                         ...(position.cursor ? { cursor: position.cursor } : {}),
                     }
                                           : { limit: MAX_BUFFER_LINES }
-                const [data, logSize]   = await Promise.all([
-                                                                logsApi.fetchLogs(params, {
-                                                                    signal: request.controller.signal,
-                                                                }),
-                                                                incremental || page > 0
-                                                                ? Promise.resolve(null)
-                                                                : logsApi
-                                                                    .fetchLogSize({ signal: request.controller.signal })
-                                                                    .catch((err: unknown) => {
-                                                                        if (requestIsCurrent()) {
-                                                                            console.warn(
-                                                                                '[LogsPage] fetchLogSize failed',
-                                                                                err,
-                                                                            )
-                                                                        }
-                                                                        return null
-                                                                    }),
-                                                            ])
+                const data              = await logsApi.fetchLogs(params, { signal: request.controller.signal })
                 if (!requestIsCurrent()) {
                     return
-                }
-                if (logSize) {
-                    setLogDiskSize({ totalBytes: logSize.total_bytes, fileCount: logSize.file_count })
                 }
 
                 const nextPosition: LogPosition = incremental ? { ...logPositionRef.current } : {}
@@ -635,8 +636,11 @@ export function LogsPage() {
         }
         const session = requests.session.capture(authGeneration)
         showConfirmation({
-                             title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
-                             message: t('logs.clear_confirm'),
+                             title: t('logs.clear_confirm_title', { defaultValue: 'Clear application logs' }),
+                             message: t('logs.clear_confirm', {
+                                 defaultValue: 'Clear the application log and its rotated files? ' +
+                                               'Request logs and error request logs will be kept. This action cannot be undone.',
+                             }),
                              variant: 'danger',
                              confirmText: t('common.confirm'),
                              onConfirm: async () => {
@@ -651,6 +655,7 @@ export function LogsPage() {
                                  if (request === null) {
                                      return
                                  }
+                                 requests.diskSize.invalidate()
                                  setClearingLogs(true)
                                  setLoading(false)
                                  setError('')
@@ -670,26 +675,11 @@ export function LogsPage() {
                                      setHistoryEvicted(false)
                                      setLastUpdated(null)
                                      setTotalLogLines(null)
-                                     setLogDiskSize(null)
                                      setLogPage(1)
-
-                                     try {
-                                         const size = await logsApi.fetchLogSize({ signal: request.controller.signal })
-                                         if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
-                                             return
-                                         }
-                                         setLogDiskSize({
-                                                            totalBytes: size.total_bytes,
-                                                            fileCount: size.file_count,
-                                                        })
-                                     } catch (err: unknown) {
-                                         if (requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
-                                             console.warn('[LogsPage] fetchLogSize failed', err)
-                                         }
-                                     }
-                                     if (requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
-                                         showNotification(t('logs.clear_success'), 'success')
-                                     }
+                                     showNotification(t('logs.clear_success', {
+                                         defaultValue: 'Application logs cleared',
+                                     }), 'success')
+                                     void loadLogDiskSize()
                                  } catch (err: unknown) {
                                      if (!requests.logs.isCurrent(request, apiClient.getAuthGeneration())) {
                                          return
@@ -747,8 +737,6 @@ export function LogsPage() {
             if (!requests.errors.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
             }
-            console.error('Failed to load error logs:', err)
-            setErrorLogs([])
             const message = getErrorMessage(err)
             setErrorLogsError(
                 message ? `${t('logs.error_logs_load_error')}: ${message}` : t('logs.error_logs_load_error'),
@@ -799,13 +787,17 @@ export function LogsPage() {
         const request = requests.preview.begin(authGeneration)
         dispatchErrorLogViewer({ type: 'open', item })
         try {
-            const result = await logsApi.previewErrorLog(item.name, 500, {
+            const result = await logsApi.previewErrorLog(item.name, ERROR_LOG_PREVIEW_LINES, {
                 signal: request.controller.signal,
             })
             if (!requests.preview.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
             }
-            dispatchErrorLogViewer({ type: 'ready', text: redactSensitiveText(result.content) })
+            dispatchErrorLogViewer({
+                                       type: 'ready',
+                                       text: redactSensitiveText(result.content),
+                                       metadata: { totalLines: result.total_lines, truncated: result.truncated },
+                                   })
         } catch (err: unknown) {
             if (!requests.preview.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
@@ -885,6 +877,7 @@ export function LogsPage() {
         const invalidateRequests   = () => {
             requests.session.invalidate()
             requests.logs.invalidate()
+            requests.diskSize.invalidate()
             requests.errors.invalidate()
             requests.preview.invalidate()
             requests.errorDownload.invalidate()
@@ -908,6 +901,7 @@ export function LogsPage() {
             setClearingLogs(false)
             setError('')
             setLogDiskSize(null)
+            setLogDiskSizeError('')
             setTotalLogLines(null)
             setLogPage(1)
             setExpandedLogId(null)
@@ -1492,8 +1486,14 @@ export function LogsPage() {
             if (!requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
                 return
             }
-            const message = getErrorMessage(err)
-            showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            if (err instanceof PendingRequestLogError) {
+                showNotification(t('logs.request_log_download_pending', {
+                    defaultValue: 'The request log is being generated. Retry the download in a moment',
+                }), 'warning')
+            } else {
+                const message = redactSensitiveText(getErrorMessage(err))
+                showNotification(`${t('notification.download_failed')}${message ? `: ${message}` : ''}`, 'error')
+            }
         } finally {
             if (requests.requestDownload.isCurrent(request, apiClient.getAuthGeneration())) {
                 requests.requestDownload.finish(request)
@@ -1898,18 +1898,32 @@ export function LogsPage() {
                                     >
                                         <span className={styles.buttonContent}>
                                             <IconTrash2 size={16} />
-                                            {t('logs.clear_button')}
+                                            {t('logs.clear_button', { defaultValue: 'Clear application logs' })}
                                         </span>
                                     </Button>
-                                    {logDiskSize !== null && (
+                                    {(logDiskSize !== null || logDiskSizeError) && (
                                         <span
                                             className={styles.diskUsageBadge}
-                                            title={t('logs.disk_usage_detail', {
+                                            role='status'
+                                            title={logDiskSizeError || (logDiskSize && t('logs.disk_usage_detail', {
                                                 size: formatFileSize(logDiskSize.totalBytes),
                                                 count: logDiskSize.fileCount,
-                                            })}
+                                            })) || undefined}
                                         >
-                                            {t('logs.disk_usage', { size: formatFileSize(logDiskSize.totalBytes) })}
+                                            {logDiskSizeError ? (logDiskSize
+                                                                 ?
+                                                                 t('logs.disk_usage_stale', {
+                                                                     size: formatFileSize(logDiskSize.totalBytes),
+                                                                     defaultValue: 'Disk: {{size}} (last read; refresh failed)',
+                                                                 })
+                                                                 :
+                                                                 t(
+                                                                     'logs.disk_usage_unavailable',
+                                                                     { defaultValue: 'Disk usage unavailable' },
+                                                                 ))
+                                                              : logDiskSize && t('logs.disk_usage', {
+                                                size: formatFileSize(logDiskSize.totalBytes),
+                                            })}
                                         </span>
                                     )}
                                     <span className={styles.logReadStatus} role='status'>
@@ -2064,13 +2078,19 @@ export function LogsPage() {
                                 {t('logs.error_logs_retention', { count: config?.errorLogsMaxFiles ?? 10 })}
                             </p>
 
-                            {errorLogsError && <div className='error-box'>{errorLogsError}</div>}
+                            {errorLogsError && errorLogs.length > 0 && <div className='error-box' role='alert'>
+                                {errorLogsError} · {t('usage_stats.previous_results_shown', {
+                                defaultValue: 'Showing the last loaded results',
+                            })}
+                            </div>}
 
                             <Sheet
                                 rows={errorLogs}
                                 columns={errorLogColumns}
                                 rowKey={(item) => item.name}
-                                status={loadingErrors ? 'loading' : errorLogs.length > 0 ? 'ready' : 'empty'}
+                                status={errorLogs.length > 0 ? 'ready' : loadingErrors ? 'loading' :
+                                                                         errorLogsError ? 'error' : 'empty'}
+                                errorMessage={errorLogsError}
                                 emptyText={t('logs.error_logs_empty')}
                                 loadingText={t('common.loading')}
                                 scrollClassName={styles.errorPanel}
@@ -2517,236 +2537,255 @@ export function LogsPage() {
                                 {t('common.refresh')}
                             </Button>
                         </div>
-                        {trace.traceLoading ? (
-                            <div className='hint'>{t('logs.trace_loading')}</div>
-                        ) : trace.traceError ? (
-                            <div className='error-box'>{trace.traceError}</div>
-                        ) : trace.traceCandidates.length === 0 ? (
+                        {trace.traceLoading && <div className='hint'>{t('logs.trace_loading')}</div>}
+                        {trace.traceError && <div className='error-box' role='alert'>
+                            {trace.traceError}
+                            {trace.traceCandidates.length > 0 && <> · {t('usage_stats.previous_results_shown', {
+                                defaultValue: 'Showing the last loaded results',
+                            })}</>}
+                        </div>}
+                        {trace.traceExactLookupUnavailable &&
+                         !trace.traceCandidates.some((item) => item.requestIdMatched) && (
+                             <div className={styles.traceNotice}>{t('logs.trace_exact_lookup_unavailable', {
+                                 defaultValue: 'This server could not search by request ID; ' +
+                                               'only nearby events were checked',
+                             })}</div>
+                         )}
+                        {!trace.traceLoading && !trace.traceError && trace.traceCandidates.length === 0 && (
                             <div className='hint'>{t('logs.trace_no_match')}</div>
-                        ) : (
-                                <div className={styles.traceCandidates}>
-                                    {trace.traceCandidates.map((candidate) => {
-                                        const detail = candidate.detail
+                        )}
+                        {trace.traceCandidates.length > 0 && (
+                            <div className={styles.traceCandidates}>
+                                {trace.traceCandidates.map((candidate) => {
+                                    const detail = candidate.detail
 
-                                        const sourceInfo = trace.resolveTraceSourceInfo(
-                                            String(detail.source ?? ''),
-                                            detail.auth_index,
-                                        )
+                                    const sourceInfo = trace.resolveTraceSourceInfo(
+                                        String(detail.source ?? ''),
+                                        detail.auth_index,
+                                    )
 
-                                        const tokens = detail.tokens
+                                    const tokens = detail.tokens
 
-                                        const inputTokens = maxTraceTokenValue(tokens?.input_tokens)
+                                    const inputTokens = maxTraceTokenValue(tokens?.input_tokens)
 
-                                        const outputTokens = maxTraceTokenValue(tokens?.output_tokens)
+                                    const outputTokens = maxTraceTokenValue(tokens?.output_tokens)
 
-                                        const reasoningTokens = maxTraceTokenValue(tokens?.reasoning_tokens)
+                                    const reasoningTokens = maxTraceTokenValue(tokens?.reasoning_tokens)
 
-                                        const { cachedTokens, cacheHitTokens } = resolveUsageTokenMetrics(tokens)
+                                    const { cachedTokens, cacheHitTokens } = resolveUsageTokenMetrics(tokens)
 
-                                        const thinking = detail.thinking ??
-                                                         (detail.reasoning_effort ?
-                                                             { intensity: detail.reasoning_effort } :
-                                                          null)
+                                    const thinking = detail.thinking ??
+                                                     (detail.reasoning_effort ?
+                                                         { intensity: detail.reasoning_effort } :
+                                                      null)
 
-                                        const thinkingLabel = thinking
-                                                              ?
-                                                              formatThinkingLabel(
-                                                                  thinking,
-                                                                  i18n.language,
-                                                              )
-                                                              :
-                                                              notRecordedLabel
+                                    const thinkingLabel = thinking
+                                                          ?
+                                                          formatThinkingLabel(
+                                                              thinking,
+                                                              i18n.language,
+                                                          )
+                                                          :
+                                                          notRecordedLabel
 
-                                        const completedLabel =
-                                                  typeof detail.completed === 'boolean'
-                                                  ? detail.completed
-                                                    ?
-                                                    t(
-                                                        'usage_stats.request_events_completed',
-                                                        { defaultValue: 'Completed' },
-                                                    )
-                                                    :
-                                                    t(
-                                                        'usage_stats.request_events_incomplete',
-                                                        { defaultValue: 'Incomplete' },
-                                                    )
-                                                  : notRecordedLabel
-                                        return (
-                                            <div
-                                                key={[
-                                                    detail.__endpoint,
-                                                    detail.__modelName,
-                                                    detail.timestamp,
-                                                    detail.source,
-                                                ].join('-')}
-                                                className={styles.traceCandidate}
-                                            >
-                                                <div className={styles.traceCandidateHeader}>
-                                                    {candidate.modelMatched && (
-                                                        <span className={styles.traceModelBadge}>
-                                                        {t('logs.trace_model_matched')}
+                                    const completedLabel =
+                                              typeof detail.completed === 'boolean'
+                                              ? detail.completed
+                                                ?
+                                                t(
+                                                    'usage_stats.request_events_completed',
+                                                    { defaultValue: 'Completed' },
+                                                )
+                                                :
+                                                t(
+                                                    'usage_stats.request_events_incomplete',
+                                                    { defaultValue: 'Incomplete' },
+                                                )
+                                              : notRecordedLabel
+                                    return (
+                                        <div
+                                            key={[
+                                                detail.__endpoint,
+                                                detail.__modelName,
+                                                detail.timestamp,
+                                                detail.source,
+                                            ].join('-')}
+                                            className={styles.traceCandidate}
+                                        >
+                                            <div className={styles.traceCandidateHeader}>
+                                                    <span className={styles.traceModelBadge}>
+                                                        {candidate.requestIdMatched
+                                                         ? t('logs.trace_request_id_matched', {
+                                                                defaultValue: 'Exact request ID',
+                                                            })
+                                                         : candidate.modelMatched
+                                                           ? t('logs.trace_nearby_model', {
+                                                                    defaultValue: 'Candidate · model and time',
+                                                                })
+                                                           : t('logs.trace_nearby_time', {
+                                                                    defaultValue: 'Candidate · time only',
+                                                                })}
                                                     </span>
-                                                    )}
-                                                    {candidate.timeDeltaMs !== null && (
-                                                        <span className={styles.traceDelta}>
+                                                {candidate.timeDeltaMs !== null && (
+                                                    <span className={styles.traceDelta}>
                                                         {t('logs.trace_delta_seconds', {
                                                             seconds: (candidate.timeDeltaMs / 1000).toFixed(2),
                                                         })}
                                                     </span>
-                                                    )}
-                                                </div>
-                                                <div className={styles.traceCandidateGrid}>
-                                                    <div className={styles.traceInfoItem}>
+                                                )}
+                                            </div>
+                                            <div className={styles.traceCandidateGrid}>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_endpoint')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {detail.__endpoint}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_model')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {detail.__modelName || notRecordedLabel}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_source')}
                                                     </span>
-                                                        <span
-                                                            className={styles.traceInfoValue}
-                                                            title={String(detail.source || notRecordedLabel)}
-                                                        >
+                                                    <span
+                                                        className={styles.traceInfoValue}
+                                                        title={String(detail.source || notRecordedLabel)}
+                                                    >
                                                         <span>{sourceInfo.displayName || notRecordedLabel}</span>
-                                                            {sourceInfo.type && (
-                                                                <span className={styles.traceSourceType}>
+                                                        {sourceInfo.type && (
+                                                            <span className={styles.traceSourceType}>
                                                                 {sourceInfo.type}
                                                             </span>
-                                                            )}
+                                                        )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_auth_index')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {detail.auth_index ?? notRecordedLabel}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_timestamp')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatLogTimestamp(detail.timestamp) || notRecordedLabel}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_result')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {detail.failed
                                                          ? t('stats.failure')
                                                          : t('stats.success')}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_usage_request_id')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {detail.request_id || notRecordedLabel}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_usage_total_duration')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceDuration(
                                                             detail.total_duration_ms,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_recorded_latency')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceDuration(
                                                             detail.latency_ms,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_time_to_first_byte')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceDuration(
                                                             detail.time_to_first_byte_ms,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_input_tokens')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceToken(inputTokens, i18n.language, notRecordedLabel)}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_output_tokens')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceToken(
                                                             outputTokens,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_reasoning_tokens')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceToken(
                                                             reasoningTokens,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_cached_tokens')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTraceToken(
                                                             cachedTokens,
                                                             i18n.language,
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_cache_hit')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>
+                                                    <span className={styles.traceInfoValue}>
                                                         {formatTracePercent(
                                                             cacheHitTokens,
                                                             inputTokens,
@@ -2754,25 +2793,25 @@ export function LogsPage() {
                                                             notRecordedLabel,
                                                         )}
                                                     </span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_thinking')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>{thinkingLabel}</span>
-                                                    </div>
-                                                    <div className={styles.traceInfoItem}>
+                                                    <span className={styles.traceInfoValue}>{thinkingLabel}</span>
+                                                </div>
+                                                <div className={styles.traceInfoItem}>
                                                     <span className={styles.traceInfoLabel}>
                                                         {t('logs.trace_completed')}
                                                     </span>
-                                                        <span className={styles.traceInfoValue}>{completedLabel}</span>
-                                                    </div>
+                                                    <span className={styles.traceInfoValue}>{completedLabel}</span>
                                                 </div>
                                             </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
             </Modal>
@@ -2840,12 +2879,32 @@ export function LogsPage() {
                     <div className='hint'>{t('common.loading')}</div>
                 )}
                 {errorLogViewer.status === 'error' && (
-                    <div className='error-box'>{errorLogViewer.message}</div>
+                    <div className='error-box' role='alert'>
+                        {errorLogViewer.message}{' '}
+                        <Button variant='secondary' size='sm' onClick={() => void previewErrorLog(errorLogViewer.item)}>
+                            {t('common.retry')}
+                        </Button>
+                    </div>
                 )}
                 {errorLogViewer.status === 'ready' && (
-                    errorLogViewer.text ?
-                    <pre className={styles.previewContent}>{errorLogViewer.text}</pre> :
-                    <div className='hint'>{t('logs.error_log_empty_content')}</div>
+                    <>
+                        {errorLogViewer.metadata && (
+                            <p className={styles.errorLogsHint}>
+                                {t(
+                                    'usage_stats.request_events_log_lines',
+                                    { count: errorLogViewer.metadata.totalLines },
+                                )}
+                                {errorLogViewer.metadata.truncated && ` · ${t('logs.error_log_tail_preview', {
+                                    shown: ERROR_LOG_PREVIEW_LINES,
+                                    defaultValue: 'Showing the last {{shown}} lines; ' +
+                                                  'download the full log to see earlier lines',
+                                })}`}
+                            </p>
+                        )}
+                        {errorLogViewer.text
+                         ? <pre className={styles.previewContent}>{errorLogViewer.text}</pre>
+                         : <div className='hint'>{t('logs.error_log_empty_content')}</div>}
+                    </>
                 )}
             </Modal>
         </div>

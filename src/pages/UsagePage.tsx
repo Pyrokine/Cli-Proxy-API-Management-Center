@@ -1,3 +1,4 @@
+import {EmptyState} from '@/components/ui/EmptyState'
 import {LoadingSpinner} from '@/components/ui/LoadingSpinner'
 import {Tabs} from '@/components/ui/Tabs'
 import {
@@ -18,7 +19,6 @@ import {providersApi} from '@/services/api/providers'
 import {type RequestSpeed, usageApi} from '@/services/api/usage'
 import {useConfigStore} from '@/stores'
 import type {OpenAIProviderConfig} from '@/types'
-import {toLocalDateTimeString} from '@/utils/format'
 import {type ChartDimension, filterUsageByDateRange, filterUsageBySelections} from '@/utils/usage'
 import {
     CategoryScale,
@@ -40,9 +40,11 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 const DEFAULT_PRESET              = '30d'
 const ACTIVE_TAB_STORAGE_KEY      = 'cli-proxy-usage-active-tab-v1'
-const ALL_PRESET_PLACEHOLDER_FROM = '2020-01-01T00:00'
+// Earliest timestamp representable by the usage store's Unix nanoseconds.
+const ALL_PRESET_PLACEHOLDER_FROM = '1677-09-21T00:12:43.145224192Z'
 
 type UsageTab = 'overview' | 'events' | 'settings'
+type UsageDateRange = { from: string; to: string }
 
 function initActiveTab(): UsageTab {
     try {
@@ -61,8 +63,8 @@ function initActiveTab(): UsageTab {
 function initDateRange(): { from: string; to: string; preset: string } {
     const now = new Date()
     return {
-        from: toLocalDateTimeString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
-        to: toLocalDateTimeString(now),
+        from: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        to: now.toISOString(),
         preset: DEFAULT_PRESET,
     }
 }
@@ -101,7 +103,10 @@ export function UsagePage() {
     const [liveWindowAnchorMs, setLiveWindowAnchorMs]           = useState(() => Date.now())
     const [summaryRefreshToken, setSummaryRefreshToken]         = useState(0)
     const [eventsRefreshToken, setEventsRefreshToken]           = useState(0)
-    const [eventsVisibleDateRange, setEventsVisibleDateRange]   = useState<{ from: string; to: string } | null>(null)
+    const [eventsVisibleDateRange, setEventsVisibleDateRange]   = useState<{
+                                                                               base: UsageDateRange
+                                                                               range: UsageDateRange
+                                                                           } | null>(null)
     const [openaiProvidersForUsage, setOpenaiProvidersForUsage] = useState<OpenAIProviderConfig[] | null>(null)
 
     const needsRawUsage = false
@@ -135,6 +140,7 @@ export function UsagePage() {
 
     const setActiveTab = useCallback((next: UsageTab) => {
         setActiveTabState(next)
+        setEventsVisibleDateRange(null)
         try {
             localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, next)
         } catch {
@@ -195,117 +201,85 @@ export function UsagePage() {
         }
     }, [usageStatsTabActive, config?.openaiCompatibility])
 
-    const handleDateRangeChange = useCallback((from: string, to: string, preset?: string) => {
-        // When "all" is selected, start from an epoch placeholder so the first
-        // summary request can discover the real earliest point, then converge the
-        // window to that point once data arrives.
-        if (preset === 'all') {
-            setDateRange({ from: ALL_PRESET_PLACEHOLDER_FROM, to, preset: 'all' })
-        } else {
-            setDateRange({ from, to, preset: preset ?? '' })
-        }
+    const clearUsageFilters = useCallback(() => {
+        setSelectedModels([])
+        setSelectedCredentials([])
+        setSelectedApiKeys([])
+        setSelectedEventStatus('')
+        setSelectedEventSpeed('')
     }, [])
 
-    // Refresh button: re-fetch data and, for time-relative presets, slide the
-    // window so it ends at "now" instead of the locked-in initial timestamp.
-    // Custom (no preset) ranges stay untouched in absolute time, but still need
-    // a manual reload because the params object does not change by itself.
+    const handleDateRangeChange = useCallback((from: string, to: string, preset?: string) => {
+        setDateRange({ from, to, preset: preset ?? '' })
+    }, [])
+
     const handleRefresh = useCallback(() => {
         const refreshAnchorMs = Date.now()
         setLiveWindowAnchorMs(refreshAnchorMs)
-        const shouldReloadSummary = !['24h', '7d', '30d'].includes(dateRange.preset)
-        const shouldReloadEvents  = activeTab === 'events'
 
         setDateRange((prev) => {
-            const now    = new Date(refreshAnchorMs)
-            const nowStr = toLocalDateTimeString(now)
-            switch (prev.preset) {
-                case '24h':
-                    return {
-                        ...prev,
-                        from: toLocalDateTimeString(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-                        to: nowStr,
-                    }
-                case '7d':
-                    return {
-                        ...prev,
-                        from: toLocalDateTimeString(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
-                        to: nowStr,
-                    }
-                case '30d':
-                    return {
-                        ...prev,
-                        from: toLocalDateTimeString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
-                        to: nowStr,
-                    }
-                case 'all':
-                    return { ...prev, to: nowStr }
-                default:
-                    return prev
+            const days = prev.preset === '24h' ? 1 : prev.preset === '7d' ? 7 : prev.preset === '30d' ? 30 : 0
+            if (days > 0) {
+                return {
+                    ...prev,
+                    from: new Date(refreshAnchorMs - days * 24 * 60 * 60 * 1000).toISOString(),
+                    to: new Date(refreshAnchorMs).toISOString(),
+                }
             }
+            return prev.preset === 'all' ? { ...prev, to: new Date(refreshAnchorMs).toISOString() } : prev
         })
 
         if (needsRawUsage) {
             void loadUsage().catch(() => {
             })
         }
-        if (shouldReloadSummary) {
-            setSummaryRefreshToken((prev) => prev + 1)
-        }
-        if (shouldReloadEvents) {
+        setSummaryRefreshToken((prev) => prev + 1)
+        if (activeTab === 'events') {
             setEventsRefreshToken((prev) => prev + 1)
         }
-    }, [activeTab, dateRange.preset, loadUsage, needsRawUsage])
+    }, [activeTab, loadUsage, needsRawUsage])
 
     const isAllPreset                                     = dateRange.preset === 'all'
-    const allSummaryResolutionKey                         = useMemo(
-        () => JSON.stringify([dateRange.to, selectedModels, selectedApiKeys, selectedCredentials]),
-        [dateRange.to, selectedModels, selectedApiKeys, selectedCredentials],
-    )
-    const [allSummaryResolution, setAllSummaryResolution] = useState<{
-        key: string
-        from: string
-        resolved: boolean
-    }>({
-           key: '',
-           from: '',
-           resolved: false,
-       })
-    const [allSummaryFailure, setAllSummaryFailure]       = useState<{ key: string; message: string } | null>(null)
-    const [allSummaryResolving, setAllSummaryResolving]   = useState(false)
-    const allSummaryResolved                              =
-              isAllPreset && allSummaryResolution.key === allSummaryResolutionKey && allSummaryResolution.resolved
-    const resolvedAllFrom                                 = allSummaryResolved ? allSummaryResolution.from : ''
-    const effectiveDateFrom                               = isAllPreset ?
-                                                            (resolvedAllFrom || ALL_PRESET_PLACEHOLDER_FROM) :
-                                                            dateRange.from
     const effectiveDateTo                                 = dateRange.to
-    const effectiveRangeReady                             = !isAllPreset || allSummaryResolved
-    const granularityRangeFrom                            = effectiveDateFrom || dateRange.from
-    const hourWindowHours                                 = calcHourWindow(granularityRangeFrom, effectiveDateTo)
+    const allSummaryResolutionKey                         = JSON.stringify([
+                                                                               effectiveDateTo,
+                                                                               selectedModels,
+                                                                               selectedApiKeys,
+                                                                               selectedCredentials,
+                                                                               summaryRefreshToken,
+                                                                           ])
+    const [allSummaryResolution, setAllSummaryResolution] = useState<{
+                                                                         key: string
+                                                                         from?: string
+                                                                         error?: string
+                                                                     } | null>(null)
+    const resolvedAll                                     = isAllPreset &&
+                                                            allSummaryResolution?.key ===
+                                                            allSummaryResolutionKey
+                                                            ? allSummaryResolution : null
+    const rangeResolutionLoading                          = isAllPreset && !resolvedAll
+    const rangeResolutionError                            = resolvedAll?.error
+    const rangeEmpty                                      = isAllPreset &&
+                                                            resolvedAll !==
+                                                            null &&
+                                                            !resolvedAll.from &&
+                                                            !rangeResolutionError
+    const effectiveDateFrom                               = isAllPreset ? resolvedAll?.from ?? '' : dateRange.from
+    const effectiveRangeReady                             = !isAllPreset || Boolean(resolvedAll?.from)
+    const hourWindowHours                                 = calcHourWindow(effectiveDateFrom, effectiveDateTo)
     const summaryGranularity: 'hourly' | 'daily'          = (hourWindowHours ?? 0) > 7 * 24 ? 'daily' : 'hourly'
-    const hasSelectionFilters                             =
-              selectedModels.length > 0 || selectedCredentials.length > 0 || selectedApiKeys.length > 0
+    const hasSelectionFilters                             = selectedModels.length >
+                                                            0 ||
+                                                            selectedCredentials.length >
+                                                            0 ||
+                                                            selectedApiKeys.length >
+                                                            0
 
     useEffect(() => {
-        if (!isAllPreset) {
-            const frameId = requestAnimationFrame(() => {
-                setAllSummaryResolution((prev) => (prev.key || prev.from || prev.resolved ?
-                    { key: '', from: '', resolved: false } :
-                                                   prev))
-                setAllSummaryResolving(false)
-            })
-            return () => cancelAnimationFrame(frameId)
-        }
-        if (allSummaryResolved) {
+        if (!isAllPreset || !usageStatsTabActive) {
             return
         }
-
-        let cancelled    = false
         const controller = new AbortController()
-        const frameId    = requestAnimationFrame(() => {
-            setAllSummaryResolving(true)
-        })
 
         void usageApi
             .getEvents(
@@ -325,54 +299,30 @@ export function UsagePage() {
                 { signal: controller.signal },
             )
             .then((response) => {
-                if (cancelled) {
-                    return
+                if (!controller.signal.aborted) {
+                    const timestamp = response.events[0]?.timestamp
+                    if (response.total > 0 && (!timestamp || !Number.isFinite(Date.parse(timestamp)))) {
+                        throw new Error(t('usage_stats.range_start_unavailable', {
+                            defaultValue: 'Could not find the first request time',
+                        }))
+                    }
+                    setAllSummaryResolution({ key: allSummaryResolutionKey, from: timestamp })
                 }
-                setAllSummaryFailure(null)
-                const timestamp    = response.events[0]?.timestamp
-                const resolvedFrom = timestamp ? toLocalDateTimeString(new Date(timestamp)) : ''
-                setAllSummaryResolution((prev) =>
-                                            prev.key ===
-                                            allSummaryResolutionKey &&
-                                            prev.from ===
-                                            resolvedFrom &&
-                                            prev.resolved
-                                            ? prev
-                                            : { key: allSummaryResolutionKey, from: resolvedFrom, resolved: true },
-                )
             })
             .catch((failure: unknown) => {
-                if (!cancelled) {
-                    setAllSummaryFailure({
-                                             key: allSummaryResolutionKey,
-                                             message: failure instanceof Error ? failure.message : String(failure),
-                                         })
-                }
-            })
-            .finally(() => {
-                cancelAnimationFrame(frameId)
-                if (!cancelled) {
-                    setAllSummaryResolving(false)
+                if (!controller.signal.aborted) {
+                    setAllSummaryResolution({
+                                                key: allSummaryResolutionKey,
+                                                error: failure instanceof Error ? failure.message : String(failure),
+                                            })
                 }
             })
 
-        return () => {
-            cancelled = true
-            controller.abort()
-            cancelAnimationFrame(frameId)
-        }
+        return () => controller.abort()
     }, [
-                  summaryRefreshToken,
-                  isAllPreset,
-                  allSummaryResolved,
-                  allSummaryResolutionKey,
-                  effectiveDateTo,
-                  selectedModels,
-                  selectedCredentials,
-                  selectedApiKeys,
+                  isAllPreset, usageStatsTabActive, allSummaryResolutionKey, effectiveDateTo,
+                  selectedModels, selectedCredentials, selectedApiKeys, t,
               ])
-
-    const rangeResolutionLoading = isAllPreset && allSummaryResolving && resolvedAllFrom.length === 0
 
     // Summary API (pre-aggregated data from backend)
     const summaryParams = useMemo(
@@ -400,9 +350,9 @@ export function UsagePage() {
               summary,
               loading: summaryLoading,
               error: summaryError,
-              reload: reloadSummary,
           }             = useUsageSummary(summaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady,
+        refreshToken: summaryRefreshToken,
     })
 
     const liveSummaryRange = useMemo(() => ({
@@ -428,9 +378,9 @@ export function UsagePage() {
               summary: requestedLiveSummary,
               loading: requestedLiveSummaryLoading,
               error: requestedLiveSummaryError,
-              reload: reloadLiveSummary,
           }                   = useUsageSummary(liveSummaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady && !reuseSummaryForLive,
+        refreshToken: summaryRefreshToken,
     })
     const liveSummary         = reuseSummaryForLive ? summary : requestedLiveSummary
     const liveSummaryLoading  = reuseSummaryForLive ? summaryLoading : requestedLiveSummaryLoading
@@ -455,7 +405,7 @@ export function UsagePage() {
 
     // Unfiltered summary used to populate the filter dropdowns so that selecting one
     // option does not cause the other options to disappear.
-    const filterOptionsParams                                                   = useMemo(
+    const filterOptionsParams               = useMemo(
         () => ({
             from: effectiveDateFrom,
             to: effectiveDateTo,
@@ -465,18 +415,18 @@ export function UsagePage() {
         }),
         [effectiveDateFrom, effectiveDateTo, summaryGranularity],
     )
-    const { summary: filterOptionsSummary, reload: reloadFilterOptionsSummary } = useUsageSummary(filterOptionsParams, {
+    const { summary: filterOptionsSummary } = useUsageSummary(filterOptionsParams, {
         enabled: usageStatsTabActive && effectiveRangeReady && hasSelectionFilters,
+        refreshToken: summaryRefreshToken,
     })
 
-    // 健康监测: 跟顶部 dateRange + 维度筛选, 但 granularity 固定 hourly
-    // 主 summary 在 >7 天窗口下用 daily 粒度防折线图过密, 那样每天只能映射
-    // 到 1 个 hour cell, grid 几乎全 idle,独立请求保证每天 24 cells 都能填上
+    // Wide windows use daily buckets on servers that predate period.granularity, too.
     const heatmapSummaryParams   = useMemo(
         () => ({
             from: effectiveDateFrom,
             to: effectiveDateTo,
-            granularity: 'hourly' as const,
+            granularity: Date.parse(effectiveDateTo) - Date.parse(effectiveDateFrom) > 1999 * 3600_000
+                         ? 'daily' as const : 'hourly' as const,
             api_key_identity: 'canonical' as const,
             model: selectedModels.length > 0 ? selectedModels.join(',') : undefined,
             api_key: selectedApiKeys.length > 0 ? selectedApiKeys : undefined,
@@ -491,63 +441,28 @@ export function UsagePage() {
               summary: requestedHeatmapSummary,
               loading: requestedHeatmapSummaryLoading,
               error: requestedHeatmapSummaryError,
-              reload: reloadHeatmapSummary,
           }                      = useUsageSummary(heatmapSummaryParams, {
         enabled: usageStatsTabActive && effectiveRangeReady && !reuseSummaryForHeatmap,
+        refreshToken: summaryRefreshToken,
     })
     const heatmapSummary         = reuseSummaryForHeatmap ? summary : requestedHeatmapSummary
     const heatmapSummaryLoading  = reuseSummaryForHeatmap ? summaryLoading : requestedHeatmapSummaryLoading
     const heatmapSummaryError    = reuseSummaryForHeatmap ? summaryError : requestedHeatmapSummaryError
 
-    useEffect(() => {
-        if (summaryRefreshToken === 0 || !effectiveRangeReady) {
-            return
-        }
-
-        const token   = summaryRefreshToken
-        const reloads = [reloadSummary()]
-        if (!reuseSummaryForHeatmap) {
-            reloads.push(reloadHeatmapSummary())
-        }
-        if (!reuseSummaryForLive) {
-            reloads.push(reloadLiveSummary())
-        }
-        if (hasSelectionFilters) {
-            reloads.push(reloadFilterOptionsSummary())
-        }
-
-        void Promise.all(reloads).finally(() => {
-            setSummaryRefreshToken((current) => (current === token ? 0 : current))
-        })
-    }, [
-                  summaryRefreshToken,
-                  effectiveRangeReady,
-                  reloadSummary,
-                  reloadFilterOptionsSummary,
-                  reloadHeatmapSummary,
-                  reloadLiveSummary,
-                  reuseSummaryForHeatmap,
-                  reuseSummaryForLive,
-                  hasSelectionFilters,
-              ])
-
     const eventsDateRange                    = useMemo(
         () => ({ from: effectiveDateFrom, to: effectiveDateTo }),
         [effectiveDateFrom, effectiveDateTo],
     )
-    const handleEventsVisibleDateRangeChange = useCallback((range: { from: string; to: string }) => {
-        setEventsVisibleDateRange((prev) => {
-            if (prev?.from === range.from && prev?.to === range.to) {
-                return prev
-            }
-            return range
-        })
-    }, [])
+    const handleEventsVisibleDateRangeChange = useCallback((range: UsageDateRange) => {
+        setEventsVisibleDateRange({ base: eventsDateRange, range })
+    }, [eventsDateRange])
+    const visibleDateRange                   = activeTab ===
+                                               'events' &&
+                                               eventsVisibleDateRange?.base ===
+                                               eventsDateRange
+                                               ? eventsVisibleDateRange.range : eventsDateRange
 
     const combinedSummaryLoading  = (usageStatsTabActive && rangeResolutionLoading) || summaryLoading
-    const rangeResolutionError    = isAllPreset && allSummaryFailure?.key === allSummaryResolutionKey ?
-                                    allSummaryFailure.message :
-                                    undefined
     const combinedSummaryError    = rangeResolutionError ?? summaryError
     const combinedHeatmapLoading  = (usageStatsTabActive && rangeResolutionLoading) || heatmapSummaryLoading
     const combinedHeatmapError    = rangeResolutionError ?? heatmapSummaryError
@@ -593,10 +508,8 @@ export function UsagePage() {
             {activeTab !== 'settings' && (
                 <FilterBar
                     usage={usage}
-                    dateFrom={
-                        activeTab === 'events' ? eventsVisibleDateRange?.from || effectiveDateFrom : effectiveDateFrom
-                    }
-                    dateTo={activeTab === 'events' ? eventsVisibleDateRange?.to || dateRange.to : effectiveDateTo}
+                    dateFrom={visibleDateRange.from}
+                    dateTo={visibleDateRange.to}
                     activePreset={dateRange.preset || undefined}
                     onDateRangeChange={handleDateRangeChange}
                     selectedModels={selectedModels}
@@ -653,7 +566,14 @@ export function UsagePage() {
                 <button type='button' className='btn btn-secondary' onClick={handleRefresh}>{t('common.retry')}</button>
             </div>}
 
-            {activeTab === 'overview' && (
+            {activeTab === 'overview' && summaryError && summary && <div className={styles.errorBox} role='alert'>
+                {summaryError} · {t('usage_stats.previous_results_shown', {
+                defaultValue: 'Showing the last loaded results',
+            })}
+                <button type='button' className='btn btn-secondary' onClick={handleRefresh}>{t('common.retry')}</button>
+            </div>}
+            {activeTab === 'overview' && rangeEmpty && <EmptyState title={t('service_health.no_requests')} />}
+            {activeTab === 'overview' && !rangeEmpty && (
                 <OverviewTab
                     usage={filteredUsage}
                     loading={combinedSummaryLoading}
@@ -666,6 +586,7 @@ export function UsagePage() {
                     summary={summary}
                     liveSummary={liveSummary}
                     heatmapSummary={heatmapSummary}
+                    heatmapGranularity={heatmapSummaryParams.granularity}
                     fromMs={dateFromMs}
                     toMs={dateToMs}
                     modelPrices={modelPrices}
@@ -684,9 +605,11 @@ export function UsagePage() {
                 />
             )}
 
-            {activeTab === 'events' && (
+            {activeTab === 'events' && !rangeResolutionError && (
                 <EventsTab
                     enabled={effectiveRangeReady}
+                    rangeLoading={rangeResolutionLoading}
+                    onClearFilters={clearUsageFilters}
                     refreshToken={eventsRefreshToken}
                     geminiKeys={config?.geminiApiKeys || []}
                     claudeConfigs={config?.claudeApiKeys || []}
