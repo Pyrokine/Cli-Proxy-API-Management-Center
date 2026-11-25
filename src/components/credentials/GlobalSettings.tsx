@@ -1,6 +1,3 @@
-import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
-import {configApi} from '@/services/api/config'
-import {useConfigStore, useNotificationStore} from '@/stores'
 import type {Config} from '@/types'
 import {useTranslation} from 'react-i18next'
 import styles from './GlobalSettings.module.scss'
@@ -10,56 +7,31 @@ interface GlobalSettingsProps {
     disableControls: boolean
 }
 
-export function GlobalSettings({ config, disableControls }: GlobalSettingsProps) {
-    const { t }             = useTranslation()
-    const updateConfigValue = useConfigStore((s) => s.updateConfigValue)
-    const showNotification  = useNotificationStore((s) => s.showNotification)
-
-    const switchProject      = config?.quotaExceeded?.switchProject ?? false
-    const switchPreviewModel = config?.quotaExceeded?.switchPreviewModel ?? false
-
-    const handleToggleSwitchProject = async (value: boolean) => {
-        try {
-            await configApi.updateSwitchProject(value)
-            updateConfigValue('quota-exceeded', {
-                ...(config?.quotaExceeded || {}),
-                switchProject: value,
-            })
-        } catch {
-            showNotification(t('common.error'), 'error')
-        }
-    }
-
-    const handleToggleSwitchPreview = async (value: boolean) => {
-        try {
-            await configApi.updateSwitchPreviewModel(value)
-            updateConfigValue('quota-exceeded', {
-                ...(config?.quotaExceeded || {}),
-                switchPreviewModel: value,
-            })
-        } catch {
-            showNotification(t('common.error'), 'error')
-        }
-    }
+export function GlobalSettings({ config }: GlobalSettingsProps) {
+    const { t }            = useTranslation()
+    const formatSavedValue = (value: boolean | undefined) =>
+        value === undefined ? '—' : t(value ? 'common.enabled' : 'common.disabled')
 
     return (
         <div className={styles.section}>
-            <h3 className={styles.title}>{t('credentials.global_settings')}</h3>
-            <div className={styles.toggles}>
-                <ToggleSwitch
-                    label={t('credentials.switch_project_on_quota')}
-                    checked={switchProject}
-                    disabled={disableControls}
-                    onChange={handleToggleSwitchProject}
-                />
-                <ToggleSwitch
-                    label={t('credentials.switch_preview_on_quota')}
-                    checked={switchPreviewModel}
-                    disabled={disableControls}
-                    onChange={handleToggleSwitchPreview}
-                />
-            </div>
-            <p className={styles.hint}>{t('credentials.settings_sync_hint')}</p>
+            <h3 className={styles.title}>
+                {t('credentials.legacy_quota_settings', { defaultValue: 'Legacy quota settings' })}
+            </h3>
+            <p className={styles.hint}>
+                {t('config_management.visual.quota_switch_inactive_hint', {
+                    defaultValue: 'These values are kept for compatibility. The server does not use them for routing.',
+                })}
+            </p>
+            <dl className={styles.settings}>
+                <div>
+                    <dt>{t('credentials.switch_project_on_quota')}</dt>
+                    <dd>{formatSavedValue(config?.quotaExceeded?.switchProject)}</dd>
+                </div>
+                <div>
+                    <dt>{t('credentials.switch_preview_on_quota')}</dt>
+                    <dd>{formatSavedValue(config?.quotaExceeded?.switchPreviewModel)}</dd>
+                </div>
+            </dl>
         </div>
     )
 }

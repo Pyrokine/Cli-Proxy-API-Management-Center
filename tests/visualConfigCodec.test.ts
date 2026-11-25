@@ -94,11 +94,12 @@ const BOOLEAN_FIELDS = [
 describe(
     'visual config YAML codec',
     () => {
-        test('decodes legacy aliases and API key storage metadata', () => {
+        test('decodes supported legacy aliases and API key storage metadata', () => {
             const decoded = decodeVisualConfigYaml(SOURCE_YAML)
 
             expect(decoded.values.rmAutoUpdatePanel).toBe(false)
-            expect(decoded.values.rmPanelRepo).toBe('legacy/panel')
+            expect(decoded.values.rmPanelRepo).toBe('')
+            expect(decoded.values.yamlFields['remote-management.panel-github-repository']?.source).toBe('default')
             expect(decoded.values.rmTrustedProxies).toEqual(['127.0.0.1/32'])
             expect(decoded.values.pluginsEnabled).toBe(true)
             expect(decoded.values.pluginStoreSources).toEqual(['https://plugins.example/registry.json'])

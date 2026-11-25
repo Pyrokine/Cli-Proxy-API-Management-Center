@@ -953,13 +953,16 @@ export function VisualConfigEditor({
         </FieldAnchor>
     )
 
+    const quotaSwitchInactiveHint  = t('config_management.visual.quota_switch_inactive_hint', {
+        defaultValue: 'The saved value is retained for compatibility. It does not change quota handling.',
+    })
     const quotaSwitchProjectToggle = (
         <FieldAnchor fieldId='quotaSwitchProject'>
             <ToggleRow
                 title={sectionT('quota.switch_project')}
-                description={sectionT('quota.switch_project_desc')}
+                description={quotaSwitchInactiveHint}
                 checked={values.quotaSwitchProject}
-                disabled={disabled}
+                disabled
                 onChange={(quotaSwitchProject) => onChange({ quotaSwitchProject })}
             />
         </FieldAnchor>
@@ -969,9 +972,9 @@ export function VisualConfigEditor({
         <FieldAnchor fieldId='quotaSwitchPreviewModel'>
             <ToggleRow
                 title={sectionT('quota.switch_preview_model')}
-                description={sectionT('quota.switch_preview_model_desc')}
+                description={quotaSwitchInactiveHint}
                 checked={values.quotaSwitchPreviewModel}
-                disabled={disabled}
+                disabled
                 onChange={(quotaSwitchPreviewModel) => onChange({ quotaSwitchPreviewModel })}
             />
         </FieldAnchor>

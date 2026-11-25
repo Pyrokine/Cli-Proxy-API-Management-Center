@@ -134,19 +134,19 @@ describe('config validation navigation', () => {
 
 describe('config input accessibility', () => {
     for (const mode of ['simple', 'full'] as const) {
-        for (const disabled of [false, true]) {
-            test(`anchors quota switches in ${mode} mode when ${disabled ? 'disabled' : 'editable'}`, () => {
-                const markup = renderEditor(DEFAULT_VISUAL_VALUES, disabled, mode)
-                for (const field of ['quotaSwitchProject', 'quotaSwitchPreviewModel']) {
-                    const anchor = `id="cfg-field-${field}"`
-                    expect(markup.split(anchor)).toHaveLength(2)
-                    const input = markup.slice(markup.indexOf(anchor)).match(/<input\b[^>]*>/)?.[0] ?? ''
-                    expect(attribute(input, 'type')).toBe('checkbox')
-                    // noinspection SpellCheckingInspection
-                    expect(/\sdisabled[=\s>]/.test(input)).toBe(disabled)
-                }
-            })
-        }
+        test(`anchors the stored read-only quota switches in ${mode} mode`, () => {
+            const values = { ...DEFAULT_VISUAL_VALUES, quotaSwitchProject: true, quotaSwitchPreviewModel: false }
+            const markup = renderEditor(values, false, mode)
+            for (const field of ['quotaSwitchProject', 'quotaSwitchPreviewModel'] as const) {
+                const anchor = `id="cfg-field-${field}"`
+                expect(markup.split(anchor)).toHaveLength(2)
+                const input = markup.slice(markup.indexOf(anchor)).match(/<input\b[^>]*>/)?.[0] ?? ''
+                expect(attribute(input, 'type')).toBe('checkbox')
+                expect(attribute(input, 'disabled')).toBe('')
+                expect(attribute(input, 'checked') !== undefined).toBe(values[field])
+                expect(attribute(input, 'aria-describedby')).toBeTruthy()
+            }
+        })
     }
 
     for (const invalid of [false, true]) {

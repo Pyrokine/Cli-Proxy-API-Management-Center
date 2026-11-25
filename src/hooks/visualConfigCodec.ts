@@ -2157,18 +2157,12 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         rmTrustedProxies: parseStringList(remoteManagement?.['trusted-proxies']),
         rmSecretKey: typeof remoteManagement?.['secret-key'] === 'string' ? remoteManagement['secret-key'] : '',
         rmDisableControlPanel: normalizeBoolean(remoteManagement?.['disable-control-panel']) ?? false,
-        rmAutoUpdatePanel: remoteManagement?.['disable-auto-update-panel'] !== undefined
-                           ? !(normalizeBoolean(remoteManagement['disable-auto-update-panel']) ?? false)
-                           : normalizeBoolean(remoteManagement?.['auto-update-panel']) ?? true,
+        rmAutoUpdatePanel: yamlFields['remote-management.auto-update-panel']?.value !== false,
         rmAutoUpdateCPA: normalizeBoolean(remoteManagement?.['auto-update-cpa']) ?? false,
         rmAutoCheckUpdate: normalizeBoolean(remoteManagement?.['auto-check-update']) ?? false,
         rmCheckInterval: String(remoteManagement?.['check-interval'] ?? ''),
-        rmPanelRepo:
-            typeof remoteManagement?.['panel-github-repository'] === 'string'
-            ? remoteManagement['panel-github-repository']
-            : typeof remoteManagement?.['panel-repo'] === 'string'
-              ? remoteManagement['panel-repo']
-              : '',
+        rmPanelRepo: typeof remoteManagement?.['panel-github-repository'] === 'string'
+                     ? remoteManagement['panel-github-repository'] : '',
         rmCpaRepo:
             typeof remoteManagement?.['cpa-github-repository'] === 'string'
             ? remoteManagement['cpa-github-repository']
@@ -2222,8 +2216,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         antigravityConnectionPoolMaxIdleConnsPerHost: String(antigravityPool?.['max-idle-conns-per-host'] ?? ''),
         codexLiveMediaRelayEnabled: normalizeBoolean(codexRelay?.enabled) ?? false,
         codexLiveMediaRelayMaxSessions: String(codexRelay?.['max-sessions'] ?? ''),
-        codexLiveMediaRelayDisablePrivateRemoteIPs: normalizeBoolean(codexRelay?.['disable-private-remote-ips']) ??
-                                                    false,
+        codexLiveMediaRelayDisablePrivateRemoteIPs: yamlFields['codex.live-media-relay.disable-private-remote-ips']?.value ===
+                                                    true,
         codexLiveMediaRelayPublicIP: typeof codexRelay?.['public-ip'] === 'string' ? codexRelay['public-ip'] : '',
         codexLiveMediaRelayUDPPortMin: String(codexRelay?.['udp-port-min'] ?? ''),
         codexLiveMediaRelayUDPPortMax: String(codexRelay?.['udp-port-max'] ?? ''),
@@ -2280,16 +2274,10 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         routingSessionAffinity:
             normalizeBoolean(routing?.['session-affinity'] !== undefined
                              ? routing['session-affinity']
-                             : routing?.['claude-code-session-affinity'] !== undefined
-                               ? routing['claude-code-session-affinity']
-                               : routing?.sessionAffinity) ?? false,
+                             : routing?.['claude-code-session-affinity']) ?? false,
         routingSessionAffinitySubagents: normalizeBoolean(routing?.['session-affinity-subagents']) ?? true,
-        routingSessionAffinityTTL:
-            typeof routing?.['session-affinity-ttl'] === 'string'
-            ? routing['session-affinity-ttl']
-            : typeof routing?.sessionAffinityTTL === 'string'
-              ? routing.sessionAffinityTTL
-              : '',
+        routingSessionAffinityTTL: typeof routing?.['session-affinity-ttl'] === 'string'
+                                   ? routing['session-affinity-ttl'] : '',
 
         payloadDefaultRules: parsePayloadRules(payload?.default),
         payloadDefaultRawRules: parseRawPayloadRules(payload?.['default-raw']),
@@ -2300,9 +2288,7 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         streaming: {
             keepaliveSeconds: String(streaming?.['keepalive-seconds'] ?? ''),
             bootstrapRetries: String(streaming?.['bootstrap-retries'] ?? ''),
-            nonstreamKeepaliveInterval: String(
-                parsed['nonstream-keepalive-interval'] ?? streaming?.['nonstream-keepalive-interval'] ?? '',
-            ),
+            nonstreamKeepaliveInterval: String(parsed['nonstream-keepalive-interval'] ?? ''),
         },
     }
     for (const [field, section] of Object.entries(PAYLOAD_FIELDS)) {
@@ -3274,7 +3260,12 @@ export function encodeVisualConfigYaml(
     setField('tlsTrustForwardedProto', ['tls', 'trust-forwarded-proto'], 'boolean')
     setField('rmAllowRemote', ['remote-management', 'allow-remote'], 'boolean')
     setField('rmDisableControlPanel', ['remote-management', 'disable-control-panel'], 'boolean')
-    setField('rmAutoUpdatePanel', ['remote-management', 'auto-update-panel'], 'boolean')
+    if (dirty('rmAutoUpdatePanel') && currentValues.rmAutoUpdatePanel !== values.rmAutoUpdatePanel) {
+        const legacy = currentValues.yamlFields['remote-management.auto-update-panel']?.source === 'legacy'
+        const path   = ['remote-management', legacy ? 'disable-auto-update-panel' : 'auto-update-panel']
+        preparePath(path)
+        setBooleanInDoc(doc, path, legacy ? !values.rmAutoUpdatePanel : values.rmAutoUpdatePanel)
+    }
     setField('rmAutoUpdateCPA', ['remote-management', 'auto-update-cpa'], 'boolean')
     setField('rmAutoCheckUpdate', ['remote-management', 'auto-check-update'], 'boolean')
     setField('pluginsEnabled', ['plugins', 'enabled'], 'boolean')
@@ -3313,11 +3304,16 @@ export function encodeVisualConfigYaml(
     setField('codexOrphanDelegationCompatibility', ['codex', 'orphan-delegation-compatibility'], 'boolean')
     setField('antigravityConnectionPoolEnabled', ['antigravity', 'connection-pool', 'enabled'], 'boolean')
     setField('codexLiveMediaRelayEnabled', ['codex', 'live-media-relay', 'enabled'], 'boolean')
-    setField(
-        'codexLiveMediaRelayDisablePrivateRemoteIPs',
-        ['codex', 'live-media-relay', 'disable-private-remote-ips'],
-        'boolean',
-    )
+    if (shouldWriteAtomicField(
+        'codexLiveMediaRelayDisablePrivateRemoteIPs', RELAY_PRIVATE_PATH,
+        [RELAY_PRIVATE_PATH, RELAY_LEGACY_PRIVATE_PATH],
+    )) {
+        const legacy = currentValues.yamlFields[RELAY_PRIVATE_PATH.join('.')]?.source === 'legacy'
+        const path   = legacy ? RELAY_LEGACY_PRIVATE_PATH : RELAY_PRIVATE_PATH
+        preparePath(path)
+        setBooleanInDoc(doc, path, legacy ? !values.codexLiveMediaRelayDisablePrivateRemoteIPs :
+                                   values.codexLiveMediaRelayDisablePrivateRemoteIPs)
+    }
     setField('claudeDisableCloakMode', ['disable-claude-cloak-mode'], 'boolean')
     setField('claudeCodeDisableCloakingModelList', ['claude-code', 'disable-cloaking-model-list'], 'boolean')
     setField('claudeModelLevelCooling', ['claude', 'model-level-cooling'], 'boolean')
@@ -3379,24 +3375,6 @@ export function encodeVisualConfigYaml(
         for (let i = contract.path.length - 1; i > 0; i--) {
             deleteIfMapEmpty(doc, contract.path.slice(0, i))
         }
-        if (field === 'streaming.nonstreamKeepaliveInterval') {
-            if (doc.hasIn(['streaming', 'nonstream-keepalive-interval'])) {
-                doc.deleteIn(['streaming', 'nonstream-keepalive-interval'])
-                deleteIfMapEmpty(doc, ['streaming'])
-            }
-        }
-    }
-    if (dirty('rmAutoUpdatePanel')) {
-        doc.deleteIn(['remote-management', 'disable-auto-update-panel'])
-    }
-    if (dirty('rmPanelRepo')) {
-        doc.deleteIn(['remote-management', 'panel-repo'])
-    }
-    if (dirty('routingSessionAffinity')) {
-        doc.deleteIn(['routing', 'sessionAffinity'])
-    }
-    if (dirty('routingSessionAffinityTTL')) {
-        doc.deleteIn(['routing', 'sessionAffinityTTL'])
     }
     if (shouldWriteAtomicField('apiKeysText', ['api-keys'], [
         ['api-keys'], ['auth', 'providers', 'config-api-key'],
