@@ -5,6 +5,7 @@ import {
     useCallback,
     useEffect,
     useId,
+    useLayoutEffect,
     useRef,
     useState,
 } from 'react'
@@ -83,12 +84,17 @@ export function Modal({
     const previousFocusRef          = useRef<HTMLElement | null>(null)
     const focusCapturedRef          = useRef(false)
     const returnFocusIdRef          = useRef(returnFocusId)
+    const onCloseRef                = useRef(onClose)
     const modalId                   = useId()
     const titleId                   = useId()
 
     useEffect(() => {
         returnFocusIdRef.current = returnFocusId
     }, [returnFocusId])
+
+    useEffect(() => {
+        onCloseRef.current = onClose
+    }, [onClose])
 
     const startClose = useCallback(
         (notifyParent: boolean) => {
@@ -101,37 +107,45 @@ export function Modal({
                 setIsClosing(false)
                 closeTimerRef.current = null
                 if (notifyParent) {
-                    onClose()
+                    onCloseRef.current()
                 }
             }, CLOSE_ANIMATION_DURATION)
         },
-        [onClose],
+        [],
     )
 
-    useEffect(() => {
-        let cancelled = false
-
-        if (open) {
-            if (closeTimerRef.current !== null) {
-                window.clearTimeout(closeTimerRef.current)
-                closeTimerRef.current = null
-            }
-            queueMicrotask(() => {
-                if (cancelled) {
-                    return
-                }
-                setIsVisible(true)
-                setIsClosing(false)
-            })
-        } else if (isVisible) {
-            queueMicrotask(() => {
-                if (cancelled) {
-                    return
-                }
-                startClose(false)
-            })
+    useLayoutEffect(() => {
+        if (!open) {
+            return
         }
+        if (closeTimerRef.current !== null) {
+            window.clearTimeout(closeTimerRef.current)
+            closeTimerRef.current = null
+        }
+        let cancelled = false
+        queueMicrotask(() => {
+            if (!cancelled) {
+                setIsVisible(true)
+                if (closeTimerRef.current === null) {
+                    setIsClosing(false)
+                }
+            }
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [open])
 
+    useEffect(() => {
+        if (open || !isVisible) {
+            return
+        }
+        let cancelled = false
+        queueMicrotask(() => {
+            if (!cancelled) {
+                startClose(false)
+            }
+        })
         return () => {
             cancelled = true
         }

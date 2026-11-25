@@ -82,6 +82,10 @@ export function PageTransition({
     const currentLayerKey               = currentLayer?.key ?? getLayerKey(location)
     const currentLayerPathname          = currentLayer?.location.pathname
     const currentLayerHash              = currentLayer?.location.hash ?? ''
+    const locationMatchesCurrentLayer   = currentLayerPathname ===
+                                          location.pathname &&
+                                          currentLayerHash ===
+                                          location.hash
 
     const resolveScrollContainer = useCallback(() => {
         if (scrollContainerRef?.current) {
@@ -99,10 +103,7 @@ export function PageTransition({
     }, [resolveScrollContainer])
 
     useLayoutEffect(() => {
-        if (isAnimating) {
-            return
-        }
-        if (currentLayerPathname === location.pathname && currentLayerHash === location.hash) {
+        if (isAnimating || locationMatchesCurrentLayer) {
             return
         }
         const scrollContainer       = resolveScrollContainer()
@@ -197,7 +198,7 @@ export function PageTransition({
                         location,
                         currentLayerKey,
                         currentLayerPathname,
-                        currentLayerHash,
+                        locationMatchesCurrentLayer,
                         getRouteOrder,
                         getTransitionVariant,
                         resolveScrollContainer,
@@ -408,7 +409,8 @@ export function PageTransition({
 
                 return layers.map((layer, index) => {
                     const shouldKeepStacked = layer.status === 'stacked' && index === keepStackedIndex
-                    const renderLocation    = layer.status === 'current' ? location : layer.location
+                    const renderLocation    = layer.status === 'current' && locationMatchesCurrentLayer ?
+                                              location : layer.location
                     return (
                         <div
                             key={layer.key}
