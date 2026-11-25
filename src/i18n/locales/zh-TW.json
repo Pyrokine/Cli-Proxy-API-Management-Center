@@ -3431,7 +3431,21 @@
         "quota_window_limit": "限額",
         "quota_window_hours": "{{count}} 小時限額",
         "quota_window_days": "{{count}} 天限額",
-        "quota_window_weeks": "{{count}} 週限額"
+        "quota_window_weeks": "{{count}} 週限額",
+        "legacy_quota_settings": "舊版配額設定",
+        "inspection_schedule_integer_range": "輸入 {{min}} 至 {{max}} 之間的整數",
+        "inspection_schedule_save_failed": "巡檢排程儲存失敗",
+        "inspection_run_timed_out": "巡檢逾時",
+        "inspection_run_stopped": "已手動停止巡檢",
+        "inspection_run_target_changed": "帳號或巡檢範圍已變更",
+        "inspection_run_save_failed": "巡檢結果儲存失敗",
+        "inspection_target_not_found": "此帳號已不存在",
+        "inspection_target_ambiguous": "此帳號對應多份憑證",
+        "inspection_target_excluded": "巡檢排程未包含此供應商",
+        "quota_task_select": "選擇配額重新整理任務",
+        "quota_task_history_unavailable": "無法讀取已儲存的任務歷程",
+        "latest_inspection_status": "最近巡檢結果",
+        "oauth_cancel_failed": "無法取消授權"
     },
     "multi_select": {
         "selected": "已選 {{count}} 項",

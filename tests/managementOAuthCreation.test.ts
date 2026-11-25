@@ -420,16 +420,12 @@ test('ordinary settings keep uncertain runtime receipt despite a matching config
     expect(wire.calls.filter((c) => c.method === 'put')).toHaveLength(1)
 })
 
-test('inspection persistence HTTP 503 preserves partial result and never repeats scheduling', async () => {
-    const wire = transport(
-        'partial',
-        {
-            status: 503,
-            body: { error: 'inspection persistence failed' },
-            resource: { status: 'idle' },
-            effect: 'configuration.runtime_applied',
-        },
-    )
+test('inspection persistence HTTP 503 reports failure before changing the schedule', async () => {
+    const wire = transport('uncertain', {
+        status: 503,
+        body: { error: 'inspection persistence failed' },
+        resource: { status: 'idle' },
+    })
     try {
         await accountInspectionApi.updateSchedule({
                                                       enabled: true,
@@ -440,12 +436,12 @@ test('inspection persistence HTTP 503 preserves partial result and never repeats
                                                       retention_runs: 10,
                                                   })
         // noinspection ExceptionCaughtLocallyJS
-        throw new Error('Expected partial failure')
+        throw new Error('Expected schedule save failure')
     } catch (error) {
         const failure = error as ApiError
         expect(failure.status).toBe(503)
         expect(failure.data).toEqual({ error: 'inspection persistence failed' })
-        expect(failure.mutation?.result?.outcome).toBe('partial')
+        expect(failure.mutation?.result).toMatchObject({ outcome: 'uncertain', confirmed_effect: false, effects: [] })
     }
     expect(wire.calls.filter((c) => c.method === 'put')).toHaveLength(1)
 })

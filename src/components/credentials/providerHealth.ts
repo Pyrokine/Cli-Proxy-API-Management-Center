@@ -24,7 +24,10 @@ interface ProviderHealthRow {
     requestSuccess: number
     requestFailure: number
     requestTotal: number
-    errorRate: number
+    errorRate: number | null
+    accountCountsAvailable: boolean
+    inspectionAvailable: boolean
+    quotaAvailable: boolean
     nextRefreshAt?: string | null
     nextRetryAfter?: string | number | null
     lastCheckedAt?: string | null
@@ -57,7 +60,10 @@ const emptyRow = (provider: string): ProviderHealthRow => ({
     requestSuccess: 0,
     requestFailure: 0,
     requestTotal: 0,
-    errorRate: 0,
+    errorRate: null,
+    accountCountsAvailable: false,
+    inspectionAvailable: false,
+    quotaAvailable: false,
     status: 'unknown',
 })
 
@@ -95,10 +101,11 @@ const deriveStatus = (row: ProviderHealthRow): ProviderHealthStatus => {
     if (row.accountTotal === 0 && row.quotaCredentialCount === 0 && row.requestTotal === 0) {
         return 'unknown'
     }
-    if (row.unavailable > 0 || row.quotaBanned > 0 || row.quotaExceeded > 0 || row.errorRate >= 0.5) {
+    const errorRate = row.errorRate ?? 0
+    if (row.unavailable > 0 || row.quotaBanned > 0 || row.quotaExceeded > 0 || errorRate >= 0.5) {
         return 'error'
     }
-    if (row.abnormal > 0 || row.refreshFailed > 0 || row.tokenInvalid > 0 || row.quotaError > 0 || row.errorRate > 0) {
+    if (row.abnormal > 0 || row.refreshFailed > 0 || row.tokenInvalid > 0 || row.quotaError > 0 || errorRate > 0) {
         return 'warning'
     }
     return 'healthy'
@@ -108,7 +115,7 @@ export function buildProviderHealthRows({
                                             inspectionStatus,
                                             quotaStatus,
                                             usageSummary,
-                                            authFiles = [],
+                                            authFiles,
                                         }: ProviderHealthInput): ProviderHealthRow[] {
     const rows   = new Map<string, ProviderHealthRow>()
     const getRow = (providerValue: unknown) => {
@@ -122,44 +129,49 @@ export function buildProviderHealthRows({
         return row
     }
 
-    const hasInspectionSummary = Object.keys(inspectionStatus?.summary_by_provider ?? {}).length > 0
-    const hasUsageSummary      = Object.keys(usageSummary?.by_provider ?? {}).length > 0
-
-    Object.values(inspectionStatus?.summary_by_provider ?? {}).forEach((summary) => {
-        const row         = getRow(summary.provider)
-        row.accountTotal  = toNumber(summary.total)
-        row.normal        = toNumber(summary.normal)
-        row.abnormal      = toNumber(summary.abnormal)
-        row.disabled      = toNumber(summary.disabled)
-        row.unavailable   = toNumber(summary.unavailable)
-        row.unknown       = toNumber(summary.unknown)
-        row.tokenInvalid  = toNumber(summary.token_invalid)
-        row.refreshFailed = toNumber(summary.refresh_failed)
-        row.lastCheckedAt = summary.last_checked_at ?? null
+    const providersWithUsage = new Set<string>()
+    Object.values(usageSummary?.by_provider ?? {}).forEach((summary) => {
+        const row = getRow(summary.provider)
+        providersWithUsage.add(row.provider)
+        row.requestSuccess = toNumber(summary.success)
+        row.requestFailure = toNumber(summary.failure)
     })
 
-    authFiles.forEach((item) => {
+    Object.values(inspectionStatus?.summary_by_provider ?? {}).forEach((summary) => {
+        const row               = getRow(summary.provider)
+        row.inspectionAvailable = true
+        row.accountTotal        = toNumber(summary.total)
+        row.normal              = toNumber(summary.normal)
+        row.abnormal            = toNumber(summary.abnormal)
+        row.disabled            = toNumber(summary.disabled)
+        row.unavailable         = toNumber(summary.unavailable)
+        row.unknown             = toNumber(summary.unknown)
+        row.tokenInvalid        = toNumber(summary.token_invalid)
+        row.refreshFailed       = toNumber(summary.refresh_failed)
+        row.lastCheckedAt       = summary.last_checked_at ?? null
+    })
+
+    authFiles?.forEach((item) => {
         const row = getRow(item.provider ?? item.type)
-        if (!hasInspectionSummary) {
+        if (!row.inspectionAvailable) {
             row.accountTotal++
+            if (item.disabled) {
+                row.disabled++
+            }
+            if (item.unavailable) {
+                row.unavailable++
+            }
+            if (item.status === 'error') {
+                row.refreshFailed++
+            }
+            if (item.unavailable || item.status === 'error') {
+                row.abnormal++
+            }
         }
-        if (item.disabled && !hasInspectionSummary) {
-            row.disabled++
-        }
-        if (item.unavailable && !hasInspectionSummary) {
-            row.unavailable++
-            row.abnormal++
-        }
-        if (item.status === 'error' && !hasInspectionSummary) {
-            row.refreshFailed++
-            row.abnormal++
-        }
-        if (!hasUsageSummary) {
-            const success = toNumber(item.success)
-            const failed  = toNumber(item.failed)
-            if (success > 0 || failed > 0) {
-                row.requestSuccess += success
-                row.requestFailure += failed
+        if (!providersWithUsage.has(row.provider)) {
+            if (typeof item.success === 'number' || typeof item.failed === 'number') {
+                row.requestSuccess += toNumber(item.success)
+                row.requestFailure += toNumber(item.failed)
             } else {
                 const buckets = item.recentRequests ?? []
                 buckets.forEach((bucket) => {
@@ -173,6 +185,7 @@ export function buildProviderHealthRows({
 
     Object.values(quotaStatus?.by_provider ?? {}).forEach((summary) => {
         const row                = getRow(summary.provider)
+        row.quotaAvailable       = true
         row.quotaCredentialCount = toNumber(summary.credential_count)
         row.quotaError           = toNumber(summary.error)
         row.quotaBanned          = toNumber(summary.banned)
@@ -182,16 +195,11 @@ export function buildProviderHealthRows({
         row.nextRefreshAt        = summary.next_refresh_at ?? null
     })
 
-    Object.values(usageSummary?.by_provider ?? {}).forEach((summary) => {
-        const row          = getRow(summary.provider)
-        row.requestSuccess = toNumber(summary.success)
-        row.requestFailure = toNumber(summary.failure)
-    })
-
     rows.forEach((row) => {
-        row.requestTotal = row.requestSuccess + row.requestFailure
-        row.errorRate    = row.requestTotal > 0 ? row.requestFailure / row.requestTotal : 0
-        row.status       = deriveStatus(row)
+        row.accountCountsAvailable = row.inspectionAvailable || authFiles !== undefined
+        row.requestTotal           = row.requestSuccess + row.requestFailure
+        row.errorRate              = row.requestTotal > 0 ? row.requestFailure / row.requestTotal : null
+        row.status                 = deriveStatus(row)
     })
 
     return [...rows.values()].sort((a, b) => {

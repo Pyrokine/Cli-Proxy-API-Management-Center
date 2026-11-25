@@ -58,11 +58,12 @@ import {useNotificationStore} from '@/stores/useNotificationStore'
 import {useQuotaStore} from '@/stores/useQuotaStore'
 import {resolveAutoRefreshMs} from '@/utils/autoRefresh'
 import {formatDateTime} from '@/utils/format'
+import {getErrorMessage} from '@/utils/helpers'
 import {MINUTE_CLOCK} from '@/utils/time/sharedClock'
 import {calculateStatusBarDataFromSummaryPoints} from '@/utils/usage'
 import {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react'
 import {useTranslation} from 'react-i18next'
-import {useNavigate} from 'react-router'
+import {useLocation, useNavigate} from 'react-router'
 
 import styles from './CredentialsPage.module.scss'
 
@@ -101,10 +102,12 @@ function loadStoredArray(key: string): string[] {
     }
 }
 
-const CREDENTIALS_UI_STATE_KEY     = 'cpa-credentials-ui-state'
-const CREDENTIALS_VENDOR_ORDER_KEY = 'cpa-vendor-order'
-const API_KEY_STATUS_BUCKET_MS     = 10 * 60 * 1000
-const API_KEY_STATUS_BUCKET_COUNT  = 24
+const CREDENTIALS_UI_STATE_KEY                         = 'cpa-credentials-ui-state'
+const CREDENTIALS_VENDOR_ORDER_KEY                     = 'cpa-vendor-order'
+const API_KEY_STATUS_BUCKET_MS                         = 10 * 60 * 1000
+const API_KEY_STATUS_BUCKET_COUNT                      = 24
+const QUOTA_REFRESH_SETTINGS_ID                        = 'quota-refresh-settings'
+const EMPTY_CREDENTIAL_ALIASES: Record<string, string> = {}
 
 type CredentialUsageWindow = {
     startMs: number
@@ -263,6 +266,7 @@ function loadCredentialsUIState(): CredentialsUIState {
 
 export default function CredentialsPage() {
     const navigate = useNavigate()
+    const location = useLocation()
 
     const { t } = useTranslation()
 
@@ -288,7 +292,25 @@ export default function CredentialsPage() {
     const [selectedVendors, setSelectedVendors] = useState<string[]>(initialUIState.selectedVendors ??
                                                                          [])
 
-    const [activeTab, setActiveTab] = useState<CredentialsTab>('credentials')
+    const activeTab: CredentialsTab = new URLSearchParams(location.search).get('tab') === 'inspection' ?
+                                      'inspection' : 'credentials'
+    const handleTabChange           = (tab: CredentialsTab) => {
+        if (tab === activeTab) {
+            return
+        }
+        const search = new URLSearchParams(location.search)
+        if (tab === 'inspection') {
+            search.set('tab', tab)
+        } else {
+            search.delete('tab')
+        }
+        void navigate({ search: search.toString() }, { replace: true })
+    }
+    useEffect(() => {
+        if (activeTab === 'inspection' && location.hash === `#${QUOTA_REFRESH_SETTINGS_ID}`) {
+            document.getElementById(QUOTA_REFRESH_SETTINGS_ID)?.scrollIntoView({ block: 'start' })
+        }
+    }, [activeTab, location.hash])
 
     const [quotaSort, setQuotaSort] = useState<'grouped' | 'soonest'>(
         initialUIState.quotaSort ?? 'grouped')
@@ -971,7 +993,7 @@ export default function CredentialsPage() {
                     { value: 'inspection', label: t('credentials.tab_inspection', { defaultValue: '账号巡检' }) },
                 ]}
                 activeValue={activeTab}
-                onChange={setActiveTab}
+                onChange={handleTabChange}
                 ariaLabel={t('credentials.page_title')}
             />
 

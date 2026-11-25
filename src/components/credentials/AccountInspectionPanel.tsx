@@ -17,15 +17,22 @@ import type {
 import {accountInspectionApi} from '@/services/api/accountInspection'
 import {type AuthFileRefreshBatchItem, authFilesApi} from '@/services/api/authFiles'
 import {apiClient} from '@/services/api/client'
-import type {QuotaConfig, QuotaRefreshTaskTarget, QuotaStatusResponse} from '@/services/api/quota'
+import type {
+    QuotaConfig,
+    QuotaRefreshTask,
+    QuotaRefreshTaskList,
+    QuotaRefreshTaskTarget,
+    QuotaStatusResponse,
+} from '@/services/api/quota'
 import {quotaApi} from '@/services/api/quota'
 import type {UsageSummary} from '@/services/api/usage'
 import {usageApi} from '@/services/api/usage'
 import {useAuthFileRefreshStore} from '@/stores/useAuthFileRefreshStore'
+import {useAuthStore} from '@/stores/useAuthStore'
 import {useNotificationStore} from '@/stores/useNotificationStore'
 import type {AuthFileItem} from '@/types/authFile'
 import {formatDateTime} from '@/utils/format'
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {useTranslation} from 'react-i18next'
 import styles from './AccountInspectionPanel.module.scss'
 import {isQuotaRefreshTaskTerminal} from './hooks/quotaRefreshTask'
@@ -36,6 +43,18 @@ const DEFAULT_PAGE_SIZE = 25
 
 type ColumnKey = 'account' | 'provider' | 'status' | 'probe' | 'reason' | 'advice' | 'checked_at' | 'actions'
 type DetailTab = 'results' | 'quota' | 'logs'
+type ReadSection = 'status' | 'results' | 'logs' | 'quotaConfig' | 'quotaStatus' | 'usage' | 'authFiles' |
+                   'quotaTasks' | 'quotaTask'
+type ReadState = { loading: boolean; error: string; scope?: string }
+
+const inspectionScheduleFields = [
+    ['intervalSeconds', 'interval_seconds', 'credentials.inspection_interval', 60, 9223372036],
+    ['maxConcurrency', 'max_concurrency', 'credentials.inspection_max_concurrency', 1, Number.MAX_SAFE_INTEGER],
+    ['timeoutSeconds', 'timeout_seconds', 'credentials.inspection_timeout', 1, 9223372036],
+    ['retentionRuns', 'retention_runs', 'credentials.inspection_retention_runs', 1, Number.MAX_SAFE_INTEGER],
+] as const
+
+type ScheduleDraftField = typeof inspectionScheduleFields[number][0]
 
 type UIState = {
     issuesOnly?: boolean
@@ -113,9 +132,14 @@ function scheduleDraftFrom(schedule: AccountInspectionSchedule) {
     }
 }
 
-function parsePositiveInt(value: string, fallback: number): number {
-    const parsed = Number.parseInt(value, 10)
-    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+function sheetDataStatus(hasRows: boolean, read?: ReadState): DataStatusValue {
+    if (hasRows) {
+        return 'ready'
+    }
+    if (read?.error) {
+        return 'error'
+    }
+    return !read || read.loading ? 'loading' : 'empty'
 }
 
 function emptyStatus(): AccountInspectionStatusResponse {
@@ -218,6 +242,41 @@ function translateLogToken(prefix: string, value: string, t: ReturnType<typeof u
     return t(`${prefix}${value}`, { defaultValue: value })
 }
 
+function formatInspectionError(message: string, t: ReturnType<typeof useTranslation>['t']): string {
+    switch (message) {
+        case 'account inspection timed out':
+            return t('credentials.inspection_run_timed_out', { defaultValue: 'Inspection timed out' })
+        case 'account inspection stopped by request':
+            return t('credentials.inspection_run_stopped', { defaultValue: 'Inspection stopped by request' })
+        case 'account no longer matches the inspection target or schedule':
+            return t(
+                'credentials.inspection_run_target_changed',
+                { defaultValue: 'The account or its inspection eligibility changed' },
+            )
+        case 'failed to save account inspection results':
+            return t('credentials.inspection_run_save_failed', { defaultValue: 'Could not save inspection results' })
+        case 'failed to save account inspection schedule':
+            return t(
+                'credentials.inspection_schedule_save_failed',
+                { defaultValue: 'Could not save the inspection schedule' },
+            )
+        case 'account not found':
+            return t('credentials.inspection_target_not_found', { defaultValue: 'This account is no longer available' })
+        case 'account identifier matches more than one credential':
+            return t(
+                'credentials.inspection_target_ambiguous',
+                { defaultValue: 'More than one credential matches this account' },
+            )
+        case 'account provider is excluded from the inspection schedule':
+            return t(
+                'credentials.inspection_target_excluded',
+                { defaultValue: 'The inspection schedule excludes this provider' },
+            )
+        default:
+            return message
+    }
+}
+
 function formatInspectionLogMessage(
     entry: AccountInspectionLogEntry,
     t: ReturnType<typeof useTranslation>['t'],
@@ -276,10 +335,17 @@ function formatInspectionLogMessage(
         })
     }
 
-    return message
+    return formatInspectionError(message, t)
 }
 
-export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspectionPanelProps) {
+export function AccountInspectionPanel(props: AccountInspectionPanelProps) {
+    const generation = useAuthStore(() => apiClient.getAuthGeneration())
+    return <AccountInspectionSession key={generation} authGeneration={generation} {...props} />
+}
+
+function AccountInspectionSession({ onCredentialsChanged, authGeneration }: AccountInspectionPanelProps & {
+    authGeneration: number
+}) {
     const { t, i18n }                                             = useTranslation()
     const showNotification                                        = useNotificationStore((s) => s.showNotification)
     const showConfirmation                                        = useNotificationStore((s) => s.showConfirmation)
@@ -296,7 +362,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const [quotaConfig, setQuotaConfig]                           = useState<QuotaConfig>(emptyQuotaConfig)
     const [quotaStatus, setQuotaStatus]                           = useState<QuotaStatusResponse | null>(null)
     const [usageSummary, setUsageSummary]                         = useState<UsageSummary | null>(null)
-    const [authFiles, setAuthFiles]                               = useState<AuthFileItem[]>([])
+    const [authFiles, setAuthFiles]                               = useState<AuthFileItem[]>()
     const [tokenRefreshResults, setTokenRefreshResults]           = useState<AuthFileRefreshBatchItem[] | null>(null)
     const [quotaConfigLoaded, setQuotaConfigLoaded]               = useState(false)
     const [quotaDraft, setQuotaDraft]                             = useState({
@@ -306,11 +372,18 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                                                              })
     const quotaDraftStateRef                                      = useRef({ generation: -1, dirty: false })
     const [scheduleDraft, setScheduleDraft]                       = useState(() => scheduleDraftFrom(emptySchedule()))
+    const scheduleDraftDirty                                      = useRef(false)
+    const [invalidScheduleFields, setInvalidScheduleFields]       = useState<ScheduleDraftField[]>([])
     const [inspectionScheduleLoaded, setInspectionScheduleLoaded] = useState(false)
-    const [results, setResults]                                   = useState<AccountInspectionResult[]>([])
+    const [resultSnapshot, setResultSnapshot]                     = useState<{
+        scope: string; rows: AccountInspectionResult[]; total: number
+    }>()
     const [logs, setLogs]                                         = useState<AccountInspectionLogEntry[]>([])
-    const [total, setTotal]                                       = useState(0)
-    const [loading, setLoading]                                   = useState(false)
+    const [reads, setReads]                                       = useState<Partial<Record<ReadSection, ReadState>>>({})
+    const readOwners                                              = useRef(new Map<ReadSection, symbol>())
+    const [quotaTaskList, setQuotaTaskList]                       = useState<QuotaRefreshTaskList>()
+    const [quotaTaskDetail, setQuotaTaskDetail]                   = useState<QuotaRefreshTask>()
+    const [selectedTaskId, setSelectedTaskId]                     = useState('')
     const [busyRequest, setBusyRequest]                           = useState<{
                                                                                  action: string;
                                                                                  generation: number
@@ -318,160 +391,227 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
     const busyRequestRef                                          = useRef<typeof busyRequest>(null)
     const tokenRefreshRequest                                     = useAuthFileRefreshStore((state) => state.request)
     const [dataGeneration, setDataGeneration]                     = useState<number | null>(null)
-    const authGeneration                                          = apiClient.getAuthGeneration()
     const tokenRefreshBusy                                        = tokenRefreshRequest?.generation === authGeneration
     const busyAction                                              = busyRequest?.generation === authGeneration ?
                                                                     busyRequest.action :
                                                                     ''
-    const [fetchError, setFetchError]                             = useState('')
     const [actionError, setActionError]                           = useState('')
     const latestQuotaTask                                         = status.refresh_queue.latest_task
-    const latestQuotaTaskId                                       = latestQuotaTask?.id ?? ''
-    const quotaTaskActive                                         = latestQuotaTask !== undefined &&
-                                                                    !isQuotaRefreshTaskTerminal(latestQuotaTask)
+    const quotaTasks                                              = quotaTaskList?.tasks ??
+                                                                    (latestQuotaTask ? [latestQuotaTask] : [])
+    const taskPreview                                             = quotaTasks.find((task) => task.id ===
+                                                                                              selectedTaskId) ??
+                                                                    quotaTasks.find((task) => !isQuotaRefreshTaskTerminal(
+                                                                        task)) ?? quotaTasks[0]
+    const selectedQuotaTask                                       = quotaTaskDetail &&
+                                                                    quotaTaskDetail.id ===
+                                                                    taskPreview?.id ? quotaTaskDetail : taskPreview
+    const polledTask                                              = detailTab === 'quota' ?
+                                                                    selectedQuotaTask :
+                                                                    latestQuotaTask
+    const polledTaskId                                            = polledTask?.id ?? ''
+    const quotaTaskActive                                         = polledTask !==
+                                                                    undefined &&
+                                                                    !isQuotaRefreshTaskTerminal(polledTask)
     const quotaTaskActionBusy                                     = busyAction.startsWith('quota-')
+
+    const resultsQuery    = useMemo(
+        () => ({ status: statusFilter, issuesOnly, includeDisabled, page, pageSize }),
+        [statusFilter, issuesOnly, includeDisabled, page, pageSize],
+    )
+    const resultsScope    = JSON.stringify(resultsQuery)
+    const resultsQueryRef = useRef(resultsQuery)
+    useLayoutEffect(() => {
+        resultsQueryRef.current = resultsQuery
+    }, [resultsQuery])
+    const currentResult = resultSnapshot?.scope === resultsScope ? resultSnapshot : undefined
+    const results       = currentResult?.rows ?? []
+    const total         = currentResult?.total ?? 0
+    const resultsRead   = reads.results?.scope === resultsScope ? reads.results : undefined
+    const taskRead      = reads.quotaTask?.scope === selectedQuotaTask?.id ? reads.quotaTask : undefined
+    const loading       = reads.status?.loading ?? false
 
     useEffect(() => {
         localStorage.setItem(UI_STATE_KEY, JSON.stringify({ issuesOnly, pageSize }))
     }, [issuesOnly, pageSize])
 
-    const fetchData = useCallback(async () => {
-        const isCurrent = () => authGeneration === apiClient.getAuthGeneration()
-        if (!isCurrent()) {
+    const read = useCallback(async <T, >(
+        section: ReadSection,
+        request: () => Promise<T>,
+        apply: (value: T) => void,
+        scope?: string,
+        signal?: AbortSignal,
+    ) => {
+        if (authGeneration !== apiClient.getAuthGeneration()) {
             return
         }
-        setLoading(true)
-        setQuotaConfigLoaded(false)
+        const owner = Symbol()
+        readOwners.current.set(section, owner)
+        const isCurrent = () => readOwners.current.get(section) === owner && !signal?.aborted &&
+                                authGeneration === apiClient.getAuthGeneration()
+        setReads((prev) => ({
+            ...prev,
+            [section]: {
+                loading: true,
+                error: prev[section]?.scope === scope ? prev[section]?.error ?? '' : '',
+                scope,
+            },
+        }))
         try {
-            const [
-                      statusRes,
-                      resultsRes,
-                      logsRes,
-                      quotaConfigRes,
-                      quotaStatusRes,
-                      usageSummaryRes,
-                      authFilesRes,
-                  ] = await Promise.all([
-                                            accountInspectionApi.getStatus(),
-                                            accountInspectionApi.getResults(
-                                                {
-                                                    status: statusFilter,
-                                                    issuesOnly,
-                                                    includeDisabled,
-                                                    page,
-                                                    pageSize,
-                                                }),
-                                            accountInspectionApi.getLogs(),
-                                            quotaApi.getConfig(),
-                                            quotaApi.getStatus().catch(() => null),
-                                            usageApi.getSummary({ groups: 'all' }).catch(() => null),
-                                            authFilesApi.list().catch(() => ({ files: [] })),
-                                        ])
-            if (!isCurrent()) {
-                return
-            }
-            setDataGeneration(authGeneration)
-            const nextStatus = normalizeStatusResponse(statusRes)
-            if (typeof quotaConfigRes?.enabled !==
-                'boolean' ||
-                !Number.isSafeInteger(quotaConfigRes.interval) ||
-                !Number.isSafeInteger(quotaConfigRes['max-interval'])) {
-                // noinspection ExceptionCaughtLocallyJS
-                throw new Error(t('credentials.quota_config_invalid'))
-            }
-            const nextQuotaConfig = quotaConfigRes
-            if (quotaDraftStateRef.current.generation !== authGeneration || !quotaDraftStateRef.current.dirty) {
-                setQuotaDraft({
-                                  enabled: nextQuotaConfig.enabled,
-                                  intervalMinutes: String(nextQuotaConfig.interval / 60),
-                                  maxIntervalMinutes: String(nextQuotaConfig['max-interval'] / 60),
-                              })
-                quotaDraftStateRef.current = { generation: authGeneration, dirty: false }
-            }
-            setStatus(nextStatus)
-            setQuotaConfig(nextQuotaConfig)
-            setQuotaStatus(quotaStatusRes)
-            setUsageSummary(usageSummaryRes)
-            setAuthFiles(authFilesRes.files)
-            setQuotaConfigLoaded(true)
-            setScheduleDraft(scheduleDraftFrom(nextStatus.schedule))
-            setInspectionScheduleLoaded(true)
-            setResults(Array.isArray(resultsRes.results) ? resultsRes.results : [])
-            setTotal(typeof resultsRes.total === 'number' ? resultsRes.total : 0)
-            setLogs(Array.isArray(logsRes.logs) ? logsRes.logs : [])
-            setFetchError('')
-        } catch (err) {
+            const value = await request()
             if (isCurrent()) {
-                setFetchError(err instanceof Error ? err.message : t('common.unknown_error'))
+                apply(value)
+                setDataGeneration(authGeneration)
+                setReads((prev) => ({ ...prev, [section]: { loading: false, error: '', scope } }))
             }
-        } finally {
+        } catch (error) {
             if (isCurrent()) {
-                setLoading(false)
+                const message = error instanceof Error && error.message ? error.message : t('common.unknown_error')
+                setReads((prev) => ({ ...prev, [section]: { loading: false, error: message, scope } }))
             }
         }
-    }, [authGeneration, includeDisabled, issuesOnly, page, pageSize, statusFilter, t])
+    }, [authGeneration, t])
+
+    const fetchStatus      = useCallback(() => read('status', accountInspectionApi.getStatus, (response) => {
+        const next = normalizeStatusResponse(response)
+        setStatus(next)
+        if (!scheduleDraftDirty.current) {
+            setScheduleDraft(scheduleDraftFrom(next.schedule))
+        }
+        setInspectionScheduleLoaded(true)
+    }), [read])
+    const fetchResults     = useCallback(() => {
+        const query = resultsQueryRef.current
+        const scope = JSON.stringify(query)
+        return read('results', () => accountInspectionApi.getResults(query), (response) => {
+            if (resultsQueryRef.current === query) {
+                setResultSnapshot({
+                                      scope,
+                                      rows: Array.isArray(response.results) ? response.results : [],
+                                      total: typeof response.total === 'number' ? response.total : 0,
+                                  })
+                if (response.total_pages > 0 && query.page > response.total_pages) {
+                    setPage(response.total_pages)
+                }
+            }
+        }, scope)
+    }, [read])
+    const fetchLogs        = useCallback(() => read('logs', accountInspectionApi.getLogs, (response) => {
+        setLogs(Array.isArray(response.logs) ? response.logs : [])
+    }), [read])
+    const fetchQuotaConfig = useCallback(() => read('quotaConfig', quotaApi.getConfig, (response) => {
+        if (typeof response?.enabled !== 'boolean' || !Number.isSafeInteger(response.interval) ||
+            !Number.isSafeInteger(response['max-interval'])) {
+            throw new Error(t('credentials.quota_config_invalid'))
+        }
+        if (quotaDraftStateRef.current.generation !== authGeneration || !quotaDraftStateRef.current.dirty) {
+            setQuotaDraft({
+                              enabled: response.enabled,
+                              intervalMinutes: String(response.interval / 60),
+                              maxIntervalMinutes: String(response['max-interval'] / 60),
+                          })
+            quotaDraftStateRef.current = { generation: authGeneration, dirty: false }
+        }
+        setQuotaConfig(response)
+        setQuotaConfigLoaded(true)
+    }), [authGeneration, read, t])
+    const fetchQuotaStatus = useCallback(() => read('quotaStatus', quotaApi.getStatus, setQuotaStatus), [read])
+    const fetchUsage       = useCallback(() => read(
+        'usage',
+        () => usageApi.getSummary({ groups: 'all' }),
+        setUsageSummary,
+    ), [read])
+    const fetchAuthFiles   = useCallback(() => read('authFiles', authFilesApi.list, (response) => {
+        setAuthFiles(response.files)
+    }), [read])
+
+    const fetchOverview = useCallback(() => {
+        void Promise.all([fetchLogs(), fetchQuotaConfig(), fetchQuotaStatus(), fetchUsage(), fetchAuthFiles()])
+        return fetchStatus()
+    }, [fetchAuthFiles, fetchLogs, fetchQuotaConfig, fetchQuotaStatus, fetchStatus, fetchUsage])
+    const fetchData     = useCallback(() => {
+        void fetchResults()
+        return fetchOverview()
+    }, [fetchOverview, fetchResults])
 
     useEffect(() => {
-        const id = window.setTimeout(() => void fetchData(), 0)
+        const id = window.setTimeout(() => void fetchOverview(), 0)
         return () => window.clearTimeout(id)
-    }, [fetchData])
+    }, [fetchOverview])
+    useEffect(() => {
+        const id = window.setTimeout(() => void fetchResults(), 0)
+        return () => window.clearTimeout(id)
+    }, [fetchResults, resultsQuery])
 
     useEffect(() => {
         if (status.status !== 'running') {
             return
         }
-        const id = window.setInterval(() => void fetchData(), 2000)
-        return () => window.clearInterval(id)
-    }, [fetchData, status.status])
-
-    useEffect(() => {
-        if (!latestQuotaTaskId || !quotaTaskActive) {
-            return
-        }
-        const controller  = new AbortController()
-        let requestActive = false
-        const pollTask    = async () => {
-            if (requestActive) {
+        let pending = false
+        const id    = window.setInterval(async () => {
+            if (pending) {
                 return
             }
-            requestActive = true
-            try {
-                const task = await quotaApi.getTask(latestQuotaTaskId, { signal: controller.signal })
-                if (controller.signal.aborted || authGeneration !== apiClient.getAuthGeneration()) {
-                    return
+            pending = true
+            await fetchStatus()
+            await Promise.all([fetchResults(), fetchLogs()])
+            pending = false
+        }, 2000)
+        return () => window.clearInterval(id)
+    }, [fetchLogs, fetchResults, fetchStatus, status.status])
+
+    const fetchQuotaTasks = useCallback(() => read('quotaTasks', quotaApi.listTasks, setQuotaTaskList), [read])
+    const fetchQuotaTask  = useCallback((taskId: string, signal?: AbortSignal) => read(
+        'quotaTask',
+        () => quotaApi.getTask(taskId, { signal }),
+        (task) => {
+            setQuotaTaskDetail(task)
+            setStatus((prev) => {
+                if (prev.refresh_queue.latest_task?.id !== task.id) {
+                    return prev
                 }
-                setStatus((prev) => {
-                    if (prev.refresh_queue.latest_task?.id !== task.id) {
-                        return prev
-                    }
-                    return {
-                        ...prev,
-                        refresh_queue: {
-                            ...prev.refresh_queue,
-                            latest_task: task,
-                            pending: task.summary.queued + task.summary.running,
-                            skipped: task.summary.skipped,
-                            failed: task.summary.failed + task.summary.inconclusive + task.summary.interrupted,
-                        },
-                    }
-                })
-                if (isQuotaRefreshTaskTerminal(task)) {
-                    void fetchData()
+                return {
+                    ...prev,
+                    refresh_queue: {
+                        ...prev.refresh_queue,
+                        latest_task: task,
+                        pending: task.summary.queued + task.summary.running,
+                        skipped: task.summary.skipped,
+                        failed: task.summary.failed + task.summary.inconclusive + task.summary.interrupted,
+                    },
                 }
-            } catch (error) {
-                if (!controller.signal.aborted) {
-                    console.warn('[AccountInspectionPanel] quota refresh task poll failed:', error)
-                }
-            } finally {
-                requestActive = false
+            })
+        },
+        taskId,
+        signal,
+    ), [read])
+    useEffect(() => {
+        if (detailTab === 'quota') {
+            const id = window.setTimeout(() => void fetchQuotaTasks(), 0)
+            return () => window.clearTimeout(id)
+        }
+    }, [detailTab, fetchQuotaTasks])
+    useEffect(() => {
+        if (!polledTaskId || (detailTab !== 'quota' && !quotaTaskActive)) {
+            return
+        }
+        const controller = new AbortController()
+        let pending      = false
+        const poll       = async () => {
+            if (!pending) {
+                pending = true
+                await fetchQuotaTask(polledTaskId, controller.signal)
+                pending = false
             }
         }
-        const id          = window.setInterval(() => void pollTask(), 1000)
+        const initial    = window.setTimeout(() => void poll(), 0)
+        const interval   = quotaTaskActive ? window.setInterval(() => void poll(), 1000) : undefined
         return () => {
             controller.abort()
-            window.clearInterval(id)
+            window.clearTimeout(initial)
+            window.clearInterval(interval)
         }
-    }, [authGeneration, fetchData, latestQuotaTaskId, quotaTaskActive])
+    }, [detailTab, fetchQuotaTask, polledTaskId, quotaTaskActive])
 
     const handleIssuesOnlyChange = useCallback((checked: boolean) => {
         setIssuesOnly(checked)
@@ -629,37 +769,60 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         })
     }, [onCredentialsChanged, runAction, showNotification, t])
 
-    const saveInspectionSchedule = useCallback(
-        async (enabled = status.schedule.enabled) => {
-            if (!inspectionScheduleLoaded) {
+    const updateScheduleDraft = (field: ScheduleDraftField, value: string) => {
+        scheduleDraftDirty.current = true
+        setScheduleDraft((prev) => ({ ...prev, [field]: value }))
+        setInvalidScheduleFields((prev) => prev.filter((key) => key !== field))
+    }
+
+    const saveInspectionSchedule = async (enabled?: boolean) => {
+        if (!inspectionScheduleLoaded) {
+            return
+        }
+        const nextSchedule = { ...status.schedule, enabled: enabled ?? status.schedule.enabled }
+        if (enabled === undefined) {
+            const invalid = inspectionScheduleFields.filter(([field, key, , min, max]) => {
+                const input = scheduleDraft[field].trim()
+                const value = Number(input)
+                if (!/^\d+$/.test(input) || !Number.isSafeInteger(value) || value < min || value > max) {
+                    return true
+                }
+                nextSchedule[key] = value
+                return false
+            }).map(([field]) => field)
+            setInvalidScheduleFields(invalid)
+            if (invalid.length > 0) {
                 return
             }
-            const nextSchedule: AccountInspectionSchedule = {
-                ...status.schedule,
-                enabled,
-                interval_seconds: Math.max(
-                    60,
-                    parsePositiveInt(
-                        scheduleDraft.intervalSeconds,
-                        status.schedule.interval_seconds,
-                    ),
-                ),
-                max_concurrency: parsePositiveInt(scheduleDraft.maxConcurrency, status.schedule.max_concurrency),
-                timeout_seconds: parsePositiveInt(scheduleDraft.timeoutSeconds, status.schedule.timeout_seconds),
-                retention_runs: parsePositiveInt(scheduleDraft.retentionRuns, status.schedule.retention_runs),
+        }
+
+        await runAction('inspection-schedule', async (isCurrent) => {
+            const saved = normalizeSchedule(await accountInspectionApi.updateSchedule(nextSchedule))
+            if (!isCurrent()) {
+                return
             }
-            await runAction('inspection-schedule', async (isCurrent) => {
-                const saved = normalizeSchedule(await accountInspectionApi.updateSchedule(nextSchedule))
-                if (!isCurrent()) {
-                    return
-                }
-                setStatus((prev) => ({ ...prev, schedule: saved }))
+            readOwners.current.delete('status')
+            setStatus((prev) => ({ ...prev, schedule: saved }))
+            if (enabled === undefined || !scheduleDraftDirty.current) {
+                scheduleDraftDirty.current = false
                 setScheduleDraft(scheduleDraftFrom(saved))
-                showNotification(t('common.success'), 'success')
-            })
-        },
-        [inspectionScheduleLoaded, runAction, scheduleDraft, showNotification, status.schedule, t],
-    )
+            }
+            showNotification(t('common.success'), 'success')
+        })
+    }
+
+    const runQuotaTaskAction = (action: string, request: (id: string) => Promise<QuotaRefreshTask>) => {
+        if (!selectedQuotaTask) {
+            return
+        }
+        const id = selectedQuotaTask.id
+        void runAction(`${action}-${id}`, async (isCurrent) => {
+            await request(id)
+            if (isCurrent()) {
+                await fetchQuotaTask(id)
+            }
+        })
+    }
 
     const formatTime = useCallback(
         (value?: string | number | null) => {
@@ -937,31 +1100,29 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
         return items
     }, [formatTime, renderAdvice, renderReason, renderRowActions, t])
 
-    const totalPages                            = Math.max(1, Math.ceil(total / pageSize))
-    const sheetStatus: DataStatusValue          = fetchError
-                                                  ? 'error'
-                                                  : loading && results.length === 0
-                                                    ? 'loading'
-                                                    : results.length === 0
-                                                      ? 'empty'
-                                                      : 'ready'
-    const visibleLogs                           = useMemo(() => logs.slice(-80), [logs])
-    const providerHealthRows                    = useMemo(
+    const totalPages                 = Math.max(1, Math.ceil(total / pageSize))
+    const sheetStatus                = sheetDataStatus(results.length > 0, resultsRead)
+    const visibleLogs                = useMemo(() => logs.slice(-80), [logs])
+    const providerHealthRows         = useMemo(
         () => buildProviderHealthRows({ inspectionStatus: status, quotaStatus, usageSummary, authFiles }),
         [authFiles, quotaStatus, status, usageSummary],
     )
-    const lastRunResultLabel                    = status.last_run
-                                                  ? t('credentials.inspection_last_run_result', {
-            checked: status.last_run.checked,
-            defaultValue: '{{checked}} 个账号',
-        })
-                                                  : ''
-    const logsSheetStatus: DataStatusValue      = loading && visibleLogs.length === 0
-                                                  ? 'loading'
-                                                  : visibleLogs.length === 0
-                                                    ? 'empty'
-                                                    : 'ready'
-    const logColumns                            = useMemo<SheetColumn<AccountInspectionLogEntry>[]>(() => [
+    const lastRun                    = status.last_run
+    const lastRunResultLabel         = lastRun ? t('credentials.inspection_last_run_result', {
+        checked: lastRun.checked,
+        defaultValue: '{{checked}} accounts',
+    }) : ''
+    const logsSheetStatus            = sheetDataStatus(visibleLogs.length > 0, reads.logs)
+    const renderReadError            = (state: ReadState | undefined, retry: () => void, label?: string) =>
+        state?.error && (
+                         <div className={styles.readError} role='alert'>
+                             <span>{label ? `${label}: ${state.error}` : state.error}</span>
+                             <Button variant='secondary' size='xs' onClick={retry} loading={state.loading}>
+                                 {t('common.retry')}
+                             </Button>
+                         </div>
+                     )
+    const logColumns                 = useMemo<SheetColumn<AccountInspectionLogEntry>[]>(() => [
         {
             key: 'time',
             header: t('credentials.inspection_log_time', { defaultValue: '时间' }),
@@ -982,7 +1143,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             cell: (entry) => <span className={styles.logMessage}>{formatInspectionLogMessage(entry, t)}</span>,
         },
     ], [formatTime, t])
-    const quotaTaskColumns                      = useMemo<SheetColumn<QuotaRefreshTaskTarget>[]>(() => [
+    const quotaTaskColumns           = useMemo<SheetColumn<QuotaRefreshTaskTarget>[]>(() => [
         {
             key: 'provider',
             header: t('credentials.quota_task_provider', { defaultValue: 'Provider' }),
@@ -1029,7 +1190,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             cell: (target) => <span className={styles.timeCell}>{formatTime(target.completed_at)}</span>,
         },
     ], [formatTime, t])
-    const tokenRefreshColumns                   = useMemo<SheetColumn<AuthFileRefreshBatchItem>[]>(() => [
+    const tokenRefreshColumns        = useMemo<SheetColumn<AuthFileRefreshBatchItem>[]>(() => [
         {
             key: 'provider',
             header: t('credentials.quota_task_provider'),
@@ -1065,11 +1226,17 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
             cell: (item) => <span className={styles.timeCell}>{formatTime(item.refreshed_at)}</span>,
         },
     ], [formatTime, t])
-    const quotaTaskSheetStatus: DataStatusValue = !latestQuotaTask || latestQuotaTask.targets.length === 0
-                                                  ? 'empty'
-                                                  : 'ready'
-    const inspectionScheduleDisabled            = !inspectionScheduleLoaded || busyAction === 'inspection-schedule'
-    const sheetEmptyHint                        =
+    const taskHistoryError           = reads.quotaTasks?.error || (quotaTaskList?.persistence_error ?
+                                                                   t(
+                                                                       'credentials.quota_task_history_unavailable',
+                                                                       { defaultValue: 'Saved task history is unavailable' },
+                                                                   ) : '')
+    const quotaTaskSheetStatus       = sheetDataStatus(
+        Boolean(selectedQuotaTask?.targets.length),
+        taskRead ?? (reads.quotaTasks && { ...reads.quotaTasks, error: taskHistoryError }),
+    )
+    const inspectionScheduleDisabled = !inspectionScheduleLoaded || Boolean(busyAction)
+    const sheetEmptyHint             =
               results.length ===
               0 &&
               !includeDisabled &&
@@ -1104,27 +1271,27 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                 <div className={styles.summaryGrid}>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_total', { defaultValue: '账号总数' })}</span>
-                        <strong>{status.summary.total}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.total : '—'}</strong>
                     </div>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_normal', { defaultValue: '正常' })}</span>
-                        <strong>{status.summary.normal}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.normal : '—'}</strong>
                     </div>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_abnormal', { defaultValue: '异常' })}</span>
-                        <strong>{status.summary.abnormal}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.abnormal : '—'}</strong>
                     </div>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_token_invalid', { defaultValue: 'Token 失效' })}</span>
-                        <strong>{status.summary.token_invalid}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.token_invalid : '—'}</strong>
                     </div>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_refresh_failed', { defaultValue: '刷新失败' })}</span>
-                        <strong>{status.summary.refresh_failed}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.refresh_failed : '—'}</strong>
                     </div>
                     <div className={styles.metric}>
                         <span>{t('credentials.inspection_disabled', { defaultValue: '已禁用' })}</span>
-                        <strong>{status.summary.disabled}</strong>
+                        <strong>{inspectionScheduleLoaded ? status.summary.disabled : '—'}</strong>
                     </div>
                 </div>
 
@@ -1134,25 +1301,28 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             {t('credentials.inspection_runtime_status', { defaultValue: '运行状态' })}
                         </div>
                         <div className={styles.statusLine}>
-                            {status.last_run && (
+                            {lastRun && (
                                 <span>
-                                        {t('credentials.inspection_last_run', { defaultValue: '上次巡检' })}:{' '}
-                                    {formatTime(status.last_run.started_at)} · {lastRunResultLabel}
-                                    </span>
+                                    {t('credentials.inspection_last_run', { defaultValue: 'Last inspection' })}:{' '}
+                                    {formatTime(lastRun.started_at)} · {lastRunResultLabel}
+                                    {lastRun.error && ` · ${formatInspectionError(lastRun.error, t)}`}
+                                </span>
                             )}
                             <span>
                                     {t('credentials.next_refresh_at', { defaultValue: '下次刷新' })}:{' '}
                                 {formatTime(status.refresh_queue.next_refresh)}
                                 </span>
-                            <span>
-                                    {t('credentials.inspection_refresh_queue', { defaultValue: '后端配额轮询' })}:{' '}
-                                {status.refresh_queue.pending}{' '}
-                                {t('credentials.inspection_refresh_pending', { defaultValue: '待刷新' })} ·{' '}
-                                {status.refresh_queue.skipped}{' '}
-                                {t('credentials.inspection_refresh_skipped', { defaultValue: '已跳过' })} ·{' '}
-                                {status.refresh_queue.failed}{' '}
-                                {t('credentials.inspection_refresh_failed_queue', { defaultValue: '失败' })}
+                            {latestQuotaTask && (
+                                <span>
+                                    {t(
+                                        'credentials.quota_task_latest',
+                                        { defaultValue: 'Latest quota refresh task' },
+                                    )}:{' '}
+                                    {status.refresh_queue.pending}{' '}{t('credentials.inspection_refresh_pending')} ·{' '}
+                                    {status.refresh_queue.skipped}{' '}{t('credentials.inspection_refresh_skipped')} ·{' '}
+                                    {status.refresh_queue.failed}{' '}{t('credentials.inspection_refresh_failed_queue')}
                                 </span>
+                            )}
                         </div>
                         <div className={styles.statusHint}>
                             {t('credentials.inspection_runtime_hint', {
@@ -1166,7 +1336,11 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             variant='primary'
                             size='sm'
                             loading={busyAction === 'run'}
-                            disabled={status.status === 'running' || Boolean(busyAction) || tokenRefreshBusy}
+                            disabled={!inspectionScheduleLoaded ||
+                                      status.status ===
+                                      'running' ||
+                                      Boolean(busyAction) ||
+                                      tokenRefreshBusy}
                             onClick={() => void runAction('run', accountInspectionApi.run)}
                         >
                             {t('credentials.inspection_run_now', { defaultValue: '立即巡检' })}
@@ -1201,6 +1375,8 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     </div>
                 </div>
 
+                {renderReadError(reads.status, fetchStatus, t('credentials.inspection_runtime_status'))}
+
                 {tokenRefreshResults !== null && (
                     <div className={styles.sectionCard}>
                         <div className={styles.sectionHeaderCompact}>
@@ -1233,6 +1409,9 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             </div>
                         </div>
                     </div>
+                    {renderReadError(reads.quotaStatus, fetchQuotaStatus, t('credentials.quota_auto_refresh'))}
+                    {renderReadError(reads.usage, fetchUsage, t('nav.usage_stats'))}
+                    {renderReadError(reads.authFiles, fetchAuthFiles, t('nav.credentials'))}
                     {providerHealthRows.length === 0 ? (
                         <div className={styles.providerHealthEmpty}>
                             {t('credentials.provider_health_empty', { defaultValue: '暂无 provider 健康数据' })}
@@ -1252,50 +1431,54 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                      <div className={styles.providerHealthMetrics}>
                                          <span>
                                              {t('credentials.provider_health_accounts', { defaultValue: '账号' })}:{' '}
-                                             <strong>{row.accountTotal}</strong>
+                                             <strong>{row.accountCountsAvailable ? row.accountTotal : '—'}</strong>
                                          </span>
                                          <span>
                                              {t('credentials.provider_health_abnormal', { defaultValue: '异常' })}:{' '}
-                                             <strong>{row.abnormal}</strong>
+                                             <strong>{row.accountCountsAvailable ? row.abnormal : '—'}</strong>
                                          </span>
                                          <span>
                                              {t('credentials.inspection_disabled', { defaultValue: '已禁用' })}:{' '}
-                                             <strong>{row.disabled}</strong>
+                                             <strong>{row.accountCountsAvailable ? row.disabled : '—'}</strong>
                                          </span>
                                          <span>
                                              {t(
                                                  'credentials.inspection_status_unavailable',
                                                  { defaultValue: '不可用' },
                                              )}:{' '}
-                                             <strong>{row.unavailable}</strong>
+                                             <strong>{row.accountCountsAvailable ? row.unavailable : '—'}</strong>
                                          </span>
                                          <span>
                                              {t(
                                                  'credentials.inspection_token_invalid',
                                                  { defaultValue: 'Token 失效' },
                                              )}:{' '}
-                                             <strong>{row.tokenInvalid}</strong>
+                                             <strong>{row.inspectionAvailable ? row.tokenInvalid : '—'}</strong>
                                          </span>
                                          <span>
                                              {t(
                                                  'credentials.inspection_refresh_failed',
                                                  { defaultValue: '刷新失败' },
                                              )}:{' '}
-                                             <strong>{row.refreshFailed}</strong>
+                                             <strong>{row.accountCountsAvailable ? row.refreshFailed : '—'}</strong>
                                          </span>
                                          <span>
                                              {t(
                                                  'credentials.provider_health_quota',
                                                  { defaultValue: 'Quota 异常' },
                                              )}:{' '}
-                                             <strong>{row.quotaError + row.quotaBanned + row.quotaExceeded}</strong>
+                                             <strong>{row.quotaAvailable ?
+                                                      row.quotaError + row.quotaBanned + row.quotaExceeded :
+                                                      '—'}</strong>
                                          </span>
                                          <span>
                                              {t(
                                                  'credentials.provider_health_error_rate',
                                                  { defaultValue: '错误率' },
                                              )}:{' '}
-                                             <strong>{formatPercent(row.errorRate)}</strong>
+                                             <strong>{row.errorRate === null ?
+                                                      '—' :
+                                                      formatPercent(row.errorRate)}</strong>
                                          </span>
                                      </div>
                                      <div className={styles.providerHealthMeta}>
@@ -1321,7 +1504,7 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                 </div>
 
                 <div className={styles.settingsGrid}>
-                    <div className={styles.settingsCard}>
+                    <div className={styles.settingsCard} id='quota-refresh-settings'>
                         <div className={styles.settingsHeader}>
                             <div>
                                 <div className={styles.settingsTitle}>
@@ -1336,11 +1519,12 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             <span className={`${styles.statusBadge} ${quotaConfig.enabled ?
                                                                       styles.statusRunning :
                                                                       styles.statusDisabled}`}>
-                                    {quotaConfig.enabled
-                                     ? t('common.enabled', { defaultValue: '已启用' })
-                                     : t('common.disabled', { defaultValue: '已禁用' })}
+                                    {quotaConfigLoaded ?
+                                     t(quotaConfig.enabled ? 'common.enabled' : 'common.disabled') :
+                                     '—'}
                                 </span>
                         </div>
+                        {renderReadError(reads.quotaConfig, fetchQuotaConfig)}
                         <div className={styles.settingsFields}>
                             <ToggleSwitch label={t('credentials.quota_auto_refresh')} checked={quotaDraft.enabled}
                                           disabled={!quotaConfigLoaded ||
@@ -1388,60 +1572,27 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             />
                         </div>
                         <div className={styles.settingsFields}>
-                            <label className={styles.settingsField}>
-                                <span>{t('credentials.inspection_interval', { defaultValue: '间隔秒数' })}</span>
-                                <input
-                                    type='number'
-                                    min='60'
-                                    value={scheduleDraft.intervalSeconds}
-                                    onChange={(event) =>
-                                        setScheduleDraft((prev) => ({
-                                            ...prev,
-                                            intervalSeconds: event.target.value,
-                                        }))
-                                    }
-                                    disabled={inspectionScheduleDisabled}
-                                />
-                            </label>
-                            <label className={styles.settingsField}>
-                                <span>{t('credentials.inspection_max_concurrency', { defaultValue: '最大并发' })}</span>
-                                <input
-                                    type='number'
-                                    min='1'
-                                    value={scheduleDraft.maxConcurrency}
-                                    onChange={(event) =>
-                                        setScheduleDraft((prev) => ({
-                                            ...prev,
-                                            maxConcurrency: event.target.value,
-                                        }))
-                                    }
-                                    disabled={inspectionScheduleDisabled}
-                                />
-                            </label>
-                            <label className={styles.settingsField}>
-                                <span>{t('credentials.inspection_timeout', { defaultValue: '超时秒数' })}</span>
-                                <input
-                                    type='number'
-                                    min='1'
-                                    value={scheduleDraft.timeoutSeconds}
-                                    onChange={(event) =>
-                                        setScheduleDraft((prev) => ({ ...prev, timeoutSeconds: event.target.value }))
-                                    }
-                                    disabled={inspectionScheduleDisabled}
-                                />
-                            </label>
-                            <label className={styles.settingsField}>
-                                <span>{t('credentials.inspection_retention_runs', { defaultValue: '保留轮次' })}</span>
-                                <input
-                                    type='number'
-                                    min='1'
-                                    value={scheduleDraft.retentionRuns}
-                                    onChange={(event) =>
-                                        setScheduleDraft((prev) => ({ ...prev, retentionRuns: event.target.value }))
-                                    }
-                                    disabled={inspectionScheduleDisabled}
-                                />
-                            </label>
+                            {inspectionScheduleFields.map(([field, , label, min, max]) => (
+                                <div key={field} className={styles.settingsField}>
+                                    <Input
+                                        label={t(label)}
+                                        type='number'
+                                        min={min}
+                                        max={max}
+                                        step={1}
+                                        value={scheduleDraft[field]}
+                                        onChange={(event) => updateScheduleDraft(field, event.target.value)}
+                                        disabled={inspectionScheduleDisabled}
+                                        error={invalidScheduleFields.includes(field) ?
+                                               t('credentials.inspection_schedule_integer_range', {
+                                                   min: min.toLocaleString(i18n.language),
+                                                   max: max.toLocaleString(i18n.language),
+                                                   defaultValue: 'Enter a whole number from {{min}} to {{max}}',
+                                               }) :
+                                               undefined}
+                                    />
+                                </div>
+                            ))}
                             <Button
                                 variant='secondary'
                                 size='sm'
@@ -1468,7 +1619,8 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     />
                 </div>
 
-                {actionError && <div className={styles.error}>{actionError}</div>}
+                {actionError &&
+                 <div className={styles.error} role='alert'>{formatInspectionError(actionError, t)}</div>}
 
                 <Tabs
                     items={[
@@ -1521,18 +1673,19 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                             />
                         </div>
 
+                        {results.length > 0 && renderReadError(resultsRead, fetchResults)}
                         <Sheet
                             rows={results}
                             columns={columns}
                             rowKey={(row) => rowKey(row)}
                             status={sheetStatus}
-                            errorMessage={fetchError}
-                            onRetry={fetchData}
-                            retrying={loading}
+                            errorMessage={resultsRead?.error}
+                            onRetry={fetchResults}
+                            retrying={resultsRead?.loading}
                             emptyText={t('credentials.inspection_empty', { defaultValue: '暂无巡检结果' })}
                             emptyHint={sheetEmptyHint}
                             loadingText={t('common.loading')}
-                            refreshing={loading && results.length > 0}
+                            refreshing={resultsRead?.loading && results.length > 0}
                             refreshingText={t('common.loading')}
                         />
 
@@ -1546,50 +1699,84 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                     </div>
                 ) : detailTab === 'quota' ? (
                     <div className={styles.sectionCard}>
-                        {latestQuotaTask && (
+                        <div className={styles.tableControls}>
+                            {quotaTasks.length > 0 && (
+                                <Select
+                                    value={selectedQuotaTask?.id ?? ''}
+                                    options={quotaTasks.map((task) => ({
+                                        value: task.id,
+                                        label: `${t(
+                                            `credentials.quota_task_status_${task.id === selectedQuotaTask?.id ?
+                                                                             selectedQuotaTask.status :
+                                                                             task.status}`,
+                                            { defaultValue: task.status },
+                                        )} · ${formatTime(task.created_at)} · ${task.id.slice(0, 8)}`,
+                                    }))}
+                                    onChange={setSelectedTaskId}
+                                    ariaLabel={t(
+                                        'credentials.quota_task_select',
+                                        { defaultValue: 'Select a refresh task' },
+                                    )}
+                                    disabled={quotaTaskActionBusy}
+                                    fullWidth={false}
+                                />
+                            )}
+                            <Button variant='ghost' size='sm' loading={reads.quotaTasks?.loading} onClick={() => {
+                                void fetchQuotaTasks()
+                                if (selectedQuotaTask) {
+                                    void fetchQuotaTask(selectedQuotaTask.id)
+                                }
+                            }}>
+                                {t('common.refresh')}
+                            </Button>
+                        </div>
+                        {selectedQuotaTask && taskHistoryError && renderReadError(
+                            { loading: reads.quotaTasks?.loading ?? false, error: taskHistoryError }, fetchQuotaTasks,
+                        )}
+                        {selectedQuotaTask && (
                             <>
                                 <div className={styles.statusPanel}>
                                     <div>
                                         <div className={styles.taskHeaderLine}>
                                             <div className={styles.sectionTitle}>
                                                 {t(
-                                                    'credentials.quota_task_latest',
-                                                    { defaultValue: '最近配额刷新任务' },
+                                                    'credentials.quota_task_tab',
+                                                    { defaultValue: 'Quota refresh task' },
                                                 )}
                                             </div>
                                             <span
                                                 className={`${styles.statusBadge} ${
-                                                    statusClass(latestQuotaTask.status)}`}>
-                                                {t(`credentials.quota_task_status_${latestQuotaTask.status}`, {
-                                                    defaultValue: latestQuotaTask.status,
+                                                    statusClass(selectedQuotaTask.status)}`}>
+                                                {t(`credentials.quota_task_status_${selectedQuotaTask.status}`, {
+                                                    defaultValue: selectedQuotaTask.status,
                                                 })}
                                             </span>
                                         </div>
                                         <div className={styles.statusLine}>
                                             <span>
                                                 {t('credentials.quota_task_id', { defaultValue: '任务 ID' })}:{' '}
-                                                <code className={styles.taskId}>{latestQuotaTask.id}</code>
+                                                <code className={styles.taskId}>{selectedQuotaTask.id}</code>
                                             </span>
                                             <span>
                                                 {t(
                                                     'credentials.quota_task_created_at',
                                                     { defaultValue: '创建时间' },
                                                 )}:{' '}
-                                                {formatTime(latestQuotaTask.created_at)}
+                                                {formatTime(selectedQuotaTask.created_at)}
                                             </span>
                                             <span>
                                                 {t(
                                                     'credentials.quota_task_started_at',
                                                     { defaultValue: '开始时间' },
                                                 )}:{' '}
-                                                {formatTime(latestQuotaTask.started_at)}
+                                                {formatTime(selectedQuotaTask.started_at)}
                                             </span>
                                             <span>
                                                 {t(
                                                     'credentials.quota_task_completed_at',
                                                     { defaultValue: '完成时间' },
                                                 )}:{' '}
-                                                {formatTime(latestQuotaTask.completed_at)}
+                                                {formatTime(selectedQuotaTask.completed_at)}
                                             </span>
                                         </div>
                                     </div>
@@ -1597,38 +1784,29 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                         <Button
                                             variant='secondary'
                                             size='sm'
-                                            loading={busyAction === `quota-pause-${latestQuotaTask.id}`}
-                                            disabled={quotaTaskActionBusy ||
-                                                      !['queued', 'running'].includes(latestQuotaTask.status)}
-                                            onClick={() => void runAction(
-                                                `quota-pause-${latestQuotaTask.id}`,
-                                                () => quotaApi.pauseTask(latestQuotaTask.id),
-                                            )}
+                                            loading={busyAction === `quota-pause-${selectedQuotaTask.id}`}
+                                            disabled={Boolean(busyAction) ||
+                                                      !['queued', 'running'].includes(selectedQuotaTask.status)}
+                                            onClick={() => runQuotaTaskAction('quota-pause', quotaApi.pauseTask)}
                                         >
                                             {t('credentials.quota_task_pause', { defaultValue: '暂停' })}
                                         </Button>
                                         <Button
                                             variant='secondary'
                                             size='sm'
-                                            loading={busyAction === `quota-resume-${latestQuotaTask.id}`}
-                                            disabled={quotaTaskActionBusy || latestQuotaTask.status !== 'paused'}
-                                            onClick={() => void runAction(
-                                                `quota-resume-${latestQuotaTask.id}`,
-                                                () => quotaApi.resumeTask(latestQuotaTask.id),
-                                            )}
+                                            loading={busyAction === `quota-resume-${selectedQuotaTask.id}`}
+                                            disabled={Boolean(busyAction) || selectedQuotaTask.status !== 'paused'}
+                                            onClick={() => runQuotaTaskAction('quota-resume', quotaApi.resumeTask)}
                                         >
                                             {t('credentials.quota_task_resume', { defaultValue: '继续' })}
                                         </Button>
                                         <Button
                                             variant='danger'
                                             size='sm'
-                                            loading={busyAction === `quota-cancel-${latestQuotaTask.id}`}
-                                            disabled={quotaTaskActionBusy ||
-                                                      isQuotaRefreshTaskTerminal(latestQuotaTask)}
-                                            onClick={() => void runAction(
-                                                `quota-cancel-${latestQuotaTask.id}`,
-                                                () => quotaApi.cancelTask(latestQuotaTask.id),
-                                            )}
+                                            loading={busyAction === `quota-cancel-${selectedQuotaTask.id}`}
+                                            disabled={Boolean(busyAction) ||
+                                                      isQuotaRefreshTaskTerminal(selectedQuotaTask)}
+                                            onClick={() => runQuotaTaskAction('quota-cancel', quotaApi.cancelTask)}
                                         >
                                             {t('credentials.quota_task_cancel', { defaultValue: '取消' })}
                                         </Button>
@@ -1636,15 +1814,15 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                 </div>
                                 <div className={styles.summaryGrid}>
                                     {([
-                                        ['total', latestQuotaTask.summary.total, '目标'],
-                                        ['queued', latestQuotaTask.summary.queued, '排队'],
-                                        ['running', latestQuotaTask.summary.running, '执行中'],
-                                        ['succeeded', latestQuotaTask.summary.succeeded, '成功'],
-                                        ['failed', latestQuotaTask.summary.failed, '失败'],
-                                        ['skipped', latestQuotaTask.summary.skipped, '跳过'],
-                                        ['cancelled', latestQuotaTask.summary.cancelled, '取消'],
-                                        ['inconclusive', latestQuotaTask.summary.inconclusive, '无法判定'],
-                                        ['interrupted', latestQuotaTask.summary.interrupted, '已中断'],
+                                        ['total', selectedQuotaTask.summary.total, '目标'],
+                                        ['queued', selectedQuotaTask.summary.queued, '排队'],
+                                        ['running', selectedQuotaTask.summary.running, '执行中'],
+                                        ['succeeded', selectedQuotaTask.summary.succeeded, '成功'],
+                                        ['failed', selectedQuotaTask.summary.failed, '失败'],
+                                        ['skipped', selectedQuotaTask.summary.skipped, '跳过'],
+                                        ['cancelled', selectedQuotaTask.summary.cancelled, '取消'],
+                                        ['inconclusive', selectedQuotaTask.summary.inconclusive, '无法判定'],
+                                        ['interrupted', selectedQuotaTask.summary.interrupted, '已中断'],
                                     ] as const).map(([key, value, label]) => (
                                         <div className={styles.metric} key={key}>
                                             <span>{t(`credentials.quota_task_summary_${key}`, {
@@ -1654,58 +1832,72 @@ export function AccountInspectionPanel({ onCredentialsChanged }: AccountInspecti
                                         </div>
                                     ))}
                                 </div>
-                                {(latestQuotaTask.error || latestQuotaTask.persistence_error) && (
+                                {(selectedQuotaTask.error || selectedQuotaTask.persistence_error) && (
                                     <div className={styles.error}>
-                                        {[latestQuotaTask.error, latestQuotaTask.persistence_error]
+                                        {[selectedQuotaTask.error, selectedQuotaTask.persistence_error]
                                             .filter(Boolean)
                                             .join(' · ')}
                                     </div>
                                 )}
                             </>
                         )}
+                        {selectedQuotaTask && selectedQuotaTask.targets.length > 0 && renderReadError(
+                            taskRead,
+                            () => void fetchQuotaTask(selectedQuotaTask.id),
+                        )}
                         <Sheet
-                            rows={latestQuotaTask?.targets ?? []}
+                            rows={selectedQuotaTask?.targets ?? []}
                             columns={quotaTaskColumns}
                             rowKey={(target) => target.id}
                             status={quotaTaskSheetStatus}
+                            errorMessage={taskRead?.error || taskHistoryError}
+                            onRetry={selectedQuotaTask ?
+                                     () => void fetchQuotaTask(selectedQuotaTask.id) :
+                                     fetchQuotaTasks}
+                            retrying={taskRead?.loading ?? reads.quotaTasks?.loading}
                             emptyText={t('credentials.quota_task_empty', { defaultValue: '暂无配额刷新任务' })}
                             loadingText={t('common.loading')}
-                            refreshing={quotaTaskActive}
-                            refreshingText={t('credentials.quota_task_polling', { defaultValue: '正在读取任务进度' })}
                         />
                     </div>
                 ) : (
-                        <Sheet
-                            rows={visibleLogs}
-                            columns={logColumns}
-                            rowKey={(entry, index) => `${entry.time}-${index}`}
-                            status={logsSheetStatus}
-                            emptyText={t('credentials.inspection_logs_empty', { defaultValue: '暂无巡检日志' })}
-                            loadingText={t('common.loading')}
-                            refreshing={loading && visibleLogs.length > 0}
-                            refreshingText={t('common.loading')}
-                            className={styles.logsPanel}
-                            tableWrapClassName={styles.logsTableWrap}
-                            summaryContent={(
-                                <div>
-                                    <div className={styles.logsTitle}>
-                                        {t('credentials.inspection_logs', { defaultValue: '巡检日志' })}
+                        <div className={styles.sectionCard}>
+                            {visibleLogs.length > 0 && renderReadError(reads.logs, fetchLogs)}
+                            <Sheet
+                                rows={visibleLogs}
+                                columns={logColumns}
+                                rowKey={(entry, index) => `${entry.time}-${index}`}
+                                status={logsSheetStatus}
+                                errorMessage={reads.logs?.error}
+                                onRetry={fetchLogs}
+                                retrying={reads.logs?.loading}
+                                emptyText={t('credentials.inspection_logs_empty', { defaultValue: '暂无巡检日志' })}
+                                loadingText={t('common.loading')}
+                                refreshing={reads.logs?.loading && visibleLogs.length > 0}
+                                refreshingText={t('common.loading')}
+                                className={styles.logsPanel}
+                                tableWrapClassName={styles.logsTableWrap}
+                                summaryContent={(
+                                    <div>
+                                        <div className={styles.logsTitle}>
+                                            {t('credentials.inspection_logs', { defaultValue: '巡检日志' })}
+                                        </div>
+                                        <div className={styles.logsMeta}>
+                                            {t('credentials.inspection_logs_count', {
+                                                shown: visibleLogs.length,
+                                                total: logs.length,
+                                                defaultValue: '显示最后 {{shown}} / {{total}} 条，后端已保存',
+                                            })}
+                                        </div>
                                     </div>
-                                    <div className={styles.logsMeta}>
-                                        {t('credentials.inspection_logs_count', {
-                                            shown: visibleLogs.length,
-                                            total: logs.length,
-                                            defaultValue: '显示最后 {{shown}} / {{total}} 条，后端已保存',
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-                            toolbarContent={(
-                                <Button variant='ghost' size='sm' onClick={() => void fetchData()} loading={loading}>
-                                    {t('common.refresh')}
-                                </Button>
-                            )}
-                        />
+                                )}
+                                toolbarContent={(
+                                    <Button variant='ghost' size='sm' onClick={() => void fetchLogs()}
+                                            loading={reads.logs?.loading}>
+                                        {t('common.refresh')}
+                                    </Button>
+                                )}
+                            />
+                        </div>
                     )}
             </div>
         </div>

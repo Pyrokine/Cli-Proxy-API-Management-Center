@@ -3419,7 +3419,21 @@
         "provider_error_reset_remaining": "Provider reported {{seconds}} seconds remaining",
         "provider_error_retry_due": "Awaiting recheck",
         "provider_error_raw_details": "Original error details",
-        "quota_older_than_runtime_error": "This quota snapshot predates the latest model error"
+        "quota_older_than_runtime_error": "This quota snapshot predates the latest model error",
+        "legacy_quota_settings": "Legacy quota settings",
+        "inspection_schedule_integer_range": "Enter a whole number from {{min}} to {{max}}",
+        "inspection_schedule_save_failed": "Could not save the inspection schedule",
+        "inspection_run_timed_out": "Inspection timed out",
+        "inspection_run_stopped": "Inspection stopped by request",
+        "inspection_run_target_changed": "The account or its inspection eligibility changed",
+        "inspection_run_save_failed": "Could not save inspection results",
+        "inspection_target_not_found": "This account is no longer available",
+        "inspection_target_ambiguous": "More than one credential matches this account",
+        "inspection_target_excluded": "The inspection schedule excludes this provider",
+        "quota_task_select": "Select a refresh task",
+        "quota_task_history_unavailable": "Saved task history is unavailable",
+        "latest_inspection_status": "Last inspection result",
+        "oauth_cancel_failed": "Could not cancel authorization"
     },
     "sidebar": {
         "toggle_expand": "Expand sidebar",

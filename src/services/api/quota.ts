@@ -109,6 +109,12 @@ export interface QuotaRefreshTaskTarget {
     shared_execution?: boolean
 }
 
+export interface QuotaRefreshTaskList {
+    tasks: QuotaRefreshTask[]
+    total: number
+    persistence_error?: string
+}
+
 export interface QuotaRefreshTask {
     id: string
     status: QuotaRefreshTaskStatus
@@ -148,6 +154,8 @@ export const quotaApi = {
             ...(credentials ? { credentials } : {}),
             ...(options?.allowRecovery !== undefined ? { allow_recovery: options.allowRecovery } : {}),
         }, { ...({ signal: options?.signal }), mutationReadback: () => quotaApi.getStatus() }),
+
+    listTasks: () => apiClient.get<QuotaRefreshTaskList>('/quota/refresh-tasks'),
 
     getTask: (taskId: string, options?: QuotaRequestOptions) =>
         apiClient.get<QuotaRefreshTask>(quotaRefreshTaskPath(taskId), { signal: options?.signal }),

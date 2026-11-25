@@ -3446,7 +3446,21 @@
         "quota_window_limit": "Лимит",
         "quota_window_hours": "Лимит на {{count}} ч",
         "quota_window_days": "Лимит на {{count}} дн.",
-        "quota_window_weeks": "Лимит на {{count}} нед."
+        "quota_window_weeks": "Лимит на {{count}} нед.",
+        "legacy_quota_settings": "Устаревшие настройки квот",
+        "inspection_schedule_integer_range": "Введите целое число от {{min}} до {{max}}",
+        "inspection_schedule_save_failed": "Не удалось сохранить расписание проверок",
+        "inspection_run_timed_out": "Истекло время проверки",
+        "inspection_run_stopped": "Проверка остановлена вручную",
+        "inspection_run_target_changed": "Изменилась учётная запись или её доступность для проверки",
+        "inspection_run_save_failed": "Не удалось сохранить результаты проверки",
+        "inspection_target_not_found": "Эта учётная запись больше недоступна",
+        "inspection_target_ambiguous": "Этой учётной записи соответствуют несколько данных для входа",
+        "inspection_target_excluded": "Этот поставщик не входит в расписание проверок",
+        "quota_task_select": "Выберите задачу обновления квот",
+        "quota_task_history_unavailable": "Сохранённая история задач недоступна",
+        "latest_inspection_status": "Результат последней проверки",
+        "oauth_cancel_failed": "Не удалось отменить авторизацию"
     },
     "notifications": {
         "title": "Уведомления",

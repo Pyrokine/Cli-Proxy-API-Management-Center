@@ -3419,7 +3419,21 @@
         "provider_error_reset_remaining": "供应商返回剩余 {{seconds}} 秒",
         "provider_error_retry_due": "等待重新检查",
         "provider_error_raw_details": "原始错误详情",
-        "quota_older_than_runtime_error": "该额度快照早于最新模型错误"
+        "quota_older_than_runtime_error": "该额度快照早于最新模型错误",
+        "legacy_quota_settings": "旧版配额设置",
+        "inspection_schedule_integer_range": "输入 {{min}} 至 {{max}} 之间的整数",
+        "inspection_schedule_save_failed": "巡检计划保存失败",
+        "inspection_run_timed_out": "巡检超时",
+        "inspection_run_stopped": "已手动停止巡检",
+        "inspection_run_target_changed": "账号或巡检范围已变化",
+        "inspection_run_save_failed": "巡检结果保存失败",
+        "inspection_target_not_found": "此账号已不存在",
+        "inspection_target_ambiguous": "此账号对应多份凭证",
+        "inspection_target_excluded": "巡检计划未包含此供应商",
+        "quota_task_select": "选择配额刷新任务",
+        "quota_task_history_unavailable": "无法读取已保存的任务历史",
+        "latest_inspection_status": "最近巡检结果",
+        "oauth_cancel_failed": "无法取消授权"
     },
     "sidebar": {
         "toggle_expand": "展开侧边栏",

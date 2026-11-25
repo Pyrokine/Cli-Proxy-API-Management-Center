@@ -451,10 +451,11 @@ describe(
             expect(backendQuotaHookSource).not.toContain('currentLastRefreshMs')
             expect(backendQuotaHookSource).not.toContain('RefreshBaseline')
             expect(accountInspectionPanelSource).toContain('value: \'quota\'')
-            expect(accountInspectionPanelSource).toContain('quotaApi.pauseTask(latestQuotaTask.id)')
-            expect(accountInspectionPanelSource).toContain('quotaApi.resumeTask(latestQuotaTask.id)')
-            expect(accountInspectionPanelSource).toContain('quotaApi.cancelTask(latestQuotaTask.id)')
-            expect(accountInspectionPanelSource).toContain('latestQuotaTask?.targets ?? []')
+            expect(accountInspectionPanelSource).toContain('runQuotaTaskAction(\'quota-pause\', quotaApi.pauseTask)')
+            expect(accountInspectionPanelSource).toContain('runQuotaTaskAction(\'quota-resume\', quotaApi.resumeTask)')
+            expect(accountInspectionPanelSource).toContain('runQuotaTaskAction(\'quota-cancel\', quotaApi.cancelTask)')
+            expect(accountInspectionPanelSource).toContain('const id = selectedQuotaTask.id')
+            expect(accountInspectionPanelSource).toContain('selectedQuotaTask?.targets ?? []')
         })
 
         test('shows provider-safe probe outcomes with immutable credential binding', () => {
