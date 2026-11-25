@@ -13,6 +13,7 @@ import {configFileApi} from '@/services/api/configFile'
 import type {ModelCatalogRow} from '@/services/api/models'
 import type {PluginEntry} from '@/services/api/plugins'
 import {EMPTY_API_KEY_MODEL_RULE, isApiKeyModelRuleEmpty} from '@/types/visualConfig'
+import {getErrorMessage} from '@/utils/helpers'
 import {isModelGloballyExcluded} from '@/utils/modelTree'
 import {calculateStatusBarDataFromSummaryPoints, rateToColor} from '@/utils/usage'
 import {isValidApiKey} from '@/utils/validation'
@@ -1235,11 +1236,9 @@ test(
 
 test('a stale confirmation cannot write a newly prepared configuration that failed validation', async () => {
     let cleared   = false
-    const confirm = sourceExpression<() => Promise<void>>(
+    const confirm = sourceInitializer<() => Promise<void>>(
         'pages/ConfigPage.tsx',
-        (node, tree) => ts.isArrowFunction(node) &&
-                        node.getText(tree).includes('const prepared = preparedSaveRef.current') &&
-                        node.getText(tree).includes('saveConfigYaml(prepared.content'),
+        'handleConfirmSave',
         {
             isCurrentConnection: () => true,
             disableControls: false,

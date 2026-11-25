@@ -1,6 +1,8 @@
 import type {VisualConfigValidationErrorCode} from '@/types/visualConfig'
 import {parse as parseYaml} from 'yaml'
 
+const modelKey = (name: string) => name.trim().replace(/^models\//, '').trim().toLowerCase()
+
 export function getOAuthModelAliasError(text: string): VisualConfigValidationErrorCode | undefined {
     if (!text.trim()) {
         return undefined
@@ -11,6 +13,10 @@ export function getOAuthModelAliasError(text: string): VisualConfigValidationErr
     } catch {
         return 'oauth_alias_invalid'
     }
+    return getOAuthModelAliasValueError(value)
+}
+
+export function getOAuthModelAliasValueError(value: unknown): VisualConfigValidationErrorCode | undefined {
     if (value === null) {
         return undefined
     }
@@ -38,11 +44,16 @@ export function getOAuthModelAliasError(text: string): VisualConfigValidationErr
                 !item.alias.trim()) {
                 return 'oauth_alias_empty'
             }
-            if (item.fork !== undefined && typeof item.fork !== 'boolean') {
+            if ((item.fork !== undefined && typeof item.fork !== 'boolean') ||
+                (item['force-mapping'] !== undefined && typeof item['force-mapping'] !== 'boolean') ||
+                (item['display-name'] !== undefined && typeof item['display-name'] !== 'string')) {
                 return 'oauth_alias_invalid'
             }
-            const name  = item.name.trim().toLowerCase()
-            const alias = item.alias.trim().toLowerCase()
+            const name  = modelKey(item.name)
+            const alias = modelKey(item.alias)
+            if (!name || !alias) {
+                return 'oauth_alias_empty'
+            }
             if (name === alias) {
                 return 'oauth_alias_self'
             }

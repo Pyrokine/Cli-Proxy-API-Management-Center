@@ -617,8 +617,16 @@
     background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
+.searchResultCopy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .searchResultLabel {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 7px;
     min-width: 0;

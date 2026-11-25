@@ -12,10 +12,15 @@ import type {
     PluginStoreAuthRule,
     PluginStoreAuthType,
     VisualConfigValues,
+    YamlConfigFieldState,
+    YamlConfigFieldStates,
+    YamlConfigFieldValue,
+    YamlConfigPath,
 } from '@/types/visualConfig'
 import {isApiKeyModelRuleEmpty} from '@/types/visualConfig'
 import {rewriteModelMetadataForYaml} from '@/utils/modelMetadata'
 import {
+    type Alias,
     isAlias,
     isMap,
     isScalar,
@@ -23,9 +28,17 @@ import {
     type Node,
     parseDocument,
     stringify as stringifyYaml,
+    visit,
     type YAMLMap,
     type YAMLSeq,
 } from 'yaml'
+import {
+    canEditYamlConfigField,
+    VISUAL_YAML_FIELDS,
+    type YamlConfigField,
+    yamlConfigField,
+    yamlConfigPathId,
+} from './visualConfigFields'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -47,6 +60,32 @@ function normalizeBoolean(value: unknown): boolean | undefined {
         }
     }
     return undefined
+}
+
+function parseDisableImageGeneration(raw: unknown): VisualConfigValues['disableImageGeneration'] | undefined {
+    if (raw != null && typeof raw !== 'string' && typeof raw !== 'boolean' && typeof raw !== 'bigint') {
+        return undefined
+    }
+    switch (String(raw ?? '').trim().toLowerCase()) {
+        case '':
+        case 'false':
+        case 'off':
+        case '0':
+        case 'no':
+            return 'off'
+        case 'true':
+        case 'all':
+        case '1':
+        case 'on':
+        case 'yes':
+            return 'all'
+        case 'chat':
+            return 'chat'
+        case 'passthrough':
+            return 'passthrough'
+        default:
+            return undefined
+    }
 }
 
 function parseRoutingStrategy(raw: unknown): VisualConfigValues['routingStrategy'] {
@@ -189,6 +228,24 @@ function yamlBlockToText(value: unknown): string {
     return stringifyYaml(value).trimEnd()
 }
 
+function oauthRulesBlockText(doc: YamlDocument, key: string, parsed: unknown): string {
+    const node = doc.get(key, true)
+    return isMap(node) || (isScalar(node) && node.value === null)
+           ? stringifyYaml(node, { verifyAliasOrder: false }).trimEnd() : yamlBlockToText(parsed ?? {})
+}
+
+function setOAuthRulesBlockInDoc(doc: YamlDocument, path: YamlPath, text: string): void {
+    if (!text.trim()) {
+        doc.deleteIn(path)
+        return
+    }
+    const snippet      = parseConfigDocument(text)
+    const node         = snippet.contents ?? doc.createNode(null)
+    node.commentBefore = [snippet.commentBefore, node.commentBefore].filter(Boolean).join('\n') || undefined
+    node.comment       = [node.comment, snippet.comment].filter(Boolean).join('\n') || undefined
+    doc.setIn(path, node)
+}
+
 function parseYamlBlockText(value: string): unknown {
     const trimmed = value.trim()
     if (!trimmed) {
@@ -207,6 +264,261 @@ function parseConfigDocument(value: string): YamlDocument {
         throw new Error(doc.errors[0]?.message ?? 'Invalid YAML')
     }
     return doc
+}
+
+const configChild     = (value: unknown, key: string | number): unknown => {
+    if (typeof key === 'number') {
+        return Array.isArray(value) ? value[key] : undefined
+    }
+    const mapping = asRecord(value)
+    return mapping && Object.prototype.hasOwnProperty.call(mapping, key) ? mapping[key] : undefined
+}
+const configPathValue = (source: unknown, path: YamlConfigPath): unknown => path.reduce(configChild, source)
+
+const isConfigSecretPlaceholder = (value: unknown) =>
+    typeof value === 'string' && /^__CLI_PROXY_CONFIG_SECRET_[0-9a-f]{32}__$/.test(value)
+
+const RESTART_CONFIG_FIELDS = [
+    'host', 'port', 'tls.enable', 'tls.cert', 'tls.key', 'tls.http-redirect-port',
+    'model-refresh-interval', 'commercial-mode',
+] as const
+
+export function getConfigRestartFields(previousYaml: string, nextYaml: string): string[] {
+    const read     = (source: string) => {
+        try {
+            const document = parseDocument(source, { intAsBigInt: true, merge: true, uniqueKeys: false })
+            return document.errors.length ? undefined : (document.toJS() ?? {}) as unknown
+        } catch {
+            // An unreadable previous file must remain repairable from source mode.
+            return undefined
+        }
+    }
+    const previous = read(previousYaml)
+    const next     = read(nextYaml)
+    if (previous === undefined || next === undefined) {
+        return []
+    }
+    const startupValue = (source: unknown, id: typeof RESTART_CONFIG_FIELDS[number]) => {
+        const field = yamlConfigField(id)!
+        const raw   = configPathValue(source, field.path)
+        if (field.kind === 'boolean') {
+            return normalizeBoolean(raw) ?? field.defaultValue
+        }
+        if (field.kind === 'integer') {
+            if (id === 'model-refresh-interval' && typeof raw === 'bigint' && raw < 0n) {
+                return '0'
+            }
+            return raw == null ? field.defaultValue : String(raw)
+        }
+        if (id === 'tls.cert' || id === 'tls.key') {
+            return typeof raw === 'string' ? raw.trim() : ''
+        }
+        return raw ?? field.defaultValue
+    }
+    return RESTART_CONFIG_FIELDS.filter((id) => startupValue(previous, id) !== startupValue(next, id))
+}
+
+function readYamlFieldValue(field: YamlConfigField, raw: unknown, literal?: string): YamlConfigFieldValue | undefined {
+    if (field.id === 'disable-image-generation') {
+        return parseDisableImageGeneration(literal ?? raw)
+    }
+    if (field.kind === 'boolean') {
+        return normalizeBoolean(raw)
+    }
+    if (field.kind === 'integer') {
+        return typeof raw === 'bigint' ? String(raw) : undefined
+    }
+    if (field.kind === 'string') {
+        if (typeof raw === 'string') {
+            return raw
+        }
+        if (typeof raw === 'boolean' || typeof raw === 'bigint' || typeof raw === 'number') {
+            return literal ?? String(raw)
+        }
+    }
+    if (field.kind === 'scalar') {
+        if (typeof raw === 'boolean') {
+            return raw
+        }
+        if (typeof raw === 'bigint' || (typeof raw === 'number' && Number.isFinite(raw))) {
+            return String(raw)
+        }
+    }
+    return undefined
+}
+
+const RELAY_PRIVATE_PATH        = ['codex', 'live-media-relay', 'disable-private-remote-ips']
+const RELAY_LEGACY_PRIVATE_PATH = ['codex', 'live-media-relay', 'allow-private-remote-ips']
+const PUBLIC_PAYLOAD_BUDGETS    = new Set([
+                                              'max_tokens',
+                                              'max_completion_tokens',
+                                              'max_output_tokens',
+                                              'generationConfig.maxOutputTokens',
+                                              'thinking.budget_tokens',
+                                          ])
+
+function effectiveYamlValue(field: YamlConfigField, value: YamlConfigFieldValue): YamlConfigFieldValue {
+    switch (field.id) {
+        case 'redis-usage-queue-retention-seconds':
+            return Number(value) <= 0 ? '60' : Number(value) > 3600 ? '3600' : value
+        case 'error-logs-max-files':
+            return Number(value) < 0 ? '10' : value
+        case 'logs-max-total-size-mb':
+        case 'max-retry-credentials':
+        case 'model-refresh-interval':
+        case 'auto-refresh-interval':
+            return Number(value) < 0 ? '0' : value
+        case 'usage-retention.days':
+            return value === '0' ? '-1' : value
+        case 'usage-retention.warning-threshold-pct':
+            return value === '0' ? '80' : value
+        case 'codex.live-media-relay.max-sessions':
+            return Number(value) <= 0 ? '32' : value
+        case 'remote-management.check-interval':
+            return Number(value) < 30 ? '180' : value
+        case 'pprof.addr':
+        case 'gpt-image-2-base-model':
+        case 'video-result-auth-cache-ttl':
+            return String(value).trim() || field.defaultValue || value
+        case 'routing.strategy':
+            return parseRoutingStrategy(value)
+        default:
+            return value
+    }
+}
+
+function readYamlConfigFields(doc: YamlDocument, parsed: unknown): YamlConfigFieldStates {
+    const fields: YamlConfigFieldStates = {}
+    const hiddenHomeGroups              = new Set(['credential-in-flight', 'credential-concurrency'].filter((key) => {
+        const group = configChild(parsed, key)
+        return isConfigSecretPlaceholder(group) || Object.keys(asRecord(group) ?? {}).some(isConfigSecretPlaceholder)
+    }))
+    const read                          = (
+        field: YamlConfigField,
+        path: YamlConfigPath,
+        raw: unknown,
+    ): YamlConfigFieldState => {
+        if (field.owner === 'runtime') {
+            return { source: 'unset' }
+        }
+        const node    = doc.getIn(path, true)
+        const shared  = isAlias(node) || ((isScalar(node) || isSeq(node) || isMap(node)) && Boolean(node.anchor)) ||
+                        (field.editable && path.some((_, index) => {
+                            const parent = index === 0 ? doc.contents : doc.getIn(path.slice(0, index), true)
+                            return isAlias(parent) || (parent != null && (!isMap(parent) || Boolean(parent.anchor)))
+                        }))
+        const source  = node === undefined || isAlias(node) ? 'inherited' : 'yaml'
+        const missing = raw === null || raw === undefined
+        let state: YamlConfigFieldState
+        if (field.id === 'remote-management.auto-update-panel') {
+            const disabled = normalizeBoolean(configPathValue(
+                parsed,
+                ['remote-management', 'disable-auto-update-panel'],
+            ))
+            if (disabled !== undefined) {
+                return { source: 'legacy', value: !disabled }
+            }
+        }
+        if (field.id === 'remote-management.disable-auto-update-panel' && missing) {
+            const enabled = normalizeBoolean(configPathValue(parsed, ['remote-management', 'auto-update-panel']))
+            if (enabled !== undefined) {
+                return { source: 'fallback', value: !enabled, from: 'remote-management.auto-update-panel' }
+            }
+        }
+        if (field.id === 'routing.session-affinity' && raw === undefined) {
+            const enabled = normalizeBoolean(configPathValue(parsed, ['routing', 'claude-code-session-affinity']))
+            if (enabled !== undefined) {
+                return { source: 'legacy', value: enabled, from: 'routing.claude-code-session-affinity' }
+            }
+        }
+        if (field.id === RELAY_PRIVATE_PATH.join('.') && raw === undefined) {
+            const allowed = normalizeBoolean(configPathValue(parsed, RELAY_LEGACY_PRIVATE_PATH))
+            if (allowed !== undefined) {
+                return { source: 'legacy', value: !allowed, from: RELAY_LEGACY_PRIVATE_PATH.join('.') }
+            }
+        }
+        if (isConfigSecretPlaceholder(raw) || (missing && hiddenHomeGroups.has(String(path[0])))) {
+            state = { source: 'redacted' }
+        } else if (field.inherits && (missing || raw === '' || (field.inherits === 'request-retry' &&
+                                                                typeof raw === 'bigint' && raw < 0n))) {
+            const inherited = yamlConfigField(field.inherits)
+            const fallback  = inherited ?
+                              read(inherited, inherited.path, configPathValue(parsed, inherited.path)) :
+                              undefined
+            state           =
+                { source: 'fallback', from: field.inherits, value: fallback?.effective ?? fallback?.value }
+        } else if (missing) {
+            state =
+                field.defaultValue === undefined ?
+                    { source: 'unset' } :
+                    { source: 'default', value: field.defaultValue }
+        } else if (field.statusOnly) {
+            state = { source }
+        } else if (field.kind === 'list' || field.kind === 'object') {
+            const mapping = asRecord(raw)
+            state         = field.kind === 'list' && Array.isArray(raw) ? { source, size: raw.length } :
+                            field.kind === 'object' && mapping ?
+                                { source, size: Object.keys(mapping).length } :
+                                { source: 'unsupported' }
+        } else {
+            const scalar       = isAlias(node) ? node.resolve(doc) : node
+            const publicBudget = typeof raw === 'string' && path[0] === 'payload' &&
+                                 (path[1] === 'default-raw' || path[1] === 'override-raw') && path[3] === 'params' &&
+                                 PUBLIC_PAYLOAD_BUDGETS.has(String(path[4])) && /^-?(0|[1-9]\d*)$/.test(raw.trim())
+            const value        = publicBudget ? raw.trim() :
+                                 readYamlFieldValue(field, raw, isScalar(scalar) ? scalar.source : undefined)
+            state              =
+                value === undefined ? { source: field.kind === 'scalar' ? source : 'unsupported' } : { source, value }
+            if (value !== undefined) {
+                const effective = effectiveYamlValue(field, value)
+                if (effective !== value) {
+                    state.effective = effective
+                }
+            }
+        }
+        return shared ? { ...state, shared: true } : state
+    }
+    for (const field of VISUAL_YAML_FIELDS) {
+        if (!field.template) {
+            fields[field.id] = read(field, field.path, configPathValue(parsed, field.path))
+            continue
+        }
+        // Client API keys are map keys, including on older servers that return them unmasked.
+        if (field.privateKeys) {
+            continue
+        }
+        const expand = (raw: unknown, path: YamlConfigPath): void => {
+            if (path.length === field.path.length) {
+                const id = yamlConfigPathId(path)
+                fields[id] ??= { ...read(field, path, raw), instance: { schemaId: field.id, path } }
+                return
+            }
+            const next = field.path[path.length]
+            if (next === '[]') {
+                if (Array.isArray(raw)) {
+                    raw.forEach((item, index) => expand(item, [...path, index]))
+                }
+            } else if (next === '{*}') {
+                for (const [key, value] of Object.entries(asRecord(raw) ?? {})) {
+                    if (!isConfigSecretPlaceholder(key)) {
+                        expand(value, [...path, key])
+                    }
+                }
+            } else if (raw != null) {
+                expand(configChild(raw, next), [...path, next])
+            }
+        }
+        expand(parsed, [])
+    }
+    return fields
+}
+
+export function readVisualYamlFieldCatalog(yaml: string): YamlConfigFieldStates {
+    const document = parseConfigDocument(yaml)
+    if (document.contents !== null && !isMap(document.contents)) {
+        throw new Error('Configuration must be a YAML map')
+    }
+    return readYamlConfigFields(document, document.toJS())
 }
 
 function setYamlBlockTextInDoc(doc: YamlDocument, path: YamlPath, value: string, preserveEmpty = false): void {
@@ -603,6 +915,101 @@ function areMergeValuesEqual(left: unknown, right: unknown): boolean {
            areMergeValuesEqual(leftRecord[key], rightRecord[key]))
 }
 
+export class SharedConfigYamlValueError extends Error {
+    constructor() {
+        super('This change affects a shared YAML value. Undo the form edit, then review its references in source mode.')
+    }
+}
+
+function readSharedYamlValues(doc: YamlDocument): Map<Alias, string | undefined> {
+    const anchors    = new Map<string, Node>()
+    const serialized = new Map<Node, string>()
+    const aliases    = new Map<Alias, string | undefined>()
+    visit(doc, {
+        Node(_key, node) {
+            if (!isAlias(node)) {
+                if (node.anchor) {
+                    anchors.set(node.anchor, node)
+                }
+                return
+            }
+            const target = anchors.get(node.source)
+            if (target && !serialized.has(target)) {
+                serialized.set(target, stringifyYaml(target, { verifyAliasOrder: false }))
+            }
+            aliases.set(node, target && serialized.get(target))
+        },
+    })
+    return aliases
+}
+
+export function patchKnownYamlFields(
+    doc: YamlDocument,
+    map: YAMLMap,
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+    legacyKeys: Record<string, string> = {},
+): void {
+    const patchNode = (node: unknown, previous: unknown, next: unknown): Node => {
+        const oldRecord = asRecord(previous)
+        const newRecord = asRecord(next)
+        if (isMap(node) && oldRecord && newRecord) {
+            patchKnownYamlFields(doc, node, oldRecord, newRecord)
+            return node
+        }
+        if (isSeq(node) && Array.isArray(previous) && Array.isArray(next) && node.items.length === previous.length) {
+            const items     = [...node.items]
+            const used      = new Set<number>()
+            const indexes   = next.map((value) => {
+                const index = previous.findIndex((entry, i) => !used.has(i) && areMergeValuesEqual(entry, value))
+                if (index >= 0) {
+                    used.add(index)
+                }
+                return index
+            })
+            const unmatched = previous.map((_, i) => i).filter((i) => !used.has(i))
+            node.items      = next.map((value, index) => {
+                const match = indexes[index]!
+                if (match >= 0) {
+                    return items[match]
+                }
+                const old = unmatched.shift()
+                return old === undefined ? doc.createNode(value) : patchNode(items[old], previous[old], value)
+            })
+            return node
+        }
+        const replacement = doc.createNode(next)
+        if (isScalar(node) || isMap(node) || isSeq(node) || isAlias(node)) {
+            replacement.comment       = node.comment
+            replacement.commentBefore = node.commentBefore
+            replacement.spaceBefore   = node.spaceBefore
+            if (isScalar(node) && isScalar(replacement) && typeof node.value === typeof replacement.value) {
+                replacement.type = node.type
+            }
+        }
+        return replacement
+    }
+    const own       = (record: Record<string, unknown>, key: string) =>
+        Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        const previous = own(before, key)
+        const next     = own(after, key)
+        if (areMergeValuesEqual(previous, next)) {
+            continue
+        }
+        const legacy = own(legacyKeys, key) as string | undefined
+        if (next === undefined) {
+            map.delete(key)
+        } else {
+            const node = map.has(key) || !legacy ? map.get(key, true) : map.get(legacy, true)
+            map.set(key, patchNode(node, previous, next))
+        }
+        if (legacy) {
+            map.delete(legacy)
+        }
+    }
+}
+
 function mergeVisualChanges(
     current: unknown,
     next: unknown,
@@ -743,8 +1150,7 @@ export function areVisualConfigValuesEqual(left: VisualConfigValues, right: Visu
         left.claudeCodeDisableCloakingModelList === right.claudeCodeDisableCloakingModelList &&
         left.claudeModelLevelCooling === right.claudeModelLevelCooling &&
         left.xaiInjectXSearch === right.xaiInjectXSearch &&
-        left.codexHeaderDefaultsText === right.codexHeaderDefaultsText &&
-        left.claudeHeaderDefaultsText === right.claudeHeaderDefaultsText &&
+        areMergeValuesEqual(left.yamlFieldEdits, right.yamlFieldEdits) &&
         left.streaming.keepaliveSeconds === right.streaming.keepaliveSeconds &&
         left.streaming.bootstrapRetries === right.streaming.bootstrapRetries &&
         left.streaming.nonstreamKeepaliveInterval === right.streaming.nonstreamKeepaliveInterval &&
@@ -906,6 +1312,45 @@ function serializeApiKeyRulesForYaml(rules: Record<string, ApiKeyModelRule>): Re
     return out
 }
 
+function syncApiKeyRules(
+    doc: YamlDocument,
+    baseline: VisualConfigValues['apiKeyRules'],
+    desired: VisualConfigValues['apiKeyRules'],
+): void {
+    const existing = doc.get('api-key-rules', true)
+    if (isAlias(existing)) {
+        throw new SharedConfigYamlValueError()
+    }
+    const map    = isMap(existing) ? existing : doc.createNode({}) as YAMLMap
+    const before = serializeApiKeyRulesForYaml(baseline)
+    const after  = serializeApiKeyRulesForYaml(desired)
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (areMergeValuesEqual(before[key], after[key])) {
+            continue
+        }
+        const next = asRecord(after[key])
+        if (!next) {
+            map.delete(key)
+            continue
+        }
+        const node = map.get(key, true)
+        if (isAlias(node)) {
+            throw new SharedConfigYamlValueError()
+        }
+        const rule = isMap(node) ? node : doc.createNode({}) as YAMLMap
+        patchKnownYamlFields(doc, rule, asRecord(before[key]) ?? {}, next, {
+            'blocked-models': 'blockedModels', 'canonical-models': 'canonicalModels', 'model-mappings': 'modelMappings',
+            'policy-profile': 'policyProfile', 'reservation-ttl': 'reservationTtl',
+        })
+        map.set(key, rule)
+    }
+    if (map.items.length) {
+        doc.set('api-key-rules', map)
+    } else {
+        doc.delete('api-key-rules')
+    }
+}
+
 const PLUGIN_STORE_AUTH_TYPES: PluginStoreAuthType[]       = [
     'none',
     'bearer',
@@ -967,42 +1412,79 @@ function parsePluginStoreAuthRules(raw: unknown): PluginStoreAuthRule[] {
         .filter((rule): rule is PluginStoreAuthRule => Boolean(rule))
 }
 
-function serializePluginStoreAuthForYaml(rules: PluginStoreAuthRule[]): Array<Record<string, unknown>> {
-    return rules
-        .map((rule) => {
-            const match = rule.match.trim()
-            if (!match) {
-                return null
+export function isPluginStoreAuthMatchMissing(rule: PluginStoreAuthRule, baseline?: PluginStoreAuthRule): boolean {
+    return !rule.match.trim() && !areMergeValuesEqual(rule, baseline)
+}
+
+function serializePluginStoreAuthRule(rule: PluginStoreAuthRule): Record<string, unknown> {
+    const item: Record<string, unknown> = { match: rule.match.trim(), type: rule.type }
+    if (rule.applyTo.length) {
+        item['apply-to'] = rule.applyTo
+    }
+    for (const [key, value] of [
+        ['token-env', rule.tokenEnv], ['username-env', rule.usernameEnv], ['password-env', rule.passwordEnv],
+        ['header-name', rule.headerName], ['header-value-env', rule.headerValueEnv],
+    ]) {
+        if (value.trim()) {
+            item[key] = value.trim()
+        }
+    }
+    if (rule.allowInsecure) {
+        item['allow-insecure'] = true
+    }
+    return item
+}
+
+function syncPluginStoreAuthRules(
+    doc: YamlDocument,
+    baseline: PluginStoreAuthRule[],
+    desired: PluginStoreAuthRule[],
+): void {
+    const path     = ['plugins', 'store-auth']
+    const existing = doc.getIn(path, true)
+    if (!isSeq(existing) && (isAlias(existing) || baseline.length)) {
+        throw new SharedConfigYamlValueError()
+    }
+    const sequence  = isSeq(existing) ? existing : doc.createNode([]) as YAMLSeq
+    const priorById = new Map(baseline.map((rule) => [rule.id, rule]))
+    const nextById  = new Map(desired.map((rule) => [rule.id, rule]))
+    sequence.items  = sequence.items.flatMap((node, index) => {
+        const id       = `plugin-store-auth-${index}`
+        const previous = priorById.get(id)
+        if (!previous) {
+            return [node]
+        }
+        const next = nextById.get(id)
+        if (!next) {
+            return []
+        }
+        if (!areMergeValuesEqual(previous, next)) {
+            if (!isMap(node)) {
+                throw new SharedConfigYamlValueError()
             }
-            const item: Record<string, unknown> = {
-                match,
-                type: rule.type,
-            }
-            const applyTo                       = rule.applyTo.map((value) => value.trim()).filter(Boolean)
-            if (applyTo.length > 0) {
-                item['apply-to'] = applyTo
-            }
-            if (rule.tokenEnv.trim()) {
-                item['token-env'] = rule.tokenEnv.trim()
-            }
-            if (rule.usernameEnv.trim()) {
-                item['username-env'] = rule.usernameEnv.trim()
-            }
-            if (rule.passwordEnv.trim()) {
-                item['password-env'] = rule.passwordEnv.trim()
-            }
-            if (rule.headerName.trim()) {
-                item['header-name'] = rule.headerName.trim()
-            }
-            if (rule.headerValueEnv.trim()) {
-                item['header-value-env'] = rule.headerValueEnv.trim()
-            }
-            if (rule.allowInsecure) {
-                item['allow-insecure'] = true
-            }
-            return item
-        })
-        .filter((rule): rule is Record<string, unknown> => Boolean(rule))
+            patchKnownYamlFields(
+                doc,
+                node,
+                serializePluginStoreAuthRule(previous),
+                serializePluginStoreAuthRule(next),
+                {
+                    'apply-to': 'apply_to', 'allow-insecure': 'allow_insecure',
+                },
+            )
+        }
+        return [node]
+    })
+    for (const rule of desired) {
+        if (!priorById.has(rule.id)) {
+            sequence.items.push(doc.createNode(serializePluginStoreAuthRule(rule)))
+        }
+    }
+    if (sequence.items.length) {
+        doc.setIn(path, sequence)
+    } else {
+        doc.deleteIn(path)
+        deleteIfMapEmpty(doc, ['plugins'])
+    }
 }
 
 function serializePayloadParamValue(param: PayloadParamEntry): unknown {
@@ -1654,6 +2136,11 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
     const routing                                             = asRecord(parsed.routing)
     const payload                                             = asRecord(parsed.payload)
     const streaming                                           = asRecord(parsed.streaming)
+    const exactDocument                                       = parseConfigDocument(yamlContent)
+    const yamlFields                                          = readYamlConfigFields(
+        exactDocument,
+        exactDocument.toJS(),
+    )
 
     const newValues: VisualConfigValues = {
         host: typeof parsed.host === 'string' ? parsed.host : '',
@@ -1723,20 +2210,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
         forceModelPrefix: normalizeBoolean(parsed['force-model-prefix']) ?? false,
         enableGeminiCliEndpoint: normalizeBoolean(parsed['enable-gemini-cli-endpoint']) ?? false,
         passthroughHeaders: normalizeBoolean(parsed['passthrough-headers']) ?? false,
-        disableImageGeneration: parsed['disable-image-generation'] ===
-                                true ||
-                                ['on', 'yes'].includes(String(parsed['disable-image-generation'])
-                                                           .trim()
-                                                           .toLowerCase()) ?
-                                'all' :
-                                parsed['disable-image-generation'] ===
-                                'all' ||
-                                parsed['disable-image-generation'] ===
-                                'chat' ||
-                                parsed['disable-image-generation'] ===
-                                'passthrough'
-                                ? parsed['disable-image-generation']
-                                : 'off',
+        disableImageGeneration: (yamlFields['disable-image-generation']?.value ?? '') as
+            VisualConfigValues['disableImageGeneration'],
         gptImage2BaseModel: typeof parsed['gpt-image-2-base-model'] === 'string' ?
                             parsed['gpt-image-2-base-model'] :
                             '',
@@ -1765,13 +2240,19 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
                             ? (parsed['cors-allowed-origins'] as string[]).join(', ')
                             : '',
         providerConfigText: buildProviderConfigText(parsed),
-        oauthExcludedModelsText: yamlBlockToText(parsed['oauth-excluded-models'] ?? {}),
+        oauthExcludedModelsText: oauthRulesBlockText(
+            exactDocument,
+            'oauth-excluded-models',
+            parsed['oauth-excluded-models'],
+        ),
         oauthModelAliasText: yamlBlockToText(parsed['oauth-model-alias'] ?? {}),
         clientCodexEnableApplyPatch: normalizeBoolean(asRecord(asRecord(parsed.client)?.codex)?.[
                                                           'enable-apply-patch']) ??
                                      false,
-        oauthSettingsText: yamlBlockToText(parsed['oauth-settings'] ?? {}),
-        oauthRequestScopedErrorsText: yamlBlockToText(parsed['oauth-request-scoped-errors'] ?? {}),
+        oauthSettingsText: oauthRulesBlockText(exactDocument, 'oauth-settings', parsed['oauth-settings']),
+        oauthRequestScopedErrorsText: oauthRulesBlockText(
+            exactDocument, 'oauth-request-scoped-errors', parsed['oauth-request-scoped-errors'],
+        ),
         codexIdentityConfuse: normalizeBoolean(asRecord(parsed.codex)?.['identity-confuse']) ?? false,
         codexOptimizeMultiAgentV2: normalizeBoolean(asRecord(parsed.codex)?.['optimize-multi-agent-v2']) ?? false,
         codexDisableCloaking: normalizeBoolean(asRecord(parsed.codex)?.['disable-codex-cloaking']) ?? false,
@@ -1782,8 +2263,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
             asRecord(parsed['claude-code'])?.['disable-cloaking-model-list']) ?? false,
         claudeModelLevelCooling: normalizeBoolean(asRecord(parsed.claude)?.['model-level-cooling']) ?? false,
         xaiInjectXSearch: normalizeBoolean(asRecord(parsed.xai)?.['inject-x-search']) ?? false,
-        codexHeaderDefaultsText: yamlBlockToText(parsed['codex-header-defaults'] ?? {}),
-        claudeHeaderDefaultsText: yamlBlockToText(parsed['claude-header-defaults'] ?? {}),
+        yamlFields,
+        yamlFieldEdits: {},
 
         quotaSwitchProject: normalizeBoolean(quotaExceeded?.['switch-project']) ?? false,
         quotaSwitchPreviewModel: normalizeBoolean(quotaExceeded?.['switch-preview-model']) ?? false,
@@ -1824,7 +2305,6 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
             ),
         },
     }
-    const exactDocument                 = parseConfigDocument(yamlContent)
     for (const [field, section] of Object.entries(PAYLOAD_FIELDS)) {
         const rules = newValues[field as keyof typeof PAYLOAD_FIELDS]
         rules.forEach((rule, index) => {
@@ -1876,7 +2356,8 @@ export function decodeVisualConfigYaml(yamlContent: string, apiKeysSourceYaml: s
 export const VISUAL_INTEGER_FIELDS: Record<string, { path: string[]; minimum: number; maximum: number }> = {
     port: { path: ['port'], minimum: 1, maximum: 65535 },
     tlsHttpRedirectPort: { path: ['tls', 'http-redirect-port'], minimum: 0, maximum: 65535 },
-    rmCheckInterval: { path: ['remote-management', 'check-interval'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    // Both update schedulers convert the interval from minutes to a Go time.Duration.
+    rmCheckInterval: { path: ['remote-management', 'check-interval'], minimum: 0, maximum: 153722867 },
     logsMaxTotalSizeMb: { path: ['logs-max-total-size-mb'], minimum: Number.MIN_SAFE_INTEGER, maximum: 8796093022207 },
     imageArtifactCacheRetentionDays: { path: ['image-artifact-cache', 'retention-days'], minimum: 0, maximum: 106751 },
     imageArtifactCacheMaxTotalSizeMb: {
@@ -2711,6 +3192,7 @@ export function encodeVisualConfigYaml(
         }
         doc.contents = doc.createNode({})
     }
+    const sharedValuesBefore     = readSharedYamlValues(doc)
     const currentValues          = decodeVisualConfigYaml(currentYaml).values
     const baselineDoc            = baselineYaml === undefined ? undefined : parseConfigDocument(baselineYaml)
     const merged                 = mergeVisualChanges(currentValues, nextValues, originalBaselineValues)
@@ -2758,6 +3240,9 @@ export function encodeVisualConfigYaml(
             setBooleanInDoc(doc, path, value as boolean)
         } else if (kind === 'list') {
             setStringListInDoc(doc, path, value as string[])
+        } else if (field === 'oauthExcludedModelsText' || field === 'oauthSettingsText' ||
+                   field === 'oauthRequestScopedErrorsText') {
+            setOAuthRulesBlockInDoc(doc, path, value as string)
         } else {
             setYamlBlockTextInDoc(doc, path, value as string, field === 'oauthModelAliasText')
         }
@@ -2852,10 +3337,32 @@ export function encodeVisualConfigYaml(
     setField('clientCodexEnableApplyPatch', ['client', 'codex', 'enable-apply-patch'], 'boolean')
     setField('oauthSettingsText', ['oauth-settings'], 'yaml')
     setField('oauthRequestScopedErrorsText', ['oauth-request-scoped-errors'], 'yaml')
-    setField('codexHeaderDefaultsText', ['codex-header-defaults'], 'yaml')
-    setField('claudeHeaderDefaultsText', ['claude-header-defaults'], 'yaml')
+    for (const [id, draft] of Object.entries(nextValues.yamlFieldEdits)) {
+        const field  = yamlConfigField(id)
+        const before = originalBaselineValues.yamlFields[id]
+        const latest = currentValues.yamlFields[id]
+        if (!field || !canEditYamlConfigField(field, before) || !canEditYamlConfigField(field, latest)) {
+            throw new Error(`${id} is read-only in the form`)
+        }
+        if (draft !== null && typeof draft !== field.kind) {
+            throw new Error(`${id} has an invalid value type`)
+        }
+        if ((draft === null && (latest?.source === 'default' || latest?.source === 'unset')) ||
+            (latest?.source === 'yaml' && latest.value === draft)) {
+            continue
+        }
+        if (!areMergeValuesEqual(latest, before)) {
+            throw new Error(`${id} changed on the server; reload configuration before editing it`)
+        }
+        // Null restores optional defaults while preserving the existing key's comments.
+        doc.setIn(field.path, draft)
+    }
     setField('rmTrustedProxies', ['remote-management', 'trusted-proxies'], 'list')
-    setField('pluginStoreSources', ['plugins', 'store-sources'], 'list')
+    if (shouldWriteAtomicField('pluginStoreSources', ['plugins', 'store-sources'])) {
+        preparePath(['plugins', 'store-sources'])
+        syncStringListInDoc(doc, ['plugins', 'store-sources'], values.pluginStoreSources)
+        deleteIfMapEmpty(doc, ['plugins'])
+    }
     if (dirty('codexLiveMediaRelayICEServers')) {
         syncLiveICEServers(
             doc, nextValues.codexLiveMediaRelayICEServers,
@@ -2932,22 +3439,15 @@ export function encodeVisualConfigYaml(
     }
 
     if (shouldWriteAtomicField('apiKeyRules', ['api-key-rules'])) {
-        const rules = serializeApiKeyRulesForYaml(values.apiKeyRules)
-        if (Object.keys(rules).length) {
-            doc.setIn(['api-key-rules'], rules)
-        } else {
-            doc.deleteIn(['api-key-rules'])
-        }
+        syncApiKeyRules(doc, currentValues.apiKeyRules, values.apiKeyRules)
     }
     if (shouldWriteAtomicField('pluginStoreAuth', ['plugins', 'store-auth'])) {
-        preparePath(['plugins', 'store-auth'])
-        const rules = serializePluginStoreAuthForYaml(values.pluginStoreAuth)
-        if (rules.length) {
-            doc.setIn(['plugins', 'store-auth'], rules)
-        } else {
-            doc.deleteIn(['plugins', 'store-auth'])
-            deleteIfMapEmpty(doc, ['plugins'])
+        const prior = new Map(originalBaselineValues.pluginStoreAuth.map((rule) => [rule.id, rule]))
+        if (values.pluginStoreAuth.some((rule) => isPluginStoreAuthMatchMissing(rule, prior.get(rule.id)))) {
+            throw new Error('plugins.store-auth: Match URL prefix is required')
         }
+        preparePath(['plugins', 'store-auth'])
+        syncPluginStoreAuthRules(doc, currentValues.pluginStoreAuth, values.pluginStoreAuth)
     }
     if (shouldWriteAtomicField('corsAllowedOrigins', ['cors-allowed-origins'])) {
         setStringListInDoc(doc, ['cors-allowed-origins'], values.corsAllowedOrigins.split(','))
@@ -2999,6 +3499,13 @@ export function encodeVisualConfigYaml(
                 doc, section, currentValues[key], originalBaselineValues[key], nextValues[key],
                 isSeq(baselineSequence) ? baselineSequence : undefined,
             )
+        }
+    }
+    if (sharedValuesBefore.size) {
+        for (const [alias, value] of readSharedYamlValues(doc)) {
+            if (sharedValuesBefore.has(alias) && sharedValuesBefore.get(alias) !== value) {
+                throw new SharedConfigYamlValueError()
+            }
         }
     }
     return preservePayloadConditionScalarText(doc, doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 }))

@@ -1,10 +1,22 @@
+import {
+    listYamlConfigFields,
+    VISUAL_YAML_FIELDS,
+    type YamlConfigField,
+    yamlConfigField,
+} from '@/hooks/visualConfigFields'
+import type {YamlConfigFieldState, YamlConfigFieldStates} from '@/types/visualConfig'
+
 export type VisualSectionId = 'connectivity' | 'network' | 'logging' | 'quota' | 'streaming' | 'advanced' | 'payload'
 
 export interface ConfigFieldSearchEntry {
     fieldId: string
     sectionId: VisualSectionId
     path?: string
+    destination?: string
+    yamlPath?: string
+    sourceField?: YamlConfigField
     labelKey: string
+    label?: string
     qualifierKey?: string
     hintKey?: string
     yamlKeys?: string[]
@@ -92,6 +104,19 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         hintKey: L('sections.remote.secret_key_hint'),
         yamlKeys: ['remote-management', 'secret-key'],
     },
+    ...([
+        ['rmDisableControlPanel', 'disable-control-panel', 'disable_panel'],
+        ['rmAutoUpdatePanel', 'auto-update-panel', 'auto_update_panel'],
+        ['rmAutoUpdateCPA', 'auto-update-cpa', 'auto_update_cpa'],
+        ['rmAutoCheckUpdate', 'auto-check-update', 'auto_check_update'],
+        ['rmCheckInterval', 'check-interval', 'check_interval'],
+        ['rmPanelRepo', 'panel-github-repository', 'panel_repo'],
+        ['rmCpaRepo', 'cpa-github-repository', 'cpa_repo'],
+    ] as const).map(([fieldId, key, label]) => ({
+        fieldId, sectionId: 'connectivity' as const, labelKey: L(`sections.remote.${label}`),
+        yamlKeys: ['remote-management', key],
+        keywords: fieldId === 'rmAutoUpdatePanel' ? ['remote-management.disable-auto-update-panel'] : undefined,
+    })),
     {
         fieldId: 'authDir',
         sectionId: 'connectivity',
@@ -106,6 +131,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         hintKey: L('api_keys.policy_hint'),
         yamlKeys: [
             'api-keys',
+            'api-key-aliases',
             'api-key-rules',
             'blocked-models',
             'providers',
@@ -204,6 +230,21 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         labelKey: L('sections.network.session_affinity_subagents'),
         hintKey: L('sections.network.session_affinity_subagents_desc'),
         yamlKeys: ['routing', 'session-affinity-subagents'],
+    },
+    {
+        fieldId: 'routingSessionAffinityTTL', sectionId: 'network',
+        labelKey: L('sections.network.session_affinity_ttl'), hintKey: L('sections.network.session_affinity_ttl_hint'),
+        yamlKeys: ['routing', 'session-affinity-ttl'],
+    },
+    {
+        fieldId: 'enableGeminiCliEndpoint', sectionId: 'network',
+        labelKey: L('sections.network.enable_gemini_cli_endpoint'),
+        hintKey: L('sections.network.enable_gemini_cli_endpoint_desc'), yamlKeys: ['enable-gemini-cli-endpoint'],
+    },
+    {
+        fieldId: 'passthroughHeaders', sectionId: 'network',
+        labelKey: L('sections.network.passthrough_headers'),
+        hintKey: L('sections.network.passthrough_headers_desc'), yamlKeys: ['passthrough-headers'],
     },
     {
         fieldId: 'wsAuth',
@@ -311,8 +352,23 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         sectionId: 'logging',
         labelKey: L('sections.system.usage_retention_days'),
         hintKey: L('sections.system.usage_retention_hint'),
-        yamlKeys: ['usage-retention-days'],
+        yamlKeys: ['usage-retention', 'days'],
+        keywords: ['usage-retention-days'],
     },
+    ...([
+        ['pprofAddr', ['pprof', 'addr'], 'pprof_addr'],
+        ['usageStatisticsFile', ['usage-statistics-file'], 'usage_statistics_file'],
+        ['usageRetentionMaxDbSizeMb', ['usage-retention', 'max-db-size-mb'], 'usage_retention_max_db_size'],
+        [
+            'usageRetentionWarningThresholdPct',
+            ['usage-retention', 'warning-threshold-pct'],
+            'usage_retention_warning_threshold',
+        ],
+        ['modelRefreshInterval', ['model-refresh-interval'], 'model_refresh_interval'],
+    ] as const).map(([fieldId, yamlKeys, label]) => ({
+        fieldId, sectionId: 'logging' as const, yamlKeys: [...yamlKeys],
+        labelKey: L(`sections.system.${label}`),
+    })),
     {
         fieldId: 'autoRefreshInterval',
         sectionId: 'logging',
@@ -325,16 +381,27 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         fieldId: 'quotaSwitchProject',
         sectionId: 'quota',
         labelKey: L('sections.quota.switch_project'),
-        hintKey: L('sections.quota.switch_project_desc'),
+        hintKey: L('quota_switch_inactive_hint'),
+        qualifierKey: 'config_management.yaml_fields.legacy',
         yamlKeys: ['quota-exceeded', 'switch-project'],
     },
     {
         fieldId: 'quotaSwitchPreviewModel',
         sectionId: 'quota',
         labelKey: L('sections.quota.switch_preview_model'),
-        hintKey: L('sections.quota.switch_preview_model_desc'),
+        hintKey: L('quota_switch_inactive_hint'),
+        qualifierKey: 'config_management.yaml_fields.legacy',
         yamlKeys: ['quota-exceeded', 'switch-preview-model'],
     },
+    ...([
+        ['quotaRefreshEnabled', 'enabled', 'credentials.quota_auto_refresh'],
+        ['quotaRefreshInterval', 'interval', 'credentials.quota_interval_minutes'],
+        ['quotaRefreshMaxInterval', 'max-interval', 'credentials.quota_max_interval_minutes'],
+    ] as const).map(([fieldId, yamlKey, labelKey]) => ({
+        fieldId, sectionId: 'quota' as const, path: '/credentials',
+        destination: '/credentials?tab=inspection#quota-refresh-settings',
+        labelKey, yamlKeys: ['quota-refresh', yamlKey],
+    })),
     {
         fieldId: 'quotaAntigravityCredits',
         sectionId: 'quota',
@@ -466,6 +533,7 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
             'xai-api-key',
             'openai-compatibility',
         ],
+        keywords: ['use-max-completion-tokens', 'max_completion_tokens', 'max_tokens'],
     },
     {
         fieldId: 'clientCodexEnableApplyPatch', sectionId: 'advanced',
@@ -605,6 +673,11 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
         yamlKeys: ['claude-header-defaults'],
     },
 
+    ...VISUAL_YAML_FIELDS.filter((field) => field.editable || field.owner === 'home')
+                         .map((field) => ({
+                             fieldId: field.id, sectionId: 'advanced' as const, labelKey: '', label: field.id,
+                             yamlKeys: field.path.map(String),
+                         })),
     {
         fieldId: 'payloadDefaultRules',
         sectionId: 'payload',
@@ -649,11 +722,54 @@ const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
 
 const MAX_RESULTS = 8
 
+const SEARCH_BY_ID   = new Map(CONFIG_FIELD_SEARCH_INDEX.map((entry) => [entry.fieldId, entry]))
+const SEARCH_BY_PATH = new Map(CONFIG_FIELD_SEARCH_INDEX.filter((entry) => entry.yamlKeys)
+                                                        .map((entry) => [entry.yamlKeys!.join('.'), entry]))
+
+export function getYamlConfigFieldEntry(field: YamlConfigField, state?: YamlConfigFieldState, pluginsAvailable = false):
+    ConfigFieldSearchEntry | undefined {
+    if (field.owner === 'runtime') {
+        return undefined
+    }
+    const direct     = SEARCH_BY_PATH.get(field.id)
+    const target     = (field.target && SEARCH_BY_ID.get(field.target)) || direct
+    const sourceOnly = field.owner !== 'home' && field.owner !== 'catalog' && field.owner !== 'ignored' &&
+                       (state?.source === 'inherited' || state?.shared || state?.source === 'unsupported' ||
+                        (state?.source === 'redacted' && field.editable))
+    const label      = { yamlPath: field.id, labelKey: '', label: field.id, yamlKeys: field.path.map(String) }
+    const fallback   = { ...label, fieldId: field.id, sectionId: target?.sectionId ?? 'advanced' as const }
+    if (sourceOnly || (field.destination === '/plugins' && (!pluginsAvailable || field.path.length > 2)) ||
+        (field.destination === '/credentials' && field.path.length > 1)) {
+        return { ...fallback, sourceField: field }
+    }
+    if (field.destination) {
+        return direct?.destination === field.destination ? direct :
+            { ...fallback, destination: field.destination }
+    }
+    if (target) {
+        return target === direct ? target : { ...target, ...label }
+    }
+    if (field.owner === 'home' || field.owner === 'ignored') {
+        return undefined
+    }
+    return { ...fallback, sourceField: field }
+}
+
 export function findConfigFieldById(fieldId: string | null | undefined): ConfigFieldSearchEntry | undefined {
     if (!fieldId) {
         return undefined
     }
-    return CONFIG_FIELD_SEARCH_INDEX.find((entry) => entry.fieldId === fieldId)
+    const entry = SEARCH_BY_ID.get(fieldId)
+    const field = yamlConfigField(fieldId)
+    return entry ?? (field && getYamlConfigFieldEntry(field))
+}
+
+const withoutSelectors = (path: string) => path.replace(/\[(?:\d*)\]|\{\*\}/g, '')
+
+export function matchesYamlConfigField(path: string, query: string): boolean {
+    const lower = path.toLowerCase()
+    const plain = withoutSelectors(query)
+    return lower.includes(query) || (plain !== '' && withoutSelectors(lower).includes(plain))
 }
 
 const buildYamlSearchText = (yamlKeys: string[] = []) => {
@@ -667,29 +783,50 @@ const buildYamlSearchText = (yamlKeys: string[] = []) => {
     ].join(' ')
 }
 
-export function searchConfigFields(query: string, t: Translate): ConfigFieldSearchEntry[] {
+export function searchConfigFields(
+    query: string, t: Translate, states: YamlConfigFieldStates = {},
+    pluginsAvailable                                           = false,
+): ConfigFieldSearchEntry[] {
     const q = query.trim().toLowerCase()
     if (!q) {
         return []
     }
 
-    const scored: Array<{ entry: ConfigFieldSearchEntry; score: number }> = []
-
+    const candidates = new Map<string, ConfigFieldSearchEntry>()
     for (const entry of CONFIG_FIELD_SEARCH_INDEX) {
-        const label     = t(entry.labelKey).toLowerCase()
+        const field = yamlConfigField(entry.yamlKeys?.join('.') ?? '')
+        if (!field) {
+            candidates.set(entry.fieldId, entry)
+        }
+    }
+    for (const field of listYamlConfigFields(states)) {
+        const entry = getYamlConfigFieldEntry(field, states[field.id], pluginsAvailable)
+        if (!entry) {
+            continue
+        }
+        candidates.set(entry.yamlPath ?? entry.fieldId, entry)
+    }
+
+    const scored: Array<{ entry: ConfigFieldSearchEntry; score: number }> = []
+    for (const entry of candidates.values()) {
+        const label     = (entry.label ?? t(entry.labelKey)).toLowerCase()
         const qualifier = entry.qualifierKey ? t(entry.qualifierKey).toLowerCase() : ''
         const hint      = entry.hintKey ? t(entry.hintKey).toLowerCase() : ''
-        const yaml      = buildYamlSearchText(entry.yamlKeys)
+        const path      = (entry.yamlPath ?? entry.yamlKeys?.join('.') ?? '').toLowerCase()
         const keywords  = (entry.keywords ?? []).join(' ').toLowerCase()
 
         let score = Number.POSITIVE_INFINITY
-        if (label.startsWith(q)) {
+        if (path === q) {
+            score = -2
+        } else if (withoutSelectors(path) === q || entry.yamlKeys?.some((key) => key.toLowerCase() === q)) {
+            score = -1
+        } else if (label.startsWith(q)) {
             score = 0
         } else if (label.includes(q)) {
             score = 1
         } else if (qualifier.includes(q) || keywords.includes(q)) {
             score = 2
-        } else if (yaml.includes(q)) {
+        } else if (path && (matchesYamlConfigField(path, q) || buildYamlSearchText(entry.yamlKeys).includes(q))) {
             score = 3
         } else if (hint.includes(q)) {
             score = 4
@@ -700,7 +837,10 @@ export function searchConfigFields(query: string, t: Translate): ConfigFieldSear
         }
     }
 
-    scored.sort((a, b) => a.score - b.score)
+    scored.sort((a, b) => a.score -
+                          b.score ||
+                          Number(Boolean(a.entry.sourceField)) -
+                          Number(Boolean(b.entry.sourceField)))
     return scored.slice(0, MAX_RESULTS).map((item) => item.entry)
 }
 
@@ -731,8 +871,7 @@ export function getVisualConfigSectionId(field: string): VisualSectionId | undef
         oauthSettingsText: 'advanced',
         oauthRequestScopedErrorsText: 'advanced',
         oauthModelAliasText: 'advanced',
-        codexHeaderDefaultsText: 'advanced',
-        claudeHeaderDefaultsText: 'advanced',
+        yamlFieldEdits: 'advanced',
         streaming: 'streaming',
     }
     return groups[field] ?? findConfigFieldById(field)?.sectionId

@@ -114,6 +114,7 @@ test(
                 React,
                 VisualConfigEditor,
                 scope: 'oauth',
+                pluginsAvailable: false,
                 visualValues: DEFAULT_VISUAL_VALUES,
                 baselineValues: DEFAULT_VISUAL_VALUES,
                 visualValidationErrors: {},
@@ -125,7 +126,9 @@ test(
                 runtimeInfo: {},
                 fieldJumpRequest: undefined,
                 handleVisualChange: (value: unknown) => changes.push(value),
-                navigate: (value: unknown) => navigations.push(value),
+                handleFieldNavigation: sourceCallback('pages/ConfigPage.tsx', 'handleFieldNavigation', {
+                    scope: 'oauth', navigate: (value: unknown) => navigations.push(value),
+                }),
             },
         )
         expect(editor.props.scope).toBe('oauth')
@@ -208,7 +211,7 @@ test('image day limits and legitimate zero/negative semantics remain explicit', 
 })
 
 test(
-    'actual retention payload rejects blank/overflow inputs visibly and preserves valid zero and maximum values',
+    'actual retention payload enforces the dedicated endpoint’s threshold and capacity ranges',
     () => {
         const toPayload = sourceCallback<(draft: {
             daysEnabled: boolean;

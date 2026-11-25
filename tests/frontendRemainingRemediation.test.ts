@@ -1,5 +1,5 @@
 import {Sheet} from '@/components/common/Sheet'
-import {getVisualConfigSectionId} from '@/components/config/configSearchIndex'
+import {findConfigFieldById, getVisualConfigSectionId} from '@/components/config/configSearchIndex'
 import {shouldFinalizeOAuthAttempt} from '@/components/credentials/oauthAttempts'
 import {Button} from '@/components/ui/Button'
 import {Pagination} from '@/components/ui/Pagination'
@@ -237,14 +237,16 @@ describe('remaining frontend remediation contracts', () => {
     })
 
     test(
-        'maps every visual control except the three migrated quota source fields and renders section state accessibly',
+        'maps controls to their sections, directs quota refresh to inspection, and keeps snapshots out of dirty sections',
         () => {
-            expect(Object.keys(DEFAULT_VISUAL_VALUES).filter((field) => !getVisualConfigSectionId(field))).toEqual(
-                [
-                    'quotaRefreshEnabled',
-                    'quotaRefreshInterval',
-                    'quotaRefreshMaxInterval',
-                ])
+            expect(Object.keys(DEFAULT_VISUAL_VALUES).filter((field) => !getVisualConfigSectionId(field)))
+                .toEqual(['yamlFields'])
+            for (const field of ['quotaRefreshEnabled', 'quotaRefreshInterval', 'quotaRefreshMaxInterval']) {
+                expect(findConfigFieldById(field)).toMatchObject({
+                                                                     sectionId: 'quota',
+                                                                     destination: '/credentials?tab=inspection#quota-refresh-settings',
+                                                                 })
+            }
             const dirtySections = sourceCallback<() => Set<string>>(
                 'components/config/VisualConfigEditor.tsx',
                 'dirtySections',
@@ -253,6 +255,7 @@ describe('remaining frontend remediation contracts', () => {
                         ...DEFAULT_VISUAL_VALUES,
                         port: '9001',
                         requestRetry: '4',
+                        yamlFields: { 'quota-refresh.enabled': { source: 'yaml', value: true } },
                     },
                     baselineValues: DEFAULT_VISUAL_VALUES,
                     // noinspection JSUnusedGlobalSymbols

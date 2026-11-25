@@ -88,6 +88,25 @@ for (const language of ['en', 'zh-CN', 'zh-TW', 'ru']) {
     })
 }
 
+test('stale visual parse errors do not disable an edited source draft', () => {
+    const t = i18n.getFixedT('en')
+    for (const activeTab of ['source', 'visual']) {
+        const actions = sourceInitializer<ReactElement>('pages/ConfigPage.tsx', 'floatingActions', {
+            ...defaultState, React, t, styles, activeTab, isDirty: true, hasVisualModeError: true,
+            IconCheck, IconRefreshCw, IconX, shouldShowFloatingActions: true, floatingActionsRef: { current: null },
+            getStatusText: () => '', getStatusClass: () => '', diffModalOpen: false,
+            handleDiscard: () => {
+            }, handleReload: () => {
+            }, handleSave: () => {
+            },
+        })
+        const markup  = renderToStaticMarkup(actions)
+        const save    = markup.match(/<button\b[^>]*aria-label="Save"[^>]*>/)?.[0] ?? ''
+        expect(save).toContain('aria-label="Save"')
+        expect(save.includes('disabled=""')).toBe(activeTab === 'visual')
+    }
+})
+
 test('shared modal focuses expanded payload text and returns focus to the invoking input', () => {
     class Element {
         // noinspection JSUnusedGlobalSymbols

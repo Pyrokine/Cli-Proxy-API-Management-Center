@@ -1,6 +1,6 @@
 import {getVisualConfigSectionId, searchConfigFields} from '@/components/config/configSearchIndex'
 import {getVisualConfigValidationErrors} from '@/hooks/useVisualConfig'
-import {decodeVisualConfigYaml, encodeVisualConfigYaml} from '@/hooks/visualConfigCodec'
+import {decodeVisualConfigYaml, encodeVisualConfigYaml, patchKnownYamlFields} from '@/hooks/visualConfigCodec'
 import {apiClient} from '@/services/api/client'
 import {configFileApi} from '@/services/api/configFile'
 import type {RequestScopedErrorRule} from '@/types'
@@ -13,7 +13,7 @@ import React, {type ReactElement, type ReactNode} from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import {Trans} from 'react-i18next'
 import ts from 'typescript'
-import {parse, parseDocument, visit} from 'yaml'
+import {isMap, isSeq, parse, parseDocument, visit} from 'yaml'
 import i18n from '../src/i18n'
 import {sourceCallback, sourceExpression} from './sourceCallbacks'
 
@@ -72,6 +72,7 @@ function editor(props: EditorProps, channel = '', scope: Record<string, unknown>
             }),
             parseDocument,
             visit,
+            isMap, isSeq, patchKnownYamlFields,
             Input,
             Button,
             Modal,
@@ -352,11 +353,11 @@ test('all eight field terms reach registered configuration search targets and th
 })
 
 test(
-    'provider-scoped OAuth controls edit names, aliases and fork while preserving unknown fields and sibling providers',
+    'OAuth controls edit alias metadata while preserving unknown fields and sibling providers',
     () => {
         const source  = (
             'oauth-model-alias:\n  codex:\n    - name: Original\n      alias:' +
-            ' Public\n      future: keep\n  claude: [{name: Other, alias: ' +
+            ' Public\n      display-name: Current name\n      future: keep\n  claude: [{name: Other, alias: ' +
             'OtherPublic}]\nunrelated: keep\n'
         )
         const decoded = decodeVisualConfigYaml(source)
@@ -376,13 +377,27 @@ test(
                   )
             ;(input.props.onChange as (event: unknown) => void)({ target: { value: next } })
         }
-        let tree   = editor({
-                                kind: 'aliases', value, disabled: false, onChange: (text) => {
+        let tree          = editor({
+                                       kind: 'aliases', value, disabled: false, onChange: (text) => {
                 value = text
             },
-                            })
-        const fork = find(tree, (node) => node.type === 'input' && node.props.type === 'checkbox')
-        ;(fork.props.onChange as (event: unknown) => void)({ target: { checked: true } })
+                                   })
+        const displayName = find(tree, (node) => node.type === Input &&
+                                                 node.props.label === 'ai_providers.model_display_name_label')
+        expect(displayName.props.value).toBe('Current name')
+        ;(displayName.props.onChange as (event: unknown) => void)({ target: { value: 'Shown name' } })
+        for (const label of ['oauth_model_alias.alias_fork_label', 'ai_providers.model_force_mapping_label']) {
+            tree           = editor({
+                                        kind: 'aliases', value, disabled: false, onChange: (text) => {
+                    value = text
+                },
+                                    })
+            const field    = find(tree, (node) => node.type === 'label' && Array.isArray(node.props.children) &&
+                                                  node.props.children.includes(label))
+            const checkbox = find(field.props.children as ReactNode, (node) => node.type === 'input')
+            expect(checkbox.props.checked).toBe(false)
+            ;(checkbox.props.onChange as (event: unknown) => void)({ target: { checked: true } })
+        }
         const next = { ...decoded.values, oauthModelAliasText: value }
         expect(getVisualConfigValidationErrors(next, decoded.values).oauthModelAliasText).toBeUndefined()
         const saved = parse(encodeVisualConfigYaml(source, next, decoded.values, decoded.apiKeysStorage, source))
@@ -390,7 +405,9 @@ test(
                                                              {
                                                                  name: 'Changed',
                                                                  alias: 'ChangedPublic',
+                                                                 'display-name': 'Shown name',
                                                                  fork: true,
+                                                                 'force-mapping': true,
                                                                  future: 'keep',
                                                              },
                                                          ])

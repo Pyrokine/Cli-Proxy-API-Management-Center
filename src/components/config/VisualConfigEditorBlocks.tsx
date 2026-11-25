@@ -10,9 +10,7 @@ import {
     VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS,
     VISUAL_CONFIG_PROTOCOL_OPTIONS,
 } from '@/hooks/useVisualConfig'
-import {getPayloadModelHeaderError} from '@/hooks/visualConfigCodec'
-import {apiKeysApi} from '@/services/api/apiKeys'
-import {apiClient} from '@/services/api/client'
+import {getPayloadModelHeaderError, isPluginStoreAuthMatchMissing} from '@/hooks/visualConfigCodec'
 import {type ModelCatalogRow, modelsApi} from '@/services/api/models'
 import {useAuthStore, useConfigStore, useNotificationStore} from '@/stores'
 import type {
@@ -894,109 +892,25 @@ export const ApiKeysCardEditor =
 
                          const showSearch = apiKeys.length >= 6
 
-                         const query = searchQuery.trim()
-
-                         const searchGeneration = apiClient.getAuthGeneration()
-
-                         const needsSavedSearch = Boolean(query) &&
-                                                  apiKeys.some((key) => CONFIG_SECRET_PLACEHOLDER.test(
-                                                      key))
-
-                         const [savedKeySearch, setSavedKeySearch] = useState<{
-                                                                                  query: string;
-                                                                                  value: string;
-                                                                                  aliasesText: string;
-                                                                                  generation: number;
-                                                                                  signal: AbortSignal;
-                                                                                  matches: Set<string>;
-                                                                                  error: string
-                                                                              } | null>(null)
-
-                         const currentSavedKeySearch = savedKeySearch?.query ===
-                                                       query &&
-                                                       savedKeySearch.value ===
-                                                       value &&
-                                                       savedKeySearch.aliasesText ===
-                                                       aliasesText &&
-                                                       savedKeySearch.generation ===
-                                                       searchGeneration &&
-                                                       !savedKeySearch.signal.aborted ?
-                                                       savedKeySearch :
-                                                       null
-
-                         useEffect(
-                             () => {
-                                 if (!needsSavedSearch) {
-                                     return
-                                 }
-                                 const controller      = new AbortController()
-                                 const snapshot        = {
-                                     query,
-                                     value,
-                                     aliasesText,
-                                     generation: searchGeneration,
-                                     signal: controller.signal,
-                                 }
-                                 const isCurrent       = () => !controller.signal.aborted &&
-                                                               searchGeneration ===
-                                                               apiClient.getAuthGeneration()
-                                 const searchSavedKeys = async () => {
-                                     try {
-                                         if (connectionStatus !== 'connected' || !apiBase) {
-                                             // noinspection ExceptionCaughtLocallyJS
-                                             throw new Error('Disconnected')
-                                         }
-                                         const matches = await apiKeysApi.search(
-                                             query,
-                                             { signal: controller.signal },
-                                         )
-                                         if (isCurrent()) {
-                                             setSavedKeySearch({
-                                                                   ...snapshot,
-                                                                   matches: new Set(matches),
-                                                                   error: '',
-                                                               })
-                                         }
-                                     } catch {
-                                         if (isCurrent()) {
-                                             setSavedKeySearch({
-                                                                   ...snapshot,
-                                                                   matches: new Set(),
-                                                                   error: visualT('api_keys.search_failed'),
-                                                               })
-                                         }
-                                     }
-                                 }
-                                 void searchSavedKeys()
-                                 return () => controller.abort()
-                             },
-                             [
-                                 apiBase,
-                                 connectionStatus,
-                                 query,
-                                 value,
-                                 aliasesText,
-                                 searchGeneration,
-                                 needsSavedSearch,
-                                 visualT,
-                             ],
-                         )
+                         const keyLabel       = visualT('api_keys.input_label')
+                         const hiddenKeyLabel = visualT('api_keys.saved_key_hidden')
 
                          const filteredKeys = useMemo(() => {
-                             const q = searchQuery.trim().toLowerCase()
-                             if (!q) {
-                                 return apiKeys.map((key, i) => ({ key, index: i }))
+                             const query = searchQuery.trim().toLowerCase()
+                             const rows  = apiKeys.map((key, index) => ({ key, index }))
+                             if (!query) {
+                                 return rows
                              }
-                             return apiKeys
-                                 .map((key, i) => ({ key, index: i }))
-                                 .filter(({ key }) => {
-                                     const alias = aliases[key]
-                                     return (!CONFIG_SECRET_PLACEHOLDER.test(key) &&
-                                             key.toLowerCase().includes(q)) ||
-                                            (alias?.toLowerCase().includes(q) ?? false) ||
-                                            Boolean(currentSavedKeySearch?.matches.has(key))
-                                 })
-                         }, [apiKeys, searchQuery, aliases, currentSavedKeySearch])
+                             return rows.filter(({ key, index }) => {
+                                 const visible = [aliases[key] || keyLabel, `#${index + 1}`]
+                                 if (CONFIG_SECRET_PLACEHOLDER.test(key)) {
+                                     visible.push(hiddenKeyLabel)
+                                 } else {
+                                     visible.push(key, maskApiKey(key))
+                                 }
+                                 return visible.some((text) => text.toLowerCase().includes(query))
+                             })
+                         }, [apiKeys, searchQuery, aliases, keyLabel, hiddenKeyLabel])
 
                          useEffect(() => {
                              let cancelled = false
@@ -1597,12 +1511,6 @@ export const ApiKeysCardEditor =
                                      />
                                  )}
 
-                                 {needsSavedSearch &&
-                                  !currentSavedKeySearch &&
-                                  <div role='status'>{t('common.loading')}</div>}
-                                 {currentSavedKeySearch?.error &&
-                                  <div role='alert'>{currentSavedKeySearch.error}</div>}
-
                                  {apiKeys.length === 0 ? (
                                      <div className={styles.emptyState}>{visualT('api_keys.empty')}</div>
                                  ) : (
@@ -1618,26 +1526,15 @@ export const ApiKeysCardEditor =
                                                               <div className='pill'>#{item.index + 1}</div>
                                                               <div className='item-title'>
                                                                   {highlightText(
-                                                                      aliases[item.key] ||
-                                                                      visualT('api_keys.input_label'),
+                                                                      aliases[item.key] || keyLabel,
                                                                       searchQuery,
                                                                   )}
                                                               </div>
                                                               <div className='item-subtitle'>
-                                                                  {redacted
-                                                                   ?
-                                                                   currentSavedKeySearch?.matches.has(item.key)
-                                                                   ?
-                                                                   <mark
-                                                                       className={styles.searchHighlight}>{visualT(
-                                                                       'api_keys.saved_key_hidden')}</mark>
-                                                                   :
-                                                                   visualT('api_keys.saved_key_hidden')
-                                                                   :
-                                                                   highlightText(
-                                                                       maskApiKey(String(item.key || '')),
-                                                                       searchQuery,
-                                                                   )}
+                                                                  {highlightText(
+                                                                      redacted ? hiddenKeyLabel : maskApiKey(item.key),
+                                                                      searchQuery,
+                                                                  )}
                                                               </div>
                                                               <div className={styles.apiKeyModelLimitSummary}>
                                                                   {modelRules[item.key]?.blockedModels?.length
@@ -2385,10 +2282,12 @@ const createPluginStoreAuthRule = (): PluginStoreAuthRule => ({
 
 export const PluginStoreAuthEditor = memo(function PluginStoreAuthEditor({
                                                                              value,
+                                                                             baseline,
                                                                              disabled,
                                                                              onChange,
                                                                          }: {
     value: PluginStoreAuthRule[]
+    baseline?: PluginStoreAuthRule[]
     disabled?: boolean
     onChange: (next: PluginStoreAuthRule[]) => void
 }) {
@@ -2437,18 +2336,20 @@ export const PluginStoreAuthEditor = memo(function PluginStoreAuthEditor({
                             </Button>
                         </div>
                         <div className={styles.storeAuthGrid}>
-                            <label className={styles.storeAuthField}>
-                                <span>{t('config_management.visual.sections.system.store_auth_match', {
+                            <Input
+                                label={t('config_management.visual.sections.system.store_auth_match', {
                                     defaultValue: 'Match URL prefix',
-                                })}</span>
-                                <input
-                                    className='input'
-                                    value={rule.match}
-                                    placeholder='https://api.github.com/repos/owner/repo/releases/'
-                                    disabled={disabled}
-                                    onChange={(event) => updateRule(rule.id, { match: event.target.value })}
-                                />
-                            </label>
+                                })}
+                                value={rule.match}
+                                placeholder='https://api.github.com/repos/owner/repo/releases/'
+                                disabled={disabled}
+                                required
+                                error={isPluginStoreAuthMatchMissing(rule, baseline?.find(({ id }) => id === rule.id))
+                                       ? t('config_management.visual.validation.store_auth_match_required', {
+                                        defaultValue: 'Enter a URL prefix or delete the rule.',
+                                    }) : undefined}
+                                onChange={(event) => updateRule(rule.id, { match: event.target.value })}
+                            />
                             <label className={styles.storeAuthField}>
                                 <span>{t('config_management.visual.sections.system.store_auth_type', {
                                     defaultValue: 'Auth type',

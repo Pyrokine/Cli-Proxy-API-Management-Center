@@ -1,5 +1,6 @@
 import {ConfigSection} from '@/components/config/ConfigSection'
 import {OAuthConfigFields} from '@/components/config/OAuthConfigFields'
+import {Button} from '@/components/ui/Button'
 import {Collapsible} from '@/components/ui/Collapsible'
 import {
     IconCode,
@@ -16,6 +17,7 @@ import {
 import {Input} from '@/components/ui/Input'
 import {Select} from '@/components/ui/Select'
 import {ToggleSwitch} from '@/components/ui/ToggleSwitch'
+import {VISUAL_YAML_FIELDS, yamlConfigField} from '@/hooks/visualConfigFields'
 import {apiClient} from '@/services/api/client'
 import {TIMEZONE_OPTIONS, useTimezoneStore} from '@/stores/useTimezoneStore'
 import type {
@@ -36,7 +38,9 @@ import {useTranslation} from 'react-i18next'
 import {
     configFieldDomId,
     type ConfigFieldSearchEntry,
+    findConfigFieldById,
     getVisualConfigSectionId,
+    getYamlConfigFieldEntry,
     searchConfigFields,
     type VisualSectionId,
 } from './configSearchIndex'
@@ -49,6 +53,22 @@ import {
     PluginStoreAuthEditor,
     StringListEditor,
 } from './VisualConfigEditorBlocks'
+import {
+    ConfigYamlFieldCatalog,
+    YamlConfigFieldInput,
+    YamlConfigFieldMeta,
+    YamlConfigFieldRows,
+} from './YamlConfigFields'
+
+const HOME_OBSERVATIONS    = [
+    { id: 'credential-in-flight', label: 'in_flight' },
+    { id: 'credential-concurrency', label: 'credential_concurrency' },
+].map((group) => ({
+    ...group, fields: VISUAL_YAML_FIELDS.filter((field) =>
+                                                    field.path[0] === group.id && field.path.length === 2),
+}))
+const CLAUDE_HEADER_FIELDS = VISUAL_YAML_FIELDS.filter((field) => field.path[0] === 'claude-header-defaults')
+const CODEX_HEADER_FIELDS  = VISUAL_YAML_FIELDS.filter((field) => field.path[0] === 'codex-header-defaults')
 
 const EDITOR_MODE_STORAGE_KEY = 'config-management:editor-mode'
 
@@ -63,6 +83,7 @@ type VisualSection = {
 interface VisualConfigEditorProps {
     values: VisualConfigValues
     scope?: 'oauth' | 'model-aliases'
+    pluginsAvailable?: boolean
     onNavigateField?: (entry: ConfigFieldSearchEntry) => void
     baselineValues?: VisualConfigValues
     validationErrors?: VisualConfigValidationErrors
@@ -129,7 +150,7 @@ function Divider() {
 
 function FieldAnchor({ fieldId, children }: { fieldId: string; children: ReactNode }) {
     return (
-        <div id={configFieldDomId(fieldId)} className={styles.fieldAnchor}>
+        <div id={configFieldDomId(fieldId)} className={styles.fieldAnchor} tabIndex={-1}>
             {children}
         </div>
     )
@@ -248,6 +269,7 @@ function FieldMeta({ children, tone = 'default' }: { children: ReactNode; tone?:
 export function VisualConfigEditor({
                                        values,
                                        scope,
+                                       pluginsAvailable,
                                        onNavigateField,
                                        baselineValues,
                                        validationErrors,
@@ -271,8 +293,6 @@ export function VisualConfigEditor({
         })),
         [t],
     )
-    const checkIntervalLabelId                      = useId()
-    const checkIntervalHintId                       = `${checkIntervalLabelId}-hint`
     const routingStrategyLabelId                    = useId()
     const routingStrategyHintId                     = `${routingStrategyLabelId}-hint`
     const disableImageGenerationLabelId             = useId()
@@ -295,6 +315,9 @@ export function VisualConfigEditor({
     const nonstreamKeepaliveHintId                  = `${nonstreamKeepaliveInputId}-hint`
     const nonstreamKeepaliveErrorId                 = `${nonstreamKeepaliveInputId}-error`
     const [mode, setMode]                           = useState<VisualConfigEditorMode>(() => {
+        if (scope) {
+            return 'full'
+        }
         const saved = localStorage.getItem(EDITOR_MODE_STORAGE_KEY)
         return saved === 'full' ? 'full' : 'simple'
     })
@@ -326,7 +349,10 @@ export function VisualConfigEditor({
     const ownerPath            = scope === 'oauth' ?
                                  '/credentials/oauth-config' :
                                  scope === 'model-aliases' ? '/models/oauth-aliases' : '/config'
-    const searchResults        = useMemo(() => searchConfigFields(searchQuery, t), [searchQuery, t])
+    const searchResults        = useMemo(
+        () => searchConfigFields(searchQuery, t, values.yamlFields, pluginsAvailable),
+        [searchQuery, t, values.yamlFields, pluginsAvailable],
+    )
     const isResultsOpen        = searchOpen && Boolean(searchQuery.trim())
     const effectiveActiveIndex = searchResults.length > 0
                                  ? Math.min(Math.max(activeResultIndex, 0), searchResults.length - 1)
@@ -335,11 +361,13 @@ export function VisualConfigEditor({
     const handleResultJump = useCallback(
         (entry: ConfigFieldSearchEntry) => {
             setSearchOpen(false)
-            if ((entry.path ?? '/config') !== ownerPath) {
-                onNavigateField?.(entry);
+            if (entry.sourceField || entry.destination || (entry.path ?? '/config') !== ownerPath) {
+                onNavigateField?.(entry)
                 return
             }
-            handleModeChange('full')
+            if (ownerPath === '/config') {
+                handleModeChange('full')
+            }
             setActiveSectionId(entry.sectionId)
             setJumpRequest({ fieldId: entry.fieldId, sectionId: entry.sectionId })
         },
@@ -360,6 +388,20 @@ export function VisualConfigEditor({
                                          Number(values.streaming.keepaliveSeconds) <= 0
     const isNonstreamKeepaliveDisabled = !validationErrors?.['streaming.nonstreamKeepaliveInterval'] &&
                                          Number(values.streaming.nonstreamKeepaliveInterval) <= 0
+    const ignoredSpellingHint          = (oldPath: string, currentPath: string) => {
+        const source = values.yamlFields[oldPath]?.source
+        return source && source !== 'default' && source !== 'unset' ?
+               t('config_management.yaml_fields.ignored_spelling_hint', {
+                   oldPath, currentPath, defaultValue: 'CPA ignores {{oldPath}} in the file. Use {{currentPath}} here.',
+               }) : undefined
+    }
+    const nonstreamKeepaliveHint       = [
+        sectionT('streaming.nonstream_keepalive_hint'),
+        ignoredSpellingHint('streaming.nonstream-keepalive-interval', 'nonstream-keepalive-interval'),
+    ]
+        .filter(Boolean).join(' ')
+    const usageThresholdPct            = runtimeInfo?.usageDbSize.status === 'ready' ?
+                                         runtimeInfo.usageDbSize.warningThresholdPct : undefined
 
     const portError                            = getValidationMessage(t, validationErrors?.port)
     const tlsHttpRedirectPortError             = getValidationMessage(t, validationErrors?.tlsHttpRedirectPort)
@@ -606,6 +648,7 @@ export function VisualConfigEditor({
                                             'codexLiveMediaRelayUDPPortMin',
                                             'codexLiveMediaRelayUDPPortMax',
                                             'codexLiveMediaRelayICEServers',
+                                            'pluginStoreAuth',
                                             'oauthModelAliasText',
                                             'oauthExcludedModelsText',
                                             'oauthSettingsText',
@@ -756,9 +799,14 @@ export function VisualConfigEditor({
             return
         }
 
-        const details = element.closest('details') ?? element.querySelector('details')
-        if (details && !details.open) {
-            details.open = true
+        const childDetails = element.querySelector('details')
+        if (childDetails) {
+            childDetails.open = true
+        }
+        let detail = element.closest('details')
+        while (detail) {
+            detail.open = true
+            detail      = detail.parentElement?.closest('details') ?? null
         }
 
         if (highlightTimerRef.current !== null) {
@@ -770,10 +818,11 @@ export function VisualConfigEditor({
         window.requestAnimationFrame(() => {
             element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
             element.classList.add(styles.fieldHighlightActive)
-            element.querySelector<HTMLElement>(
+            const focusTarget = element.querySelector<HTMLElement>(
                 'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), ' +
                 'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-            )?.focus({ preventScroll: true })
+            ) ?? (element.hasAttribute('tabindex') ? element : null)
+            focusTarget?.focus({ preventScroll: true })
         })
         highlightedElRef.current  = element
         highlightTimerRef.current = window.setTimeout(() => {
@@ -844,6 +893,9 @@ export function VisualConfigEditor({
                 value={values.port}
                 onChange={(e) => onChange({ port: e.target.value })}
                 disabled={disabled}
+                hint={!portError && values.port === '0' ? t('config_management.yaml_fields.port_zero_hint', {
+                    defaultValue: 'Port 0 lets the operating system choose a port at startup.',
+                }) : undefined}
                 error={portError}
             />
         </FieldAnchor>
@@ -924,6 +976,80 @@ export function VisualConfigEditor({
             />
         </FieldAnchor>
     )
+
+    const remoteSwitches     = ([
+        ['rmDisableControlPanel', 'disable_panel'],
+        ['rmAutoUpdatePanel', 'auto_update_panel'],
+        ['rmAutoUpdateCPA', 'auto_update_cpa'],
+        ['rmAutoCheckUpdate', 'auto_check_update'],
+    ] as const).map(([field, label]) => (
+        <FieldAnchor key={field} fieldId={field}>
+            <ToggleRow title={sectionT(`remote.${label}`)} description={sectionT(`remote.${label}_desc`)}
+                       checked={values[field]} disabled={disabled}
+                       onChange={(checked) => onChange({ [field]: checked })} />
+            {field === 'rmAutoUpdatePanel' && <YamlConfigFieldMeta
+                field={yamlConfigField('remote-management.auto-update-panel')}
+                state={values.yamlFields['remote-management.auto-update-panel']}
+                pending={baselineValues !== undefined && values[field] !== baselineValues[field]}
+            />}
+        </FieldAnchor>
+    ))
+    const checkInterval      = (
+        <FieldAnchor fieldId='rmCheckInterval'>
+            <YamlConfigFieldInput kind='integer' label={sectionT('remote.check_interval')}
+                                  value={values.rmCheckInterval} placeholder='180' disabled={disabled}
+                                  onChange={(rmCheckInterval) => onChange({ rmCheckInterval })}
+                                  error={getValidationMessage(t, validationErrors?.rmCheckInterval)}
+                                  hint={t('config_management.yaml_fields.check_interval_hint', {
+                                      defaultValue: 'In minutes. Uses 180 below 30 or when not set.',
+                                  })} />
+        </FieldAnchor>
+    )
+    const headerDefaults     = [
+        {
+            id: 'codexHeaderDefaults', fields: CODEX_HEADER_FIELDS,
+            title: sectionT('network.codex_header_defaults'),
+            hint: t('config_management.yaml_fields.codex_headers_hint', {
+                defaultValue: 'Fallback headers for Codex OAuth requests.',
+            }),
+        },
+        {
+            id: 'claudeHeaderDefaults', fields: CLAUDE_HEADER_FIELDS,
+            title: sectionT('network.claude_header_defaults'),
+            hint: t('config_management.yaml_fields.claude_headers_hint', {
+                defaultValue: 'Fallback headers for Claude requests.',
+            }),
+        },
+    ].map(({ id, fields, title, hint }) => (
+        <FieldAnchor key={id} fieldId={id}>
+            <SectionSubsection title={title} description={hint}>
+                <YamlConfigFieldRows fields={fields} states={values.yamlFields} edits={values.yamlFieldEdits}
+                                     disabled={disabled} anchored onSelect={handleResultJump}
+                                     onChange={(yamlFieldEdits) => onChange({ yamlFieldEdits })} />
+            </SectionSubsection>
+        </FieldAnchor>
+    ))
+    const homeObservations   = HOME_OBSERVATIONS.map(({ id, label, fields }) => (
+        <FieldAnchor key={id} fieldId={id}>
+            <Collapsible label={t(`config_management.yaml_fields.${label}`)}
+                         hint={t('config_management.yaml_fields.home_hint')}>
+                <YamlConfigFieldRows fields={fields} states={values.yamlFields} anchored />
+            </Collapsible>
+        </FieldAnchor>
+    ))
+    const pluginConfigsField = yamlConfigField('plugins.configs')!
+    const pluginConfigsEntry = getYamlConfigFieldEntry(
+        pluginConfigsField, values.yamlFields[pluginConfigsField.id],
+        pluginsAvailable,
+    )
+    const ownerLink          = (fieldId: string, path: string) => {
+        const entry = findConfigFieldById(fieldId)
+        return entry && onNavigateField && (
+            <Button type='button' variant='secondary' onClick={() => onNavigateField({ ...entry, path })}>
+                {t('config_management.yaml_fields.open_owner', { defaultValue: 'Open settings' })}
+            </Button>
+        )
+    }
 
     const navContent = (
         <div className={styles.navList}>
@@ -1109,9 +1235,17 @@ export function VisualConfigEditor({
                 ref={searchResultsRef}
             >
                 {searchResults.length > 0 ? (
-                    searchResults.map((entry, index) => (
-                        <button
-                            key={entry.fieldId}
+                    searchResults.map((entry, index) => {
+                        const path   = entry.yamlPath ?? entry.yamlKeys?.join('.') ?? ''
+                        const state  = values.yamlFields[path]
+                        const spec   = entry.sourceField ?? yamlConfigField(state?.instance?.schemaId ?? path)
+                        const field  = state?.instance && spec ? { ...spec, template: undefined } : spec
+                        const action = entry.sourceField ? t('config_management.yaml_fields.open_source') :
+                                       entry.destination || (entry.path && entry.path !== ownerPath) ?
+                                       t('config_management.yaml_fields.open_owner') :
+                                       t(`config_management.visual.sections.${entry.sectionId}.title`)
+                        return <button
+                            key={entry.yamlPath ?? entry.fieldId}
                             type='button'
                             role='option'
                             id={`${searchListboxId}-opt-${index}`}
@@ -1124,19 +1258,18 @@ export function VisualConfigEditor({
                             onMouseEnter={() => setActiveResultIndex(index)}
                             onClick={() => handleResultJump(entry)}
                         >
-                                        <span className={styles.searchResultLabel}>
-                                            {t(entry.labelKey)}
-                                            {entry.qualifierKey ? (
-                                                <span className={styles.searchResultQualifier}>
+                            <span className={styles.searchResultCopy}>
+                                <span className={styles.searchResultLabel}>
+                                    {entry.label ?? t(entry.labelKey)}
+                                    {entry.qualifierKey && <span className={styles.searchResultQualifier}>
                                         {t(entry.qualifierKey)}
-                                                </span>
-                                            ) : null}
-                                        </span>
-                            <span className={styles.searchResultSection}>
-                                            {t(`config_management.visual.sections.${entry.sectionId}.title`)}
-                                        </span>
+                                    </span>}
+                                </span>
+                                {field && <YamlConfigFieldMeta field={field} state={state} compact />}
+                            </span>
+                            <span className={styles.searchResultSection}>{action}</span>
                         </button>
-                    ))
+                    })
                 ) : (
                      <div className={styles.searchEmpty}>
                          {t('config_management.visual.search.no_results')}
@@ -1198,6 +1331,8 @@ export function VisualConfigEditor({
                 </div>
 
                 {searchControls}
+                <ConfigYamlFieldCatalog snapshot={values.yamlFields} onSelect={handleResultJump}
+                                        disabled={disabled} pluginsAvailable={pluginsAvailable} />
             </div>
 
             {
@@ -1384,105 +1519,9 @@ export function VisualConfigEditor({
                                                         </div>
                                                     </div>
                                                 </FieldAnchor>
-                                                <ToggleRow
-                                                    title={sectionT('remote.disable_panel')}
-                                                    description={sectionT(
-                                                        'remote.disable_panel_desc')}
-                                                    checked={values.rmDisableControlPanel}
-                                                    disabled={disabled}
-                                                    onChange={(rmDisableControlPanel) =>
-                                                        onChange({
-                                                                     rmDisableControlPanel,
-                                                                 })
-                                                    }
-                                                />
-                                                <ToggleRow
-                                                    title={sectionT(
-                                                        'remote.auto_update_panel',
-                                                        {
-                                                            defaultValue: 'Auto-install panel updates',
-                                                        },
-                                                    )}
-                                                    description={sectionT(
-                                                        'remote.auto_update_panel_desc',
-                                                        {
-                                                            defaultValue:
-                                                                'Automatically download and install ' +
-                                                                'detected panel updates',
-                                                        },
-                                                    )}
-                                                    checked={values.rmAutoUpdatePanel}
-                                                    disabled={disabled}
-                                                    onChange={(rmAutoUpdatePanel) => onChange({ rmAutoUpdatePanel })}
-                                                />
-                                                <ToggleRow
-                                                    title={sectionT('remote.auto_update_cpa', {
-                                                        defaultValue: 'Auto-update backend',
-                                                    })}
-                                                    description={sectionT(
-                                                        'remote.auto_update_cpa_desc',
-                                                        {
-                                                            defaultValue:
-                                                                'Automatically download and install ' +
-                                                                'detected CPA backend updates',
-                                                        },
-                                                    )}
-                                                    checked={values.rmAutoUpdateCPA}
-                                                    disabled={disabled}
-                                                    onChange={(rmAutoUpdateCPA) => onChange({ rmAutoUpdateCPA })}
-                                                />
+                                                {remoteSwitches}
                                             </SectionGrid>
-                                            <FieldShell
-                                                label={sectionT('remote.check_interval', {
-                                                    defaultValue: 'Check interval',
-                                                })}
-                                                labelId={checkIntervalLabelId}
-                                                hint={sectionT('remote.check_interval_hint', {
-                                                    defaultValue:
-                                                        'How often the backend polls for new versions. ' +
-                                                        '"Off" disables background checks ' +
-                                                        '(manual refresh still works).',
-                                                })}
-                                                hintId={checkIntervalHintId}
-                                            >
-                                                <Select
-                                                    id={`${checkIntervalLabelId}-select`}
-                                                    ariaLabelledBy={checkIntervalLabelId}
-                                                    ariaDescribedBy={checkIntervalHintId}
-                                                    value={values.rmAutoCheckUpdate ?
-                                                           values.rmCheckInterval || '180' :
-                                                           '0'}
-                                                    options={[
-                                                        {
-                                                            value: '0',
-                                                            label: sectionT(
-                                                                'remote.check_interval_off',
-                                                                {
-                                                                    defaultValue: 'Off',
-                                                                },
-                                                            ),
-                                                        },
-                                                        { value: '60', label: '1h' },
-                                                        { value: '180', label: '3h' },
-                                                        { value: '360', label: '6h' },
-                                                        { value: '720', label: '12h' },
-                                                        { value: '1440', label: '24h' },
-                                                    ]}
-                                                    disabled={disabled}
-                                                    onChange={(nextValue) => {
-                                                        // "0" collapses to auto-check-update=false; any positive
-                                                        // value enables and stores the interval in minutes.
-                                                        if (nextValue === '0') {
-                                                            onChange({ rmAutoCheckUpdate: false, rmCheckInterval: '' })
-                                                        } else {
-                                                            onChange({
-                                                                         rmAutoCheckUpdate: true,
-                                                                         rmCheckInterval: nextValue,
-                                                                     })
-                                                        }
-                                                    }}
-                                                />
-                                            </FieldShell>
+                                            {checkInterval}
                                             <SectionGrid>
                                                 <FieldAnchor fieldId='rmSecretKey'>
                                                     <Input
@@ -1496,25 +1535,25 @@ export function VisualConfigEditor({
                                                         hint={sectionT('remote.secret_key_hint')}
                                                     />
                                                 </FieldAnchor>
-                                                <Input
-                                                    label={sectionT('remote.panel_repo')}
-                                                    placeholder={
-                                                        'https://github.com/Pyrokine/' +
-                                                        'Cli-Proxy-API-Management-Center'
-                                                    }
-                                                    value={values.rmPanelRepo}
-                                                    onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
-                                                    disabled={disabled}
-                                                />
-                                                <Input
-                                                    label={sectionT('remote.cpa_repo', {
-                                                        defaultValue: 'CPA GitHub Repository',
-                                                    })}
-                                                    placeholder='https://github.com/Pyrokine/CLIProxyAPI'
-                                                    value={values.rmCpaRepo}
-                                                    onChange={(e) => onChange({ rmCpaRepo: e.target.value })}
-                                                    disabled={disabled}
-                                                />
+                                                <FieldAnchor fieldId='rmPanelRepo'>
+                                                    <Input
+                                                        label={sectionT('remote.panel_repo')}
+                                                        placeholder={'https://github.com/Pyrokine/' +
+                                                                     'Cli-Proxy-API-Management-Center'}
+                                                        value={values.rmPanelRepo} disabled={disabled}
+                                                        hint={ignoredSpellingHint(
+                                                            'remote-management.panel-repo',
+                                                            'remote-management.panel-github-repository',
+                                                        )}
+                                                        onChange={(e) => onChange({ rmPanelRepo: e.target.value })}
+                                                    />
+                                                </FieldAnchor>
+                                                <FieldAnchor fieldId='rmCpaRepo'>
+                                                    <Input label={sectionT('remote.cpa_repo')}
+                                                           placeholder='https://github.com/Pyrokine/CLIProxyAPI'
+                                                           value={values.rmCpaRepo} disabled={disabled}
+                                                           onChange={(e) => onChange({ rmCpaRepo: e.target.value })} />
+                                                </FieldAnchor>
                                             </SectionGrid>
                                         </SectionStack>
                                     </SectionSubsection>
@@ -1643,14 +1682,20 @@ export function VisualConfigEditor({
                                                     'network.cors_allowed_origins_hint')}
                                             />
                                         </FieldAnchor>
-                                        <Input
-                                            label={sectionT('network.session_affinity_ttl')}
-                                            placeholder='1h'
-                                            value={values.routingSessionAffinityTTL}
-                                            onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
-                                            disabled={disabled}
-                                            hint={sectionT('network.session_affinity_ttl_hint')}
-                                        />
+                                        <FieldAnchor fieldId='routingSessionAffinityTTL'>
+                                            <Input
+                                                label={sectionT('network.session_affinity_ttl')}
+                                                placeholder='1h'
+                                                value={values.routingSessionAffinityTTL}
+                                                onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
+                                                disabled={disabled}
+                                                hint={[
+                                                    sectionT('network.session_affinity_ttl_hint'), ignoredSpellingHint(
+                                                        'routing.sessionAffinityTTL', 'routing.session-affinity-ttl',
+                                                    ),
+                                                ].filter(Boolean).join(' ')}
+                                            />
+                                        </FieldAnchor>
                                         <FieldAnchor fieldId='routingStrategy'>
                                             <FieldShell
                                                 label={sectionT('network.routing_strategy')}
@@ -1711,25 +1756,29 @@ export function VisualConfigEditor({
                                                 onChange={(forceModelPrefix) => onChange({ forceModelPrefix })}
                                             />
                                         </FieldAnchor>
-                                        <ToggleRow
-                                            title={sectionT('network.enable_gemini_cli_endpoint')}
-                                            description={sectionT(
-                                                'network.enable_gemini_cli_endpoint_desc')}
-                                            checked={values.enableGeminiCliEndpoint}
-                                            disabled={disabled}
-                                            tone='warning'
-                                            onChange={(enableGeminiCliEndpoint) => (
-                                                onChange({ enableGeminiCliEndpoint })
-                                            )}
-                                        />
-                                        <ToggleRow
-                                            title={sectionT('network.passthrough_headers')}
-                                            description={sectionT(
-                                                'network.passthrough_headers_desc')}
-                                            checked={values.passthroughHeaders}
-                                            disabled={disabled}
-                                            onChange={(passthroughHeaders) => onChange({ passthroughHeaders })}
-                                        />
+                                        <FieldAnchor fieldId='enableGeminiCliEndpoint'>
+                                            <ToggleRow
+                                                title={sectionT('network.enable_gemini_cli_endpoint')}
+                                                description={sectionT(
+                                                    'network.enable_gemini_cli_endpoint_desc')}
+                                                checked={values.enableGeminiCliEndpoint}
+                                                disabled={disabled}
+                                                tone='warning'
+                                                onChange={(enableGeminiCliEndpoint) => (
+                                                    onChange({ enableGeminiCliEndpoint })
+                                                )}
+                                            />
+                                        </FieldAnchor>
+                                        <FieldAnchor fieldId='passthroughHeaders'>
+                                            <ToggleRow
+                                                title={sectionT('network.passthrough_headers')}
+                                                description={sectionT(
+                                                    'network.passthrough_headers_desc')}
+                                                checked={values.passthroughHeaders}
+                                                disabled={disabled}
+                                                onChange={(passthroughHeaders) => onChange({ passthroughHeaders })}
+                                            />
+                                        </FieldAnchor>
                                         <FieldAnchor fieldId='disableImageGeneration'>
                                             <FieldShell
                                                 label={sectionT(
@@ -1743,7 +1792,11 @@ export function VisualConfigEditor({
                                                     id={`${disableImageGenerationLabelId}-select`}
                                                     ariaLabelledBy={disableImageGenerationLabelId}
                                                     ariaDescribedBy={disableImageGenerationHintId}
+                                                    ariaInvalid={values.disableImageGeneration === '' || undefined}
                                                     value={values.disableImageGeneration}
+                                                    placeholder={t('config_management.yaml_fields.unsupported', {
+                                                        defaultValue: 'Unsupported YAML value',
+                                                    })}
                                                     options={[
                                                         {
                                                             value: 'off',
@@ -1787,8 +1840,13 @@ export function VisualConfigEditor({
                                         <FieldAnchor fieldId='routingSessionAffinity'>
                                             <ToggleRow
                                                 title={sectionT('network.session_affinity')}
-                                                description={sectionT(
-                                                    'network.session_affinity_desc')}
+                                                description={[
+                                                    sectionT('network.session_affinity_desc'),
+                                                    ignoredSpellingHint(
+                                                        'routing.sessionAffinity',
+                                                        'routing.session-affinity',
+                                                    ),
+                                                ].filter(Boolean).join(' ')}
                                                 checked={values.routingSessionAffinity}
                                                 disabled={disabled}
                                                 onChange={(routingSessionAffinity) => (
@@ -1993,32 +2051,34 @@ export function VisualConfigEditor({
                                                 error={usageRetentionDaysError}
                                             />
                                         </FieldAnchor>
-                                        <FieldShell
-                                            label={sectionT('system.usage_retention_max_db_size')}
-                                            htmlFor={usageDbSizeInputId}
-                                            hint={sectionT(
-                                                'system.usage_retention_max_db_size_hint')}
-                                            hintId={usageDbSizeHintId}
-                                            error={usageRetentionMaxDbSizeMbError}
-                                            errorId={usageDbSizeErrorId}
-                                            meta={usageDbSizeMeta}
-                                        >
-                                            <input
-                                                id={usageDbSizeInputId}
-                                                aria-describedby={usageRetentionMaxDbSizeMbError ?
-                                                                  `${usageDbSizeHintId} ${usageDbSizeErrorId}` :
-                                                                  usageDbSizeHintId}
-                                                aria-invalid={usageRetentionMaxDbSizeMbError ? true : undefined}
-                                                className='input'
-                                                type='number'
-                                                placeholder='0'
-                                                value={values.usageRetentionMaxDbSizeMb}
-                                                onChange={(e) => (
-                                                    onChange({ usageRetentionMaxDbSizeMb: e.target.value })
-                                                )}
-                                                disabled={disabled}
-                                            />
-                                        </FieldShell>
+                                        <FieldAnchor fieldId='usageRetentionMaxDbSizeMb'>
+                                            <FieldShell
+                                                label={sectionT('system.usage_retention_max_db_size')}
+                                                htmlFor={usageDbSizeInputId}
+                                                hint={sectionT(
+                                                    'system.usage_retention_max_db_size_hint')}
+                                                hintId={usageDbSizeHintId}
+                                                error={usageRetentionMaxDbSizeMbError}
+                                                errorId={usageDbSizeErrorId}
+                                                meta={usageDbSizeMeta}
+                                            >
+                                                <input
+                                                    id={usageDbSizeInputId}
+                                                    aria-describedby={usageRetentionMaxDbSizeMbError ?
+                                                                      `${usageDbSizeHintId} ${usageDbSizeErrorId}` :
+                                                                      usageDbSizeHintId}
+                                                    aria-invalid={usageRetentionMaxDbSizeMbError ? true : undefined}
+                                                    className='input'
+                                                    type='number'
+                                                    placeholder='0'
+                                                    value={values.usageRetentionMaxDbSizeMb}
+                                                    onChange={(e) => (
+                                                        onChange({ usageRetentionMaxDbSizeMb: e.target.value })
+                                                    )}
+                                                    disabled={disabled}
+                                                />
+                                            </FieldShell>
+                                        </FieldAnchor>
                                         <FieldAnchor fieldId='imageArtifactCacheRetentionDays'>
                                             <Input
                                                 label={sectionT(
@@ -2048,6 +2108,10 @@ export function VisualConfigEditor({
                                                 value={values.errorLogsMaxFiles}
                                                 onChange={(e) => onChange({ errorLogsMaxFiles: e.target.value })}
                                                 disabled={disabled}
+                                                hint={!errorLogsMaxFilesError && Number(values.errorLogsMaxFiles) < 0 ?
+                                                      t('config_management.yaml_fields.effective_value_hint', {
+                                                          value: 10, defaultValue: 'CPA uses {{value}} in this case.',
+                                                      }) : undefined}
                                                 error={errorLogsMaxFilesError}
                                             />
                                         </FieldAnchor>
@@ -2064,24 +2128,35 @@ export function VisualConfigEditor({
                                                         redisUsageQueueRetentionSeconds: e.target.value,
                                                     })}
                                                 disabled={disabled}
-                                                hint={sectionT('system.redis_usage_retention_hint')}
+                                                hint={values.redisUsageQueueRetentionSeconds &&
+                                                      !redisUsageQueueRetentionError &&
+                                                      (Number(values.redisUsageQueueRetentionSeconds) < 1 ||
+                                                       Number(values.redisUsageQueueRetentionSeconds) > 3600) ?
+                                                      t('config_management.yaml_fields.effective_value_hint', {
+                                                          value: Number(values.redisUsageQueueRetentionSeconds) < 1 ?
+                                                                 60 :
+                                                                 3600,
+                                                          defaultValue: 'CPA uses {{value}} in this case.',
+                                                      }) : sectionT('system.redis_usage_retention_hint')}
                                                 error={redisUsageQueueRetentionError}
                                             />
                                         </FieldAnchor>
-                                        <Input
-                                            label={sectionT(
-                                                'system.pprof_addr',
-                                                { defaultValue: 'pprof 监听地址' },
-                                            )}
-                                            placeholder='127.0.0.1:8316'
-                                            value={values.pprofAddr}
-                                            onChange={(e) => onChange({ pprofAddr: e.target.value })}
-                                            disabled={disabled}
-                                            hint={sectionT(
-                                                'system.pprof_addr_hint',
-                                                { defaultValue: '仅在启用 pprof 时生效' },
-                                            )}
-                                        />
+                                        <FieldAnchor fieldId='pprofAddr'>
+                                            <Input
+                                                label={sectionT(
+                                                    'system.pprof_addr',
+                                                    { defaultValue: 'pprof 监听地址' },
+                                                )}
+                                                placeholder='127.0.0.1:8316'
+                                                value={values.pprofAddr}
+                                                onChange={(e) => onChange({ pprofAddr: e.target.value })}
+                                                disabled={disabled}
+                                                hint={sectionT(
+                                                    'system.pprof_addr_hint',
+                                                    { defaultValue: '仅在启用 pprof 时生效' },
+                                                )}
+                                            />
+                                        </FieldAnchor>
                                         <FieldAnchor fieldId='usageDataDir'>
                                             <Input
                                                 label={sectionT('system.usage_data_dir')}
@@ -2092,37 +2167,52 @@ export function VisualConfigEditor({
                                                 hint={sectionT('system.usage_data_dir_hint')}
                                             />
                                         </FieldAnchor>
-                                        <Input
-                                            label={sectionT(
-                                                'system.usage_statistics_file',
-                                                { defaultValue: '使用统计旧文件路径' },
-                                            )}
-                                            placeholder=''
-                                            value={values.usageStatisticsFile}
-                                            onChange={(e) => onChange({ usageStatisticsFile: e.target.value })}
-                                            disabled={disabled}
-                                            hint={sectionT(
-                                                'system.usage_statistics_file_hint',
-                                                { defaultValue: '对应 usage-statistics-file，留空使用默认数据目录' },
-                                            )}
-                                        />
-                                        <Input
-                                            label={sectionT(
-                                                'system.usage_retention_warning_threshold')}
-                                            type='number'
-                                            placeholder='80'
-                                            value={values.usageRetentionWarningThresholdPct}
-                                            onChange={(e) =>
-                                                onChange({
-                                                             usageRetentionWarningThresholdPct:
-                                                             e.target.value,
-                                                         })
-                                            }
-                                            disabled={disabled}
-                                            hint={sectionT(
-                                                'system.usage_retention_warning_threshold_hint')}
-                                            error={usageRetentionWarningThresholdError}
-                                        />
+                                        <FieldAnchor fieldId='usageStatisticsFile'>
+                                            <Input
+                                                label={sectionT(
+                                                    'system.usage_statistics_file',
+                                                    { defaultValue: '使用统计旧文件路径' },
+                                                )}
+                                                placeholder=''
+                                                value={values.usageStatisticsFile}
+                                                onChange={(e) => onChange({ usageStatisticsFile: e.target.value })}
+                                                disabled={disabled}
+                                                hint={sectionT(
+                                                    'system.usage_statistics_file_hint',
+                                                    { defaultValue: '对应 usage-statistics-file，留空使用默认数据目录' },
+                                                )}
+                                            />
+                                        </FieldAnchor>
+                                        <FieldAnchor fieldId='usageRetentionWarningThresholdPct'>
+                                            <Input
+                                                label={sectionT(
+                                                    'system.usage_retention_warning_threshold')}
+                                                type='number'
+                                                min={0}
+                                                max={100}
+                                                placeholder='80'
+                                                value={values.usageRetentionWarningThresholdPct}
+                                                onChange={(e) =>
+                                                    onChange({
+                                                                 usageRetentionWarningThresholdPct:
+                                                                 e.target.value,
+                                                             })
+                                                }
+                                                disabled={disabled}
+                                                hint={<>
+                                                    {sectionT('system.usage_retention_warning_threshold_default_hint', {
+                                                        defaultValue: 'Enter 1–100%. Leave blank or use 0 for the default of 80%.',
+                                                    })}
+                                                    {usageThresholdPct !==
+                                                     undefined &&
+                                                     <> · {sectionT('runtime.db_size_threshold', {
+                                                         threshold: usageThresholdPct,
+                                                         defaultValue: 'Active threshold: {{threshold}}%',
+                                                     })}</>}
+                                                </>}
+                                                error={usageRetentionWarningThresholdError}
+                                            />
+                                        </FieldAnchor>
                                         <FieldAnchor fieldId='autoRefreshInterval'>
                                             <Input
                                                 label={sectionT('system.auto_refresh_interval')}
@@ -2136,16 +2226,18 @@ export function VisualConfigEditor({
                                                 error={autoRefreshIntervalError}
                                             />
                                         </FieldAnchor>
-                                        <Input
-                                            label={sectionT('system.model_refresh_interval')}
-                                            type='number'
-                                            placeholder='3'
-                                            value={values.modelRefreshInterval}
-                                            onChange={(e) => onChange({ modelRefreshInterval: e.target.value })}
-                                            disabled={disabled}
-                                            hint={sectionT('system.model_refresh_interval_hint')}
-                                            error={modelRefreshIntervalError}
-                                        />
+                                        <FieldAnchor fieldId='modelRefreshInterval'>
+                                            <Input
+                                                label={sectionT('system.model_refresh_interval')}
+                                                type='number'
+                                                placeholder='3'
+                                                value={values.modelRefreshInterval}
+                                                onChange={(e) => onChange({ modelRefreshInterval: e.target.value })}
+                                                disabled={disabled}
+                                                hint={sectionT('system.model_refresh_interval_hint')}
+                                                error={modelRefreshIntervalError}
+                                            />
+                                        </FieldAnchor>
                                     </div>
                                 </SectionStack>
                             </ConfigSection>
@@ -2304,8 +2396,7 @@ export function VisualConfigEditor({
                                             <FieldShell
                                                 label={sectionT('streaming.nonstream_keepalive')}
                                                 htmlFor={nonstreamKeepaliveInputId}
-                                                hint={sectionT(
-                                                    'streaming.nonstream_keepalive_hint')}
+                                                hint={nonstreamKeepaliveHint}
                                                 hintId={nonstreamKeepaliveHintId}
                                                 error={nonstreamKeepaliveError}
                                                 errorId={nonstreamKeepaliveErrorId}
@@ -2360,7 +2451,7 @@ export function VisualConfigEditor({
                                     <FieldAnchor fieldId='pluginsEnabled'>
                                         <Collapsible
                                             label={sectionT('advanced.plugins_title')}
-                                            hint={sectionT('system.plugin_configs_hint')}
+                                            hint={sectionT('system.plugins_enabled_desc')}
                                             defaultOpen={false}
                                         >
                                             <SectionStack>
@@ -2392,22 +2483,17 @@ export function VisualConfigEditor({
                                                         description={sectionT(
                                                             'system.plugin_store_sources_desc')}
                                                     >
-                                                        <div className={styles.fieldShell}>
-                                                            <StringListEditor
-                                                                value={values.pluginStoreSources}
-                                                                disabled={disabled}
-                                                                placeholder={sectionT(
-                                                                    'system.plugin_store_sources_placeholder',
-                                                                )}
-                                                                inputAriaLabel={sectionT(
-                                                                    'system.plugin_store_sources_label',
-                                                                )}
-                                                                onChange={handlePluginStoreSourcesChange}
-                                                            />
-                                                            <div className={styles.fieldHint}>
-                                                                {sectionT('system.plugin_store_sources_hint')}
-                                                            </div>
-                                                        </div>
+                                                        <YamlConfigFieldInput
+                                                            kind='list'
+                                                            label={sectionT('system.plugin_store_sources_label')}
+                                                            value={values.pluginStoreSources}
+                                                            disabled={disabled}
+                                                            placeholder={sectionT(
+                                                                'system.plugin_store_sources_placeholder',
+                                                            )}
+                                                            hint={sectionT('system.plugin_store_sources_hint')}
+                                                            onChange={handlePluginStoreSourcesChange}
+                                                        />
                                                     </SectionSubsection>
                                                 </FieldAnchor>
                                                 <FieldAnchor fieldId='pluginStoreAuth'>
@@ -2423,29 +2509,32 @@ export function VisualConfigEditor({
                                                             </div>
                                                             <PluginStoreAuthEditor
                                                                 value={values.pluginStoreAuth}
+                                                                baseline={baselineValues?.pluginStoreAuth}
                                                                 disabled={disabled}
                                                                 onChange={handlePluginStoreAuthChange}
                                                             />
                                                         </div>
                                                     </SectionSubsection>
                                                 </FieldAnchor>
+                                                <YamlConfigFieldRows
+                                                    fields={[yamlConfigField('plugins.auth-revision')!]}
+                                                    states={values.yamlFields} anchored />
                                                 <FieldAnchor fieldId='pluginConfigs'>
-                                                    <TextAreaField
-                                                        label={sectionT(
-                                                            'system.plugin_configs',
-                                                            { defaultValue: '插件实例配置' },
-                                                        )}
-                                                        value={values.pluginConfigsText}
-                                                        placeholder={'{}'}
-                                                        disabled={disabled}
-                                                        hint={sectionT(
-                                                            'system.plugin_configs_hint',
-                                                            { defaultValue: '对应 plugins.configs，使用 YAML map 格式' },
-                                                        )}
-                                                        onChange={(pluginConfigsText) => (
-                                                            onChange({ pluginConfigsText })
-                                                        )}
-                                                    />
+                                                    <SectionSubsection title={sectionT('system.plugin_configs')}>
+                                                        <YamlConfigFieldMeta
+                                                            field={pluginConfigsField}
+                                                            state={values.yamlFields[pluginConfigsField.id]}
+                                                        />
+                                                        {pluginConfigsEntry && onNavigateField && <div>
+                                                            <Button type='button' variant='secondary'
+                                                                    disabled={disabled}
+                                                                    onClick={() => onNavigateField(pluginConfigsEntry)}>
+                                                                {t(pluginConfigsEntry.sourceField ?
+                                                                   'config_management.yaml_fields.open_source' :
+                                                                   'config_management.yaml_fields.open_owner')}
+                                                            </Button>
+                                                        </div>}
+                                                    </SectionSubsection>
                                                 </FieldAnchor>
                                             </SectionStack>
                                         </Collapsible>
@@ -2457,29 +2546,18 @@ export function VisualConfigEditor({
                                                 'network.provider_advanced',
                                                 { defaultValue: '供应商高级配置' },
                                             )}
-                                            hint={sectionT(
-                                                'network.provider_advanced_desc',
-                                                { defaultValue: '复杂数组和映射使用 YAML 格式直接暴露，保存后写回源码配置对应路径' },
-                                            )}
                                             defaultOpen={false}
                                         >
                                             <SectionStack>
-                                                <TextAreaField
-                                                    label={sectionT(
-                                                        'network.provider_keys',
-                                                        { defaultValue: '供应商 Key 与 OpenAI 兼容配置' },
-                                                    )}
-                                                    value={values.providerConfigText}
-                                                    placeholder={
-                                                        'gemini-api-key: []\n' +
-                                                        'codex-api-key: []\n' +
-                                                        'claude-api-key: []\n' +
-                                                        'vertex-api-key: []\n' +
-                                                        'openai-compatibility: []'
-                                                    }
-                                                    disabled={disabled}
-                                                    onChange={(providerConfigText) => onChange({ providerConfigText })}
-                                                />
+                                                <SectionSubsection title={sectionT('network.provider_keys')}
+                                                                   description={t(
+                                                                       'config_management.yaml_fields.managed',
+                                                                       {
+                                                                           defaultValue: 'Managed on a dedicated page',
+                                                                       },
+                                                                   )}>
+                                                    {ownerLink('providerConfig', '/credentials')}
+                                                </SectionSubsection>
                                                 <FieldAnchor fieldId='clientCodexEnableApplyPatch'>
                                                     <ToggleRow title={sectionT('advanced.client_apply_patch')}
                                                                description={(
@@ -2821,48 +2899,12 @@ export function VisualConfigEditor({
                                                         onChange={(xaiInjectXSearch) => onChange({ xaiInjectXSearch })}
                                                     />
                                                 </FieldAnchor>
-                                                <FieldAnchor fieldId='codexHeaderDefaults'>
-                                                    <TextAreaField
-                                                        label={sectionT(
-                                                            'network.codex_header_defaults',
-                                                            { defaultValue: 'Codex 默认请求头' },
-                                                        )}
-                                                        value={values.codexHeaderDefaultsText}
-                                                        placeholder={'user-agent: ""\nbeta-features: ""'}
-                                                        disabled={disabled}
-                                                        onChange={(codexHeaderDefaultsText) =>
-                                                            onChange({
-                                                                         codexHeaderDefaultsText,
-                                                                     })
-                                                        }
-                                                    />
-                                                </FieldAnchor>
-                                                <FieldAnchor fieldId='claudeHeaderDefaults'>
-                                                    <TextAreaField
-                                                        label={sectionT(
-                                                            'network.claude_header_defaults',
-                                                            { defaultValue: 'Claude 默认请求头' },
-                                                        )}
-                                                        value={values.claudeHeaderDefaultsText}
-                                                        placeholder={
-                                                            'user-agent: ""\n' +
-                                                            'package-version: ""\n' +
-                                                            'runtime-version: ""\n' +
-                                                            'os: ""\n' +
-                                                            'arch: ""\n' +
-                                                            'timeout: ""'
-                                                        }
-                                                        disabled={disabled}
-                                                        onChange={(claudeHeaderDefaultsText) =>
-                                                            onChange({
-                                                                         claudeHeaderDefaultsText,
-                                                                     })
-                                                        }
-                                                    />
-                                                </FieldAnchor>
+                                                {headerDefaults}
                                             </SectionStack>
                                         </Collapsible>
                                     </FieldAnchor>
+
+                                    {homeObservations}
                                 </SectionStack>
                             </ConfigSection>
 

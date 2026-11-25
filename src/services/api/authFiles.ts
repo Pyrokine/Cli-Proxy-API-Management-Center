@@ -24,8 +24,11 @@ import type {
 import {normalizeBooleanValue} from '@/utils/boolean'
 import {getCredentialRetryValidationKey} from '@/utils/credentialOverrides'
 import {normalizeExcludedModelsValue} from '@/utils/excludedModels'
+import {getOAuthModelAliasValueError} from '@/utils/oauthModelAlias'
+import {isMap, parseDocument, stringify} from 'yaml'
 import type {AccountInspectionResult} from './accountInspection'
 import {apiClient, mutationReceiptError} from './client'
+import type {ConfigValidationError} from './configFile'
 
 type AuthFileStatusResponse = { status: string; disabled: boolean }
 export type AuthFileRefreshResult = {
@@ -678,7 +681,104 @@ const normalizeAuthFileRefreshBatchResult = (value: unknown): AuthFileRefreshBat
     }
 }
 
-const OAUTH_MODEL_ALIAS_ENDPOINT       = '/oauth-model-alias'
+const OAUTH_MODEL_ALIAS_FIELD    = 'oauth-model-alias'
+const OAUTH_MODEL_ALIAS_ENDPOINT = `/${OAUTH_MODEL_ALIAS_FIELD}`
+
+type OAuthAliasChannels = Record<string, Array<Record<string, unknown>>>
+
+function readAliasEditorYaml(content: string): OAuthAliasChannels {
+    const document = parseDocument(content)
+    if (document.errors.length) {
+        throw new Error(document.errors[0].message)
+    }
+    if (!isMap(document.contents) || document.contents.items.length !== 1 || !document.has(OAUTH_MODEL_ALIAS_FIELD)) {
+        throw new Error(i18n.t('config_management.oauth_alias_source_scope', {
+            defaultValue: 'This source editor accepts only the oauth-model-alias configuration.',
+        }))
+    }
+    const value: unknown = document.toJS()[OAUTH_MODEL_ALIAS_FIELD]
+    const error          = getOAuthModelAliasValueError(value)
+    if (error) {
+        throw new Error(i18n.t(`config_management.visual.validation.${error}`))
+    }
+    return Object.fromEntries(Object.entries((value ?? {}) as OAuthAliasChannels).map(([channel, rows]) =>
+                                                                                          [
+                                                                                              channel.trim()
+                                                                                                     .toLowerCase(),
+                                                                                              rows,
+                                                                                          ],
+    ))
+}
+
+export const oauthModelAliasEditorApi = {
+    scopedToAliases: true as const,
+
+    async fetchConfigYaml(): Promise<{ content: string; etag: string }> {
+        const response       = await apiClient.getRaw(OAUTH_MODEL_ALIAS_ENDPOINT)
+        const etag           = response.headers.etag
+        const value: unknown = response.data?.[OAUTH_MODEL_ALIAS_FIELD]
+        if (typeof etag !== 'string' || !etag.trim() ||
+            (value !== null && (!value || typeof value !== 'object' || Array.isArray(value) ||
+                                Object.values(value).some((rows: unknown) => !Array.isArray(rows) ||
+                                rows.some((row: unknown) => !row || typeof row !== 'object' || Array.isArray(row)))))) {
+            throw new Error(i18n.t('config_management.status_load_failed'))
+        }
+        return { content: stringify({ [OAUTH_MODEL_ALIAS_FIELD]: value ?? {} }), etag }
+    },
+
+    async validateConfigYaml(
+        content: string,
+    ): Promise<{ valid: boolean; errors: ConfigValidationError[]; warnings: string[] }> {
+        try {
+            JSON.stringify(readAliasEditorYaml(content))
+            return { valid: true, errors: [], warnings: [] }
+        } catch (error: unknown) {
+            return {
+                valid: false, warnings: [], errors: [
+                    { field: OAUTH_MODEL_ALIAS_FIELD, message: error instanceof Error ? error.message : String(error) },
+                ],
+            }
+        }
+    },
+
+    async saveConfigYaml(
+        content: string, etag: string, baseline?: string,
+    ): Promise<{ mutation?: ManagementMutationReceipt }> {
+        if (!etag || baseline === undefined) {
+            throw new Error(i18n.t('config_management.status_load_failed'))
+        }
+        const before   = new Map(Object.entries(readAliasEditorYaml(baseline)))
+        const after    = new Map(Object.entries(readAliasEditorYaml(content)))
+        const channels = Object.fromEntries(
+            [...new Set([...before.keys(), ...after.keys()])].flatMap((channel) => {
+                const next = after.get(channel) ?? []
+                return JSON.stringify(next) === JSON.stringify(before.get(channel) ?? []) ? [] : [[channel, next]]
+            }),
+        )
+        if (Object.keys(channels).length === 0) {
+            return {}
+        }
+
+        let receipt: ManagementMutationReceipt | undefined
+        const result = await apiClient.patch<{ status?: string }>(OAUTH_MODEL_ALIAS_ENDPOINT, { channels }, {
+            headers: { 'If-Match': etag },
+            onMutationReceipt: (value) => {
+                receipt = value
+            },
+        })
+        if (receipt?.metadata_present) {
+            receipt = await apiClient.reconcileMutation(receipt)
+            if (receipt.result?.outcome !== 'succeeded' || receipt.recovery) {
+                throw mutationReceiptError(receipt)
+            }
+        }
+        if (result?.status !== 'ok') {
+            throw new Error(i18n.t('config_management.save_result_uncertain'))
+        }
+        return { mutation: receipt }
+    },
+}
+
 const AUTH_FILE_REFRESH_TIMEOUT_MS     = 35_000
 const AUTH_FILE_REFRESH_ALL_TIMEOUT_MS = 300_000
 

@@ -41,6 +41,7 @@ export type VisualConfigFieldPath =
     | 'oauthSettingsText'
     | 'oauthRequestScopedErrorsText'
     | 'oauthExcludedModelsText'
+    | 'pluginStoreAuth'
     | 'transientErrorCooldownSeconds'
     | 'streaming.keepaliveSeconds'
     | 'streaming.bootstrapRetries'
@@ -70,6 +71,7 @@ export type VisualConfigValidationErrorCode =
     | 'oauth_settings_invalid'
     | 'oauth_settings_integer'
     | 'oauth_error_rules_invalid'
+    | 'store_auth_match_required'
 
 export type VisualConfigValidationErrors = Partial<Record<VisualConfigFieldPath, VisualConfigValidationErrorCode>>
 
@@ -209,6 +211,23 @@ export type CodexLiveICEServerDraft = {
     credentialEdited: boolean
 }
 
+export type YamlConfigFieldValue = boolean | string | string[]
+export type YamlConfigPath = (string | number)[]
+
+export type YamlConfigFieldState = {
+    source: 'yaml' | 'inherited' | 'default' | 'unset' | 'unsupported' | 'legacy' | 'redacted' | 'fallback'
+    value?: YamlConfigFieldValue
+    effective?: YamlConfigFieldValue
+    from?: string
+    size?: number
+    shared?: true
+    instance?: { schemaId: string; path: YamlConfigPath }
+}
+
+export type YamlConfigFieldStates = Partial<Record<string, YamlConfigFieldState>>
+
+export type YamlConfigFieldEdits = Record<string, string | boolean | null>
+
 export type VisualConfigValues = {
     host: string
     port: string
@@ -260,7 +279,7 @@ export type VisualConfigValues = {
     forceModelPrefix: boolean
     enableGeminiCliEndpoint: boolean
     passthroughHeaders: boolean
-    disableImageGeneration: 'off' | 'all' | 'chat' | 'passthrough'
+    disableImageGeneration: '' | 'off' | 'all' | 'chat' | 'passthrough'
     gptImage2BaseModel: string
     videoResultAuthCacheTTL: string
     antigravityConnectionPoolEnabled: boolean
@@ -309,8 +328,8 @@ export type VisualConfigValues = {
     claudeCodeDisableCloakingModelList: boolean
     claudeModelLevelCooling: boolean
     xaiInjectXSearch: boolean
-    codexHeaderDefaultsText: string
-    claudeHeaderDefaultsText: string
+    yamlFields: YamlConfigFieldStates
+    yamlFieldEdits: YamlConfigFieldEdits
     payloadDefaultRules: PayloadRule[]
     payloadDefaultRawRules: PayloadRule[]
     payloadOverrideRules: PayloadRule[]
@@ -426,8 +445,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
     claudeCodeDisableCloakingModelList: false,
     claudeModelLevelCooling: false,
     xaiInjectXSearch: false,
-    codexHeaderDefaultsText: '',
-    claudeHeaderDefaultsText: '',
+    yamlFields: {},
+    yamlFieldEdits: {},
     payloadDefaultRules: [],
     payloadDefaultRawRules: [],
     payloadOverrideRules: [],

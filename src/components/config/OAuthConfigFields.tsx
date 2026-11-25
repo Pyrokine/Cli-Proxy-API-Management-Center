@@ -2,13 +2,14 @@ import {RequestScopedErrorsField} from '@/components/providers/CredentialOverrid
 import {Button} from '@/components/ui/Button'
 import {Input} from '@/components/ui/Input'
 import {Modal} from '@/components/ui/Modal'
+import {patchKnownYamlFields} from '@/hooks/visualConfigCodec'
 import {useNotificationStore} from '@/stores'
 import type {RequestScopedErrorRule} from '@/types'
 import {readRequestScopedErrorRule} from '@/utils/credentialOverrides'
 import {getOAuthModelAliasError} from '@/utils/oauthModelAlias'
 import {type ReactNode, useEffect, useId, useMemo, useRef, useState} from 'react'
 import {Trans, useTranslation} from 'react-i18next'
-import {type Alias, type Node, parseDocument, visit} from 'yaml'
+import {type Alias, isMap, isSeq, type Node, parseDocument, visit} from 'yaml'
 
 interface OAuthConfigFieldsProps {
     kind: 'settings' | 'errors' | 'aliases'
@@ -39,7 +40,7 @@ export function OAuthConfigFields({ kind, value, disabled, error, onChange }: OA
     }, [value, disabled, kind, onChange])
     const parsed            = useMemo(() => {
         try {
-            const document = parseDocument(value.trim() || '{}')
+            const document = parseDocument(value.trim() || '{}', { intAsBigInt: true })
             if (document.errors.length) {
                 return { error: document.errors[0].message }
             }
@@ -231,18 +232,32 @@ export function OAuthConfigFields({ kind, value, disabled, error, onChange }: OA
         commit([normalizedChannel], [])
         setChannel('')
     }
-    const updateErrorRules  = (provider: string, rules: RequestScopedErrorRule[]) => {
-        const serialized = rules.map((rule) => {
-            const next: Record<string, unknown> = { ...rule }
-            delete next.matchRegex
-            if (rule.matchRegex !== undefined) {
-                next['match-regexr'] = rule.matchRegex
-            } else {
-                delete next['match-regexr']
-            }
-            return next
+    const updateErrorRules  = (
+        provider: string, previous: RequestScopedErrorRule[], next: RequestScopedErrorRule[],
+    ) => {
+        const document = cloneForEdit()
+        const sequence = document?.getIn([provider], true)
+        if (!document || !isSeq(sequence)) {
+            return
+        }
+        const toYaml   = (rule: RequestScopedErrorRule) => ({
+            status: rule.status, match: rule.match, 'match-regexr': rule.matchRegex, action: rule.action,
         })
-        commit([provider], serialized)
+        const items    = [...sequence.items]
+        sequence.items = next.map((rule, index) => {
+            const original = previous.indexOf(rule)
+            if (original >= 0) {
+                return items[original]
+            }
+            // The rule editor replaces a single row on field edits and otherwise preserves row identities.
+            const item = items[index]
+            if (previous.length === next.length && isMap(item)) {
+                patchKnownYamlFields(document, item, toYaml(previous[index]!), toYaml(rule))
+                return item
+            }
+            return document.createNode(toYaml(rule))
+        })
+        onChange(document.toString())
     }
 
     if (!data) {
@@ -299,77 +314,96 @@ export function OAuthConfigFields({ kind, value, disabled, error, onChange }: OA
                 }
             }} />
         </Modal>}
-        {channels.map((provider) => <fieldset className='form-group' key={provider} disabled={disabled}>
-            <legend>{provider}</legend>
-            {kind !== 'errors' ?
-             <>
-                 {data[provider].map((rule, index) => <div className='form-group' key={index}>
-                     <Input label={t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
-                                                                                   'oauth_alias_name' :
-                                                                                   'oauth_settings_name'}`)}
-                            value={String(rule.name ?? '')} disabled={disabled}
-                            onChange={(event) => commit([provider, index, 'name'], event.target.value)} />
-                     <Input label={t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
-                                                                                   'oauth_alias_alias' :
-                                                                                   'oauth_settings_alias'}`)}
-                            value={String(rule.alias ?? '')} disabled={disabled} onChange={(event) => commit(
-                         [provider, index, 'alias'],
-                         kind === 'aliases' ? event.target.value : event.target.value || undefined,
-                     )} />
-                     {kind === 'aliases' ?
-                      <label><input type='checkbox' checked={rule.fork === true} disabled={disabled}
-                                    onChange={(event) => commit([provider, index, 'fork'], event.target.checked)} /> {t(
-                          'oauth_model_alias.alias_fork_label')}</label> :
-                      <Input label={t('config_management.visual.sections.advanced.oauth_settings_context')}
-                             type='number' step={1} placeholder='0' value={typeof rule['max-context-length'] ===
-                                                                           'number' &&
-                                                                           !Number.isNaN(rule['max-context-length']) ?
-                                                                           rule['max-context-length'] :
-                                                                           ''} disabled={disabled}
-                             onChange={(event) => {
-                                 const raw  = event.target.value.trim()
-                                 const next = event.target.validity.badInput || (raw && !/^[+-]?\d+$/.test(raw)) ?
-                                              NaN :
-                                              raw ? Number(raw) : undefined
-                                 commit([provider, index, 'max-context-length'], next)
-                             }} />}
-                     <Button type='button' variant='danger' size='sm' disabled={disabled}
-                             onClick={() => removeRule(provider, index, rule)}>{t('common.delete')}</Button>
-                 </div>)}
-                 <Button type='button' variant='secondary' size='sm' disabled={disabled} onClick={() => commit(
-                     [provider],
-                     [...data[provider], kind === 'aliases' ? { name: '', alias: '' } : { name: '' }],
-                 )}>{t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
-                                                                     'oauth_alias_add' :
-                                                                     'oauth_settings_add'}`)}</Button>
-             </> :
-             <RequestScopedErrorsField disabled={disabled}
-                                       rules={data[provider].map((rule) => readRequestScopedErrorRule(
-                                           {
-                                               ...rule,
-                                               status: typeof rule.status ===
-                                                       'number' ?
-                                                       rule.status :
-                                                       NaN,
-                                               match: Array.isArray(
-                                                   rule.match) ?
-                                                      rule.match as string[] :
-                                                      undefined,
-                                               matchRegex: Array.isArray(
-                                                   rule['match-regexr']) ?
-                                                           rule['match-regexr'] as string[] :
-                                                           undefined,
-                                               action: typeof rule.action ===
-                                                       'string' ?
-                                                       rule.action :
-                                                       undefined,
-                                           }))}
-                                       onChange={(rules) => updateErrorRules(provider, rules)} />}
-            <Button type='button' variant='ghost' size='sm' disabled={disabled}
-                    onClick={() => removeProvider(provider)}>
-                {t('config_management.visual.sections.advanced.oauth_rules_remove_provider')}
-            </Button>
-        </fieldset>)}
+        {channels.map((provider) => {
+            const errorRules = kind === 'errors' ? data[provider].map((rule) => readRequestScopedErrorRule({
+                                                                                                               status: typeof rule.status ===
+                                                                                                                       'bigint' ||
+                                                                                                                       typeof rule.status ===
+                                                                                                                       'number' ?
+                                                                                                                       Number(
+                                                                                                                           rule.status) :
+                                                                                                                       NaN,
+                                                                                                               match: Array.isArray(
+                                                                                                                   rule.match) ?
+                                                                                                                      rule.match.map(
+                                                                                                                          String) :
+                                                                                                                      undefined,
+                                                                                                               matchRegex: Array.isArray(
+                                                                                                                   rule['match-regexr']) ?
+                                                                                                                           rule['match-regexr'].map(
+                                                                                                                               String) :
+                                                                                                                           undefined,
+                                                                                                               action: typeof rule.action ===
+                                                                                                                       'string' ?
+                                                                                                                       rule.action :
+                                                                                                                       undefined,
+                                                                                                           })) : []
+            return <fieldset className='form-group' key={provider} disabled={disabled}>
+                <legend>{provider}</legend>
+                {kind !== 'errors' ?
+                 <>
+                     {data[provider].map((rule, index) => <div className='form-group' key={index}>
+                         <Input label={t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
+                                                                                       'oauth_alias_name' :
+                                                                                       'oauth_settings_name'}`)}
+                                value={String(rule.name ?? '')} disabled={disabled}
+                                onChange={(event) => commit([provider, index, 'name'], event.target.value)} />
+                         <Input label={t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
+                                                                                       'oauth_alias_alias' :
+                                                                                       'oauth_settings_alias'}`)}
+                                value={String(rule.alias ?? '')} disabled={disabled} onChange={(event) => commit(
+                             [provider, index, 'alias'],
+                             kind === 'aliases' ? event.target.value : event.target.value || undefined,
+                         )} />
+                         {kind === 'aliases' ?
+                          <>
+                              <Input label={t('ai_providers.model_display_name_label')}
+                                     value={typeof rule['display-name'] === 'string' ? rule['display-name'] : ''}
+                                     disabled={disabled} onChange={(event) => commit(
+                                  [provider, index, 'display-name'], event.target.value || undefined,
+                              )} />
+                              <label><input type='checkbox' checked={rule.fork === true} disabled={disabled}
+                                            onChange={(event) => commit(
+                                                [provider, index, 'fork'],
+                                                event.target.checked,
+                                            )} />
+                                  {' '}{t('oauth_model_alias.alias_fork_label')}</label>
+                              <label><input type='checkbox' checked={rule['force-mapping'] === true} disabled={disabled}
+                                            onChange={(event) => commit(
+                                                [provider, index, 'force-mapping'], event.target.checked || undefined,
+                                            )} /> {t('ai_providers.model_force_mapping_label')}</label>
+                          </> :
+                          <Input label={t('config_management.visual.sections.advanced.oauth_settings_context')}
+                                 type='number' step={1} placeholder='0'
+                                 value={typeof rule['max-context-length'] === 'bigint' ||
+                                        (typeof rule['max-context-length'] === 'number' &&
+                                         !Number.isNaN(rule['max-context-length'])) ?
+                                        String(rule['max-context-length']) : ''} disabled={disabled}
+                                 onChange={(event) => {
+                                     const raw  = event.target.value.trim()
+                                     const next = event.target.validity.badInput || (raw && !/^[+-]?\d+$/.test(raw)) ?
+                                                  NaN :
+                                                  raw ? Number(raw) : undefined
+                                     commit([provider, index, 'max-context-length'], next)
+                                 }} />}
+                         <Button type='button' variant='danger' size='sm' disabled={disabled}
+                                 onClick={() => removeRule(provider, index, rule)}>{t('common.delete')}</Button>
+                     </div>)}
+                     <Button type='button' variant='secondary' size='sm' disabled={disabled} onClick={() => commit(
+                         [provider, data[provider].length],
+                         kind === 'aliases' ? { name: '', alias: '' } : { name: '' },
+                     )}>{t(`config_management.visual.sections.advanced.${kind === 'aliases' ?
+                                                                         'oauth_alias_add' :
+                                                                         'oauth_settings_add'}`)}</Button>
+                 </> :
+                 <RequestScopedErrorsField disabled={disabled} rules={errorRules}
+                                           onChange={(rules) => updateErrorRules(provider, errorRules, rules)} />}
+                <Button type='button' variant='ghost' size='sm' disabled={disabled}
+                        onClick={() => removeProvider(provider)}>
+                    {t('config_management.visual.sections.advanced.oauth_rules_remove_provider')}
+                </Button>
+            </fieldset>
+        })}
         <Input label={t('credentials.inspection_provider')} value={channel} placeholder='codex' disabled={disabled}
                onChange={(event) => setChannel(event.target.value)} />
         <Button type='button' variant='secondary' size='sm'

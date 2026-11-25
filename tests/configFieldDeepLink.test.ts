@@ -53,6 +53,13 @@ describe('config field deep link', () => {
         }
     })
 
+    test('finds the provider settings entry from the request token limit YAML key', () => {
+        const translate = i18n.getFixedT('zh-CN')
+        for (const query of ['use-max-completion-tokens', 'max_completion_tokens', 'max_tokens']) {
+            expect(searchConfigFields(query, translate).some((entry) => entry.fieldId === 'providerConfig')).toBe(true)
+        }
+    })
+
     test('finds Redis usage retention by its YAML key, label and hint in every locale', () => {
         const fieldId = 'redisUsageQueueRetentionSeconds'
         expect(findConfigFieldById(fieldId)).toMatchObject({

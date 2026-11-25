@@ -1,4 +1,5 @@
 import {createOAuthAttempts} from '@/components/credentials/oauthAttempts'
+import {getConfigRestartFields} from '@/hooks/visualConfigCodec'
 import {ConfigEditorRevisionState} from '@/pages/configEditorRevision'
 import {accountInspectionApi} from '@/services/api/accountInspection'
 import {apiClient, mutationReceiptError} from '@/services/api/client'
@@ -9,7 +10,7 @@ import type {ApiError, ManagementMutationReceipt, ManagementMutationResult} from
 import {safeExternalUrl} from '@/utils/validation'
 import {AxiosError, type AxiosInstance, type InternalAxiosRequestConfig} from 'axios'
 import {afterEach, expect, mock, spyOn, test} from 'bun:test'
-import {parse, parseDocument} from 'yaml'
+import {parseDocument} from 'yaml'
 import {sourceCallback, sourceInitializer} from './sourceCallbacks'
 
 const instance        = (apiClient as unknown as { instance: AxiosInstance }).instance
@@ -344,11 +345,9 @@ function editor() {
         activeTab: 'source',
         visualParseError: null,
         parseDocument,
-        readCommercialModeFromYaml: sourceCallback(
-            'pages/ConfigPage.tsx',
-            'readCommercialModeFromYaml',
-            { parseYaml: parse },
-        ),
+        getConfigRestartFields,
+        loadRuntimeInfo: mock(async () => {
+        }),
         apiErrorStatus: sourceCallback('pages/ConfigPage.tsx', 'apiErrorStatus', {}),
         // noinspection JSUnusedGlobalSymbols
         'mutationReceiptError': mutationReceiptError,

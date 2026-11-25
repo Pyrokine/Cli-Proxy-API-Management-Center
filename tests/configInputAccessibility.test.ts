@@ -26,11 +26,21 @@ const FIELD_SECTIONS = {
     codexLiveMediaRelayUDPPortMin: 'advanced', codexLiveMediaRelayUDPPortMax: 'advanced',
     codexLiveMediaRelayICEServers: 'advanced',
     oauthModelAliasText: 'advanced', oauthExcludedModelsText: 'advanced',
-    oauthSettingsText: 'advanced', oauthRequestScopedErrorsText: 'advanced',
+    oauthSettingsText: 'advanced', oauthRequestScopedErrorsText: 'advanced', pluginStoreAuth: 'advanced',
 } satisfies Record<VisualConfigFieldPath, VisualSectionId>
 
 function invalidFieldValues(field: VisualConfigFieldPath): VisualConfigValues {
     const values = { ...DEFAULT_VISUAL_VALUES, rmAutoCheckUpdate: true, codexLiveMediaRelayEnabled: true }
+    if (field === 'pluginStoreAuth') {
+        return {
+            ...values, pluginStoreAuth: [
+                {
+                    id: 'new-rule', match: '', applyTo: [], type: 'bearer', tokenEnv: '', usernameEnv: '',
+                    passwordEnv: '', headerName: '', headerValueEnv: '', allowInsecure: false,
+                },
+            ],
+        }
+    }
     if (field === 'codexLiveMediaRelayICEServers') {
         return {
             ...values, codexLiveMediaRelayICEServers: [
@@ -281,37 +291,23 @@ describe('config input accessibility', () => {
         expect(markup).not.toContain('aria-invalid')
     })
 
-    test('associates configuration YAML textareas with their labels and hints', () => {
-        const priorStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-        Object.defineProperty(globalThis, 'localStorage', {
-            configurable: true,
-            value: {
-                getItem: () => 'full', setItem: () => {
-                },
-            },
-        })
-        try {
-            const markup    = renderToStaticMarkup(createElement(VisualConfigEditor, {
-                values: DEFAULT_VISUAL_VALUES, onChange: () => {
-                },
-            }))
-            const textareas = Array.from(markup.matchAll(/<textarea\b[^>]*>/g), (match) => match[0])
-            expect(textareas.length).toBeGreaterThan(0)
-            for (const textarea of textareas) {
-                const id = attribute(textarea, 'id')
-                expect(id).toBeTruthy()
-                expect(markup).toMatch(new RegExp(`<label\\b[^>]*for="${id}"`))
-                const description = attribute(textarea, 'aria-describedby')
-                if (description) {
-                    expect(markup).toContain(`id="${description}"`)
-                }
-            }
-        } finally {
-            if (priorStorage) {
-                Object.defineProperty(globalThis, 'localStorage', priorStorage)
-            } else {
-                Reflect.deleteProperty(globalThis, 'localStorage')
-            }
+    test('associates typed configuration fields with their labels and hints', () => {
+        const markup = renderEditor(DEFAULT_VISUAL_VALUES)
+        expect(markup).not.toContain('<textarea')
+        for (const [field, kind] of [
+            ['rmCheckInterval', 'input'],
+            ['claude-header-defaults.timezone', 'input'],
+            ['claude-header-defaults.stabilize-device-profile', 'select'],
+        ]) {
+            const start = markup.indexOf(`id="cfg-field-${field}"`)
+            expect(start).toBeGreaterThan(-1)
+            const control     = markup.slice(start).match(new RegExp(`<${kind}\\b[^>]*>`))?.[0] ?? ''
+            const id          = attribute(control, 'id')
+            const description = attribute(control, 'aria-describedby')
+            expect(id).toBeTruthy()
+            expect(description).toBeTruthy()
+            expect(markup).toMatch(new RegExp(`<label\\b[^>]*for="${id}"`))
+            expect(markup).toContain(`id="${description}"`)
         }
     })
 })

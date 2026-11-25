@@ -2,15 +2,20 @@ import {usePageTransitionLayer} from '@/components/common/PageTransitionLayer'
 import {type ConfigFieldSearchEntry, findConfigFieldById} from '@/components/config/configSearchIndex'
 import {DiffModal} from '@/components/config/DiffModal'
 import {VisualConfigEditor} from '@/components/config/VisualConfigEditor'
+import {ConfigYamlFieldCatalog} from '@/components/config/YamlConfigFields'
 import {Button} from '@/components/ui/Button'
 import {IconCheck, IconChevronDown, IconChevronUp, IconRefreshCw, IconSearch, IconX} from '@/components/ui/icons'
 import {Input} from '@/components/ui/Input'
 import {Tabs} from '@/components/ui/Tabs'
+import {useHeaderRefresh} from '@/hooks/useHeaderRefresh'
 import {useUnsavedChangesGuard} from '@/hooks/useUnsavedChangesGuard'
 import {useVisualConfig} from '@/hooks/useVisualConfig'
+import {getConfigRestartFields} from '@/hooks/visualConfigCodec'
+import type {YamlConfigField} from '@/hooks/visualConfigFields'
 import {artifactsApi} from '@/services/api/artifacts'
+import {oauthModelAliasEditorApi} from '@/services/api/authFiles'
 import {apiClient, mutationReceiptError} from '@/services/api/client'
-import {configFileApi, type ConfigValidationError} from '@/services/api/configFile'
+import {configFileApi as fullConfigFileApi, type ConfigValidationError} from '@/services/api/configFile'
 import {logsApi} from '@/services/api/logs'
 import {usageApi} from '@/services/api/usage'
 import {useAuthStore, useConfigStore, useNotificationStore, useThemeStore} from '@/stores'
@@ -18,16 +23,17 @@ import type {ApiError} from '@/types/api'
 import type {VisualConfigRuntimeInfo, VisualConfigValues} from '@/types/visualConfig'
 import {yaml} from '@codemirror/lang-yaml'
 import {highlightSelectionMatches, search, searchKeymap} from '@codemirror/search'
-import {keymap} from '@codemirror/view'
+import {type EditorView, keymap} from '@codemirror/view'
 import CodeMirror, {ReactCodeMirrorRef} from '@uiw/react-codemirror'
 import type {KeyboardEvent as ReactKeyboardEvent} from 'react'
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {createPortal} from 'react-dom'
 import {useTranslation} from 'react-i18next'
 import {useLocation, useNavigate} from 'react-router'
-import {parse as parseYaml, parseDocument} from 'yaml'
+import {parseDocument} from 'yaml'
 import {ConfigEditorRevisionState, type ConfigRevisionSnapshot} from './configEditorRevision'
 import styles from './ConfigPage.module.scss'
+import {findYamlFieldRange, findYamlSearchMatch} from './configYamlSearch'
 
 type ConfigEditorTab = 'visual' | 'source'
 
@@ -35,6 +41,12 @@ type ConfigFieldJumpRequest = Readonly<{
     key: string
     entry: ConfigFieldSearchEntry
 }>
+
+type ConfigEditorApi = Omit<typeof fullConfigFileApi, 'saveConfigYaml'> & {
+    scopedToAliases?: true
+    saveConfigYaml: (content: string, etag: string, baseline?: string) =>
+        ReturnType<typeof fullConfigFileApi.saveConfigYaml>
+}
 
 type PreparedConfigSave = Readonly<{
     revision: ConfigRevisionSnapshot
@@ -54,33 +66,22 @@ function apiErrorStatus(error: unknown): number | undefined {
     return typeof status === 'number' ? status : undefined
 }
 
-function readCommercialModeFromYaml(yamlContent: string): boolean {
-    try {
-        const parsed = parseYaml(yamlContent)
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            return false
-        }
-        return Boolean((parsed as Record<string, unknown>)['commercial-mode'])
-    } catch {
-        return false
-    }
-}
-
 export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}) {
-    const { t }               = useTranslation()
-    const location            = useLocation()
-    const navigate            = useNavigate()
-    const showNotification    = useNotificationStore((state) => state.showNotification)
-    const showConfirmation    = useNotificationStore((state) => state.showConfirmation)
-    const connectionStatus    = useAuthStore((state) => state.connectionStatus)
-    const apiBase             = useAuthStore((state) => state.apiBase)
-    const managementKey       = useAuthStore((state) => state.managementKey)
-    const authGeneration      = useAuthStore(() => apiClient.getAuthGeneration())
-    const mountedRef          = useRef(true)
-    const pageLayer           = usePageTransitionLayer()
-    const pageActiveRef       = useRef(true)
-    pageActiveRef.current     = !pageLayer || pageLayer.status === 'current'
-    const isCurrentConnection = useCallback(
+    const configFileApi: ConfigEditorApi = scope === 'model-aliases' ? oauthModelAliasEditorApi : fullConfigFileApi
+    const { t }                          = useTranslation()
+    const location                       = useLocation()
+    const navigate                       = useNavigate()
+    const showNotification               = useNotificationStore((state) => state.showNotification)
+    const showConfirmation               = useNotificationStore((state) => state.showConfirmation)
+    const connectionStatus               = useAuthStore((state) => state.connectionStatus)
+    const pluginsAvailable               = useAuthStore((state) => state.serverFeatures.plugins === true)
+    const apiBase                        = useAuthStore((state) => state.apiBase)
+    const authGeneration                 = useAuthStore(() => apiClient.getAuthGeneration())
+    const mountedRef                     = useRef(true)
+    const pageLayer                      = usePageTransitionLayer()
+    const pageActiveRef                  = useRef(true)
+    pageActiveRef.current                = !pageLayer || pageLayer.status === 'current'
+    const isCurrentConnection            = useCallback(
         () => mountedRef.current && pageActiveRef.current && authGeneration === apiClient.getAuthGeneration(),
         [authGeneration],
     )
@@ -141,6 +142,15 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
 
     const [validationErrors, setValidationErrors] = useState<ConfigValidationError[]>([])
 
+    const previewWarnings = useMemo(() => {
+        const fields = diffModalOpen ? getConfigRestartFields(diffOriginalYaml, mergedYaml).join(', ') : ''
+        return fields ? [
+            ...validationWarnings, t('config_management.restart_preview', {
+                fields, defaultValue: 'These settings take effect after restarting the service: {{fields}}',
+            }),
+        ] : validationWarnings
+    }, [diffModalOpen, diffOriginalYaml, mergedYaml, t, validationWarnings])
+
     const [runtimeInfo, setRuntimeInfo] = useState<VisualConfigRuntimeInfo>(
         {
             logSize: { status: 'loading' },
@@ -151,18 +161,24 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
     // Search state
     const [searchQuery, setSearchQuery] = useState('')
 
-    const [searchResults, setSearchResults] = useState<{ current: number; total: number }>({
-                                                                                               current: 0,
-                                                                                               total: 0,
-                                                                                           })
+    const [lastSearch, setLastSearch] = useState<{
+                                                     query: string;
+                                                     content: string;
+                                                     current: number;
+                                                     total: number
+                                                 } | null>(null)
+    const searchResults               = lastSearch?.query === searchQuery && lastSearch.content === content ?
+                                        lastSearch :
+                                        null
 
-    const [lastSearchedQuery, setLastSearchedQuery] = useState('')
-
-    const editorRef = useRef<ReactCodeMirrorRef>(null)
+    const editorRef      = useRef<ReactCodeMirrorRef>(null)
+    const sourceFieldRef = useRef<YamlConfigField | null>(null)
 
     const floatingActionsRef = useRef<HTMLDivElement>(null)
 
     const revisionStateRef = useRef(new ConfigEditorRevisionState(() => apiClient.getAuthGeneration()))
+
+    const aliasRevisionRef = useRef('')
 
     const runtimeRequestSequenceRef = useRef(0)
 
@@ -192,12 +208,12 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                                                      variant: 'danger',
                                                                  },
                                                              })
-    const hasVisualModeError        = !!visualParseError
+    const hasVisualModeError        = !!visualParseError && (activeTab === 'visual' || !dirty)
     const hasVisualValidationErrors =
               activeTab === 'visual' &&
               (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors)
-    const loadRuntimeInfo           = useCallback(async () => {
-        if (!isCurrentConnection()) {
+    const loadRuntimeInfo           = useCallback(async (reportFailure = false) => {
+        if (!isCurrentConnection() || configFileApi.scopedToAliases) {
             return
         }
         const sequence   = ++runtimeRequestSequenceRef.current
@@ -214,7 +230,8 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                 usageApi.getDBSize(),
                 artifactsApi.fetchImageArtifactCacheSize(),
             ])
-        if (sequence !== runtimeRequestSequenceRef.current || generation !== apiClient.getAuthGeneration()) {
+        if (!isCurrentConnection() || sequence !== runtimeRequestSequenceRef.current ||
+            generation !== apiClient.getAuthGeneration()) {
             return
         }
 
@@ -247,7 +264,14 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                    }
                                : { status: 'error' },
                        })
-    }, [isCurrentConnection])
+        if (reportFailure) {
+            const failed = [logSizeResult, usageDbSizeResult, imageArtifactCacheSizeResult]
+                .find((result) => result.status === 'rejected')
+            if (failed?.status === 'rejected') {
+                throw failed.reason
+            }
+        }
+    }, [configFileApi.scopedToAliases, isCurrentConnection])
 
     const clearPreparedSave = useCallback(() => {
         if (!isCurrentConnection()) {
@@ -274,7 +298,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         setVisualValues(values)
     }, [isCurrentConnection, markDraftChanged, saveNeedsReload, setVisualValues])
 
-    const loadConfig = useCallback(async (discardDraft = false) => {
+    const loadConfig = useCallback(async (discardDraft = false, reportFailure = false) => {
         if (!isCurrentConnection()) {
             return
         }
@@ -287,7 +311,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         try {
             const snapshot = await configFileApi.fetchConfigYaml()
             const merged   = snapshot.content
-            if (!revisionStateRef.current.isCurrentRequest(request)) {
+            if (!isCurrentConnection() || !revisionStateRef.current.isCurrentRequest(request)) {
                 return
             }
 
@@ -300,6 +324,9 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             }
 
             revisionStateRef.current.acceptServerRevision()
+            if (configFileApi.scopedToAliases) {
+                aliasRevisionRef.current = snapshot.etag
+            }
             isDirtyRef.current = false
             revisionStateRef.current.resetSource(snapshot.content)
             setSaveNeedsReload(false)
@@ -310,17 +337,35 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             setValidationErrors([])
             loadVisualValuesFromYaml(merged, snapshot.content)
         } catch (err: unknown) {
-            if (!revisionStateRef.current.isCurrentRequest(request)) {
+            if (!isCurrentConnection() || !revisionStateRef.current.isCurrentRequest(request)) {
                 return
             }
             const message = err instanceof Error ? err.message : t('notification.refresh_failed')
             setError(message)
+            if (configFileApi.scopedToAliases) {
+                setSaveNeedsReload(true)
+            }
+            if (reportFailure) {
+                throw err
+            }
         } finally {
             if (revisionStateRef.current.isCurrentGeneration(request)) {
                 setLoading(false)
             }
         }
-    }, [isCurrentConnection, loadVisualValuesFromYaml, t])
+    }, [configFileApi, isCurrentConnection, loadVisualValuesFromYaml, t])
+
+    const handleHeaderRefresh = useCallback(async () => {
+        const results = await Promise.allSettled([
+                                                     isDirtyRef.current || saving ? undefined : loadConfig(false, true),
+                                                     loadRuntimeInfo(true),
+                                                 ])
+        const failed  = results.find((result) => result.status === 'rejected')
+        if (failed?.status === 'rejected') {
+            throw failed.reason
+        }
+    }, [loadConfig, loadRuntimeInfo, saving])
+    useHeaderRefresh(pageActiveRef.current && !disableControls ? handleHeaderRefresh : null)
 
     useEffect(() => {
         mountedRef.current = true
@@ -397,6 +442,14 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         })
     }, [activeTab, isCurrentConnection, showNotification, t, visualParseError])
 
+    const requireAliasReload = () => {
+        setDiffModalOpen(false)
+        setSaveNeedsReload(true)
+        setError(t('config_management.oauth_aliases_changed', {
+            defaultValue: 'OAuth model aliases changed. Your draft is retained. Reload before saving again.',
+        }))
+    }
+
     const handleConfirmSave = async () => {
         if (!isCurrentConnection()) {
             return
@@ -415,27 +468,31 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         const request = revisionStateRef.current.beginSave()
         setSaving(true)
         try {
-            const previousCommercialMode = readCommercialModeFromYaml(prepared.serverYaml)
-            const nextCommercialMode     = readCommercialModeFromYaml(prepared.content)
-            const commercialModeChanged  = previousCommercialMode !== nextCommercialMode
-            const saveResult             = await configFileApi.saveConfigYaml(prepared.content, prepared.serverEtag)
+            const restartFields       = getConfigRestartFields(prepared.serverYaml, prepared.content)
+            const baseline: [string?] = configFileApi.scopedToAliases ? [prepared.serverYaml] : []
+            const saveResult          = await configFileApi.saveConfigYaml(
+                prepared.content, prepared.serverEtag, ...baseline,
+            )
             if (!revisionStateRef.current.isCurrentRequest(request)) {
                 return
             }
 
             let readback: Awaited<ReturnType<typeof configFileApi.fetchConfigYaml>> | undefined
-            if (saveResult.mutation) {
+            if (saveResult.mutation || configFileApi.scopedToAliases) {
                 try {
                     readback = await configFileApi.fetchConfigYaml()
                 } catch (error: unknown) {
+                    const cause = error instanceof Error ? error : new Error(String(error))
                     // noinspection ExceptionCaughtLocallyJS
-                    throw Object.assign(
-                        error instanceof Error ? error : new Error(String(error)),
-                        { mutation: saveResult.mutation },
-                    )
+                    throw Object.assign(configFileApi.scopedToAliases ? new Error(cause.message, { cause }) : cause, {
+                        mutation: saveResult.mutation,
+                    })
                 }
                 if (!revisionStateRef.current.isCurrentRequest(request)) {
                     return
+                }
+                if (configFileApi.scopedToAliases) {
+                    aliasRevisionRef.current = readback.etag
                 }
             }
             const confirmedContent  = readback?.content ?? prepared.content
@@ -462,15 +519,21 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                     'warning',
                 )
             }
-            if (commercialModeChanged) {
+            if (restartFields.length === 1 && restartFields[0] === 'commercial-mode') {
                 showNotification(t('notification.commercial_mode_restart_required'), 'warning')
+            } else if (restartFields.length) {
+                showNotification(t('config_management.restart_saved', {
+                    fields: restartFields.join(', '),
+                    defaultValue: 'Saved. Restart the service to apply: {{fields}}',
+                }), 'warning')
             }
+            void loadRuntimeInfo()
 
             const refreshRequest = revisionStateRef.current.beginLoad()
             try {
                 clearConfigCache()
                 await fetchConfig(undefined, true)
-                if (!revisionStateRef.current.isCurrentRequest(refreshRequest)) {
+                if (configFileApi.scopedToAliases || !revisionStateRef.current.isCurrentRequest(refreshRequest)) {
                     return
                 }
 
@@ -500,6 +563,10 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             }
             if (apiErrorStatus(err) === 412) {
                 preparedSaveRef.current = null
+                if (configFileApi.scopedToAliases) {
+                    requireAliasReload()
+                    return
+                }
                 try {
                     const latestSnapshot = await configFileApi.fetchConfigYaml()
                     if (!revisionStateRef.current.isCurrentRequest(request)) {
@@ -689,6 +756,10 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             if (!revisionStateRef.current.isCurrentRequest(request)) {
                 return
             }
+            if (configFileApi.scopedToAliases && latestSnapshot.etag !== aliasRevisionRef.current) {
+                requireAliasReload()
+                return
+            }
 
             let latestDocument: ReturnType<typeof parseDocument> | null = null
             if (origin !== 'source') {
@@ -856,6 +927,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
 
             setActiveTab(tab)
             localStorage.setItem('config-management:tab', tab)
+            return true
         },
         [
             activeTab,
@@ -872,6 +944,67 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         ],
     )
 
+    const focusYamlSourceField = useCallback((view: EditorView) => {
+        const field = sourceFieldRef.current
+        if (!field || !isCurrentConnection()) {
+            return
+        }
+        sourceFieldRef.current    = null
+        const { from, to, exact } = findYamlFieldRange(view.state.doc.toString(), field)
+        setLastSearch(null)
+        view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true })
+        view.dom.scrollIntoView({ block: 'nearest' })
+        view.focus()
+        if (!exact) {
+            showNotification(t('config_management.yaml_fields.source_path_context', { path: field.id }), 'info')
+        }
+    }, [isCurrentConnection, showNotification, t])
+
+    const openYamlSourceField = useCallback(
+        (field: YamlConfigField) => {
+            if (!isCurrentConnection() || disableControls || loading || saving || saveNeedsReload) {
+                return
+            }
+            sourceFieldRef.current = field
+            if (activeTab !== 'source') {
+                if (!handleTabChange('source')) {
+                    sourceFieldRef.current = null
+                }
+                return
+            }
+            const view = editorRef.current?.view
+            if (view) {
+                focusYamlSourceField(view)
+            }
+        },
+        [
+            activeTab,
+            disableControls,
+            focusYamlSourceField,
+            handleTabChange,
+            isCurrentConnection,
+            loading,
+            saving,
+            saveNeedsReload,
+        ],
+    )
+
+    const handleFieldNavigation = useCallback((entry: ConfigFieldSearchEntry) => {
+        if (scope !== 'model-aliases' && entry.sourceField) {
+            openYamlSourceField(entry.sourceField)
+            return
+        }
+        if (!scope && activeTab === 'source' && !entry.destination && !entry.path) {
+            if (handleTabChange('visual')) {
+                setFieldJumpRequest({ key: 'yaml-directory', entry })
+            }
+            return
+        }
+        void navigate(entry.destination ?? {
+            pathname: entry.path ?? '/config', search: `?field=${encodeURIComponent(entry.fieldId)}`,
+        })
+    }, [activeTab, handleTabChange, navigate, openYamlSourceField, scope])
+
     useEffect(() => {
         if (!isCurrentConnection() ||
             !requestedField ||
@@ -881,6 +1014,10 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             return
         }
 
+        if (requestedField.destination) {
+            void navigate(requestedField.destination, { replace: true })
+            return
+        }
         const ownerPath = requestedField.path ?? '/config'
         if (location.pathname !== ownerPath) {
             void navigate({ pathname: ownerPath, search: location.search, hash: location.hash }, { replace: true })
@@ -891,7 +1028,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
         if (handledFieldRequestRef.current === requestKey) {
             return
         }
-        if (activeTab !== 'visual') {
+        if (activeTab !== 'visual' && !requestedField.sourceField) {
             if (pendingFieldRequestRef.current !== requestKey) {
                 pendingFieldRequestRef.current = requestKey
                 queueMicrotask(() => {
@@ -910,7 +1047,11 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             if (!isCurrentConnection()) {
                 return
             }
-            setFieldJumpRequest({ key: requestKey, entry: requestedField })
+            if (requestedField.sourceField) {
+                openYamlSourceField(requestedField.sourceField)
+            } else {
+                setFieldJumpRequest({ key: requestKey, entry: requestedField })
+            }
             const params = new URLSearchParams(location.search)
             params.delete('field')
             const search = params.toString()
@@ -932,125 +1073,36 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                   location.pathname,
                   location.search,
                   navigate,
+                  openYamlSourceField,
                   requestedField,
                   saving,
                   visualParseError,
               ])
 
-    // Search functionality
-    const performSearch = useCallback((query: string, direction: 'next' | 'prev' = 'next') => {
-        if (!query || !editorRef.current?.view) {
-            return
-        }
-
-        const view              = editorRef.current.view
-        const doc               = view.state.doc.toString()
-        const matches: number[] = []
-        const lowerQuery        = query.toLowerCase()
-        const lowerDoc          = doc.toLowerCase()
-
-        let pos = 0
-        while (pos < lowerDoc.length) {
-            const index = lowerDoc.indexOf(lowerQuery, pos)
-            if (index === -1) {
-                break
-            }
-            matches.push(index)
-            pos = index + 1
-        }
-
-        if (matches.length === 0) {
-            setSearchResults({ current: 0, total: 0 })
-            return
-        }
-
-        // Find current match based on cursor position
-        const selection  = view.state.selection.main
-        const cursorPos  = direction === 'prev' ? selection.from : selection.to
-        let currentIndex = 0
-
-        if (direction === 'next') {
-            // Find next match after cursor
-            for (let i = 0; i < matches.length; i++) {
-                if (matches[i] > cursorPos) {
-                    currentIndex = i
-                    break
-                }
-                // If no match after cursor, wrap to first
-                if (i === matches.length - 1) {
-                    currentIndex = 0
-                }
-            }
-        } else {
-            // Find previous match before cursor
-            for (let i = matches.length - 1; i >= 0; i--) {
-                if (matches[i] < cursorPos) {
-                    currentIndex = i
-                    break
-                }
-                // If no match before cursor, wrap to last
-                if (i === 0) {
-                    currentIndex = matches.length - 1
-                }
-            }
-        }
-
-        const matchPos = matches[currentIndex]
-        setSearchResults({ current: currentIndex + 1, total: matches.length })
-
-        // Scroll to and select the match
-        view.dispatch({
-                          selection: { anchor: matchPos, head: matchPos + query.length },
-                          scrollIntoView: true,
-                      })
-        view.focus()
-    }, [])
-
-    const handleSearchChange = useCallback((value: string) => {
+    const handleSearchChange = (value: string) => {
         setSearchQuery(value)
-        // Do not auto-search on each keystroke. Clear previous results when query changes.
-        if (!value) {
-            setSearchResults({ current: 0, total: 0 })
-            setLastSearchedQuery('')
-        } else {
-            setSearchResults({ current: 0, total: 0 })
-        }
-    }, [])
+        setLastSearch(null)
+    }
 
-    const executeSearch = useCallback(
-        (direction: 'next' | 'prev' = 'next') => {
-            if (!searchQuery) {
-                return
-            }
-            setLastSearchedQuery(searchQuery)
-            performSearch(searchQuery, direction)
-        },
-        [searchQuery, performSearch],
-    )
-
-    const handleSearchKeyDown = useCallback(
-        (e: ReactKeyboardEvent<HTMLInputElement>) => {
-            if (e.key === 'Enter') {
-                e.preventDefault()
-                executeSearch(e.shiftKey ? 'prev' : 'next')
-            }
-        },
-        [executeSearch],
-    )
-
-    const handlePrevMatch = useCallback(() => {
-        if (!lastSearchedQuery) {
+    const executeSearch = (direction: 'next' | 'prev') => {
+        const view = editorRef.current?.view
+        if (!searchQuery || !view || disableControls || loading || saving) {
             return
         }
-        performSearch(lastSearchedQuery, 'prev')
-    }, [lastSearchedQuery, performSearch])
-
-    const handleNextMatch = useCallback(() => {
-        if (!lastSearchedQuery) {
-            return
+        const match = findYamlSearchMatch(view.state, searchQuery, direction, searchResults !== null)
+        setLastSearch({ query: searchQuery, content, current: match?.current ?? 0, total: match?.total ?? 0 })
+        if (match) {
+            view.dispatch({ selection: { anchor: match.from, head: match.to }, scrollIntoView: true })
+            view.focus()
         }
-        performSearch(lastSearchedQuery, 'next')
-    }, [lastSearchedQuery, performSearch])
+    }
+
+    const handleSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            executeSearch(e.shiftKey ? 'prev' : 'next')
+        }
+    }
 
     // Keep bottom floating actions from covering page content by syncing its height to a CSS variable.
     useLayoutEffect(() => {
@@ -1229,7 +1281,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                         saveNeedsReload ||
                         !isDirty ||
                         diffModalOpen ||
-                        hasVisualModeError ||
+                        (hasVisualModeError && activeTab === 'visual') ||
                         hasVisualValidationErrors
                     }
                     title={t('config_management.save')}
@@ -1246,14 +1298,11 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
               activeTab === 'visual'
               ? t('config_management.tabs.visual', { defaultValue: '可视化编辑' })
               : t('config_management.tabs.source', { defaultValue: '源文件编辑' })
-    const pageDescription =
-              activeTab === 'visual' ?
-              t(scope === 'oauth' ?
-                'config_management.oauth_config_description' :
-                scope === 'model-aliases' ?
-                'config_management.oauth_aliases_description' :
-                'config_management.visual.notice') :
-              t('config_management.description')
+    const pageDescription = scope === 'model-aliases' ? t('config_management.oauth_aliases_description') :
+                            activeTab === 'source' ? t('config_management.description') :
+                            t(scope === 'oauth' ?
+                              'config_management.oauth_config_description' :
+                              'config_management.visual.notice')
 
     return (
         <div className={styles.container}>
@@ -1300,7 +1349,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
             <div className={styles.workspaceShell}>
                 <div className={styles.content}>
                     {error && <div className='error-box'>{error}</div>}
-                    {!error && visualParseError && (
+                    {!error && hasVisualModeError && (
                         <div className='error-box'>
                             {t('config_management.visual_mode_unavailable_detail', { message: visualParseError })}
                         </div>
@@ -1310,11 +1359,8 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                         <VisualConfigEditor
                             values={visualValues}
                             scope={scope}
-                            onNavigateField={(entry) => void navigate(
-                                {
-                                    pathname: entry.path ?? '/config',
-                                    search: `?field=${encodeURIComponent(entry.fieldId)}`,
-                                })}
+                            pluginsAvailable={pluginsAvailable}
+                            onNavigateField={handleFieldNavigation}
                             baselineValues={baselineValues}
                             validationErrors={visualValidationErrors}
                             hasPayloadValidationErrors={visualHasPayloadValidationErrors}
@@ -1339,7 +1385,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                          className={styles.searchInput}
                                          rightElement={
                                              <div className={styles.searchRight}>
-                                                 {searchQuery && lastSearchedQuery === searchQuery && (
+                                                 {searchResults && (
                                                      <span className={styles.searchCount}>
                                                         {searchResults.total > 0
                                                          ? `${searchResults.current} / ${searchResults.total}`
@@ -1368,12 +1414,8 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                      <Button
                                          variant='secondary'
                                          size='sm'
-                                         onClick={handlePrevMatch}
-                                         disabled={
-                                             !searchQuery ||
-                                             lastSearchedQuery !== searchQuery ||
-                                             searchResults.total === 0
-                                         }
+                                         onClick={() => executeSearch('prev')}
+                                         disabled={!searchResults?.total || disableControls || loading || saving}
                                          title={t('config_management.search_prev', { defaultValue: '上一个' })}
                                      >
                                          <IconChevronUp size={16} />
@@ -1381,12 +1423,8 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                      <Button
                                          variant='secondary'
                                          size='sm'
-                                         onClick={handleNextMatch}
-                                         disabled={
-                                             !searchQuery ||
-                                             lastSearchedQuery !== searchQuery ||
-                                             searchResults.total === 0
-                                         }
+                                         onClick={() => executeSearch('next')}
+                                         disabled={!searchResults?.total || disableControls || loading || saving}
                                          title={t('config_management.search_next', { defaultValue: '下一个' })}
                                      >
                                          <IconChevronDown size={16} />
@@ -1394,11 +1432,18 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                                  </div>
                              </div>
 
+                             {!scope && <ConfigYamlFieldCatalog yaml={content} onSelect={handleFieldNavigation}
+                                                                disabled={disableControls ||
+                                                                          loading ||
+                                                                          saving ||
+                                                                          saveNeedsReload}
+                                                                pluginsAvailable={pluginsAvailable} />}
                              <div className={styles.editorWrapper}>
                                  <CodeMirror
                                      ref={editorRef}
                                      value={content}
                                      onChange={handleChange}
+                                     onCreateEditor={focusYamlSourceField}
                                      extensions={extensions}
                                      theme={resolvedTheme}
                                      editable={!disableControls && !loading && !saving && !saveNeedsReload}
@@ -1443,7 +1488,7 @@ export function ConfigPage({ scope }: { scope?: 'oauth' | 'model-aliases' } = {}
                 onConfirm={handleConfirmSave}
                 onCancel={clearPreparedSave}
                 loading={saving}
-                warnings={validationWarnings}
+                warnings={previewWarnings}
                 errors={validationErrors}
             />
         </div>

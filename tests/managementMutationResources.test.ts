@@ -337,13 +337,18 @@ test('every ordinary management write registers resource readback or its special
                 const path     = ts.isStringLiteralLike(endpoint) ? endpoint.text : endpoint.getText(tree)
                 if (!readonlyPosts.has(path)) {
                     const options     = node.arguments[node.expression.name.text === 'delete' ? 1 : 2]
-                    const specialized = path === '/config.yaml' || path === '/auth-files/status'
+                    const specialized = path === '/config.yaml' || path === '/auth-files/status' ||
+                                        path === 'OAUTH_MODEL_ALIAS_ENDPOINT'
                     const expected    = specialized ? 'onMutationReceipt' : 'mutationReadback'
-                    if (options && ts.isObjectLiteralExpression(options) && options.properties.some((property) =>
-                        ts.isPropertyAssignment(property) &&
-                        property.name.getText(tree) ===
-                        expected &&
-                        ts.isArrowFunction(property.initializer))) {
+                    if (options && ts.isObjectLiteralExpression(options) && options.properties.some((property) => {
+                        if (!ts.isPropertyAssignment(property) || property.name.getText(tree) !== expected) {
+                            return false
+                        }
+                        const readback = property.initializer
+                        return ts.isArrowFunction(readback) ||
+                               (name === 'plugins.ts' && expected === 'mutationReadback' &&
+                                ts.isCallExpression(readback) && readback.expression.getText(tree) === 'readPluginList')
+                    })) {
                         registered += 1
                     } else {
                         missing.push(`${name}: ${path}`)
@@ -354,7 +359,7 @@ test('every ordinary management write registers resource readback or its special
         }
         visit(tree)
     }
-    expect(registered).toBe(82)
+    expect(registered).toBe(84)
     expect(missing).toEqual([])
 })
 

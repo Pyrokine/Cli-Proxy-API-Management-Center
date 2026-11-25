@@ -168,7 +168,7 @@ async function sizeConsumerStates(responses: { status: number; body: { error?: s
         'loadRuntimeInfo',
         {
             isCurrentConnection: () => true, runtimeRequestSequenceRef: { current: 0 },
-            apiClient: { getAuthGeneration: () => 1 }, usageApi,
+            configFileApi: { scopedToAliases: false }, apiClient: { getAuthGeneration: () => 1 }, usageApi,
             logsApi: { fetchLogSize: async () => ({ total_bytes: 0 }) },
             artifactsApi: { fetchImageArtifactCacheSize: async () => ({ total_bytes: 0 }) },
             setRuntimeInfo: (value: typeof runtime) => {

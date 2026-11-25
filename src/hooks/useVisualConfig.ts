@@ -14,6 +14,7 @@ import {parseGoDuration, parsePositiveGoDuration} from '@/utils/apiKeyPolicy'
 import {getRequestScopedErrorsValidationKey} from '@/utils/credentialOverrides'
 import {getOAuthModelAliasError} from '@/utils/oauthModelAlias'
 import {useCallback, useMemo, useRef, useState} from 'react'
+import {useTranslation} from 'react-i18next'
 import {parse as parseYaml} from 'yaml'
 import {
     type ApiKeysStorageMetadata,
@@ -23,7 +24,9 @@ import {
     encodeVisualConfigYaml,
     getPayloadModelHeaderError,
     integerFieldValue,
+    isPluginStoreAuthMatchMissing,
     parseVisualConfigInteger,
+    SharedConfigYamlValueError,
     updateApiKeysStorageMetadata,
     VISUAL_INTEGER_FIELDS,
 } from './visualConfigCodec'
@@ -227,9 +230,23 @@ export function getVisualConfigValidationErrors(
     baseline?: VisualConfigValues,
 ): VisualConfigValidationErrors {
     const errors: VisualConfigValidationErrors = {}
+    const quotaRefreshChanged                  = !baseline ||
+                                                 values.quotaRefreshEnabled !==
+                                                 baseline.quotaRefreshEnabled ||
+                                                 values.quotaRefreshInterval !==
+                                                 baseline.quotaRefreshInterval ||
+                                                 values.quotaRefreshMaxInterval !==
+                                                 baseline.quotaRefreshMaxInterval
     for (const [field, contract] of Object.entries(VISUAL_INTEGER_FIELDS)) {
+        if (!quotaRefreshChanged && contract.path[0] === 'quota-refresh') {
+            continue
+        }
+        const value = integerFieldValue(values, field)
+        if (baseline && value === integerFieldValue(baseline, field)) {
+            continue
+        }
         try {
-            parseVisualConfigInteger(integerFieldValue(values, field), contract.minimum, contract.maximum)
+            parseVisualConfigInteger(value, contract.minimum, contract.maximum)
         } catch {
             errors[field as keyof VisualConfigValidationErrors] = field === 'port'
                                                                   ? 'port_range'
@@ -270,9 +287,15 @@ export function getVisualConfigValidationErrors(
     if (!baseline || values.oauthExcludedModelsText !== baseline.oauthExcludedModelsText) {
         errors.oauthExcludedModelsText = getOAuthExcludedModelsError(values.oauthExcludedModelsText)
     }
-    errors.quotaRefreshInterval    = getQuotaRefreshIntervalError(values)
-    errors.quotaRefreshMaxInterval = getQuotaRefreshMaxIntervalError(values)
-    const ttl                      = values.videoResultAuthCacheTTL.trim()
+    if (quotaRefreshChanged) {
+        errors.quotaRefreshInterval    = getQuotaRefreshIntervalError(values)
+        errors.quotaRefreshMaxInterval = getQuotaRefreshMaxIntervalError(values)
+    }
+    const pluginAuthBaseline = new Map(baseline?.pluginStoreAuth.map((rule) => [rule.id, rule]))
+    if (values.pluginStoreAuth.some((rule) => isPluginStoreAuthMatchMissing(rule, pluginAuthBaseline.get(rule.id)))) {
+        errors.pluginStoreAuth = 'store_auth_match_required'
+    }
+    const ttl = values.videoResultAuthCacheTTL.trim()
     if (ttl && (!baseline || values.videoResultAuthCacheTTL !== baseline.videoResultAuthCacheTTL) &&
         parsePositiveGoDuration(ttl) === null) {
         errors.videoResultAuthCacheTTL = 'positive_duration'
@@ -362,6 +385,7 @@ function hasPayloadParamValidationErrors(rules: Array<PayloadRule | PayloadFilte
 }
 
 export function useVisualConfig() {
+    const { t }                                   = useTranslation()
     const [visualValues, setVisualValuesState]    = useState<VisualConfigValues>({
                                                                                      ...DEFAULT_VISUAL_VALUES,
                                                                                  })
@@ -418,11 +442,21 @@ export function useVisualConfig() {
         }
     }, [])
 
-    const applyVisualChangesToYaml = useCallback(
-        (currentYaml: string): string =>
-            encodeVisualConfigYaml(currentYaml, visualValues, baselineValues, apiKeysStorage, baselineYaml),
-        [apiKeysStorage, baselineValues, baselineYaml, visualValues],
-    )
+    const applyVisualChangesToYaml = useCallback((currentYaml: string): string => {
+        try {
+            return encodeVisualConfigYaml(currentYaml, visualValues, baselineValues, apiKeysStorage, baselineYaml)
+        } catch (error: unknown) {
+            if (error instanceof SharedConfigYamlValueError) {
+                throw new Error(t(
+                    'config_management.visual.validation.shared_yaml_value',
+                    { defaultValue: error.message },
+                ), {
+                                    cause: error,
+                                })
+            }
+            throw error
+        }
+    }, [apiKeysStorage, baselineValues, baselineYaml, t, visualValues])
 
     const setVisualValues = useCallback((newValues: Partial<VisualConfigValues>) => {
         if (newValues.apiKeysText !== undefined && newValues.apiKeysText !== apiKeysTextRef.current) {

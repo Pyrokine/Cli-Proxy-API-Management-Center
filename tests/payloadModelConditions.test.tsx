@@ -11,7 +11,9 @@ import {
     decodeVisualConfigYaml,
     encodeVisualConfigYaml,
     getPayloadModelHeaderError,
+    SharedConfigYamlValueError,
 } from '@/hooks/visualConfigCodec'
+import {ConfigEditorRevisionState} from '@/pages/configEditorRevision'
 import type {PayloadModelEntry} from '@/types/visualConfig'
 import {describe, expect, test} from 'bun:test'
 import React from 'react'
@@ -293,25 +295,36 @@ describe(
             expect(saved).toContain('0x0F: raw')
         })
 
-        test('unrelated edits preserve scalar condition text while an edited anchor publishes its new value', () => {
-            const yaml      = (
-                'port: &origin 0xFF\npayload: {default: [{models: [{name: Model-' +
-                '*, headers: {x-port: *origin, x-pattern: 0xAB}}], params: {' +
-                'temperature: 0.5}}]}\n'
-            )
-            const decoded   = decodeVisualConfigYaml(yaml)
-            const unrelated = { ...decoded.values, debug: true }
-            const saved     = encodeVisualConfigYaml(yaml, unrelated, decoded.values, decoded.apiKeysStorage)
-            expect(saved).toContain('&origin 0xFF')
-            expect(saved).toContain('x-port: *origin')
-            expect(saved).toContain('x-pattern: 0xAB')
-            const changed = { ...decoded.values, port: '256' }
-            const updated = encodeVisualConfigYaml(yaml, changed, decoded.values, decoded.apiKeysStorage)
-            const result  = parse(updated)
-            expect(result.port).toBe(256)
-            expect(result.payload.default[0].models[0].headers['x-port']).toBe(256)
-            expect(updated).toContain('x-pattern: 0xAB')
-        })
+        test(
+            'unrelated edits preserve condition text; source mode changes the anchor and its references together',
+            () => {
+                const yaml      = (
+                    'port: &origin 0xFF\npayload: {default: [{models: [{name: Model-' +
+                    '*, headers: {x-port: *origin, x-pattern: 0xAB}}], params: {' +
+                    'temperature: 0.5}}]}\n'
+                )
+                const decoded   = decodeVisualConfigYaml(yaml)
+                const unrelated = { ...decoded.values, debug: true }
+                const saved     = encodeVisualConfigYaml(yaml, unrelated, decoded.values, decoded.apiKeysStorage)
+                expect(saved).toContain('&origin 0xFF')
+                expect(saved).toContain('x-port: *origin')
+                expect(saved).toContain('x-pattern: 0xAB')
+                const changed     = { ...decoded.values, port: '256' }
+                const applyVisual = (current: string) => encodeVisualConfigYaml(
+                    current, changed, decoded.values, decoded.apiKeysStorage,
+                )
+                expect(() => applyVisual(yaml)).toThrow(SharedConfigYamlValueError)
+                const revisions = new ConfigEditorRevisionState()
+                revisions.resetSource(yaml)
+                revisions.editSource(yaml.replace('&origin 0xFF', '&origin 256'))
+                const updated = revisions.buildSaveDraft(yaml, 'source', applyVisual)
+                const result  = parse(updated)
+                expect(result.port).toBe(256)
+                expect(result.payload.default[0].models[0].headers['x-port']).toBe(256)
+                expect(updated).toContain('x-port: *origin')
+                expect(updated).toContain('x-pattern: 0xAB')
+            },
+        )
 
         test('duplicate header names block saving without merging their different patterns', () => {
             const yaml                                    = source('default')

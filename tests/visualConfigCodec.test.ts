@@ -1,14 +1,17 @@
-import {findConfigFieldById} from '@/components/config/configSearchIndex'
+import {findConfigFieldById, searchConfigFields} from '@/components/config/configSearchIndex'
 import {VisualConfigEditor} from '@/components/config/VisualConfigEditor'
 import {CodexLiveICEServersEditor} from '@/components/config/VisualConfigEditorBlocks'
+import {YamlConfigFieldRows} from '@/components/config/YamlConfigFields'
 import {getVisualConfigValidationErrors} from '@/hooks/useVisualConfig'
 
 import {
     areVisualConfigValuesEqual,
     decodeVisualConfigYaml,
     encodeVisualConfigYaml,
+    readVisualYamlFieldCatalog,
     updateApiKeysStorageMetadata,
 } from '@/hooks/visualConfigCodec'
+import {VISUAL_YAML_FIELDS, yamlConfigField} from '@/hooks/visualConfigFields'
 import i18n from '@/i18n'
 import {DEFAULT_VISUAL_VALUES} from '@/types/visualConfig'
 import {describe, expect, test} from 'bun:test'
@@ -109,29 +112,182 @@ describe(
                                                          })
         })
 
-        test('edits Claude timezone through the existing header YAML field', () => {
-            const source   = (
-                '# keep\nclaude-header-defaults:\n  timezone: UTC\n  user-agent: ' +
-                'fixture\n  future: retained\nunknown: keep\n'
-            )
+        test('edits the Claude timezone leaf while preserving its comment and unknown siblings', () => {
+            const source   = '# keep\nclaude-header-defaults:\n  timezone: UTC # Configured time zone\n' +
+                             '  user-agent: fixture\n  future: retained # Other field\nunknown: keep\n'
+            const field    = 'claude-header-defaults.timezone'
             const baseline = decodeVisualConfigYaml(source)
-            expect(parse(baseline.values.claudeHeaderDefaultsText).timezone).toBe('UTC')
-            expect(encodeVisualConfigYaml(source, baseline.values, baseline.values, baseline.apiKeysStorage)).toBe(
-                source)
+            expect(baseline.values.yamlFields[field]?.value).toBe('UTC')
+            expect(encodeVisualConfigYaml(source, baseline.values, baseline.values, baseline.apiKeysStorage))
+                .toBe(source)
             for (const timezone of ['UTC', 'Local', 'Asia/Singapore', 'America/New_York', '']) {
-                const header = parseDocument(baseline.values.claudeHeaderDefaultsText)
-                header.set('timezone', timezone)
-                const values = { ...baseline.values, claudeHeaderDefaultsText: header.toString() }
-                const output = encodeVisualConfigYaml(source, values, baseline.values, baseline.apiKeysStorage)
+                const values = { ...baseline.values, yamlFieldEdits: { [field]: timezone } }
+                const output = encodeVisualConfigYaml(source, values, baseline.values, baseline.apiKeysStorage, source)
                 expect(parse(output)['claude-header-defaults']).toEqual({
                                                                             timezone,
                                                                             'user-agent': 'fixture',
                                                                             future: 'retained',
                                                                         })
-                expect(parse(decodeVisualConfigYaml(output).values.claudeHeaderDefaultsText).timezone).toBe(timezone)
-                expect(output).toContain('# keep')
+                expect(decodeVisualConfigYaml(output).values.yamlFields[field]?.value).toBe(timezone)
+                expect(output).toContain('# Configured time zone')
+                expect(output).toContain('# Other field')
                 expect(output).toContain('unknown: keep')
             }
+        })
+
+        test('resolves image-generation YAML modes and retains the original spelling on unrelated edits', () => {
+            for (const [scalar, mode] of [
+                ['1', 'all'], ['"1"', 'all'], ['ALL', 'all'], ['" True "', 'all'], ['yes', 'all'],
+                ['0', 'off'], ['OFF', 'off'], ['false', 'off'], ['null', 'off'],
+                ['CHAT', 'chat'], ['PaSsThRoUgH', 'passthrough'],
+            ] as const) {
+                const source  = `disable-image-generation: ${scalar} # source spelling\n`
+                const decoded = decodeVisualConfigYaml(source)
+                expect(decoded.values.disableImageGeneration).toBe(mode)
+                expect(decoded.values.yamlFields['disable-image-generation']?.value).toBe(mode)
+                const updated = encodeVisualConfigYaml(
+                    source, { ...decoded.values, debug: true },
+                    decoded.values, decoded.apiKeysStorage, source,
+                )
+                expect(updated).toContain(`disable-image-generation: ${scalar} # source spelling`)
+            }
+            expect(readVisualYamlFieldCatalog('disable-image-generation: 0x1\n')['disable-image-generation'])
+                .toEqual({ source: 'unsupported' })
+            expect(decodeVisualConfigYaml('disable-image-generation: 0x1\n').values.disableImageGeneration).toBe('')
+        })
+
+        test('reports the missing panel update setting as default true without materializing a YAML key', () => {
+            const field = 'remote-management.auto-update-panel'
+            for (const [yaml, source, value] of [
+                ['', 'default', true],
+                ['remote-management: {auto-update-panel: false}\n', 'yaml', false],
+                ['remote-management: {auto-update-panel: true, disable-auto-update-panel: true}\n', 'legacy', false],
+                ['remote-management: {auto-update-panel: false, disable-auto-update-panel: false}\n', 'legacy', true],
+                ['remote-management: {auto-update-panel: false, disable-auto-update-panel: null}\n', 'yaml', false],
+            ] as const) {
+                const decoded = decodeVisualConfigYaml(yaml)
+                expect(decoded.values.rmAutoUpdatePanel).toBe(value)
+                expect(readVisualYamlFieldCatalog(yaml)[field]).toEqual({ source, value })
+                expect(encodeVisualConfigYaml(yaml, decoded.values, decoded.values, decoded.apiKeysStorage)).toBe(yaml)
+            }
+            expect(findConfigFieldById('rmAutoUpdatePanel')?.yamlKeys).toEqual(field.split('.'))
+        })
+
+        test('writes the winning panel setting without discarding a compatibility key or its comment', () => {
+            const yaml    = 'remote-management:\n  disable-auto-update-panel: true # Panel updates\n'
+            const decoded = decodeVisualConfigYaml(yaml)
+            const saved   = encodeVisualConfigYaml(
+                yaml, { ...decoded.values, rmAutoUpdatePanel: true },
+                decoded.values, decoded.apiKeysStorage, yaml,
+            )
+            expect(saved).toContain('disable-auto-update-panel: false # Panel updates')
+            expect(decodeVisualConfigYaml(saved).values.rmAutoUpdatePanel).toBe(true)
+        })
+
+        test('lists Home settings as read-only observations of the local file and masks credentials', () => {
+            const yaml    = 'credential-in-flight: {snapshot-interval: 3s}\n' +
+                            'remote-management: {secret-key: fixture-unseen-secret}\n' +
+                            'plugins: {configs: {fixture: {secret: fixture-unseen-secret}}}\n' +
+                            'unknown: {api-key: fixture-unseen-secret}\n'
+            const decoded = decodeVisualConfigYaml(yaml)
+            const fields  = VISUAL_YAML_FIELDS.filter((field) => field.path[0] ===
+                                                                 'credential-in-flight' &&
+                                                                 field.path.length ===
+                                                                 2)
+            expect(fields).toHaveLength(9)
+            expect(fields.every((field) => field.owner === 'home' && !field.editable)).toBe(true)
+            expect(decoded.values.yamlFields['credential-in-flight.snapshot-interval'])
+                .toEqual({ source: 'yaml', value: '3s' })
+            expect(decoded.values.yamlFields['credential-in-flight.staging-retention'])
+                .toEqual({ source: 'default', value: '1m' })
+            expect(decoded.values.yamlFields['remote-management.secret-key']).toEqual({ source: 'yaml' })
+            expect(JSON.stringify(decoded.values.yamlFields)).not.toContain('fixture-unseen-secret')
+            expect(JSON.stringify(decoded.values.yamlFields)).not.toContain('unknown')
+            expect(searchConfigFields('credential-in-flight.max-details', (key) => key)[0]?.fieldId)
+                .toBe('credential-in-flight.max-details')
+            const display = renderToStaticMarkup(createElement(YamlConfigFieldRows, {
+                fields, states: decoded.values.yamlFields, anchored: true, onChange: () => {
+                },
+            }))
+            expect(display).toContain('id="cfg-field-credential-in-flight.snapshot-interval"')
+            expect(display).not.toContain('<input')
+            expect(display).not.toContain('<select')
+            expect(() => encodeVisualConfigYaml(yaml, {
+                ...decoded.values,
+                yamlFieldEdits: { 'credential-in-flight.max-details': '2000' },
+            }, decoded.values, decoded.apiKeysStorage)).toThrow('read-only')
+        })
+
+        test('does not report defaults for Home settings masked by an older YAML endpoint', () => {
+            const placeholder = `__CLI_PROXY_CONFIG_SECRET_${'0'.repeat(32)}__`
+            const yaml        = `credential-in-flight: {${placeholder}: ${placeholder}, max-details: 20}\n`
+            const catalog     = readVisualYamlFieldCatalog(yaml)
+            expect(catalog['credential-in-flight.snapshot-interval']).toEqual({ source: 'redacted' })
+            expect(catalog['credential-in-flight.max-details']).toEqual({ source: 'yaml', value: '20' })
+            expect(JSON.stringify(catalog)).not.toContain(placeholder)
+        })
+
+        test('saves a real typed boolean control and resets its value without removing the comment', () => {
+            const field    = 'claude-header-defaults.stabilize-device-profile'
+            const yaml     = 'claude-header-defaults:\n  stabilize-device-profile: true # Profile switch\n'
+            const base     = decodeVisualConfigYaml(yaml)
+            let values     = base.values
+            const edit     = (next: boolean | null) => {
+                const rows = YamlConfigFieldRows({
+                                                     fields: [yamlConfigField(field)!], states: base.values.yamlFields,
+                                                     edits: values.yamlFieldEdits,
+                                                     onChange: (yamlFieldEdits) => {
+                                                         values = { ...values, yamlFieldEdits }
+                                                     },
+                                                 })
+                rows.props.children[0].props.children.props.onChange(next)
+                return encodeVisualConfigYaml(yaml, values, base.values, base.apiKeysStorage, yaml)
+            }
+            const explicit = edit(false)
+            expect(explicit).toContain('stabilize-device-profile: false # Profile switch')
+            expect(decodeVisualConfigYaml(explicit).values.yamlFields[field]).toEqual({ source: 'yaml', value: false })
+            const reset = edit(null)
+            expect(reset).toContain('stabilize-device-profile: null # Profile switch')
+            expect(decodeVisualConfigYaml(reset).values.yamlFields[field]).toEqual({ source: 'default', value: false })
+        })
+
+        test('keeps shared YAML paths unchanged and reports a conflicting server edit', () => {
+            const field     = 'claude-header-defaults.timezone'
+            const inherited = 'fixture: &headers {timezone: UTC}\nclaude-header-defaults: *headers\n'
+            const linked    = decodeVisualConfigYaml(inherited)
+            expect(linked.values.yamlFields[field]).toMatchObject({ source: 'inherited', shared: true })
+            expect(() => encodeVisualConfigYaml(
+                inherited, { ...linked.values, yamlFieldEdits: { [field]: 'Local' } },
+                linked.values, linked.apiKeysStorage, inherited,
+            )).toThrow('read-only')
+            const yaml    = 'claude-header-defaults: {timezone: UTC, future: first}\n'
+            const decoded = decodeVisualConfigYaml(yaml)
+            const values  = { ...decoded.values, yamlFieldEdits: { [field]: 'Local' } }
+            const latest  = yaml.replace('future: first', 'future: changed')
+            const saved   = encodeVisualConfigYaml(latest, values, decoded.values, decoded.apiKeysStorage, yaml)
+            expect(parse(saved)['claude-header-defaults']).toEqual({ timezone: 'Local', future: 'changed' })
+            expect(() => encodeVisualConfigYaml(
+                yaml.replace('UTC', 'Asia/Tokyo'), values, decoded.values,
+                decoded.apiKeysStorage, yaml,
+            )).toThrow('changed on the server')
+            expect(values.yamlFieldEdits[field]).toBe('Local')
+        })
+
+        test('retains other values and array comments while editing file-backed intervals and registry sources', () => {
+            const yaml    = 'remote-management: {auto-check-update: false, check-interval: 45}\n' +
+                            'plugins:\n  store-sources:\n    - https://first.invalid/index.json # Registry comment\n'
+            const decoded = decodeVisualConfigYaml(yaml)
+            const values  = {
+                ...decoded.values, rmCheckInterval: '75',
+                pluginStoreSources: [...decoded.values.pluginStoreSources, 'https://next.invalid/index.json'],
+            }
+            const saved   = encodeVisualConfigYaml(yaml, values, decoded.values, decoded.apiKeysStorage, yaml)
+            expect(parse(saved)['remote-management']).toEqual({ 'auto-check-update': false, 'check-interval': 75 })
+            expect(saved).toContain('# Registry comment')
+            expect(decodeVisualConfigYaml(saved).values).toMatchObject({
+                                                                           rmCheckInterval: '75',
+                                                                           pluginStoreSources: values.pluginStoreSources,
+                                                                       })
         })
 
         test('reads only YAML boolean spellings accepted by typed backend fields', () => {

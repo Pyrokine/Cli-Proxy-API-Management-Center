@@ -25,6 +25,7 @@ describe('visual configuration integer contracts', () => {
                                requestRetry: '2147483648',
                                maxRetryCredentials: '2147483648',
                                maxRetryInterval: '9223372037',
+                               rmCheckInterval: String(VISUAL_INTEGER_FIELDS.rmCheckInterval.maximum + 1),
                            })) {
             const next = { ...decoded.values, [field]: value }
             expect(getVisualConfigValidationErrors(next)[
@@ -105,6 +106,20 @@ describe('visual configuration integer contracts', () => {
                        field as keyof ReturnType<typeof getVisualConfigValidationErrors>])
                 .toBeDefined()
         }
+    })
+
+    test('an unchanged quota warning does not block saving fields on other pages', () => {
+        const yaml    = 'quota-refresh: {enabled: true, interval: -1, max-interval: 120}\n' +
+                        'oauth-settings: {codex: [{name: model-a, alias: alias-a}]}\n'
+        const decoded = decodeVisualConfigYaml(yaml)
+        const edited  = { ...decoded.values, oauthSettingsText: 'codex: [{name: model-a, alias: alias-b}]' }
+        const errors  = getVisualConfigValidationErrors(edited, decoded.values)
+        expect(Object.values(errors).filter(Boolean)).toEqual([])
+        const saved = encodeVisualConfigYaml(yaml, edited, decoded.values, decoded.apiKeysStorage, yaml)
+        expect(parse(saved)['quota-refresh']).toEqual({ enabled: true, interval: -1, 'max-interval': 120 })
+        const quotaErrors = getVisualConfigValidationErrors({ ...edited, quotaRefreshInterval: '20' }, decoded.values)
+        expect(quotaErrors.quotaRefreshInterval).toBe('quota_refresh_interval_range')
+        expect(quotaErrors.quotaRefreshMaxInterval).toBe('quota_refresh_max_interval_range')
     })
 
     test('omitted quota intervals use effective defaults only for validation', () => {
