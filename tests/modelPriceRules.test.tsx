@@ -57,7 +57,8 @@ type BaseInputs = {
 type Draft = BaseInputs & {
     originalModel: string; model: string; displayName: string; provider: string; channel: string; group: string;
     aliasesText: string; originalPrice: ModelCatalogPrice | null; priceRules: PriceRulesDraft;
-    speedRates: unknown[]; enabled: boolean; originalEnabled: boolean;
+    speedRates: unknown[]; enabled: boolean;
+    original: Pick<Draft, 'displayName' | 'provider' | 'channel' | 'group' | 'enabled'>;
 }
 const baseInputs                                                               = scope.priceToInputs as (price: ModelCatalogPrice | null) => BaseInputs
 const parseBase                                                                = scope.parseOptionalPrice as (
@@ -121,12 +122,22 @@ const imageCharge: NonNullable<ModelCatalogPrice['charge_rates']>[number]      =
 const imageCharges: NonNullable<ModelCatalogPrice['charge_rates']>             = [
     imageCharge, { ...imageCharge, speed: 'batch', price: 0.0195 }, { ...imageCharge, speed: 'fast', price: 0.0702 },
 ]
+const originalFields                                                           = {
+    displayName: 'Fixture',
+    provider: 'synthetic-provider',
+    channel: 'synthetic-channel',
+    group: '',
+    enabled: true,
+}
 const draft                                                                    = (price: ModelCatalogPrice | null = original): Draft => ({
-    ...baseInputs(price), originalModel: 'fixture-model', model: 'fixture-model', displayName: 'Fixture',
-    provider: 'synthetic-provider', channel: 'synthetic-channel', group: '', aliasesText: 'alias-a',
-    originalPrice: price, priceRules: priceRulesToInputs(price, !price),
+    ...baseInputs(price), ...originalFields,
+    original: originalFields,
+    originalModel: 'fixture-model',
+    model: 'fixture-model',
+    aliasesText: '',
+    originalPrice: price,
+    priceRules: priceRulesToInputs(price, !price),
     speedRates: (scope.speedRatesToInputs as (rules: ModelCatalogPrice['speed_rates']) => unknown[])(price?.speed_rates),
-    enabled: true, originalEnabled: true,
 })
 const wire                                                                     = <T, >(value: T): T => value ===
                                                                                                        undefined ?
@@ -161,7 +172,7 @@ async function save(
                             name: 'fixture-model',
                             price: readback ? readback(wire(patch.price)) : wire(patch.price),
                         },
-                    ], recalculation_pending: true,
+                    ], recalculation_pending: Boolean(patch.price || patch.clear_price),
                 }
             },
         },
@@ -503,10 +514,9 @@ test('charges preserve processing modes and allow generic plus distinct mode pri
 test(
     'actual charge mode edits persist final prices and detect dropped, changed or uncleared modes on readback',
     async () => {
-        const loaded      = { ...original, charge_rates: imageCharges }
-        const alias       = draft(loaded)
-        alias.aliasesText = 'charge-alias'
-        expect((await save(alias)).patches[0].price).toEqual(loaded)
+        const loaded   = { ...original, charge_rates: imageCharges }
+        const metadata = await save({ ...draft(loaded), displayName: 'Updated' })
+        expect(metadata.patches).toEqual([{ name: 'fixture-model', display_name: 'Updated' }])
         const input                           = draft(loaded)
         input.priceRules.chargeRates[1].speed = 'flex'
         const saved                           = await save(input)
@@ -586,12 +596,10 @@ test('actual charge mode selector uses the supported modes and clears back to a 
 test(
     'actual edit entry preserves original rules on unrelated edits and saves all new rate buckets and rule groups',
     async () => {
-        const alias       = draft()
-        alias.aliasesText = 'new-alias'
-        const untouched   = await save(alias)
-        expect(untouched.patches[0].price).toEqual(original)
-        expect(untouched.patches[0].aliases).toEqual(['new-alias'])
-        expect(untouched.closed && untouched.applied && untouched.recalculated).toBe(true)
+        const untouched = await save({ ...draft(), displayName: 'Renamed' })
+        expect(untouched.patches).toEqual([{ name: 'fixture-model', display_name: 'Renamed' }])
+        expect(untouched.closed && untouched.applied).toBe(true)
+        expect(untouched.recalculated).toBe(false)
         const edited                                           = draft()
         edited.cacheWrite30m                                   = '1.25'
         edited.cacheWrite12h                                   = ''
@@ -677,8 +685,7 @@ test(
         })
         expect(deleted.closed).toBe(true)
         expect(deleted.patches[0].clear_price).toBeUndefined()
-        const unchanged       = draft()
-        unchanged.aliasesText = 'another-alias'
+        const unchanged = { ...draft(), displayName: 'Updated display name' }
         expect((await save(unchanged, () => ({ prompt: 1, completion: 2 }))).closed).toBe(true)
     },
 )
@@ -709,7 +716,11 @@ test(
         const cleared    = await save(input)
         expect(cleared.patches[0].clear_price).toBe(true)
         expect(cleared.patches[0].price).toBeUndefined()
-        expect((await save(draft(), undefined, new Error('overlapping conditional rate rules'))).notices)
+        expect((await save(
+            { ...draft(), prompt: '8' },
+            undefined,
+            new Error('overlapping conditional rate rules'),
+        )).notices)
             .toEqual([{ message: 'notification.update_failed: overlapping conditional rate rules', kind: 'error' }])
     },
 )

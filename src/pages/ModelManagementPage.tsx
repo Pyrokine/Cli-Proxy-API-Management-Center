@@ -10,6 +10,7 @@ import {CostRecalculationCard} from '@/components/usage/CostRecalculationCard'
 import {
     type ModelCatalogApplyDecision,
     type ModelCatalogDefaultUpdateChange,
+    type ModelCatalogDefaultUpdatePreview,
     type ModelCatalogMeta,
     type ModelCatalogPatchRequest,
     type ModelCatalogPrice,
@@ -59,6 +60,7 @@ type ModelRow = {
     runtimeAvailableClients: number
     runtimeQuotaCooldown: number
     runtimeSuspended: number
+    runtimeAmbiguousAliases: string[]
     catalogGroup: string
 }
 
@@ -81,7 +83,7 @@ type EditDraft = {
     provider: string
     channel: string
     group: string
-    aliasesText: string
+    aliases: string[]
     prompt: string
     completion: string
     cacheRead: string
@@ -94,7 +96,7 @@ type EditDraft = {
     speedRates: SpeedRateDraft[]
     originalPrice: ModelCatalogPrice | null
     enabled: boolean
-    originalEnabled: boolean
+    original: Pick<EditDraft, 'provider' | 'channel' | 'group' | 'displayName' | 'enabled'>
     userCreated: boolean
     runtimeAvailable: boolean
     runtimeOnly: boolean
@@ -251,7 +253,9 @@ function parseOptionalPrice(
         return { ok: false }
     }
 
-    const metadata: ModelCatalogPrice = original ? { ...original } : {}
+    const metadata: ModelCatalogPrice = original ? { ...original } : {
+        status: 'complete', auto_apply: true, currency: 'USD',
+    }
     delete metadata.prompt
     delete metadata.completion
     delete metadata.cache
@@ -273,9 +277,6 @@ function parseOptionalPrice(
             ...(cacheWrite1hValue === undefined ? {} : { cache_write_1h: cacheWrite1hValue }),
             ...(cacheWrite30mValue === undefined ? {} : { cache_write_30m: cacheWrite30mValue }),
             ...(cacheWrite12hValue === undefined ? {} : { cache_write_12h: cacheWrite12hValue }),
-            status: metadata.status ?? 'complete',
-            auto_apply: metadata.auto_apply ?? true,
-            currency: metadata.currency ?? 'USD',
         },
     }
 }
@@ -441,11 +442,7 @@ function SpeedRateEditor({ rules, onChange, disabled, t }: {
 }
 
 function parseAliases(value: string): string[] {
-    return uniqueSorted(value.split(/[\n,]/g))
-}
-
-function aliasesToText(aliases: string[]): string {
-    return aliases.join('\n')
+    return uniqueSorted(value.split(/[\n,]/g).map((alias) => alias.trim().replace(/^models\//i, '')))
 }
 
 function catalogGroupLabel(row: ModelCatalogRow): string {
@@ -527,16 +524,21 @@ function priceTooltip(price: ModelCatalogPrice, t: ReturnType<typeof useTranslat
 }
 
 function runtimeSummary(row: ModelRow, t: ReturnType<typeof useTranslation>['t']): string {
-    if (row.runtimeConfiguredClients === 0) {
-        return t('model_management.runtime_clients_none', { defaultValue: '无运行时凭证' })
+    const parts: string[] = []
+    if (row.runtimeAmbiguousAliases.length > 0) {
+        parts.push(t('model_management.runtime_alias_ambiguous', {
+            defaultValue: '部分凭证无法按别名归属：{{aliases}}',
+            aliases: row.runtimeAmbiguousAliases.join(', '),
+        }))
     }
-    const parts = [
-        t('model_management.runtime_clients_summary', {
-            defaultValue: '{{available}} / {{configured}} 个运行时凭证可用',
-            available: row.runtimeAvailableClients,
-            configured: row.runtimeConfiguredClients,
-        }),
-    ]
+    if (row.runtimeConfiguredClients === 0) {
+        return parts[0] ?? t('model_management.runtime_clients_none', { defaultValue: '无运行时凭证' })
+    }
+    parts.unshift(t('model_management.runtime_clients_summary', {
+        defaultValue: '{{available}} / {{configured}} 个运行时凭证可用',
+        available: row.runtimeAvailableClients,
+        configured: row.runtimeConfiguredClients,
+    }))
     if (row.runtimeQuotaCooldown > 0) {
         parts.push(t('model_management.runtime_quota_cooldown', {
             defaultValue: '{{count}} 个额度冷却',
@@ -606,8 +608,9 @@ function filterTreeTableRows(rows: ModelTreeTableRow[], keyword: string): ModelT
 
     const visit = (row: ModelTreeTableRow): ModelTreeTableRow | null => {
         const children = row.children?.map(visit).filter((child): child is ModelTreeTableRow => child !== null)
-        if (matchesRow(row) || (children && children.length > 0)) {
-            return { ...row, children }
+        if (matchesRow(row) || children?.length) {
+            const leafCount = children ? children.reduce((count, child) => count + child.leafCount, 0) : row.leafCount
+            return { ...row, children, leafCount }
         }
         return null
     }
@@ -654,6 +657,7 @@ function notRequestableFallback(reason: string, t: (key: string) => string): str
         quota_cooldown: t('model_management.not_requestable_quota_cooldown'),
         suspended: t('model_management.not_requestable_suspended'),
         runtime_unavailable: t('model_management.not_requestable_runtime_unavailable'),
+        ambiguous_alias: t('model_management.not_requestable_ambiguous_alias'),
     }
     return labels[reason] ?? reason
 }
@@ -708,14 +712,16 @@ export function ModelManagementPage() {
     const [catalogRows, setCatalogRows]                   = useState<ModelCatalogRow[]>([])
     const [catalogMeta, setCatalogMeta]                   = useState<ModelCatalogMeta | null>(null)
     const [loading, setLoading]                           = useState(true)
-    const [error, setError]                               = useState('')
+    const [error, setError]                               = useState<string | null>(null)
     const [savingModel, setSavingModel]                   = useState<string | null>(null)
     const [expandedRows, setExpandedRows]                 = useState<Set<string>>(() => new Set())
     const [collapsedRows, setCollapsedRows]               = useState<Set<string>>(() => new Set())
     const [searchValue, setSearchValue]                   = useState('')
     const [editDraft, setEditDraft]                       = useState<EditDraft | null>(null)
     const [addDraft, setAddDraft]                         = useState<AddDraft | null>(null)
-    const [updateChanges, setUpdateChanges]               = useState<ModelCatalogDefaultUpdateChange[]>([])
+    const [updatePreview, setUpdatePreview]               = useState<ModelCatalogDefaultUpdatePreview | null>(null)
+    const [updateError, setUpdateError]                   = useState<string | null>(null)
+    const [skippedUpdateIds, setSkippedUpdateIds]         = useState<Set<string>>(() => new Set())
     const [updateModalOpen, setUpdateModalOpen]           = useState(false)
     const [updateLoading, setUpdateLoading]               = useState(false)
     const [updateApplying, setUpdateApplying]             = useState(false)
@@ -729,10 +735,10 @@ export function ModelManagementPage() {
 
     const loadAll = useCallback(async () => {
         setLoading(true)
-        setError('')
         try {
             const catalog = await modelsApi.fetchModelCatalog()
             applyCatalogResponse(catalog)
+            setError(null)
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : String(err ?? ''))
         } finally {
@@ -740,19 +746,27 @@ export function ModelManagementPage() {
         }
     }, [applyCatalogResponse])
 
-    const loadDefaultUpdatePreview = useCallback(async () => {
+    const loadDefaultUpdatePreview = useCallback(async (skipped?: ReadonlySet<string>) => {
         setUpdateLoading(true)
+        setUpdatePreview(null)
+        setUpdateError(null)
         try {
             const preview = await modelsApi.fetchDefaultUpdatePreview()
-            setUpdateChanges(preview.changes ?? [])
-            setUpdatePage((page) => Math.min(page, Math.max((preview.changes?.length ?? 1) - 1, 0)))
+            if (!preview.revision?.trim()) {
+                throw new Error(t('model_management.default_update_revision_missing', {
+                    defaultValue: '当前服务未提供预览版本，请更新服务后重试',
+                }))
+            }
+            const changes = preview.changes ?? []
+            setUpdatePreview({ ...preview, changes })
+            const remaining = changes.filter((change) => !skipped?.has(change.id)).length
+            setUpdatePage((page) => Math.min(page, Math.max(remaining - 1, 0)))
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : ''
-            showNotification(`${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`, 'error')
+            setUpdateError(err instanceof Error ? err.message : '')
         } finally {
             setUpdateLoading(false)
         }
-    }, [showNotification, t])
+    }, [t])
 
     const observePriceRecalculation = useCallback(() => {
         setRecalculationRefresh((value) => value + 1)
@@ -812,6 +826,7 @@ export function ModelManagementPage() {
             runtimeAvailableClients: Number(catalogRow.runtime_available_clients ?? 0),
             runtimeQuotaCooldown: Number(catalogRow.runtime_quota_cooldown_clients ?? 0),
             runtimeSuspended: Number(catalogRow.runtime_suspended_clients ?? 0),
+            runtimeAmbiguousAliases: catalogRow.runtime_ambiguous_aliases ?? [],
             catalogGroup,
         }
     }).filter((row) => row.model), [catalogRows])
@@ -893,21 +908,23 @@ export function ModelManagementPage() {
     }, [applyCatalogResponse, showNotification, t])
 
     const openEditModal = useCallback((row: ModelRow) => {
-        const priceInputs = priceToInputs(row.price)
+        const original = {
+            displayName: row.displayName !== row.model ? row.displayName : '',
+            provider: row.provider,
+            channel: row.channel,
+            group: row.catalogGroup,
+            enabled: row.enabled,
+        }
         setEditDraft({
+                         ...original,
+                         ...priceToInputs(row.price),
+                         original,
                          originalModel: row.model,
                          model: row.model,
-                         displayName: row.displayName !== row.model ? row.displayName : '',
-                         provider: row.provider,
-                         channel: row.channel,
-                         group: row.catalogGroup,
-                         aliasesText: aliasesToText(row.aliases),
-                         ...priceInputs,
+                         aliases: row.aliases,
                          originalPrice: row.price,
                          speedRates: speedRatesToInputs(row.price?.speed_rates),
                          priceRules: priceRulesToInputs(row.price, !row.price),
-                         enabled: row.enabled,
-                         originalEnabled: row.enabled,
                          userCreated: row.userCreated,
                          runtimeAvailable: row.runtimeAvailable,
                          runtimeOnly: row.runtimeOnly,
@@ -951,30 +968,58 @@ export function ModelManagementPage() {
             showNotification(t('model_management.speed_rates_require_price'), 'error')
             return
         }
-        const priceRulesChanged = priceRulesSignature(price) !== priceRulesSignature(editDraft.originalPrice)
-        const speedRatesChanged = speedRatesSignature(speedRates) !==
-                                  speedRatesSignature(editDraft.originalPrice?.speed_rates)
+        const priceRulesChanged                 = Boolean(price) !==
+                                                  Boolean(editDraft.originalPrice) ||
+                                                  priceRulesSignature(price) !==
+                                                  priceRulesSignature(editDraft.originalPrice)
+        const speedRatesChanged                 = speedRatesSignature(speedRates) !==
+                                                  speedRatesSignature(editDraft.originalPrice?.speed_rates)
+        const request: ModelCatalogPatchRequest = { name: editDraft.originalModel }
+        const { original, runtimeOnly }         = editDraft
+        const provider                          = editDraft.provider.trim()
+        const channel                           = editDraft.channel.trim().toLowerCase()
+        const group                             = editDraft.group.trim()
+        const displayName                       = editDraft.displayName.trim()
+        if (runtimeOnly || provider !== original.provider) {
+            request.provider = provider
+        }
+        if (runtimeOnly || channel !== original.channel) {
+            request.channel = channel
+        }
+        if (runtimeOnly || group !== original.group) {
+            request.group = group
+        }
+        if (runtimeOnly || displayName !== original.displayName) {
+            request.display_name = displayName
+        }
+        if (editDraft.enabled !== original.enabled) {
+            request.enabled = editDraft.enabled
+        }
+        if (priceRulesChanged || speedRatesChanged) {
+            if (price) {
+                request.price = { ...price, speed_rates: speedRates }
+            } else {
+                request.clear_price = true
+            }
+        }
+        if (Object.keys(request).length === 1) {
+            setEditDraft(null)
+            return
+        }
         setSavingModel(editDraft.originalModel)
         try {
-            const request: ModelCatalogPatchRequest = {
-                name: editDraft.originalModel,
-                provider: editDraft.provider.trim(),
-                channel: editDraft.channel.trim().toLowerCase(),
-                group: editDraft.group.trim(),
-                display_name: editDraft.displayName.trim(),
-                aliases: parseAliases(editDraft.aliasesText),
-                ...(price ? { price: { ...price, speed_rates: speedRates } } : { clear_price: true }),
-            }
-            if (editDraft.enabled !== editDraft.originalEnabled) {
-                request.enabled = editDraft.enabled
-            }
             const catalog    = await modelsApi.patchModelCatalogModel(request)
             const savedPrice = catalog.models.find((row) => modelKey(row.name) ===
                                                             modelKey(editDraft.originalModel))?.price
             if (speedRatesChanged && speedRatesSignature(savedPrice?.speed_rates) !== speedRatesSignature(speedRates)) {
                 throw new Error(t('model_management.speed_rates_not_saved'))
             }
-            if (priceRulesChanged && priceRulesSignature(savedPrice) !== priceRulesSignature(price)) {
+            if ((priceRulesChanged && priceRulesSignature(savedPrice) !== priceRulesSignature(price)) ||
+                (request.price?.auto_apply !==
+                 undefined &&
+                 (savedPrice?.auto_apply ?? false) !==
+                 request.price.auto_apply) ||
+                (request.clear_price && savedPrice)) {
                 throw new Error(t(
                     'model_management.price_rules_not_saved',
                     { defaultValue: '服务器返回的价格规则与本次保存内容不一致，请刷新后核对' },
@@ -998,13 +1043,23 @@ export function ModelManagementPage() {
         if (!addDraft) {
             return
         }
-        const model = addDraft.model.trim()
+        const model = addDraft.model.trim().replace(/^models\//i, '').trim()
         if (!model) {
             showNotification(t('model_management.model_name_required', { defaultValue: '模型名不能为空' }), 'error')
             return
         }
         if (allModelNames.some((item) => modelKey(item) === modelKey(model))) {
             showNotification(t('model_management.model_exists', { defaultValue: '模型已存在' }), 'error')
+            return
+        }
+        const channel = addDraft.channel.trim().toLowerCase()
+        const aliases = parseAliases(addDraft.aliasesText)
+        if (aliases.length >
+            0 &&
+            (!channel || /\s/.test(channel) || ['other', 'gemini', 'openai-compatibility'].includes(channel))) {
+            showNotification(t('model_management.alias_channel_required', {
+                defaultValue: '填写支持 OAuth 别名的接入类型，例如 codex 或 claude',
+            }), 'error')
             return
         }
         const parsedPrice = parseOptionalPrice(
@@ -1045,12 +1100,13 @@ export function ModelManagementPage() {
             const catalog    = await modelsApi.patchModelCatalogModel({
                                                                           name: model,
                                                                           provider: addDraft.provider.trim(),
-                                                                          channel: addDraft.channel.trim()
-                                                                                           .toLowerCase(),
+                                                                          channel,
                                                                           group: addDraft.group.trim(),
                                                                           display_name: addDraft.displayName.trim(),
                                                                           enabled: false,
-                                                                          aliases: parseAliases(addDraft.aliasesText),
+                                                                          ...(aliases.length ?
+                                                                              { aliases, alias_channel: channel } :
+                                                                              {}),
                                                                           ...(price ?
                                                                               {
                                                                                   price: {
@@ -1060,7 +1116,8 @@ export function ModelManagementPage() {
                                                                               } :
                                                                               {}),
                                                                       })
-            const savedPrice = catalog.models.find((row) => modelKey(row.name) === modelKey(model))?.price
+            const saved      = catalog.models.find((row) => modelKey(row.name) === modelKey(model))
+            const savedPrice = saved?.price
             if (speedRates.length >
                 0 &&
                 speedRatesSignature(savedPrice?.speed_rates) !==
@@ -1072,6 +1129,11 @@ export function ModelManagementPage() {
                     'model_management.price_rules_not_saved',
                     { defaultValue: '服务器返回的价格规则与本次保存内容不一致，请刷新后核对' },
                 ))
+            }
+            if (aliases.some((alias) => !saved?.aliases?.some((stored) => modelKey(stored) === modelKey(alias)))) {
+                throw new Error(t('model_management.aliases_not_saved', {
+                    defaultValue: '服务器返回的别名缺少本次所填内容，请刷新后核对',
+                }))
             }
             applyCatalogResponse(catalog)
             setAddDraft(null)
@@ -1130,39 +1192,74 @@ export function ModelManagementPage() {
 
     const openDefaultUpdateModal = useCallback(() => {
         setUpdateModalOpen(true)
+        setSkippedUpdateIds(new Set())
         setUpdatePage(0)
         void loadDefaultUpdatePreview()
     }, [loadDefaultUpdatePreview])
+
+    const updateChanges = useMemo(
+        () => updatePreview?.changes.filter((change) => !skippedUpdateIds.has(change.id)) ?? [],
+        [skippedUpdateIds, updatePreview],
+    )
 
     const applyDefaultUpdate = useCallback(async (
         change: ModelCatalogDefaultUpdateChange,
         action: ModelCatalogApplyDecision['action'],
     ) => {
+        if (!updatePreview?.revision || updateApplying) {
+            return
+        }
         setUpdateApplying(true)
         try {
-            const response = await modelsApi.applyDefaultUpdate([{ name: change.name, action }])
-            applyCatalogResponse(response.catalog)
-            await loadDefaultUpdatePreview()
-            showNotification(
-                t('model_management.default_update_applied', { defaultValue: '默认模型更新已处理' }),
-                'success',
-            )
-            if (response.catalog.recalculation_pending) {
-                observePriceRecalculation()
+            const response = await modelsApi.applyDefaultUpdate([{ name: change.name, action }], updatePreview.revision)
+            if (action === 'keep_current' || action === 'skip') {
+                setSkippedUpdateIds((previous) => new Set([...previous, change.id]))
+                setUpdatePage((page) => Math.min(page, Math.max(updateChanges.length - 2, 0)))
+                showNotification(
+                    t('model_management.default_update_skipped', { defaultValue: '已保留当前配置' }),
+                    'success',
+                )
+            } else {
+                applyCatalogResponse(response.catalog)
+                showNotification(
+                    t('model_management.default_update_applied', { defaultValue: '默认模型更新已应用' }),
+                    'success',
+                )
+                if (response.catalog.recalculation_pending) {
+                    observePriceRecalculation()
+                }
+                await loadDefaultUpdatePreview(skippedUpdateIds)
             }
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : ''
-            showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
+            if (err && typeof err === 'object' && 'status' in err && err.status === 412) {
+                setUpdatePreview(null)
+                setUpdateError(t('model_management.default_update_conflict', {
+                    defaultValue: '模型目录已变更，请重新读取预览',
+                }))
+            } else {
+                const message = err instanceof Error ? err.message : ''
+                showNotification(`${t('notification.update_failed')}${message ? `: ${message}` : ''}`, 'error')
+            }
         } finally {
             setUpdateApplying(false)
         }
-    }, [applyCatalogResponse, loadDefaultUpdatePreview, observePriceRecalculation, showNotification, t])
+    }, [
+                                               applyCatalogResponse,
+                                               loadDefaultUpdatePreview,
+                                               observePriceRecalculation,
+                                               showNotification,
+                                               skippedUpdateIds,
+                                               t,
+                                               updateApplying,
+                                               updateChanges.length,
+                                               updatePreview,
+                                           ])
 
-    const initialLoading              = loading && modelRows.length === 0
-    const refreshing                  = Boolean(savingModel) || (loading && modelRows.length > 0)
-    const status: DataStatusValue     = error && modelRows.length === 0 ?
-                                        'error' :
-                                        initialLoading ? 'loading' : modelRows.length === 0 ? 'empty' : 'ready'
+    const initialLoading              = loading && !catalogMeta
+    const refreshing                  = Boolean(savingModel) || (loading && catalogMeta !== null)
+    const status: DataStatusValue     = initialLoading ? 'loading' :
+                                        error !== null && !catalogMeta ? 'error' :
+                                        modelRows.length === 0 ? 'empty' : 'ready'
     const treeStatus: DataStatusValue = status === 'ready' && visibleTreeTableRows.length === 0 ? 'empty' : status
     const treeEmptyText               = isTreeSearchActive && modelRows.length > 0
                                         ? t('model_management.search_empty', { defaultValue: '没有匹配的模型' })
@@ -1354,7 +1451,13 @@ export function ModelManagementPage() {
                             <span className={`${styles.requestableBadge} ${row.requestable ?
                                                                            styles.requestableYes :
                                                                            styles.requestableNo}`}>
-                                {row.requestable ? t('common.yes') : t('common.no')}
+                                {row.requestable ? t('common.yes') : row.notRequestableReason === 'ambiguous_alias'
+                                                                     ?
+                                                                     t(
+                                                                         'model_management.requestable_unknown',
+                                                                         { defaultValue: '待确认' },
+                                                                     ) :
+                                                                     t('common.no')}
                             </span>
                                 {notRequestableLabel ?
                                  <span className={styles.requestableReason}>{notRequestableLabel}</span> :
@@ -1531,6 +1634,13 @@ export function ModelManagementPage() {
     )
 
     const currentUpdateChange = updateChanges[updatePage] ?? null
+    const updateFields        = currentUpdateChange ? {
+        ...(currentUpdateChange.type !==
+            'changed_default' &&
+            (currentUpdateChange.current || currentUpdateChange.default)
+            ? { model: { current: currentUpdateChange.current, default: currentUpdateChange.default } } : {}),
+        ...currentUpdateChange.fields,
+    } : {}
 
     return (
         <div className={styles.page}>
@@ -1645,6 +1755,17 @@ export function ModelManagementPage() {
 
             <Card className={styles.modelMatrixCard}
                   title={t('model_management.model_table_title', { defaultValue: '模型与价格记录' })}>
+                {error !== null && catalogMeta && (
+                    <div className={styles.recoveryWarning} role='alert'>
+                        <strong>{t('model_management.refresh_failed_stale', {
+                            defaultValue: '刷新失败，仍显示上次读取的模型目录',
+                        })}</strong>
+                        {error && <span>{error}</span>}
+                        <Button variant='secondary' size='sm' loading={loading} onClick={() => void loadAll()}>
+                            {t('common.retry')}
+                        </Button>
+                    </div>
+                )}
                 <Sheet
                     rows={visibleTreeTableRows}
                     pagination
@@ -1652,7 +1773,7 @@ export function ModelManagementPage() {
                     columns={modelColumns}
                     rowKey={(item) => item.key}
                     status={treeStatus}
-                    errorMessage={error}
+                    errorMessage={error ?? undefined}
                     onRetry={() => void loadAll()}
                     emptyText={treeEmptyText}
                     emptyHint={treeEmptyHint}
@@ -1861,19 +1982,13 @@ export function ModelManagementPage() {
                             disabled={Boolean(savingModel)}
                             t={t}
                         />
-                        <label className={styles.textareaField}>
-                            <span>{t('model_management.alias', { defaultValue: '别名' })}</span>
-                            <textarea
-                                value={editDraft.aliasesText}
-                                placeholder={t(
-                                    'model_management.alias_textarea_placeholder',
-                                    { defaultValue: '每行一个别名，也可以用逗号分隔' },
-                                )}
-                                onChange={(event) => setEditDraft((prev) => prev ?
-                                    { ...prev, aliasesText: event.target.value } :
-                                                                            prev)}
-                            />
-                        </label>
+                        <div className={styles.inlineHint}>
+                            <strong>{t('model_management.alias', { defaultValue: '别名' })}</strong>
+                            <span>{editDraft.aliases.join(', ') || t('common.not_set')}</span>
+                            <span>{t('model_management.alias_edit_hint', {
+                                defaultValue: '在「OAuth 模型别名」页面按接入类型编辑别名',
+                            })}</span>
+                        </div>
                         <div className={styles.inlineHint}>
                             <strong>{editDraft.runtimeOnly ?
                                      t('model_management.status_runtime_only', { defaultValue: '运行时发现' }) :
@@ -2094,6 +2209,7 @@ export function ModelManagementPage() {
                 open={updateModalOpen}
                 title={t('model_management.default_update_title', { defaultValue: '默认模型更新' })}
                 onClose={() => setUpdateModalOpen(false)}
+                closeDisabled={updateApplying}
                 width={780}
                 footer={
                     <div className={styles.updateFooter}>
@@ -2128,7 +2244,18 @@ export function ModelManagementPage() {
             >
                 <div className={styles.modalBody}>
                     {updateLoading ? (
-                        <div className={styles.inlineHint}>{t('common.loading')}</div>
+                        <div className={styles.inlineHint} role='status'>{t('common.loading')}</div>
+                    ) : updateError !== null ? (
+                        <div className={styles.recoveryWarning} role='alert'>
+                            <strong>{t('model_management.default_update_preview_failed', {
+                                defaultValue: '无法读取默认更新预览',
+                            })}</strong>
+                            {updateError && <span>{updateError}</span>}
+                            <Button variant='secondary' size='sm'
+                                    onClick={() => void loadDefaultUpdatePreview(skippedUpdateIds)}>
+                                {t('common.retry')}
+                            </Button>
+                        </div>
                     ) : currentUpdateChange ? (
                         <div className={styles.updateCard}>
                             <div className={styles.updateHeader}>
@@ -2144,41 +2271,27 @@ export function ModelManagementPage() {
                                     )}
                                 </span>
                             </div>
-                            {currentUpdateChange.fields && Object.keys(currentUpdateChange.fields).length > 0 ? (
-                                <div className={styles.fieldChanges}>
-                                    <div className={styles.fieldChangeHeader}>
-                                        <span>{t('model_management.field_property', { defaultValue: '配置项' })}</span>
-                                        <span>{t('model_management.current_value', { defaultValue: '当前' })}</span>
-                                        <span>{t('model_management.default_value', { defaultValue: '默认' })}</span>
-                                    </div>
-                                    {Object.entries(currentUpdateChange.fields).map(([field, change]) => (
-                                        <div className={styles.fieldChange} key={field}>
-                                            <span className={styles.fieldName}>{t(
-                                                `model_management.field_${field}`,
-                                                { defaultValue: fieldFallback(field, t) },
-                                            )}</span>
-                                            <pre>{stringifyValue(change.current)}</pre>
-                                            <pre>{stringifyValue(change.default)}</pre>
-                                        </div>
-                                    ))}
+                            <div className={styles.fieldChanges}>
+                                <div className={styles.fieldChangeHeader}>
+                                    <span>{t('model_management.field_property', { defaultValue: '配置项' })}</span>
+                                    <span>{t('model_management.current_value', { defaultValue: '当前' })}</span>
+                                    <span>{t('model_management.default_value', { defaultValue: '默认' })}</span>
                                 </div>
-                            ) : (
-                                 <div className={styles.fieldChanges}>
-                                     <div className={styles.fieldChangeHeader}>
-                                         <span>{t('model_management.field_property', { defaultValue: '配置项' })}</span>
-                                         <span>{t('model_management.current_value', { defaultValue: '当前' })}</span>
-                                         <span>{t('model_management.default_value', { defaultValue: '默认' })}</span>
-                                     </div>
-                                     <div className={styles.fieldChange}>
-                                         <span className={styles.fieldName}>{t(
-                                             'model_management.model',
-                                             { defaultValue: '模型' },
-                                         )}</span>
-                                         <pre>{stringifyValue(currentUpdateChange.current ?? null)}</pre>
-                                         <pre>{stringifyValue(currentUpdateChange.default ?? null)}</pre>
-                                     </div>
-                                 </div>
-                             )}
+                                {Object.entries(updateFields).map(([field, change]) => (
+                                    <div className={styles.fieldChange} key={field}>
+                                        <span className={styles.fieldName}>{field === 'model'
+                                                                            ?
+                                                                            t(
+                                                                                'model_management.model',
+                                                                                { defaultValue: '模型' },
+                                                                            )
+                                                                            :
+                                                                            fieldFallback(field, t)}</span>
+                                        <pre>{stringifyValue(change.current)}</pre>
+                                        <pre>{stringifyValue(change.default)}</pre>
+                                    </div>
+                                ))}
+                            </div>
                             <div className={styles.updateDecisionBar}>
                                 <Button
                                     variant='secondary'
@@ -2205,6 +2318,13 @@ export function ModelManagementPage() {
                                 </Button>
                             </div>
                         </div>
+                    ) : skippedUpdateIds.size > 0 ? (
+                        <div className={styles.inlineHint} role='status'>{t(
+                            'model_management.default_update_reviewed',
+                            {
+                                defaultValue: '本次查看的默认更新已处理完毕',
+                            },
+                        )}</div>
                     ) : (
                             <div className={styles.inlineHint}>
                                 <strong>{t(

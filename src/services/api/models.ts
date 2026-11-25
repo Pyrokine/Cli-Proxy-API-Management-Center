@@ -8,7 +8,7 @@ import {REQUEST_TIMEOUT_MS} from '@/utils/constants'
 import {normalizeModelList} from '@/utils/models'
 import axios, {type AxiosRequestConfig} from 'axios'
 import {apiCallApi, getApiCallErrorMessage, isCredentialHeaderName, prepareApiCallAuth} from './apiCall'
-import {apiClient} from './client'
+import {apiClient, MUTATION_TARGET_REACHED} from './client'
 import type {RequestSpeed} from './usage'
 
 const DEFAULT_CLAUDE_BASE_URL   = 'https://api.anthropic.com'
@@ -135,6 +135,7 @@ export type ModelCatalogRow = ModelCatalogFileModel & {
     runtime_available_clients?: number
     runtime_quota_cooldown_clients?: number
     runtime_suspended_clients?: number
+    runtime_ambiguous_aliases?: string[]
     requestable: boolean
     speed_options?: string[]
     not_requestable_reason?: string
@@ -172,6 +173,7 @@ export type ModelCatalogPatchRequest = {
     enabled?: boolean
     speed?: string
     aliases?: string[]
+    alias_channel?: string
     price?: ModelCatalogPrice
     clear_price?: boolean
 }
@@ -193,6 +195,7 @@ export type ModelCatalogDefaultUpdateChange = {
 export type ModelCatalogDefaultUpdatePreview = {
     current_defaults_version: string
     latest_defaults_version: string
+    revision?: string
     changes: ModelCatalogDefaultUpdateChange[]
 }
 
@@ -481,11 +484,26 @@ export const modelsApi = {
         return apiClient.get<ModelCatalogDefaultUpdatePreview>('/model-catalog/default-update')
     },
 
-    async applyDefaultUpdate(decisions: ModelCatalogApplyDecision[]) {
+    async applyDefaultUpdate(decisions: ModelCatalogApplyDecision[], revision?: string) {
         return apiClient.post<ModelCatalogApplyDefaultUpdateResponse>(
             '/model-catalog/default-update/apply',
             { decisions },
-            { mutationReadback: () => modelsApi.fetchModelCatalog() },
+            {
+                ...(revision ? { headers: { 'If-Match': revision } } : {}),
+                mutationReadback: async (data) => {
+                    const catalog = await modelsApi.fetchModelCatalog()
+                    if (decisions.every(({ action }) => action === 'keep_current' || action === 'skip') &&
+                        isRecord(data) &&
+                        isRecord(data.result) &&
+                        data.result.status ===
+                        'ok' &&
+                        data.result.applied ===
+                        0) {
+                        return MUTATION_TARGET_REACHED
+                    }
+                    return catalog
+                },
+            },
         )
     },
 

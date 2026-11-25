@@ -30,10 +30,18 @@
         font-weight: $font-weight-semibold;
     }
 
+    span,
     code {
         overflow-wrap: anywhere;
+    }
+
+    code {
         color: var(--text-primary);
         font-size: $font-size-xs;
+    }
+
+    button {
+        align-self: flex-start;
     }
 }
 
@@ -61,6 +69,10 @@
 
 .modelMatrixCard {
     min-width: 0;
+
+    > .recoveryWarning {
+        margin-bottom: $spacing-md;
+    }
 }
 
 .treeSummary {

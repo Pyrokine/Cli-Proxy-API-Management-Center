@@ -3791,7 +3791,19 @@
         "image_call_config_label": "图像模型配置",
         "image_call_config_desc": "手动添加的 OpenAI 兼容图像模型需要在后端配置 models[] 中设置 image: true；GPT Image 2 和官方 GPT Image 2.5、2.6 Flare/Sunburst ID 已内置",
         "source_help": "已保存的模型、价格、别名和启用状态来自后端 models.json；运行时发现结果会追加尚未保存的模型，可请求由启用状态、当前服务支持情况和 API key / 凭证访问规则共同决定",
-        "user_created_summary": "用户新增模型"
+        "user_created_summary": "用户新增模型",
+        "alias_edit_hint": "在「OAuth 模型别名」页面按接入类型编辑别名",
+        "alias_channel_required": "填写支持 OAuth 别名的接入类型，例如 codex 或 claude",
+        "aliases_not_saved": "服务器返回的别名缺少本次所填内容，请刷新后核对",
+        "runtime_alias_ambiguous": "部分凭证无法按别名归属：{{aliases}}",
+        "not_requestable_ambiguous_alias": "别名归属不明",
+        "requestable_unknown": "待确认",
+        "refresh_failed_stale": "刷新失败，仍显示上次读取的模型目录",
+        "default_update_revision_missing": "当前服务未提供预览版本，请更新服务后重试",
+        "default_update_conflict": "模型目录已变更，请重新读取预览",
+        "default_update_preview_failed": "无法读取默认更新预览",
+        "default_update_skipped": "已保留当前配置",
+        "default_update_reviewed": "本次查看的默认更新已处理完毕"
     },
     "plugin_management": {
         "invalid_config_response": "插件配置响应格式无效",

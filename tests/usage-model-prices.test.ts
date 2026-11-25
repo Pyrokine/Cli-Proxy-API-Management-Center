@@ -1,6 +1,8 @@
+import type {ModelCatalogPrice} from '@/services/api/models';
 import {describe, expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath, URL} from 'node:url';
+import {sourceCallback} from './sourceCallbacks';
 
 import {expectSourceToContain} from './sourceContractAssertions';
 
@@ -83,19 +85,45 @@ describe('usage model price loading', () => {
     });
 
     test('preserves untouched manifest metadata and defaults new price metadata', () => {
-        const parserStart = modelManagementSource.indexOf('function parseOptionalPrice(');
-        const parserEnd   = modelManagementSource.indexOf('function parseAliases(', parserStart);
-        const parser      = modelManagementSource.slice(parserStart, parserEnd);
-
-        expect(parserStart).toBeGreaterThan(-1);
-        expect(parserEnd).toBeGreaterThan(parserStart);
-        expectSourceToContain(parser, 'return { ok: true, price: original }');
-        expectSourceToContain(parser, 'const metadata: ModelCatalogPrice = original ? { ...original } : {}');
-        expect(parser).toContain('...metadata');
-        expect(parser).toContain('status: metadata.status ?? \'complete\'');
-        expect(parser).toContain('currency: metadata.currency ?? \'USD\'');
-        expect(parser).toContain('delete metadata.cache_write_5m');
-        expect(parser).toContain('delete metadata.cache_write_1h');
+        const file                           = 'pages/ModelManagementPage.tsx';
+        const scope: Record<string, unknown> = {};
+        for (const name of ['priceInput', 'priceToInputs']) {
+            scope[name] = sourceCallback(file, name, scope);
+        }
+        const parsePrice                  = sourceCallback<(
+            input: string, output: string, cacheRead: string, cacheWrite: string, cache5m: string, cache1h: string,
+            original?: ModelCatalogPrice,
+        ) => { ok: boolean; price?: ModelCatalogPrice | null }>(file, 'parseOptionalPrice', scope);
+        const original: ModelCatalogPrice = {
+            prompt: 1, completion: 2, cache_write_5m: 0, cache_write_1h: 3,
+            status: 'partial', auto_apply: false, currency: 'USD', source: 'reference-fixture',
+            checked_at: '2026-11-01', limitations: ['reference only'],
+        };
+        expect(parsePrice('1', '2', '', '', '0', '3', original).price).toBe(original);
+        const edited = parsePrice('4', '2', '', '', '', '', original);
+        expect(edited.ok).toBe(true);
+        expect(edited.price).toMatchObject({
+                                               prompt: 4,
+                                               completion: 2,
+                                               status: 'partial',
+                                               auto_apply: false,
+                                               currency: 'USD',
+                                               source: original.source,
+                                               checked_at: original.checked_at,
+                                               limitations: original.limitations,
+                                           });
+        expect(edited.price).not.toHaveProperty('cache_write_5m');
+        expect(edited.price).not.toHaveProperty('cache_write_1h');
+        expect(parsePrice('4', '', '', '', '', '', { prompt: 1 })).toEqual({ ok: true, price: { prompt: 4 } });
+        expect(parsePrice('4', '', '', '', '', '')).toEqual({
+                                                                ok: true,
+                                                                price: {
+                                                                    prompt: 4,
+                                                                    status: 'complete',
+                                                                    auto_apply: true,
+                                                                    currency: 'USD',
+                                                                },
+                                                            });
         expect(modelManagementSource).toContain('editDraft.originalPrice');
         expect(modelManagementSource).toContain('value={editDraft.cacheWrite5m}');
         expect(modelManagementSource).toContain('value={editDraft.cacheWrite1h}');

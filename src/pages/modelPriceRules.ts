@@ -255,10 +255,10 @@ export function withPriceRules(
         delete metadata.cache
     }
     return {
-        status: metadata.status ?? 'complete',
-        auto_apply: metadata.auto_apply ?? true,
-        currency: metadata.currency ?? 'USD',
+        ...(!original && { status: 'complete', currency: 'USD' }),
         ...(base ?? metadata), ...rules,
+        auto_apply: original ? original.auto_apply ?? (original.status === 'partial' ? false : undefined) :
+                    base?.auto_apply ?? true,
     }
 }
 
@@ -301,7 +301,7 @@ export function priceRulesSignature(price: ModelCatalogPrice | null | undefined)
                                   text(rule.resolution),
                                   text(rule.source),
                               ]),
-                              price?.request_scoped === true,
+                              price?.request_scoped ?? null,
                               (price?.coverage_gaps ?? []).map((gap) => [gap.dimension.trim(), gap.reason.trim()]),
                           ])
 }

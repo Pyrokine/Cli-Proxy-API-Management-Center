@@ -3791,7 +3791,19 @@
         "image_call_config_label": "Image model config",
         "image_call_config_desc": "Manual OpenAI-compatible image models must have image: true in backend models[]. GPT Image 2 and the official GPT Image 2.5 and 2.6 Flare/Sunburst IDs are built in.",
         "source_help": "Saved models, prices, aliases, and enabled state come from backend models.json. Runtime discovery adds models that have not been saved yet. Requestable is calculated from enabled state, current service support, and API key / credential access rules.",
-        "user_created_summary": "User-created model"
+        "user_created_summary": "User-created model",
+        "alias_edit_hint": "Edit these aliases by channel on the OAuth model aliases page",
+        "alias_channel_required": "Enter a channel that supports OAuth aliases, such as codex or claude",
+        "aliases_not_saved": "Some aliases are missing from the saved model. Refresh to check what was saved",
+        "runtime_alias_ambiguous": "Some credentials could not be assigned to a model for these aliases: {{aliases}}",
+        "not_requestable_ambiguous_alias": "Alias ownership unclear",
+        "requestable_unknown": "Unknown",
+        "refresh_failed_stale": "Refresh failed. Showing the last loaded catalog",
+        "default_update_revision_missing": "This server does not provide preview revisions. Update the server and try again",
+        "default_update_conflict": "The model catalog changed. Reload the preview before applying changes",
+        "default_update_preview_failed": "Could not load the default update preview",
+        "default_update_skipped": "Current configuration kept",
+        "default_update_reviewed": "All items in this review have been handled"
     },
     "plugin_management": {
         "invalid_config_response": "The plugin configuration response is invalid.",

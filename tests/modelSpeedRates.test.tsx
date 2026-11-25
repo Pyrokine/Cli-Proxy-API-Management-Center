@@ -50,7 +50,7 @@ type Draft = {
     priceRules: PriceRulesDraft;
     speedRates: RateDraft[];
     enabled: boolean;
-    originalEnabled: boolean;
+    original: Pick<Draft, 'displayName' | 'provider' | 'channel' | 'group' | 'enabled'>;
 }
 const scope: Record<string, unknown> = {
     REQUEST_SPEEDS, SPEED_RATE_BUCKETS: sourceInitializer(file, 'SPEED_RATE_BUCKETS', {}),
@@ -99,21 +99,24 @@ const defaultRule: RateDraft                                               = {
     multiplier: '2',
     multipliers: {},
 }
-const draft                                                                = (price: ModelCatalogPrice | null = original): Draft => ({
-    originalModel: 'fixture-model',
-    model: 'fixture-model',
+const originalFields                                                       = {
     displayName: 'Fixture',
     provider: 'openai',
     channel: 'codex',
     group: '',
-    aliasesText: 'alias-a', ...((scope.priceToInputs as (price: ModelCatalogPrice | null) => Pick<Draft,
+    enabled: true,
+}
+const draft                                                                = (price: ModelCatalogPrice | null = original): Draft => ({
+    originalModel: 'fixture-model',
+    model: 'fixture-model',
+    ...originalFields,
+    original: originalFields,
+    aliasesText: '', ...((scope.priceToInputs as (price: ModelCatalogPrice | null) => Pick<Draft,
         'prompt' | 'completion' | 'cacheRead' | 'cacheWrite' | 'cacheWrite5m' | 'cacheWrite1h' | 'cacheWrite30m' | 'cacheWrite12h'>)(
         price)),
     originalPrice: price,
     priceRules: priceRulesToInputs(price, !price),
     speedRates: toInputs(price?.speed_rates),
-    enabled: true,
-    originalEnabled: true,
 })
 
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -283,7 +286,10 @@ test('invalid coefficients and date ranges prevent persistence and keep the edit
 })
 
 test('server overlap rejection keeps the full draft and reports the actual error', async () => {
-    const result = await save(draft(), new Error('overlapping speed rate rules'))
+    const result = await save(
+        { ...draft(), speedRates: [{ ...defaultRule }] },
+        new Error('overlapping speed rate rules'),
+    )
     expect(result.readbacks).toEqual([])
     expect(result.closed).toBe(false)
     expect(result.notices).toEqual([

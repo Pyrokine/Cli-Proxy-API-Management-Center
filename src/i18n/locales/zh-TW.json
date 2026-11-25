@@ -3791,7 +3791,19 @@
         "gemini_funnel_public": "/v1/models 返回 {{count}} 個，服務支援但未返回 {{missing}} 個",
         "gemini_funnel_config": "配置關聯 {{count}} 個",
         "gemini_funnel_toggle": "可寫啟用開關 {{count}} 個，通道不明確 {{missing}} 個",
-        "user_created_summary": "使用者新增模型"
+        "user_created_summary": "使用者新增模型",
+        "alias_edit_hint": "在「OAuth 模型別名」頁面依接入類型編輯別名",
+        "alias_channel_required": "填寫支援 OAuth 別名的接入類型，例如 codex 或 claude",
+        "aliases_not_saved": "伺服器回傳的別名缺少本次填寫的內容，請重新整理後確認",
+        "runtime_alias_ambiguous": "部分憑證無法依別名判定所屬模型：{{aliases}}",
+        "not_requestable_ambiguous_alias": "別名歸屬未明",
+        "requestable_unknown": "待確認",
+        "refresh_failed_stale": "重新整理失敗，仍顯示上次讀取的模型目錄",
+        "default_update_revision_missing": "目前服務未提供預覽版本，請更新服務後重試",
+        "default_update_conflict": "模型目錄已變更，請重新讀取預覽",
+        "default_update_preview_failed": "無法讀取預設更新預覽",
+        "default_update_skipped": "已保留目前設定",
+        "default_update_reviewed": "本次檢視的預設更新已處理完畢"
     },
     "plugin_management": {
         "invalid_config_response": "外掛設定回應格式無效",
