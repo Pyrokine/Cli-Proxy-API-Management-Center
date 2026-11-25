@@ -933,6 +933,30 @@ describe('release confirmation contracts', () => {
         },
     )
 
+    test.each([
+                  ['v8.0.23-aug.6', true],
+                  ['v8.0.23-aug.7', false],
+              ] as const)('checks the aug.7 panel requirement against %s', async (serverVersion, blocked) => {
+        const targetVersion = 'v1.26.0-aug.7'
+        const body          = publishedReleaseBody(targetVersion)
+        const extract       = helpers.extractRequiredServerVersion as (body: string) => string | null
+        const lines         = body.split('\n')
+        for (const prefix of ['- Required server:', '- 管理面板的最低后端版本为']) {
+            expect(extract(lines.find((line) => line.startsWith(prefix)) ?? '')).toBe('v8.0.23-aug.7')
+        }
+        const view = harness({
+            currentVersion: 'v1.26.0-aug.6', target: 'panel', targetVersion, serverVersion, releaseBody: body,
+        })
+        expect((await openInstall(view, '升级')).confirmDisabled).toBe(blocked)
+        const { confirm } = view.confirmationView()
+        expect(confirm?.disabled).toBe(blocked)
+        await confirm?.onClick?.()
+        expect(view.panelUpdate).toHaveBeenCalledTimes(blocked ? 0 : 1)
+        if (!blocked) {
+            expect(view.panelUpdate).toHaveBeenCalledWith(targetVersion)
+        }
+    })
+
     test('recognizes the original Chinese minimum-version statement and legacy Required server formats', () => {
         const extract             = helpers.extractRequiredServerVersion as (body: string) => string | null
         const originalChineseLine = body.split('\n').find((line) => line.startsWith('- 管理面板的最低后端版本保持'))

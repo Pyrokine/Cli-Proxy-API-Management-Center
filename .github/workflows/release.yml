@@ -86,5 +86,7 @@ jobs:
                     draft: false
                     # noinspection UndefinedParamsPresent
                     prerelease: false
+                    # Older CPA versions download Latest without checking panel requirements.
+                    make_latest: ${{ github.ref_name == 'v1.26.0-aug.7' && 'false' || '' }}
                 env:
                     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

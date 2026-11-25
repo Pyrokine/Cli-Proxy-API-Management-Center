@@ -20,8 +20,8 @@ interface Mismatch {
 }
 
 function bannerHarness({
-                           panelVersion = 'v1.26.0-aug.5',
-                           serverVersion = 'v8.0.23-aug.1',
+                           panelVersion = 'v1.26.0-aug.7',
+                           serverVersion = 'v8.0.23-aug.7',
                            minPanelVersion = 'v1.26.0-aug.1',
                            locale = 'en',
                            dismissed = false,
@@ -76,29 +76,27 @@ describe('version compatibility', () => {
         expect(parseLooseSemver('-')).toBeNull()
     })
 
-    test('requires the backend release that provides Meta management routes', () => {
-        expect(viteConfig).toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'8.0.23-aug.1\')')
-        expect(viteConfig).not.toContain('__COMPAT_MIN_SERVER__: JSON.stringify(\'7.3.2-aug.1\')')
-        expect(compareLooseSemver([7, 3, 2, 1], [8, 0, 23, 1])).toBeLessThan(0)
-        expect(parseLooseSemver('v8.0.23-aug.1-candidate')).toEqual([8, 0, 23, 1])
-        expect(minServerVersion).toBe('8.0.23-aug.1')
+    test('requires the backend release that provides management sessions', () => {
+        expect(minServerVersion).toBe('8.0.23-aug.7')
+        expect(compareLooseSemver([8, 0, 23, 6], [8, 0, 23, 7])).toBeLessThan(0)
+        expect(parseLooseSemver('v8.0.23-aug.7-candidate')).toEqual([8, 0, 23, 7])
     })
 
     test.each(['en', 'zh-CN', 'zh-TW', 'ru'])(
         'renders the backend-upgrade warning from the actual component in %s',
         (locale) => {
-            const view = bannerHarness({ serverVersion: 'v8.0.22-aug.1', locale })
+            const view = bannerHarness({ serverVersion: 'v8.0.23-aug.6', locale })
             expect(view.mismatch).toEqual({
                                               reason: 'server_too_old',
-                                              panelVersion: '1.26.0-aug.5',
-                                              serverVersion: '8.0.22-aug.1',
-                                              minServerVersion: '8.0.23-aug.1',
+                                              panelVersion: '1.26.0-aug.7',
+                                              serverVersion: '8.0.23-aug.6',
+                                              minServerVersion: '8.0.23-aug.7',
                                               minPanelVersion: '1.26.0-aug.1',
                                           })
             expect(view.markup).toContain('role="alert"')
             const message = view.t(
                 'compat.server_too_old',
-                { panel: '1.26.0-aug.5', server: '8.0.22-aug.1', min: '8.0.23-aug.1' },
+                { panel: '1.26.0-aug.7', server: '8.0.23-aug.6', min: '8.0.23-aug.7' },
             )
             expect(view.markup).toContain(renderToStaticMarkup(createElement(
                 'span',
@@ -115,14 +113,14 @@ describe('version compatibility', () => {
             expect(view.mismatch).toEqual({
                                               reason: 'panel_too_old',
                                               panelVersion: '1.26.0',
-                                              serverVersion: '8.0.23-aug.1',
-                                              minServerVersion: '8.0.23-aug.1',
+                                              serverVersion: '8.0.23-aug.7',
+                                              minServerVersion: '8.0.23-aug.7',
                                               minPanelVersion: '1.26.0-aug.1',
                                           })
             expect(view.markup).toContain('role="alert"')
             const message = view.t(
                 'compat.panel_too_old',
-                { panel: '1.26.0', server: '8.0.23-aug.1', min: '1.26.0-aug.1' },
+                { panel: '1.26.0', server: '8.0.23-aug.7', min: '1.26.0-aug.1' },
             )
             expect(view.markup).toContain(renderToStaticMarkup(createElement(
                 'span',
@@ -135,7 +133,7 @@ describe('version compatibility', () => {
     test.each([
                   {},
                   { panelVersion: 'v1.26.0-aug.1' },
-                  { serverVersion: 'v8.0.23-aug.5' },
+                  { serverVersion: 'v8.0.24-aug.1' },
                   { panelVersion: 'dev', serverVersion: 'unknown', minPanelVersion: '' },
               ])('keeps compatible or unavailable version data without an alert: %j', (options) => {
         const view = bannerHarness(options)
@@ -144,7 +142,7 @@ describe('version compatibility', () => {
     })
 
     test('keeps a dismissed mismatch hidden', () => {
-        const view = bannerHarness({ serverVersion: 'v8.0.22-aug.1', dismissed: true })
+        const view = bannerHarness({ serverVersion: 'v8.0.23-aug.6', dismissed: true })
         expect(view.mismatch?.reason).toBe('server_too_old')
         expect(view.markup).toBe('')
     })

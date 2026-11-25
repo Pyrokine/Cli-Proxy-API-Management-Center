@@ -7,7 +7,7 @@
 
 - 示例地址：https://remote.router-for.me/
 - Management API 基础路径：`/v0/management`
-- 最低兼容后端：CLIProxyAPI `v8.0.23-aug.1`
+- 最低兼容后端：CLIProxyAPI `v8.0.23-aug.7`
 
 本仓库只提供管理面板，不转发模型流量
 

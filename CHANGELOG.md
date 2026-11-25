@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.26.0-aug.7 - 2026-11-25
+
+### Release basis
+
+- Upstream release: v1.26.0 (`c9e2f7cb0b065c13211285d9525bcc8761f17837`)
+- Fork point: `ee784b579cc2278563d44789afed7c9c864570a7`
+- Previous fork release: v1.26.0-aug.6
+
+The changes below belong to this fork and follow the previous fork release
+
+### English
+
+- Required server: CLIProxyAPI v8.0.23-aug.7
+- Upgrade CPA first, then select this panel version in version history or download `management.html` from this release.
+- GitHub Latest stays on v1.26.0-aug.6 for older servers. If periodic panel installation is enabled, set `disable-auto-update-panel: true` before installing aug.7 to keep the selected version.
+- Sign in through a revocable management session. The panel reuses the session on refresh, revokes it on sign-out, and encrypts remembered sessions in browser storage.
+- Show where configuration values come from and preserve unedited YAML, exact numeric values, and legacy settings on save. Target credential and model edits to the selected entries and check catalog revision conflicts.
+- Keep the last usable statistics when refresh fails, separate exact request matches from suggestions, and follow backend pagination limits. Report the results of backup, import, export, and retention operations.
+- Distinguish saved plugin settings from runtime changes, keep account inspection results, and check panel and server versions independently.
+
+### 简体中文
+
+- 管理面板的最低后端版本为 v8.0.23-aug.7，先升级 CPA，再从版本历史选择新版面板，或从本次 Release 下载 `management.html`
+- GitHub Latest 保留 v1.26.0-aug.6，供旧后端自动下载；启用定期安装时，安装 aug.7 前将 `disable-auto-update-panel` 设为 `true`，保留手动选定的版本
+- 登录使用可撤销的管理会话，刷新时复用，退出时撤销；选择记住登录时，面板在浏览器中加密保存会话
+- 显示配置值来源，保存时保留未改动的 YAML、精确数值和旧配置；按选中项修改凭证和模型，提示模型目录版本冲突
+- 用量刷新失败时保留上次可用数据，区分精确请求与候选结果，分页以服务端允许访问的范围为准；显示备份、导入、导出和留存清理的实际结果
+- 分别显示插件设置是否保存及运行状态，保留巡检结果，独立检查面板与后端版本
+
 ## v1.26.0-aug.6 - 2026-11-21
 
 ### Release basis

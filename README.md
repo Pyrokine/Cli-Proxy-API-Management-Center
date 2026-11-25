@@ -7,7 +7,7 @@ through its Management API
 
 - Example: https://remote.router-for.me/
 - Management API base path: `/v0/management`
-- Minimum compatible backend: CLIProxyAPI `v8.0.23-aug.1`
+- Minimum compatible backend: CLIProxyAPI `v8.0.23-aug.7`
 
 The panel manages the backend. It does not proxy model traffic
 
